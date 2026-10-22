@@ -5,7 +5,7 @@
 import type { Command } from 'commander'
 import { CommanderError, InvalidArgumentError, Option } from 'commander'
 import { resolveCanonDbPath } from '../canon/paths.js'
-import { CanonStore } from '../canon/store.js'
+import { CanonStore, migrateCanonDatabase, type MigrationYield } from '../canon/store.js'
 import {
   DEFAULT_CAPTURE_ENDPOINT,
   SUPPORTED_CAPTURE_HARNESS_IDS,
@@ -150,6 +150,47 @@ export type KyberCommandDependencies = {
   // surface -- CLI, tray, web -- reaches the one implementation through the same seam.
   runMaintenancePass?: typeof runMaintenancePass
   importFolderHistory?: typeof importFolderHistory
+  /**
+   * The seam the store's migration hands the event loop back through.
+   *
+   * <remarks>
+   * A store-touching verb migrates the store before it opens it, and the
+   * migration hands the event loop back between sessions. The seam is
+   * injected so a test can COUNT those hand-backs: the count is the
+   * contract, not a timing threshold. The default is the migration's own
+   * event-loop turn.
+   */
+  migrationYield?: MigrationYield
+}
+
+/**
+ * The store a CLI verb writes through, migrated first and then opened.
+ *
+ * <remarks>
+ * The migration runs BEFORE the store is opened, and never while a store is
+ * open on the same file: the v21 -> v22 backfill holds SQLite's write lock
+ * for the whole pass, so a store opened beside it would wait on that lock.
+ * The store's own constructor migration is then a no-op -- the file is
+ * already at this build's schema version.
+ *
+ * The migration is the asynchronous one, so the event loop is handed back
+ * between sessions: the v21 -> v22 step parses and rewrites every session
+ * payload (339 sessions and 80 MB of payloads on the live corpus), and the
+ * constructor's one blocking pass held the process -- and the refresh lock
+ * this verb is holding -- for the whole of it.
+ *
+ * An injected `createStore` is used as it is. It is already open, and its
+ * own constructor already migrated it when it was opened; migrating its
+ * file now would run the write lock under a live handle.
+ */
+async function openVerbStore(
+  path: string,
+  createStore: ((path: string) => CanonStore) | undefined,
+  options: { yield?: MigrationYield } = {},
+): Promise<CanonStore> {
+  if (createStore !== undefined) return createStore(path)
+  await migrateCanonDatabase(path, options)
+  return new CanonStore(path)
 }
 
 function createHistoryWeeksParser(): (value: string) => number {
@@ -223,7 +264,59 @@ async function readStdinText(): Promise<string> {
  * `kyber otel` subcommand and the top-level `otel` alias so both paths run
  * identical service initialization and lifecycle management.
  */
-async function runOtel(opts: { port?: number; host?: string; db?: string }): Promise<never> {
+/**
+ * `kyberdash otel` without `--serve`: the receiver belongs to the one engine, so this attaches
+ * to it (starting it from this same executable when none runs) and turns the hosted receiver
+ * on. It never binds a second receiver.
+ */
+async function attachOtelToEngine(opts: { port?: number; host?: string; db?: string }): Promise<never> {
+  if ((opts.port !== undefined && opts.port !== 4318) || (opts.host !== undefined && opts.host !== '127.0.0.1')) {
+    process.stderr.write(
+      'kyberdash otel: the receiver is hosted by the KyberDash engine on 127.0.0.1:4318; a custom port or host is not supported.\n',
+    )
+    process.exit(2)
+  }
+  const { homedir } = await import('os')
+  const { join } = await import('path')
+  const { ensureEngine } = await import('../engine/ensure.js')
+  const { KYBERDASH_VERSION } = await import('./web.js')
+  const { resolveJobSpawnTarget, currentSpawnRuntime } = await import('./spawn-target.js')
+  const { runningAsSea } = await import('../sea.js')
+
+  // The store is migrated before it is opened: the v21 -> v22 backfill is one
+  // blocking pass over every session payload, and this command holds the
+  // store's write lock for the duration of it.
+  const store = await openVerbStore(resolveDbPath(opts.db), undefined)
+  try {
+    writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
+  } finally {
+    store.close()
+  }
+  const target = resolveJobSpawnTarget(currentSpawnRuntime(runningAsSea()))
+  const result = await ensureEngine({
+    stateDir: join(homedir(), '.kyberdash'),
+    version: KYBERDASH_VERSION,
+    program: target.program,
+    programArgs: target.programArgs,
+  })
+  if (result.outcome === 'failed') {
+    process.stderr.write(`kyberdash otel: ${result.reason}\n`)
+    process.exit(1)
+  }
+  process.stdout.write(
+    `KyberDash engine ${result.outcome} (pid ${result.record.pid}, version ${result.record.version}); ` +
+    'the OTLP receiver is hosted on http://127.0.0.1:4318\n',
+  )
+  process.exit(0)
+}
+
+async function runOtel(opts: { port?: number; host?: string; db?: string; serve?: boolean }): Promise<never> {
+  if (opts.serve !== true) return attachOtelToEngine(opts)
+  // A receiver the engine started must not outlive it: if the engine is killed outright it
+  // cannot stop its child, and an orphan left holding the port is exactly the second
+  // instance this design forbids. The child watches its parent and leaves with it.
+  const parentPid = process.ppid
+  setInterval(() => { if (process.ppid !== parentPid) process.exit(0) }, 2_000).unref()
   const { startOtlpCollectorService } = await import('../otel/service.js')
   await startOtlpCollectorService({
     port: opts.port,
@@ -249,6 +342,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--port <number>', 'Port to listen on (default: 4318)', parseInteger, 4318)
     .option('--host <host>', 'Host to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .addOption(new Option('--serve', 'Run the receiver in this process (used by the engine; do not start by hand)').hideHelp())
     .action(runOtel)
 
   // Harness OpenTelemetry capture (T8: D3, D9, D11). The subgroup points the
@@ -341,7 +435,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .action(async (opts: { db?: string }) => {
       const dbPath = resolveDbPath(opts.db)
-      const store = new CanonStore(dbPath)
+      const store = await openVerbStore(dbPath, dependencies.createStore, {
+        yield: dependencies.migrationYield,
+      })
       try {
         const { backfillContent } = await import('../tools/backfill.js')
         const report = backfillContent(store)
@@ -368,7 +464,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .action(async (opts: { db?: string; source?: string[] }) => {
       const { renormalizeRecords } = await import('../tools/backfill.js')
       const { buildSessions } = await import('../canon/sessions.js')
-      const store = new CanonStore(resolveDbPath(opts.db))
+      const store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+        yield: dependencies.migrationYield,
+      })
       try {
         const report = renormalizeRecords(
           store,
@@ -390,7 +488,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .action(async (opts: { db?: string }) => {
       const dbPath = resolveDbPath(opts.db)
-      const store = new CanonStore(dbPath)
+      const store = await openVerbStore(dbPath, dependencies.createStore, {
+        yield: dependencies.migrationYield,
+      })
       try {
         const { buildSessions } = await import('../canon/sessions.js')
         const report = await buildSessions(store)
@@ -434,7 +534,6 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     throw error
   })
   refresh.action(async (opts: { db?: string; historyWeeks?: number; trigger?: RefreshTrigger }) => {
-    const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
     const refreshSources = dependencies.refreshHarnessSources ?? refreshHarnessSources
     const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
     const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
@@ -459,9 +558,30 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     // finally and leak the refresh lock - which is a permanent exit 3 for every later run,
     // with no error left behind to explain it. `store` is optional for the same reason:
     // there is nothing to close when it was never opened.
+    //
+    // The migration is part of opening the store, and it is inside this try for the same
+    // reason: a store that cannot be migrated is a store that cannot be opened, and it is
+    // reported the same way.
     let store: CanonStore | undefined
     try {
-      store = createStore(resolveDbPath(opts.db))
+      try {
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
+      } catch (err) {
+        // A store that cannot be opened is an operational failure, not a bug,
+        // and the commonest cause is a store written by a NEWER KyberDash than
+        // this build. It is reported as one line and exit 1, exactly as
+        // `dash import-history` reports the same failure, and it is NOT
+        // thrown: an uncaught throw in the packaged CLI prints a stack whose
+        // every frame carries the whole bundle, so one refusal wrote 40 MB of
+        // base64 to stderr. The job footer then summarized a fragment of that
+        // blob instead of the reason, and a scheduled refresh that had been
+        // failing for hours could not be diagnosed at all.
+        writeError(`kyberdash: refresh failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+        return
+      }
       // The folder-import gate applies to unattended runs only (D4). A person typing
       // `dash refresh` asked for their own history back, so a bare CLI run always
       // imports; a tick, the tray and the web dashboard read the shared setting.
@@ -524,7 +644,6 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       reingestWeeks?: number
       yes?: boolean
     }) => {
-      const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
       const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
       const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
       const acquireLock = dependencies.acquireStoreRefreshLock ?? acquireStoreRefreshLock
@@ -555,7 +674,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       const runClean = dependencies.cleanDatabase ?? cleanDatabase
       let store: CanonStore | undefined
       try {
-        store = createStore(resolveDbPath(opts.db))
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
         // `reingestWeeks` is stated explicitly, including the explicit null: leaving the
         // key absent would hand the decision back to cleanDatabase's own default and
         // reintroduce the unrequested folder read this command no longer makes.
@@ -602,7 +723,6 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     throw error
   })
   importHistory.action(async (opts: { db?: string; weeks?: number; harness?: string[] }) => {
-    const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
     const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
     const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
     const acquireLock = dependencies.acquireStoreRefreshLock ?? acquireStoreRefreshLock
@@ -626,7 +746,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     const ownsStore = dependencies.createStore === undefined
     let store: CanonStore | undefined
     try {
-      store = createStore(resolveDbPath(opts.db))
+      store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+        yield: dependencies.migrationYield,
+      })
       const harnesses = opts.harness ?? []
       // trigger 'cli' always: this command *is* the explicit opt-in, so it never consults
       // settings.folder_import.scheduled -- neither to decide whether to run, nor to
@@ -648,6 +770,58 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       // closing it would pull the store out from under the caller. The lock, by contrast,
       // is always ours, so it is released on every path.
       if (ownsStore) store?.close()
+      await lock.handle.release()
+    }
+  })
+
+  // The store's freelist, handed back to the filesystem. SQLite never gives a
+  // freed page back: it parks it for the next insert, so a store that was
+  // wiped and re-ingested carries that history in its file. The live store was
+  // 3.33 GB with 343,510 free pages out of 813,331 -- 42% of the file held by
+  // nobody. `VACUUM` is the only thing that returns those pages.
+  //
+  // The dry run is the half that can be taken safely against a live store: a
+  // VACUUM rewrites the whole file, so it cannot be simulated, and the dry
+  // run reports what the freelist holds straight from SQLite's own counters.
+  const vacuum = dash
+    .command('vacuum')
+    .description(
+      "Reclaim the store's free space (VACUUM); --dry-run reports the reclaimable space without writing",
+    )
+    .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .option('--dry-run', 'Report the reclaimable space without writing anything')
+  vacuum.action(async (opts: { db?: string; dryRun?: boolean }) => {
+    const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
+    const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+    const acquireLock = dependencies.acquireStoreRefreshLock ?? acquireStoreRefreshLock
+
+    // One writer at a time, the same lock and the same exit 3 as refresh,
+    // clean and import: a VACUUM rewrites the store's file, so it must not
+    // run beside a refresh that is writing it.
+    const lock = await acquireLock()
+    if (lock.outcome !== 'acquired') {
+      const holder = readLockHolder(stateDir())
+      const who = holder === null ? 'another process' : `pid ${holder.pid} (since ${holder.since})`
+      writeError(`kyberdash: a refresh or clean is already running — held by ${who}; nothing was written`)
+      process.exitCode = REFRESH_BUSY_EXIT_CODE
+      return
+    }
+
+    try {
+      const { vacuumStore } = await import('../canon/vacuum.js')
+      const { formatVacuumReport } = await import('../canon/vacuum-report.js')
+      const report = vacuumStore(resolveDbPath(opts.db), { dryRun: opts.dryRun === true })
+      write(formatVacuumReport(report).trimEnd())
+      process.exitCode = 0
+    } catch (err) {
+      // Reported as one line and exit 1, exactly as `dash import-history`
+      // reports the same failure and for the same reason: a store written by
+      // a NEWER KyberDash than this build is the commonest reason the store
+      // cannot be read, and an uncaught throw in the packaged CLI prints a
+      // stack whose every frame names the whole bundle.
+      writeError(`kyberdash: vacuum failed: ${err instanceof Error ? err.message : String(err)}`)
+      process.exitCode = 1
+    } finally {
       await lock.handle.release()
     }
   })
@@ -683,10 +857,19 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .option('--json', 'Output a JSON object of setting values')
     .exitOverride(settingsUsageExit)
-    .action((opts: { db?: string; json?: boolean }) => {
-      const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
+    .action(async (opts: { db?: string; json?: boolean }) => {
       const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
-      const store = createStore(resolveDbPath(opts.db))
+      const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+      let store: CanonStore | undefined
+      try {
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
+      } catch (err) {
+        writeError(`kyberdash: settings show failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+        return
+      }
       try {
         const values = readAllSettings(store)
         if (opts.json === true) {
@@ -706,9 +889,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .argument('<value>', 'on or off, a whole number of minutes for jobs.refresh_cadence_minutes, or a TCP port for dashboard.port')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .exitOverride(settingsUsageExit)
-    .action((key: string, value: string, opts: { db?: string }) => {
-      const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
+    .action(async (key: string, value: string, opts: { db?: string }) => {
       const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
+      const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
       const settingKey = SETTING_NAMES[key]
       if (settingKey === undefined) {
         throw new CommanderError(2, 'commander.invalidArgument', unknownSettingMessage(key))
@@ -740,7 +923,16 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
                 }
                 return onOff
               })()
-      const store = createStore(resolveDbPath(opts.db))
+      let store: CanonStore | undefined
+      try {
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
+      } catch (err) {
+        writeError(`kyberdash: settings set failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+        return
+      }
       try {
         writeSetting(store, settingKey, parsed)
         // The canonical value, not the raw argument: `05` and `5` store the same row, and an
@@ -805,5 +997,6 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--port <number>', 'Port to listen on (default: 4318)', parseInteger, 4318)
     .option('--host <host>', 'Host to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .addOption(new Option('--serve', 'Run the receiver in this process (used by the engine; do not start by hand)').hideHelp())
     .action(runOtel)
 }

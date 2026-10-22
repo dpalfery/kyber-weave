@@ -13,7 +13,7 @@
 import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
-import { CanonStore } from './store.js'
+import { CanonStore, reduceRecordPayloads } from './store.js'
 import { notMeasurable } from './types.js'
 import type {
   CanonicalRecord,
@@ -396,6 +396,13 @@ function hasTurnEvidence(records: readonly CanonicalRecord[]): boolean {
 export type BuildRunsOptions = {
   inactivityWindowMs?: number
   acceptDerivedGrouping?: boolean
+  /**
+   * Called between units of work (a session key, a planned run).
+   *
+   * The projection injects a real yield so a pending HTTP handler is not
+   * starved by a rebuild; a direct build has nothing to interleave with.
+   */
+  yieldToLoop?: () => Promise<void>
 }
 
 export type BuildRunsReport = {
@@ -417,12 +424,22 @@ export async function buildRuns(
 ): Promise<BuildRunsReport> {
   const inactivityWindowMs = options?.inactivityWindowMs ?? DEFAULT_INACTIVITY_WINDOW_MS
   const acceptDerived = options?.acceptDerivedGrouping !== false
+  const yieldToLoop = options?.yieldToLoop ?? (async () => {})
 
   // 1. Gather all candidate executions from session keys
   const identities = store.sessionIdentities()
   const candidates: ExecutionCandidate[] = []
   for (const sessionKey of store.sessionKeys()) {
-    const grouped = groupByCanonicalHarness(store.recordsForSession(sessionKey.key))
+    // One session key is one unit of work here: it loads that session's
+    // records, which is the expensive part of this phase.
+    await yieldToLoop()
+    // The records are reduced to the attributes the derived views read before
+    // the twin collapse reads them: a session's decompressed payloads are the
+    // projection's working set, and the measured corpus held 1.5 GB of them
+    // at once.
+    const sessionRecords = store.recordsForSession(sessionKey.key)
+    reduceRecordPayloads(sessionRecords)
+    const grouped = groupByCanonicalHarness(sessionRecords)
     for (const [harness, shareRecords] of grouped) {
       // Same twin-collector collapse as `buildSessions` (issue #182, ADR
       // 0009 D4): the candidate's records must be the merged share's turns,
@@ -653,12 +670,20 @@ export async function buildRuns(
   const builtExecutionIds = new Set<string>()
 
   for (const { run, executions } of plannedRuns) {
+    // One planned run is one unit of work: its outcome is derived from the
+    // full records, which is the expensive part of this phase.
+    await yieldToLoop()
     // Outcome derivation reads content, parts and raw, so the full records are
     // loaded here — one run at a time — and released before the next run.
     const outcomeRecords = executions.flatMap((e) => {
       const sessionId = e.sessionId ?? e.executionId
       const share = identities.shareOf(sessionId)
-      return share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      const records =
+        share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      // The outcome derivation reads a few attributes out of each payload, and
+      // a run's payloads are released one record at a time.
+      reduceRecordPayloads(records)
+      return records
     })
     store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
     builtRunIds.add(run.runId)

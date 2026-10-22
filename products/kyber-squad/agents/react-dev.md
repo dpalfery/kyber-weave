@@ -40,6 +40,19 @@ Your packet is your whole scope. Do not open files under the directories named b
    - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
    - A scoped build, `tsc --noEmit`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
+## Skills
+
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<react-coding-standard>** by that registry name.
@@ -47,6 +60,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never author backend services, native or mobile UI, the desktop/native core, or the formal test suites `test-dev` owns.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Key Deliverables
 - Clean, semantic HTML structure
@@ -72,5 +86,6 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of frontend file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, components touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=react-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

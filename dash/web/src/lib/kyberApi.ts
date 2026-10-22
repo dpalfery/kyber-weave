@@ -148,6 +148,15 @@ export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail
   return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
+export interface SessionRollup {
+  turn_count?: number | null
+  request_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  tokens?: number | null
+  cost_usd?: number | null
+}
+
 export interface KyberSessionSummary {
   session_id: string
   sessionId?: string
@@ -174,33 +183,88 @@ export interface KyberSessionSummary {
   cost?: { basis: string; status: string; value?: number; currency?: string }
   models?: string[]
   problems?: number
+  subagents?: KyberSessionSummary[]
+  rollup?: SessionRollup
 }
 
 /**
- * The session payload fields ancestry needs. `runId` is optional because the
- * served document does not yet carry it — resolveAncestry reads it when present
- * rather than inventing a run by scanning other endpoints (R7.5).
+ * The bounded session summary `GET /api/kyber/session/:id/summary` serves:
+ * ten identity-and-summary keys, no payload, no lineage.
+ *
+ * WHY a second document for the same session: the detail route serves the
+ * whole session blob — up to 15.3 MB and a multi-second cold page-in for a
+ * session with 10,933 turns — while a consumer that needs a handful of
+ * identity fields pays for all of it. The bounded route answers the same
+ * question for a fraction of the cost.
+ *
+ * Every key but `harness` is read defensively (optional): the client resolves
+ * an id and a harness, and must not break on a key the body omits. `harness`
+ * is the one it cannot do without — without it there is no spine.
  */
-export type KyberSessionAncestry = {
-  id?: string
+export type KyberSessionSummaryDetail = {
+  /** The session's id, the spine's execution level. */
   session_id?: string
+  /** The harness that produced the session — the spine's harness level. */
   harness: string
+  /** The stored label, verbatim. The sessions list applies its own title fallback. */
+  label?: string | null
+  is_subagent?: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  started?: string | null
+  ended?: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary?: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count?: number
+}
+
+/**
+ * What the ancestry consumer reads off the bounded summary.
+ *
+ * The lineage keys (`runId`, `run_id`, `executionId`, `execution_id`) are NOT
+ * part of the served shape: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured — and an invented link would push a run level
+ * into the resolved spine that today's client never produces. They stay on
+ * the type because the resolver probes them defensively and must keep reading
+ * `undefined`, the same value it reads today, rather than having its
+ * resolution logic rewritten around a lineage it cannot verify (R7.5).
+ */
+export type KyberSessionAncestry = KyberSessionSummaryDetail & {
+  /**
+   * The detail route's legacy id key. The bounded route never serves it, so
+   * the resolver's `id ?? session_id` chain falls through to `session_id` and
+   * resolves the same identity it resolves today.
+   */
+  id?: string
   runId?: string
   run_id?: string
   executionId?: string
   execution_id?: string
 }
 
+/**
+ * One session's identity fields, from the bounded summary route.
+ *
+ * WHY this route and not the detail route: the detail route serves the entire
+ * session payload, and this consumer needs the identity fields only. The
+ * turns consumer (`fetchKyberSessionTurns`) reads the bounded per-turn route
+ * for one turn, and the detail route for a session's whole list of them.
+ */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
-  return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  return fetchJson<KyberSessionAncestry>(
+    `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`,
+  )
 }
 
 /**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text. The rows
- * themselves come from the full session payload (`GET /api/kyber/session/:id`),
- * which the inspector header reads for measured counters only.
+ * measured and state absence plainly — never estimate from text. A single
+ * turn's row comes from the bounded per-turn route, which the turn page
+ * reads; the whole list of a session's rows still comes from the full session
+ * payload (`GET /api/kyber/session/:id`).
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -209,7 +273,46 @@ export interface TurnTokenFigures {
   cacheRead?: number | null
 }
 
-export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]> {
+/**
+ * One turn's row, from the bounded per-turn route.
+ *
+ * <remarks>
+ * The same row shape the detail route serves for one turn, so a consumer that
+ * already reads the detail route's rows reads this one unchanged — but from
+ * `GET /api/kyber/session/:id/turn/:index`, which answers one turn instead of
+ * the session's whole payload.
+ */
+export type KyberSessionTurn = KyberSessionTurnRow & {
+  /** The session the turn belongs to. */
+  session_id: string
+  /** The turn's index in that session. */
+  turn_index: number
+}
+
+/**
+ * A session's turn rows, or one turn's row.
+ *
+ * <remarks>
+ * With a turn index, the read is the bounded per-turn route: one row, never
+ * the session's whole payload — which is what a single turn's counters cost
+ * before (up to 10,933 turn rows to read four numbers). Without one, the read
+ * is still the detail route's turns array, the shape a list-style consumer
+ * expects.
+ */
+export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberSessionTurn>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex?: number,
+): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
+  if (turnIndex !== undefined) {
+    return fetchJson<KyberSessionTurn>(
+      `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`,
+    )
+  }
   const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
   return Array.isArray(body.turns) ? body.turns : []
 }
@@ -413,6 +516,14 @@ export interface KyberCostBasisMismatch {
 export interface KyberToolDefinitionShadow {
   name?: string
   function?: { name?: string }
+  /**
+   * False when the definition is an MCP catalogue entry the session offered
+   * without keeping it resident in the model's context. Absent or true means
+   * the definition was resident.
+   */
+  resident?: boolean
+  /** Whether the session offered this definition to the model. */
+  offered?: boolean
   [key: string]: unknown
 }
 
@@ -459,6 +570,11 @@ export interface KyberSessionContentPart {
   server?: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident; the drawer labels only the `false` case.
+   */
+  resident?: false
 }
 
 export interface KyberSessionContentResult {
@@ -491,6 +607,12 @@ export interface KyberTurnContentPart {
   truncated?: boolean
   totalLength?: number
   order?: number
+  /**
+   * False when a `tool_definitions` part is an MCP catalogue entry the session
+   * offered without keeping it resident in the model's context. Absent or true
+   * means the definition was resident.
+   */
+  resident?: boolean
   /**
    * Exact-match recurrence against earlier captured turns of this session
    * (same part kind, whole source text). Capture-only — never a cache claim.
@@ -542,7 +664,15 @@ export interface KyberTurnContentResult {
    * duplicates of the turn's own parts.
    */
   sharedContext?: {
-    parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
+    parts: Array<{
+      text: string
+      spanId?: string
+      turnIndex?: number
+      truncated?: boolean
+      totalLength?: number
+      /** Display only: source turns folded into this entry (volatile per-request header lines). */
+      collapsedTurns?: number[]
+    }>
     seenBefore: boolean
   } | null
   /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
@@ -1528,6 +1658,7 @@ const CAPTURE_MAX_WARNINGS = 16
 const CAPTURE_MAX_STEPS = 16
 const CAPTURE_MAX_EVENTS = 64
 const CAPTURE_MAX_CHANGES = 64
+const CAPTURE_MAX_ISSUES = 32
 
 export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
 export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
@@ -1535,6 +1666,25 @@ export type KyberCaptureMode = 'managed' | 'status-only'
 export type KyberCaptureInstalled = 'detected' | 'not-detected' | 'unknown'
 export type KyberCaptureState = 'on' | 'off' | 'partial' | 'unknown' | 'not-applicable'
 export type KyberCaptureAction = 'enable' | 'disable'
+/** The server's delivery verdict; `attention` renders yellow. */
+export type KyberCaptureHealth = 'ok' | 'attention' | 'off' | 'read-only'
+
+export interface KyberCaptureIssue {
+  code: string
+  severity: 'blocking' | 'warning'
+  text: string
+  path?: string
+  remedy?: string
+}
+
+/** The check's one-line summary. Absent from an older server. */
+export interface KyberCaptureCheck {
+  checkedAt: string
+  health: 'ok' | 'attention' | 'off'
+  enabled: number
+  attention: number
+  issueCount: number
+}
 
 /** A value the server reports for one managed key: a JSON scalar, never an object. */
 export type KyberCaptureValue = string | number | boolean | null
@@ -1555,6 +1705,7 @@ export interface KyberCaptureFile {
   expectedKeys: string[]
   presentKeys: string[]
   missingKeys: string[]
+  mismatchedKeys: string[]
   drift: KyberCaptureDriftEntry[] | null
 }
 
@@ -1576,12 +1727,19 @@ export interface KyberCaptureHarness {
   warnings: Array<{ code: string; text: string }>
   manualSteps: KyberCaptureManualStep[]
   statusLines: string[]
+  /**
+   * `null` when the server sent no verdict (an older server): the row then
+   * falls back to `state` alone rather than claiming a health it was not told.
+   */
+  health: KyberCaptureHealth | null
+  issues: KyberCaptureIssue[]
 }
 
 export interface KyberCaptureStatus {
   platform: KyberCapturePlatform
   receiver: { hosted: boolean; liveness: KyberCaptureLiveness; detail: string }
   harnesses: KyberCaptureHarness[]
+  check: KyberCaptureCheck | null
 }
 
 export type KyberCaptureEventKind =
@@ -1715,6 +1873,7 @@ function readFile(raw: unknown): KyberCaptureFile | null {
     expectedKeys: captureStrings(raw.expectedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     presentKeys: captureStrings(raw.presentKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     missingKeys: captureStrings(raw.missingKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    mismatchedKeys: captureStrings(raw.mismatchedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     drift: readDrift(raw.drift),
   }
 }
@@ -1756,6 +1915,38 @@ function readHarness(raw: unknown): KyberCaptureHarness | null {
     ),
     manualSteps: mapBounded(raw.manualSteps, CAPTURE_MAX_STEPS, readManualStep),
     statusLines: captureStrings(raw.statusLines, CAPTURE_MAX_LINES),
+    // An unrecognised verdict is shown as needing attention, never as healthy.
+    health:
+      raw.health === undefined
+        ? null
+        : oneOf<KyberCaptureHealth>(raw.health, ['ok', 'attention', 'off', 'read-only'], 'attention'),
+    issues: mapBounded(raw.issues, CAPTURE_MAX_ISSUES, readIssue),
+  }
+}
+
+function readIssue(raw: unknown): KyberCaptureIssue | null {
+  if (!isRaw(raw) || typeof raw.text !== 'string') return null
+  const issue: KyberCaptureIssue = {
+    code: capText(raw.code, CAPTURE_VALUE_MAX),
+    // An unrecognised severity is the stricter one.
+    severity: oneOf(raw.severity, ['blocking', 'warning'], 'blocking'),
+    text: capText(raw.text),
+  }
+  if (typeof raw.path === 'string') issue.path = capText(raw.path)
+  if (typeof raw.remedy === 'string') issue.remedy = capText(raw.remedy)
+  return issue
+}
+
+function readCheck(raw: unknown): KyberCaptureCheck | null {
+  if (!isRaw(raw) || typeof raw.checkedAt !== 'string') return null
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? Math.min(value, 9999) : 0
+  return {
+    checkedAt: raw.checkedAt.slice(0, 64),
+    health: oneOf(raw.health, ['ok', 'attention', 'off'], 'attention'),
+    enabled: count(raw.enabled),
+    attention: count(raw.attention),
+    issueCount: count(raw.issueCount),
   }
 }
 
@@ -1803,6 +1994,7 @@ function parseCaptureStatus(raw: unknown, status: number): KyberCaptureStatus {
       detail: capText(raw.receiver.detail),
     },
     harnesses: mapBounded(raw.harnesses, CAPTURE_MAX_HARNESSES, readHarness),
+    check: readCheck(raw.check),
   }
 }
 
@@ -1897,6 +2089,8 @@ export type KyberSkillRow = {
   turns_listed: number[]
   /** Engine-derived token estimate; labelled as derived wherever it is shown. */
   derived_tokens?: number
+  /** The skill description: from the listing, or the skill file for names-only harnesses. */
+  description?: string
 }
 
 /** The session payload's `skills` block: measured rows, or a whole-block not-measurable verdict. */
@@ -1909,6 +2103,8 @@ export type KyberSkillsBlock =
       listed_count?: number
       /** Served count of listed skills with no observed invocation; absent when not measured. */
       listed_uninvoked_count?: number
+      /** Turns on which invocations were measured, out of the session's turns; absent when the server states no coverage. */
+      invocationsCoverage?: { measuredTurns: number; totalTurns: number }
       rows: KyberSkillRow[]
     }
   | KyberSkillAvailability

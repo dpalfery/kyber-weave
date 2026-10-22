@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-10-16
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -17,6 +17,8 @@ code-refs:
   - PathGlob
   - ReviewConfig
   - ReviewConfigLoader
+  - ReviewTaskGate
+  - TaskGateSelection
 ---
 
 # Review council architecture
@@ -40,16 +42,13 @@ between two runs over one diff. So the last step is arithmetic instead.
 ```mermaid
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
-    Machine["worker completion gate<br/>dotnet format · analyzer fixes · cleanupcode --include<br/>mechanical defects fixed, never reported"]
-    Caller["conductor"] --> Machine
-    Machine --> Ladder
-    Worker["dev worker — rework"]
-    Ladder["task-reviewer — passes 1-3<br/>one agent · PASS or FAIL + fix list<br/>the only reviewer a task gets"]
-    Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
-    Ladder -->|"FAIL · passes 1-2"| Worker
-    Worker -->|"re-enter at next pass"| Ladder
-    Ladder -->|"FAIL on pass 3 · ESCALATION end-of-run"| Findings["per-objective findings collection"]
-    TaskDone --> Join["run join<br/>every task has left the ladder<br/>findings collection drained"]
+    Gate["developer exit gate — task-gate skill<br/>review.task-gates · kyber-weave review gates --agent<br/>fix, then verify · deterministic, no model"]
+    Caller["conductor"] --> Worker["dev worker"]
+    Worker --> Gate
+    Gate -->|"TASK_GATE: PASS · NONE_DECLARED · NONE_APPLICABLE"| TaskDone["task done to standard"]
+    Gate -->|"FAIL or line missing · reject to the same worker"| Worker
+    Gate -->|"2 reworks per task-gate key · circuit-breaker"| Findings["per-objective findings collection"]
+    TaskDone --> Join["run join<br/>every task has cleared its gate<br/>findings collection drained"]
     Findings --> Drain["collection drain"]
     Drain -->|"residual findings"| Architect["architect — solution and plan"]
     Architect --> Approval{"plan approval"}
@@ -120,7 +119,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 
 | Part | Kind | Location |
 |---|---|---|
-| `task-reviewer` | Canonical agent — the fast per-task pass, ahead of the council | `products/kyber-squad/agents/task-reviewer.md` |
+| `task-gate` | Canonical skill — the developer exit gate, ahead of the council | `products/kyber-squad/skills/task-gate/SKILL.md` |
 | `code-reviewer` | Canonical agent — orchestrates, adjudicates, holds the skeptic | `products/kyber-squad/agents/code-reviewer.md` |
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
@@ -141,7 +140,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 Fifteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Fifteen agents would push the canonical roster from 20 to 35, clutter every harness's agent
+Fifteen agents would push the canonical roster from 22 to 37, clutter every harness's agent
 picker, and produce fifteen near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.
@@ -280,7 +279,6 @@ harness.
 
 | Role | Profile | read | search | write | execute | delegate |
 |---|---|---|---|---|---|---|
-| `task-reviewer` | `investigator` | allow | allow | deny | **allow** | deny |
 | `code-reviewer` | `reviewer` | allow | allow | **ask** | **allow** | **allow** |
 | `review-lens` | `read-only` | allow | allow | deny | deny | deny |
 | `review-triage` | `read-only` | allow | allow | deny | deny | deny |
@@ -294,13 +292,6 @@ structurally forced to make one. It is exercised through a single declared entry
 one artifact — its findings — and on harnesses that cannot express `ask` the lattice safely
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
-
-`task-reviewer` holds `investigator`, and the one grant that differs from a lens seat —
-`process.execute` — is the whole design. It holds `process.execute` because the conductors do
-not — they cannot produce a diff to hand it, so it establishes its own scope with `git diff`;
-the grant is for reading the change, not for building it, and the role runs no gate. It holds
-`delegate: deny` (same as a lens seat) because one agent is the point: a fan-out here would be
-the council with extra steps and none of its evidence.
 
 `delegate` on the reviewer is what lets it fan out the council, and it is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
@@ -347,29 +338,70 @@ always-human:
 The artifacts that decide what agents may do are not approvable by an agent, and a change to
 the review configuration escalates through the review configuration.
 
+### Task gates
+
+`review.task-gates` is the developer exit gate's counterpart to `review.gates`: a map from an
+agent slug to that agent's ordered gates, run by `kyber-weave review gates --agent <slug>`
+against the files that agent changed. It is optional; absent, no agent has task gates and
+`--agent` reports `KW-REVIEW-027`.
+
+```yaml
+review:
+  task-gates:
+    csharp-dev:
+      - id: format-whitespace
+        include: ["**/*.cs", "**/*.csproj"]
+        run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}"]
+        fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}"]
+      - id: dotnet-build
+        include: ["**/*.cs", "**/*.csproj"]
+        run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+```
+
+| Key | Required | Default | Meaning |
+|---|---|---|---|
+| `id` | yes | none | Lookup-name slug, unique within the agent |
+| `include` | no | `[]`, which matches every changed file | Globs selecting the changed files the gate applies to |
+| `os` | no | every platform | `windows` or `unix`; a gate on another platform is skipped (`KW-REVIEW-026`) |
+| `run` | yes | none | The verifying command, argv |
+| `fix` | no | none | The command `--fix` runs before `run`; when written it must not be empty |
+| `blocking` | no | `true` | Whether a failure fails the run |
+| `timeout` | no | `900` seconds | After this the runner kills the process tree; must be positive |
+
+Both `run` and `fix` are argv for the same reason `review.gates` is. Two tokens expand, and only
+in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
+changed file the gate's `include` matches; `{task}` is the `--task` slug and may sit inside an
+argument. The program, the first element of `run` or `fix`, is always a literal: a token there is
+refused, so a changed file or a task slug can never choose what executes. A gate whose `include`
+matches no changed file is skipped, not passed. The loader refuses an unknown or embedded token,
+a token in the program, an empty list, an empty argument, a duplicate gate id, a non-slug agent
+or gate id, and an unrecognised `os`, at the point the operator wrote it. At run time a changed
+path that is absolute, leaves the repository, begins with `-`, or passes through a symbolic link
+whose target lies outside the repository, and a `--task` that is not a slug, refuse the whole run
+(`KW-REVIEW-028`) before any process starts.
+
+A YAML anchor is the way to share a gate between agents: define it on the first agent and alias
+it under the others. This repository does so for the .NET format gates and the build.
+
 ## Modes
 
 The two principles this area answers to are stated in the
 [review index](README.md#principles); this section is how they are implemented.
 
-**Two reviewers, and they never trade places.** `task-reviewer` reviews single tasks; it gets up
-to three passes and is the only reviewer an individual task sees. `code-reviewer` reviews the
-whole run, once, at the end — and one task only when a human explicitly asks. There is no
-condition under which a task summons the council: not a failed pass, not a reserved path, not a
-concern that looks serious. Each of those would be a per-task council bill, and avoiding that
-bill is the entire point of the split.
+**One reviewer, and a deterministic gate ahead of it.** `code-reviewer` reviews the whole run,
+once, at the end — and one task only when a human explicitly asks. There is no condition under
+which a task summons the council: not a failed gate, not a reserved path, not a concern that
+looks serious. Each of those would be a per-task council bill, and avoiding that bill is the
+entire point of the split.
 
-A `FAIL` on pass 3, and any finding marked `ESCALATION: end-of-run`, goes into the conductor's
-per-objective findings collection. `architect` plans against the whole collection before the
-end-of-run review runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).
-
-**Ahead of both sits a layer with no model in it at all.** The worker's completion gate runs
-`dotnet format`, analyzer code fixes, and `cleanupcode` scoped to the changed files before either
-reviewer sees the change, so mechanical defects are corrected rather than reported. A formatting
-issue that reaches a reviewer costs a pass to write up, a rework cycle to apply, and another pass
-to confirm — to reach an edit a machine had already made for free. `task-reviewer` is
-correspondingly forbidden from reporting anything those tools own; if it sees such a defect, the
-finding is that the gate did not run.
+**Ahead of the council sits a layer with no model in it at all.** Each developer agent ends its
+task with the `task-gate` skill: it runs the `review.task-gates` entry for that agent (formatting,
+analyzer fixes, `cleanupcode` scoped to the changed files, build and tests), fixes what a machine
+can fix, and verifies. The worker reports a `TASK_GATE:` line in its digest. The conductor rejects
+a missing or `FAIL` line back to the same worker; after two reworks for the same
+`task-gate/<gate-id>` key the circuit-breaker trips and the failure enters the conductor's
+per-objective findings collection, which `architect` plans against before the end-of-run review
+runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).
 
 The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
 rather than performing it.

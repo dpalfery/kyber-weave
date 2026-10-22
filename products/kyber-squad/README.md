@@ -1,13 +1,13 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **21 canonical agents** and **24 canonical skills**,
+It maintains a target-neutral, declarative catalog of **23 canonical agents** and **27 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
-skill deployments and release packages are built. The target catalog declares twelve harnesses,
-and all twelve renderers are implemented and registered today: `copilot`, `cursor`, `claude`,
-`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`.
+skill deployments and release packages are built. The target catalog declares thirteen harnesses,
+and all thirteen renderers are implemented and registered today: `copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`.
 
 ---
 
@@ -32,11 +32,12 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 21 canonical agent definition files plus owned references
+├── agents/                             # 23 canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
 │   ├── azure-reader.md
 │   ├── bug-crusher-investigator.md
+│   ├── bug-crusher.md
 │   ├── code-reviewer.md
 │   ├── conductor.md
 │   ├── conductor/                      # Progressive-disclosure references (Markdown)
@@ -44,6 +45,7 @@ products/kyber-squad/
 │   ├── dal-dev.md
 │   ├── docs-dev.md
 │   ├── github-devops.md
+│   ├── go-dev.md
 │   ├── maui-dev.md
 │   ├── product-owner.md
 │   ├── pulumi-dev.md
@@ -52,12 +54,11 @@ products/kyber-squad/
 │   ├── research-agent.md
 │   ├── review-lens.md
 │   ├── review-triage.md
+│   ├── rust-dev.md
 │   ├── sql-database-architect.md
-│   ├── task-reviewer.md
-│   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 92 recursive files
+├── skills/                             # 27 canonical skill directories; 105 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -72,17 +73,20 @@ products/kyber-squad/
 │   ├── dp-code-reviewer/
 │   ├── github-cli/
 │   ├── github-devops/
+│   ├── go-dev/
 │   ├── lm-studio-cli/
 │   ├── maui-dev/
 │   ├── pr-review-fix-comments/
 │   ├── product-owner/
 │   ├── python-dev/
 │   ├── resharper-clt/
+│   ├── rust-dev/
 │   ├── second-brain/
 │   ├── security-review/
 │   ├── setup-dev-environment/
+│   ├── task-gate/
 │   └── test-dev/
-└── migration/                          # 19 Hotshot import and baseline verification logs
+└── migration/                          # 18 import and baseline verification logs
     └── <agent-name>.md
 ```
 
@@ -116,15 +120,15 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (24 Canonical Skills)
+### 2. Skills (27 Canonical Skills)
 
-The 24 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The 27 canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
 in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
-Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
-tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
+canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
+tree also retains 78 supplemental resources, for 105 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -132,10 +136,14 @@ pushed commit links in replies, resolved threads, and a requested re-review. Its
 `code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
 workflow for step-by-step approvals.
 
+`task-gate` is the deterministic exit check every developer agent runs before it reports a
+task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
+files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
+
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
-linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
-resources (122 files total). Every skill resource reaches every render except
+linked resource: a fresh Copilot render now emits the 50 principal files plus each owner's linked
+resources (134 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
@@ -155,23 +163,26 @@ non-policy content stays in its skill directory as its durable home, portable po
 
 ### 4. Namespace Collision and Fallback Lowering
 
-Agent and skill namespaces intersect at exactly seven names, and all seven are distinct-body
-collisions: `csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`,
-and `test-dev`. On fallback harnesses, the canonical skill retains `<name>` and the agent
-projects to `role-<name>`. `role-` is reserved exclusively for generated projections.
+Agent and skill namespaces intersect at exactly ten names. Two — `product-owner` and
+`bug-crusher` — are primary shared identities: root agents whose body is a thin pointer at the
+same-name canonical skill, which carries the role. The remaining eight are distinct-body collisions:
+`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, and `test-dev`. On fallback
+harnesses, each distinct-body collision's canonical skill retains `<name>` and the agent projects
+to `role-<name>`, while a primary shared identity reuses its canonical skill as the entry point.
+`role-` is reserved exclusively for generated projections.
 
-There are no shared product identities. `conductor` has no canonical skill, so fallback targets
+`conductor` has no canonical skill, so fallback targets
 lower it through the unoccupied-identity rule to a same-name role skill. `conductor` is the single
 orchestrator: it executes test-first by default with an explicit user opt-out to standard mode,
 and it routes plans, specifications, todos, and open requests through one intake.
 
 ### 5. Migration Logs (`migration/`)
 
-The `migration/` directory contains 19 per-agent Hotshot import reports recording baseline
+The `migration/` directory contains 18 per-agent import reports recording baseline
 sources, SHA-256 hashes, retained additions, excluded harness mechanics, resolved permission
 policies, and final normalized instruction digests. `review-lens` and `review-triage` are
-canonical-only roles and therefore have no Hotshot migration record. The retired test-first
-duplicates (`conductor-v3`, `architect-v3`, `task-reviewer-v3`) have no separate reports: each
+canonical-only roles and therefore have no migration record. The retired test-first
+duplicates (`conductor-v3`, `architect-v3`) have no separate reports: each
 was folded into its canonical counterpart's report, which retains the retired source hash and a
 refreshed final-body digest for the consolidated instruction body.
 

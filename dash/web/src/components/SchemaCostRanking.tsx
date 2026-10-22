@@ -52,6 +52,9 @@ export type SchemaCostToolRow = {
   server?: string | null
   is_mcp?: boolean
   total_schema_cost?: number | null
+  /** Tokens in the tool's name + description + input schema, per turn. */
+  schema_tokens?: number
+  turns_resident?: number
   invoked?: boolean
   invocations?: number
   in_definitions?: boolean
@@ -226,6 +229,16 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     )
   }
 
+  // Two servers can offer a tool of the same name, so rows are keyed by name and
+  // server; a row naming no server stays reachable by name alone.
+  const rowKey = (name: string, server: string | undefined) => `${name}\u0000${server ?? ''}`
+  const payloadRows = new Map<string, NonNullable<typeof tools>[number]>()
+  for (const row of tools ?? []) {
+    const key = rowKey(row.name, serverOf(row))
+    if (!payloadRows.has(key)) payloadRows.set(key, row)
+  }
+  const payloadRowOf = (tool: { name: string; server?: string | null }) =>
+    payloadRows.get(rowKey(tool.name, serverOf(tool))) ?? payloadRows.get(rowKey(tool.name, undefined))
   const invocationCounts = new Map<string, number>()
   for (const row of tools ?? []) {
     if (typeof row.invocations === 'number' && Number.isFinite(row.invocations) && row.invocations >= 0) invocationCounts.set(row.name, row.invocations)
@@ -291,7 +304,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
 
   const select = (tool: DisplayTool) => {
     if (!onSelectTool) return
-    const original = tools?.find((row) => row.name === tool.name)
+    const original = payloadRowOf(tool)
     // Prefer the payload row so the inspector sees invocations the ranking
     // never had to invent. A never-invoked tool with no row is 0 calls, which
     // is measured; an invoked tool with no count is not passed as 0.
@@ -342,6 +355,14 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
         {ranked.map((tool) => {
           const never = !tool.invoked
           const callCount = invocationCounts.get(tool.name)
+          const payloadRow = payloadRowOf(tool)
+          const schemaTokens =
+            typeof payloadRow?.schema_tokens === 'number' &&
+            Number.isFinite(payloadRow.schema_tokens) &&
+            payloadRow.schema_tokens > 0
+              ? payloadRow.schema_tokens
+              : undefined
+          const turnsResident = payloadRow?.turns_resident
           const hasCost = tool.cost !== undefined
           const pct = hasCost && maxCost !== undefined && maxCost > 0 ? (tool.cost! / maxCost) * 100 : undefined
 
@@ -383,8 +404,20 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                     </span>
                   )}
                 </div>
-                <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                  {hasCost ? fmtTokens(tool.cost) : 'not measurable'}
+                <span className="flex shrink-0 items-baseline gap-2 tabular-nums">
+                  {schemaTokens !== undefined && (
+                    <span
+                      data-testid={`tool-schema-tokens-${tool.name}`}
+                      className="text-tertiary-foreground"
+                      title="Tokens in the tool's name, description and input schema, re-sent every turn"
+                    >
+                      {fmtTokens(schemaTokens)} tok
+                      {typeof turnsResident === 'number' && Number.isInteger(turnsResident) && turnsResident > 0 ? ` × ${turnsResident} turns` : ''}
+                    </span>
+                  )}
+                  <span className="font-semibold text-foreground">
+                    {hasCost ? fmtTokens(tool.cost) : 'not measurable'}
+                  </span>
                 </span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-muted">

@@ -9,44 +9,48 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
-/// <see cref="SquadRendererRegistry"/> with <see cref="KiloRenderer"/> and validates the result
-/// against Kilo's native agent and skill contracts.
+///     Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
+///     <see cref="SquadRendererRegistry" /> with <see cref="KiloRenderer" /> and validates the result
+///     against Kilo's native agent and skill contracts.
 /// </summary>
 /// <remarks>
-/// Validates that canonical agents lower to Kilo agents at <c>.kilo/agents/&lt;name&gt;.md</c>
-/// and skills lower to <c>.kilo/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
-/// shared-identity suppression, model resolution from <c>models.yml</c>, deterministic output,
-/// and structured degradation accounting (<c>permission-not-expressible</c> with matching
-/// <c>InstructionDigest</c>).
+///     Validates that canonical agents lower to Kilo agents at <c>.kilo/agents/&lt;name&gt;.md</c>
+///     and skills lower to <c>.kilo/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
+///     shared-identity suppression, model resolution from <c>models.yml</c>, deterministic output,
+///     and structured degradation accounting (<c>permission-not-expressible</c> with matching
+///     <c>InstructionDigest</c>, plus <c>resource-links-rewritten</c> for the discovery guard).
 /// </remarks>
 public sealed class KiloRendererContractTests : IDisposable
 {
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    /// <summary>
-    /// Shared identities are read from the loaded fallback profile so the test follows the
-    /// same generic single-projection contract as the renderer.
-    /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
-            .SelectMany(profile => profile.SharedIdentities)
-            .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
-    /// whose file already holds the identical body. A primary shared identity reuses its
-    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
-    /// resolver so the test cannot drift from the contract.
-    /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-
     /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
     {
         // No disposable state: suite reads canonical checked-in corpus.
+    }
+
+    /// <summary>
+    ///     Shared identities are read from the loaded fallback profile so the test follows the
+    ///     same generic single-projection contract as the renderer.
+    /// </summary>
+    private static HashSet<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    ///     The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    ///     whose file already holds the identical body. A primary shared identity reuses its
+    ///     canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    ///     resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
     }
 
     [Fact]
@@ -62,9 +66,9 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new KiloRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.Kilo],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Claude, SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -79,9 +83,9 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         KiloRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project);
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
@@ -94,9 +98,9 @@ public sealed class KiloRendererContractTests : IDisposable
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new KiloRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Kilo],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -109,9 +113,9 @@ public sealed class KiloRendererContractTests : IDisposable
         // principal output, so the corpus count is principals plus emitted closures.
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + expectedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+                                + expectedSkillCount
+                                + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
+                                    .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
 
         Assert.All(result.Files, f =>
@@ -138,7 +142,8 @@ public sealed class KiloRendererContractTests : IDisposable
                 agent.Name);
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
             Assert.True(
-                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name),
+                    StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
             string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
@@ -159,7 +164,8 @@ public sealed class KiloRendererContractTests : IDisposable
                 {
                     concreteModelAgentCount++;
                     Assert.True(
-                        string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                        string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name),
+                            StringComparison.Ordinal),
                         $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
                 }
             }
@@ -167,7 +173,8 @@ public sealed class KiloRendererContractTests : IDisposable
             {
                 concreteModelAgentCount++;
                 Assert.True(
-                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name),
+                        StringComparison.Ordinal),
                     $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
             }
             else
@@ -178,16 +185,37 @@ public sealed class KiloRendererContractTests : IDisposable
                     $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
             }
 
-            // Exact comparison with normalized body
-            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedAgentBody.EndsWith('\n'))
-            {
-                expectedAgentBody += "\n";
-            }
+            // Exact comparison with the discovery-guarded body: in-closure .md
+            // resource links are rewritten to .markdown so they still resolve beside
+            // their principal; every other byte stays verbatim.
+            string verbatimBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            if (!verbatimBody.EndsWith('\n')) verbatimBody += "\n";
+
+            string expectedAgentBody = verbatimBody;
+            foreach (SquadResource resource in agent.Resources)
+                if (resource.RelativePath.EndsWith(".md", StringComparison.Ordinal))
+                    expectedAgentBody = expectedAgentBody.Replace(
+                        resource.RelativePath,
+                        string.Concat(resource.RelativePath[..^".md".Length], ".markdown"),
+                        StringComparison.Ordinal);
 
             Assert.True(
                 string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
                 $"Agent '{agent.Name}' body mismatch.");
+
+            // Pin the guard link-by-link, matching SquadResourceRenderingContract:
+            // every authored in-closure .md link appears rewritten, and the original
+            // target is gone.
+            foreach (SquadResource resource in agent.Resources)
+            {
+                if (!resource.RelativePath.EndsWith(".md", StringComparison.Ordinal) ||
+                    !verbatimBody.Contains(resource.RelativePath, StringComparison.Ordinal))
+                    continue;
+
+                string rewrittenTarget = string.Concat(resource.RelativePath[..^".md".Length], ".markdown");
+                Assert.Contains(rewrittenTarget, body, StringComparison.Ordinal);
+                Assert.DoesNotContain(resource.RelativePath, body, StringComparison.Ordinal);
+            }
         }
 
         // Canonical model resolution verification:
@@ -222,14 +250,10 @@ public sealed class KiloRendererContractTests : IDisposable
             Assert.Contains(result.Files, f => f.RelativePath == $".kilo/agents/{sharedIdentity}.md");
             string sharedSkillPath = $".kilo/skills/{sharedIdentity}/SKILL.md";
             if (suppressedSkillIdentities.Contains(sharedIdentity))
-            {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
             else
-            {
                 // Primary shared identity: the canonical skill is the entry point and ships.
                 Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
-            }
         }
 
         // Skills verification
@@ -252,25 +276,24 @@ public sealed class KiloRendererContractTests : IDisposable
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name), StringComparison.Ordinal),
+                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name),
+                    StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description mismatch.");
             Assert.True(
                 string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' license mismatch.");
 
             string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedSkillBody.EndsWith('\n'))
-            {
-                expectedSkillBody += "\n";
-            }
+            if (!expectedSkillBody.EndsWith('\n')) expectedSkillBody += "\n";
 
             Assert.True(
                 string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
                 $"Skill '{skill.Name}' body mismatch.");
         }
 
-        // Degradations: all agents whose capability profile configures permissions carry 'permission-not-expressible',
-        // including Deny decisions to prevent silent capability widening.
+        // Degradations: every agent whose capability profile configures permissions carries
+        // 'permission-not-expressible', including Deny decisions to prevent silent capability
+        // widening, and every agent that owns resources carries 'resource-links-rewritten'.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
         string[] expectedDegraded = source.Agents
             .Where(a =>
@@ -285,12 +308,43 @@ public sealed class KiloRendererContractTests : IDisposable
         Assert.NotEmpty(expectedDegraded);
         Assert.Equal(
             expectedDegraded,
-            result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+            result.Degradations
+                .Where(d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal))
+                .Select(d => d.CanonicalIdentity)
+                .OrderBy(n => n, StringComparer.Ordinal));
+
+        // Discovery-guard degradations: every agent that owns resources records one
+        // resource-links-rewritten degradation quoting the harness scanner glob.
+        string[] expectedGuardDegraded = source.Agents
+            .Where(a => a.Resources.Count > 0)
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedGuardDegraded);
+        Assert.Equal(
+            expectedGuardDegraded,
+            result.Degradations
+                .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal))
+                .Select(d => d.CanonicalIdentity)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord guardDegradation in result.Degradations
+                     .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal)))
+        {
+            Assert.Equal("kilo", guardDegradation.Target);
+            Assert.Equal(guardDegradation.CanonicalIdentity, guardDegradation.OutputIdentity);
+            Assert.Equal(agentsByName[guardDegradation.CanonicalIdentity].BodyDigest,
+                guardDegradation.InstructionDigest);
+            Assert.Contains(".markdown", guardDegradation.Details, StringComparison.Ordinal);
+            Assert.Contains("{agent,agents}/**/*.md", guardDegradation.Details, StringComparison.Ordinal);
+        }
 
         // Verify canonical denies are recorded in degradation details (preventing capability widening)
         SquadDegradationRecord conductorDegradation = Assert.Single(
             result.Degradations,
-            d => d.CanonicalIdentity == "conductor");
+            d => d.CanonicalIdentity == "conductor" &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
         Assert.Contains("filesystem.search", conductorDegradation.Details, StringComparison.Ordinal);
         Assert.Contains("process.execute", conductorDegradation.Details, StringComparison.Ordinal);
 
@@ -300,7 +354,7 @@ public sealed class KiloRendererContractTests : IDisposable
                 string.Equals("kilo", degradation.Target, StringComparison.Ordinal),
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
             Assert.True(
-                string.Equals("permission-not-expressible", degradation.Code, StringComparison.Ordinal),
+                degradation.Code is "permission-not-expressible" or "resource-links-rewritten",
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong code.");
             Assert.True(
                 string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
@@ -317,9 +371,9 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new KiloRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Kilo],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -335,19 +389,134 @@ public sealed class KiloRendererContractTests : IDisposable
 
             Assert.Equal(file1.RelativePath, file2.RelativePath);
             Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
+            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span),
+                $"Content differed for file '{file1.RelativePath}'.");
         }
     }
 
     [Fact]
     public async Task RenderAsync_Kilo_ProjectsLinkedAgentAndSkillResourcesDeterministically()
     {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+        await SquadResourceRenderingContract.AssertDiscoveryGuardedProjectionAsync(
             new KiloRenderer(),
             SquadTarget.Kilo,
             $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md",
             ".kilo/agents",
             ".kilo/skills");
+    }
+
+    /// <summary>
+    ///     The extension guard maps <c>references/x.md</c> to <c>references/x.markdown</c>; an agent
+    ///     whose closure holds both spellings would overwrite one file with the other, so the
+    ///     render fails closed instead of merging them.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Kilo_ExtensionGuardFailsClosedOnMdAndMarkdownAlias()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        fixture.WriteAgentResource("references/x.md", "X markdown.\n");
+        fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
+        fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
+        fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
+        SquadRendererRegistry registry = new([new KiloRenderer()]);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            registry.RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Kilo],
+                SquadDeploymentScope.Project)));
+
+        Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.markdown", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     An agent whose only resources are non-markdown is invisible to agent discovery as
+    ///     projected, so the guard leaves its files and links byte-identical to the native layout.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Kilo_TextOnlyAgentResourcesProjectVerbatim()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
+        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile payload = Assert.Single(
+            result.Files,
+            file => file.RelativePath ==
+                    $".kilo/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt");
+        Assert.True(
+            Encoding.UTF8.GetBytes(ResourceBearingSquadFixture.AgentPayload).AsSpan()
+                .SequenceEqual(payload.Content.Span),
+            "The text-only agent resource did not preserve its exact UTF-8 bytes.");
+
+        SquadDeploymentFile principal = Assert.Single(
+            result.Files,
+            file => file.RelativePath == $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md");
+        string body = Encoding.UTF8.GetString(principal.Content.Span);
+        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                      string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName,
+                          StringComparison.Ordinal));
+        Assert.Equal("kilo", degradation.Target);
+        Assert.Equal(ResourceBearingSquadFixture.AgentName, degradation.OutputIdentity);
+        Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+        Assert.False(
+            string.IsNullOrWhiteSpace(degradation.Details),
+            "The resource-links-rewritten degradation must explain the discovery guard.");
+        Assert.Contains("project verbatim", degradation.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>.md</c> resource reached only transitively through a <c>.markdown</c> resource is
+    /// renamed on disk, but the body never links to it, so the degradation must report the
+    /// renamed file without claiming an authored link was rewritten.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Kilo_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
+        KiloRenderer renderer = new();
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath ==
+                $".kilo/agents/{ResourceBearingSquadFixture.AgentName}/references/notes.markdown");
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                      string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName,
+                          StringComparison.Ordinal));
+        Assert.Contains("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("authored links were rewritten", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("no authored link required rewriting", degradation.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -356,9 +525,9 @@ public sealed class KiloRendererContractTests : IDisposable
         using KiloModelResolutionSquadFixture fixture = KiloModelResolutionSquadFixture.Create();
         KiloRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: fixture.Path,
-            Targets: [SquadTarget.Kilo],
-            Scope: SquadDeploymentScope.Project);
+            fixture.Path,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -423,9 +592,9 @@ public sealed class KiloRendererContractTests : IDisposable
     {
         KiloRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Kilo],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
 
         Task<SquadRenderResult>[] tasks = Enumerable.Range(0, 10)
             .Select(_ => Task.Run(() => renderer.RenderAsync(request)))
@@ -476,13 +645,13 @@ public sealed class KiloRendererContractTests : IDisposable
         }
 
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 
     /// <summary>
-    /// Minimal synthetic squad fixture exercising all branches of Kilo model resolution:
-    /// explicit non-inherit model, explicit inherit override, fallback to non-inherit default,
-    /// and fallback to inherit default.
+    ///     Minimal synthetic squad fixture exercising all branches of Kilo model resolution:
+    ///     explicit non-inherit model, explicit inherit override, fallback to non-inherit default,
+    ///     and fallback to inherit default.
     /// </summary>
     private sealed class KiloModelResolutionSquadFixture : IDisposable
     {
@@ -502,81 +671,86 @@ public sealed class KiloRendererContractTests : IDisposable
 
         internal string Path => _tempDirectory.Path;
 
+        public void Dispose()
+        {
+            _tempDirectory.Dispose();
+        }
+
         internal static KiloModelResolutionSquadFixture Create()
         {
             KiloModelResolutionSquadFixture fixture = new();
             fixture.Write("squad.yml", """
-                schema: kyber-squad.squad/v1
-                name: kilo-model-resolution-fixture
-                version-source: kyber-weave-assembly
-                default-bundle: full
-                bundles:
-                  full: bundles/full.yml
-                profiles:
-                  models: profiles/models.yml
-                  capabilities: profiles/capabilities.yml
-                  fallbacks: profiles/fallbacks.yml
-                toolchain: toolchain.yml
-                mcp: mcp.json
-                """);
+                                       schema: kyber-squad.squad/v1
+                                       name: kilo-model-resolution-fixture
+                                       version-source: kyber-weave-assembly
+                                       default-bundle: full
+                                       bundles:
+                                         full: bundles/full.yml
+                                       profiles:
+                                         models: profiles/models.yml
+                                         capabilities: profiles/capabilities.yml
+                                         fallbacks: profiles/fallbacks.yml
+                                       toolchain: toolchain.yml
+                                       mcp: mcp.json
+                                       """);
             fixture.Write("bundles/full.yml", $"""
-                schema: kyber-squad.bundle/v1
-                name: full
-                agents:
-                  - {ExplicitModelAgent}
-                  - {InheritModelAgent}
-                  - {FallbackModelAgent}
-                  - {FallbackInheritAgent}
-                skills: []
-                """);
+                                               schema: kyber-squad.bundle/v1
+                                               name: full
+                                               agents:
+                                                 - {ExplicitModelAgent}
+                                                 - {InheritModelAgent}
+                                                 - {FallbackModelAgent}
+                                                 - {FallbackInheritAgent}
+                                               skills: []
+                                               """);
             fixture.Write("profiles/models.yml", $"""
-                schema: kyber-squad.model-profiles/v1
-                profiles:
-                  explicit-profile:
-                    default: inherit
-                    kilo: {ExplicitKiloModel}
-                  inherit-profile:
-                    default: {FallbackDefaultModel}
-                    kilo: inherit
-                  fallback-profile:
-                    default: {FallbackDefaultModel}
-                  fallback-inherit-profile:
-                    default: inherit
-                """);
+                                                  schema: kyber-squad.model-profiles/v1
+                                                  profiles:
+                                                    explicit-profile:
+                                                      default: inherit
+                                                      kilo: {ExplicitKiloModel}
+                                                    inherit-profile:
+                                                      default: {FallbackDefaultModel}
+                                                      kilo: inherit
+                                                    fallback-profile:
+                                                      default: {FallbackDefaultModel}
+                                                    fallback-inherit-profile:
+                                                      default: inherit
+                                                  """);
             fixture.Write("profiles/capabilities.yml", """
-                schema: kyber-squad.capability-profiles/v1
-                capabilities:
-                  - filesystem.read
-                profiles:
-                  worker:
-                    permissions:
-                      filesystem.read: deny
-                """);
+                                                       schema: kyber-squad.capability-profiles/v1
+                                                       capabilities:
+                                                         - filesystem.read
+                                                       profiles:
+                                                         worker:
+                                                           permissions:
+                                                             filesystem.read: deny
+                                                       """);
             fixture.Write("profiles/fallbacks.yml", """
-                schema: kyber-squad.fallback-profiles/v1
-                profiles:
-                  role-skill:
-                    no-primary-agent: skill
-                    no-agent-primitive: skill
-                    body-source: agent
-                    output-identity:
-                      unoccupied: agent-name
-                      shared: reuse-skill
-                      collision: role-prefixed-agent-name
-                      prefix: role-
-                    shared-identities: []
-                """);
+                                                    schema: kyber-squad.fallback-profiles/v1
+                                                    profiles:
+                                                      role-skill:
+                                                        no-primary-agent: skill
+                                                        no-agent-primitive: skill
+                                                        body-source: agent
+                                                        output-identity:
+                                                          unoccupied: agent-name
+                                                          shared: reuse-skill
+                                                          collision: role-prefixed-agent-name
+                                                          prefix: role-
+                                                        shared-identities: []
+                                                    """);
             fixture.Write("toolchain.yml", """
-                schema: kyber-squad.toolchain/v1
-                required-features:
-                  - agent-ir/v1
-                validated-release: null
-                """);
+                                           schema: kyber-squad.toolchain/v1
+                                           required-features:
+                                             - agent-ir/v1
+                                           validated-release: null
+                                           """);
             fixture.Write("mcp.json", """
-                {
-                  "mcpServers": {}
-                }
-                """);
+                                      {
+                                        "mcpServers": {}
+                                      }
+                                      """);
 
             WriteAgent(fixture, ExplicitModelAgent, "explicit-profile");
             WriteAgent(fixture, InheritModelAgent, "inherit-profile");
@@ -591,21 +765,20 @@ public sealed class KiloRendererContractTests : IDisposable
                          "model-profiles",
                          "capability-profiles"
                      })
-            {
                 fixture.Write($"schemas/{schema}.schema.json", """
-                    {
-                      "$schema": "https://json-schema.org/draft/2020-12/schema",
-                      "type": "object"
-                    }
-                    """);
-            }
+                                                               {
+                                                                 "$schema": "https://json-schema.org/draft/2020-12/schema",
+                                                                 "type": "object"
+                                                               }
+                                                               """);
+
             fixture.Write("schemas/fallback-profiles.schema.json", """
-                {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
-                  "type": "object"
-                }
-                """);
+                                                                   {
+                                                                     "$schema": "https://json-schema.org/draft/2020-12/schema",
+                                                                     "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
+                                                                     "type": "object"
+                                                                   }
+                                                                   """);
 
             return fixture;
         }
@@ -613,34 +786,30 @@ public sealed class KiloRendererContractTests : IDisposable
         private static void WriteAgent(KiloModelResolutionSquadFixture fixture, string name, string modelProfile)
         {
             fixture.Write($"agents/{name}.md", $"""
-                ---
-                schema: kyber-squad.agent/v1
-                name: {name}
-                description: Synthetic agent exercising model resolution for {name}.
-                invocation: subagent
-                model-profile: {modelProfile}
-                capability-profile: worker
-                copilot-tools: [vscode]
-                delegates-to: []
-                fallback: role-skill
-                aliases: []
-                ---
-                Instruction body for {name}.
-                """);
+                                                ---
+                                                schema: kyber-squad.agent/v1
+                                                name: {name}
+                                                description: Synthetic agent exercising model resolution for {name}.
+                                                invocation: subagent
+                                                model-profile: {modelProfile}
+                                                capability-profile: worker
+                                                copilot-tools: [vscode]
+                                                delegates-to: []
+                                                fallback: role-skill
+                                                aliases: []
+                                                ---
+                                                Instruction body for {name}.
+                                                """);
         }
-
-        public void Dispose() => _tempDirectory.Dispose();
 
         private void Write(string relativePath, string content)
         {
-            string fullPath = System.IO.Path.Combine(Path, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            string fullPath =
+                System.IO.Path.Combine(Path, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
             string? directory = System.IO.Path.GetDirectoryName(fullPath);
-            if (directory is not null)
-            {
-                Directory.CreateDirectory(directory);
-            }
+            if (directory is not null) Directory.CreateDirectory(directory);
 
-            File.WriteAllText(fullPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(fullPath, content, new UTF8Encoding(false));
         }
     }
 }

@@ -21,7 +21,7 @@ Use the `code-review` skill. It owns the procedure, the lens catalogue, the gate
 
 **When you run.** Once, at the end of a run, over everything it produced — and whenever a human asks for a review directly. Nothing is committed, pushed, or opened as a pull request until you return `APPROVE`. You are the last gate before the change leaves the machine.
 
-You do not review a single task. `task-reviewer` gives each task a two-pass completion audit — did the work get done, are the worker's claims true — and stops there. **Every judgement about the quality of the code is yours**, including the ones a per-task reviewer used to make: standards conformance, defects in the changed lines, and everything the lens catalogue covers. A task that never converged arrives here only as a finding in the collection `architect` has already planned against.
+You do not review a single task. Each developer worker ends its task with the deterministic `task-gate` — a machine check of the declared gates, with no judgement in it — and stops there. **Every judgement about the quality of the code is yours**: standards conformance, defects in the changed lines, and everything the lens catalogue covers. A task that never converged arrives here only as a finding in the collection `architect` has already planned against.
 
 A council spun up per task spends fifteen lenses and a full gate suite to answer a question about two files, and pays it again on the next task. Running once over the finished change is the same coverage at a fraction of the bill. If that change is past `review.policy.max-reviewable-lines`, escalating on size is the right answer rather than a problem to route around — a change too large to review is too large to ship in one piece. Never subdivide a review to slip under the ceiling: dependency-coherent, scope-disjoint, and bounded. If you are ever invoked on one task without a human having asked, say so rather than proceeding — the routing is wrong, and reviewing it anyway hides that.
 
@@ -32,6 +32,15 @@ A council spun up per task spends fifteen lenses and a full gate suite to answer
 The rule that makes this real rather than rhetorical: **a claim about executed behaviour is only ever supported by gate output.** Not by a description of a command. Not by a plausible-looking transcript. Not by "the tests pass". If the build succeeded, a gate says so, and you cite the gate. If no gate ran, the correct statement is "unverified" — never "passing".
 
 When an implementing agent claims to have run something and no gate result corroborates it, that is not a gap to be filled in charitably. It is a **finding**, at `critical`, and you name the claim and its absence of support.
+
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
 # Workflow
 

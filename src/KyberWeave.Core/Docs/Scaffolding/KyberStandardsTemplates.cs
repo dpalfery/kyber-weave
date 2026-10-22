@@ -35,10 +35,12 @@ public static class KyberStandardsTemplates
         "csharp",
         "data-access-layer",
         "github-actions",
+        "go",
         "maui",
         "pulumi",
         "python",
         "react",
+        "rust",
         "sql",
         "tauri",
         "test"

@@ -5,7 +5,6 @@
 // break reads. `setContent` writes `'{}'` / NULL `parts_json` instead.
 
 import type { CanonStore } from './store.js'
-import type { CanonicalRecord } from './types.js'
 
 export const CONTENT_RETENTION_DAYS = 14
 
@@ -27,19 +26,16 @@ export type PurgeExpiredContentResult = {
   cutoffUtc: string
 }
 
-function recordTimeMs(timestamp: Date | string): number {
-  return (timestamp instanceof Date ? timestamp : new Date(timestamp)).getTime()
-}
-
-function hasStoredContent(record: CanonicalRecord): boolean {
-  if (record.parts !== undefined && record.parts.length > 0) return true
-  return Object.keys(record.content).length > 0
-}
-
 /**
  * Empty `content_json` / `parts_json` on records older than 14 days.
  * Rows stay; `raw` is untouched. `now` is injectable so tests do not depend
  * on wall-clock time.
+ *
+ * The purge is ONE set-based statement inside ONE transaction
+ * (`CanonStore.purgeContentBefore`): it used to read and rewrite every span
+ * one at a time, which on a real store meant 9,740 autocommit updates and an
+ * fsync each. The cutoff metadata is written after the purge commits, so the
+ * recorded cutoff is always one the purge actually applied.
  */
 export function purgeExpiredContent(
   store: CanonStore,
@@ -47,16 +43,7 @@ export function purgeExpiredContent(
 ): PurgeExpiredContentResult {
   const cutoffMs = contentRetentionFloorMs(now)
   const cutoffUtc = new Date(cutoffMs).toISOString()
-  let purged = 0
-
-  for (const spanId of store.spanIds()) {
-    const record = store.get(spanId)
-    if (record === undefined) continue
-    if (recordTimeMs(record.timestamp) >= cutoffMs) continue
-    if (!hasStoredContent(record)) continue
-    store.setContent(spanId, {})
-    purged += 1
-  }
+  const purged = store.purgeContentBefore(cutoffUtc)
 
   store.setMetadata(CONTENT_RETENTION_DAYS_KEY, String(CONTENT_RETENTION_DAYS))
   store.setMetadata(CONTENT_PURGED_THROUGH_KEY, cutoffUtc)

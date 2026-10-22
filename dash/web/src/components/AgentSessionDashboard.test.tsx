@@ -438,8 +438,6 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('$0.42')
 
     expect(html.indexOf('Session Overview')).toBeLessThan(html.indexOf('Token Spend per Turn'))
-    expect(html.indexOf('Underlying Token Totals')).toBeGreaterThan(html.indexOf('Session Overview'))
-    expect(html.indexOf('Underlying Token Totals')).toBeLessThan(html.indexOf('Token Spend per Turn'))
     expect(html.indexOf('Token Spend per Turn')).toBeLessThan(html.indexOf('Context Composition'))
     expect(html.indexOf('Context Composition')).toBeLessThan(
       html.indexOf('3 · Tool &amp; Schema Cost Ranking')
@@ -505,34 +503,12 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('1 never called')
   })
 
-  it('renders Underlying Token Totals inside Session Overview, above later detail sections, with no lower duplicate', () => {
+  it('renders the token totals once, in the Session Overview cards, with no separate Underlying Token Totals section', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
 
-    // The moved section renders with its existing labels and figures.
-    expect(html).toContain('Underlying Token Totals')
-    expect(html).toContain('data-testid="cost-tokens-section"')
-    expect(html).toContain('data-testid="token-total-input"')
-
-    const overviewStart = html.indexOf('data-testid="overview-strip-section"')
-    const overviewEnd = html.indexOf('data-testid="spend-composition-section"')
-    const totalsIndex = html.indexOf('data-testid="cost-tokens-section"')
-    expect(overviewStart).toBeGreaterThan(-1)
-    expect(overviewEnd).toBeGreaterThan(-1)
-    expect(totalsIndex).toBeGreaterThan(-1)
-    // Inside the Session Overview grouping, before the later detail sections.
-    expect(totalsIndex).toBeGreaterThan(overviewStart)
-    expect(totalsIndex).toBeLessThan(overviewEnd)
-    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="tool-schema-section"'))
-    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="execution-timeline-section"'))
-
-    // Moved, not duplicated: exactly one totals section, and the lower cost
-    // panel keeps its cost content without a second copy.
-    expect(html.split('data-testid="cost-tokens-section"')).toHaveLength(2)
-    const costPanelIndex = html.indexOf('data-testid="session-cost-panel"')
-    expect(costPanelIndex).toBeGreaterThan(-1)
-    expect(costPanelIndex).toBeGreaterThan(totalsIndex)
-    expect(html.slice(costPanelIndex)).not.toContain('data-testid="cost-tokens-section"')
-    expect(html.slice(costPanelIndex)).toContain('Session Cost &amp; Token Accounting')
+    expect(html).not.toContain('Underlying Token Totals')
+    expect(html).not.toContain('data-testid="cost-tokens-section"')
+    expect(html).toContain('Cache Hit Ratio')
   })
 
   it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
@@ -1998,5 +1974,194 @@ describe('KyberSessionTurnSkills (F3): exported types must be used or removed', 
       return /\bKyberSessionTurnSkills\b/.test(text)
     })
     expect(referencedIn, `KyberSessionTurnSkills is exported from ${declaredIn.join(', ')} but unused`).not.toEqual([])
+  })
+})
+
+describe('AgentSessionDashboard: tool drawer when the harness exports no definitions', () => {
+  it('shows an honest notice and issues no content request', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    // Synthetic Antigravity-shaped session: tool rows, but no turn carries
+    // definitions and the summary lists no offered tools.
+    const session = {
+      ...sampleSession,
+      harness: 'antigravity-cli',
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+      turns: sampleSession.turns?.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
+    } as unknown as AgentSessionPayload
+
+    const render = () => {
+      stateCursor = 0
+      return AgentSessionContent({ session })
+    }
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      ;(findElementByTestId(render(), 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
+      const drawer = drawerFrom(render())!
+      const props = drawer.props as { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+      expect(props.contentRequest).toBeUndefined()
+      expect(props.rawContent).not.toHaveProperty('definitionUnavailableNotice')
+      const html = renderHtml(<>{props.children as React.ReactNode}</>)
+      expect(html).toContain('data-testid="tool-definition-unavailable"')
+      expect(html).toContain('antigravity-cli does not export tool definitions')
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Antigravity and Copilot CLI payloads (synthetic). These pin the display
+// contract the implementer must meet; see the report for the field names.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reason the tool-definitions area states for a Copilot CLI session. The
+ * `<tools>` section of the system prompt is usage guidance, so a reader must
+ * not take it for the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** Visible text: tags dropped, entities decoded, whitespace collapsed. */
+function visibleTextOf(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+}
+
+/** The markup from one tool row's testid up to the next tool row. */
+function toolRowHtml(html: string, name: string): string {
+  const start = html.indexOf(`data-testid="tool-row-${name}"`)
+  if (start < 0) return ''
+  const next = html.indexOf('data-testid="tool-row-', start + 1)
+  return html.slice(start, next < 0 ? undefined : next)
+}
+
+type DrawerProps = { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+
+function drawerElementIn(node: unknown): React.ReactElement | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = drawerElementIn(child)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (node.type === SessionInspectorDrawer) return node
+  return drawerElementIn((node.props as { children?: unknown }).children)
+}
+
+/** Clicks a tool row and returns the props the dashboard hands its inspector drawer. */
+function openToolDrawer(session: AgentSessionPayload, toolName: string): DrawerProps {
+  const internals = internalsOf()
+  const originalUseState = internals?.H?.useState
+  const state: unknown[] = []
+  let stateCursor = 0
+
+  if (internals?.H) {
+    internals.H.useState = (initial: unknown) => {
+      const index = stateCursor++
+      if (!(index in state)) {
+        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      return [
+        state[index],
+        (next: unknown) => {
+          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+        },
+      ]
+    }
+  }
+
+  const render = () => {
+    stateCursor = 0
+    return AgentSessionContent({ session })
+  }
+
+  try {
+    ;(findElementByTestId(render(), `tool-row-${toolName}`)!.props as { onClick: () => void }).onClick()
+    return drawerElementIn(render())!.props as DrawerProps
+  } finally {
+    if (internals?.H) {
+      internals.H.useState = originalUseState
+    }
+  }
+}
+
+describe('AgentSessionDashboard: Antigravity tools list', () => {
+  // Invoked tools carry their counts; a tool never invoked still appears, with 0.
+  const antigravity = {
+    ...sampleSession,
+    harness: 'antigravity-cli',
+    tools: [
+      { name: 'read_file', server: 'antigravity', invocations: 4, in_definitions: false },
+      { name: 'grep_search', server: 'antigravity', invocations: 2, in_definitions: false },
+      { name: 'unused_tool', server: 'antigravity', invocations: 0, in_definitions: false },
+    ],
+  } as unknown as AgentSessionPayload
+
+  it('lists each invoked tool beside its invocation count', () => {
+    const html = renderHtml(<AgentSessionContent session={antigravity} />)
+    expect(visibleTextOf(toolRowHtml(html, 'read_file'))).toMatch(/read_file.*\b4\b/)
+    expect(visibleTextOf(toolRowHtml(html, 'grep_search'))).toMatch(/grep_search.*\b2\b/)
+  })
+})
+
+describe('AgentSessionDashboard: Copilot CLI tool definitions reason', () => {
+  it('states the Copilot reason verbatim in the tool-definitions area, and issues no content request', () => {
+    const copilot = {
+      ...sampleSession,
+      harness: 'copilot',
+      turns: [],
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+    } as unknown as AgentSessionPayload
+
+    const props = openToolDrawer(copilot, 'read_file')
+
+    expect(props.contentRequest).toBeUndefined()
+    expect(visibleTextOf(renderHtml(<>{props.children as React.ReactNode}</>))).toContain(
+      COPILOT_TOOL_DEFINITIONS_REASON,
+    )
   })
 })

@@ -115,6 +115,58 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
+  ['commandcode', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions']],
+  // Copilot CLI's journal carries the system prompt only on the turns it pairs
+  // with a reader turn, so system_prompt stays declared here and is lifted per
+  // record (see `measurabilityForRecord`). Its other keys keep the copilot
+  // family's declaration. The journal carries no tool schemas: the `<tools>`
+  // block in its system prompt is usage guidance, so tool_definitions is never
+  // lifted.
+  ['copilot-cli', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  // Antigravity exports MCP tool schemas (the `mcp/<server>/<tool>.json`
+  // catalogue) as tool_definitions, but not built-in tool schemas, the system
+  // prompt, or skill text. The catalogue is a directory snapshot, not a
+  // resident-context measurement, so schema_cost stays unmeasurable. The
+  // catalogue reaches a turn only where it was paired, so tool_definitions
+  // stays declared here and is lifted per record (see `measurabilityForRecord`).
+  ...['antigravity', 'antigravity-cli', 'antigravity-ide'].map((id): [string, readonly string[]] => [
+    id,
+    ['schema_cost', ...CANONICAL_CONTENT_KEYS],
+  ]),
+])
+
+/**
+ * The reason Copilot CLI's tool_definitions is declared not measurable. The
+ * `<tools>` section of its system prompt reads like a tool list but is usage
+ * guidance, so it must not be taken for the offered set (D8).
+ */
+const COPILOT_CLI_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** The reason Antigravity's tool_definitions is not measurable on a turn with no paired catalogue. */
+const ANTIGRAVITY_TOOL_DEFINITIONS_REASON =
+  'Antigravity does not export tool definitions for this turn; its MCP catalogue is paired only where the turn carries it.'
+
+/**
+ * Readers whose declared limits are settled record by record (D8): a declared
+ * key is measured on a record only where that record's paired reader turn
+ * carried parts of it. Every other reader keeps its declaration whole, because
+ * its limit concerns completeness rather than presence — Cursor's conversation
+ * prefix is incomplete even on a turn that carries one.
+ */
+const PER_RECORD_LIFT_HARNESSES: ReadonlySet<string> = new Set([
+  // Kilo's prompt and tool definitions come from the capture plugin for the turns it
+  // recorded; kilo.db carries neither, so every other turn keeps the declaration.
+  'kilo-shared-runtime',
+  'copilot-cli',
+  'antigravity',
+  'antigravity-cli',
+  'antigravity-ide',
+])
+
+/** Keys a reader never lifts, however its paired turn reads (D8). */
+const NEVER_LIFTED: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['copilot-cli', new Set(['tool_definitions'])],
 ])
 
 /**
@@ -259,6 +311,8 @@ export function normalizeHarnessName(harness: string): string {
     return 'kilo-shared-runtime'
   }
   if (lower === 'kimicode' || lower === 'kimi-code') return 'kimi-code'
+  // The npm package is published as `command-code`; the provider, registry and reader all use `commandcode`.
+  if (lower === 'commandcode' || lower === 'command-code') return 'commandcode'
   return lower
 }
 
@@ -383,6 +437,12 @@ export function measurabilityFor(
           ? provider === 'gemini'
             ? 'Gemini session files do not export a cache-creation counter.'
             : 'Antigravity conversation stores do not export a cache-creation counter.'
+          : metric === 'tool_definitions' && surveyFamily(provider) === 'antigravity'
+            ? ANTIGRAVITY_TOOL_DEFINITIONS_REASON
+          : metric === 'tool_definitions' && provider === 'copilot-cli'
+            ? COPILOT_CLI_TOOL_DEFINITIONS_REASON
+          : metric === 'system_prompt' && provider === 'copilot-cli'
+            ? 'Copilot CLI session journals carry the system prompt only on turns the journal pairs with a reader turn.'
           : metric === 'system_prompt' && provider === 'copilot-vscode'
             ? 'VS Code Copilot chat-session files do not store the runtime system prompt.'
             : metric === 'tool_definitions' && provider === 'copilot-vscode'
@@ -411,6 +471,62 @@ export function measurabilityFor(
       ),
     ]),
   )
+}
+
+/**
+ * The measurability one synthesized record stamps (D8). The declaration for its
+ * provider stands, except that a declared key the paired reader turn carried
+ * parts of is measured on this record alone: a sibling turn the journal did not
+ * pair keeps the declared reason. Copilot CLI is declared on its own, because
+ * its journal limits differ from the copilot family's. The harness id decides
+ * the declaration, so a Copilot CLI envelope takes the CLI's declaration even
+ * though its calls arrive under the shared `copilot` provider label.
+ */
+export function measurabilityForRecord(
+  provider: string,
+  harnessId: string,
+  carriedKeys: ReadonlySet<string>,
+): Measurability {
+  const harness = normalizeHarnessName(harnessId)
+  // The legacy Kilo task tree shares kilo-code's provider string and reader registration
+  // but not its store: its own row declares every content bucket unmeasurable, so the
+  // harness id selects it. Keying on the harness for every record would re-key other
+  // split surfaces (claude-cli, copilot-vscode) whose providers already carry the right row.
+  const family = harness === 'copilot-cli' || harness === 'kilo-vscode-legacy' ? harness : provider
+  const declared = measurabilityFor(family)
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return declared
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
+  const stamped: Measurability = { ...declared }
+  for (const key of carriedKeys) {
+    if (key in stamped && !neverLifted.has(key)) stamped[key] = 'measured'
+  }
+  return stamped
+}
+
+/**
+ * The measurability one tool.invoke child stamps (D29). A child is not a paired
+ * reader turn: it carries only the result it was handed. A child has no paired
+ * reader turn of its own, so D8 gives it the family declaration for every key
+ * it does not carry itself, rather than the carrier's lifted state. Other
+ * harnesses keep the carrier's map unchanged.
+ */
+export function measurabilityForChild(
+  parent: Measurability,
+  provider: string,
+  harnessId: string,
+  childCarriedKeys: ReadonlySet<string>,
+): Measurability {
+  const harness = normalizeHarnessName(harnessId)
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return { ...parent }
+  const family = harness === 'copilot-cli' ? 'copilot-cli' : provider
+  const declared = measurabilityFor(family)
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
+  const stamped: Measurability = { ...parent }
+  for (const [key, value] of Object.entries(declared)) {
+    if (typeof value !== 'object') continue
+    stamped[key] = childCarriedKeys.has(key) && !neverLifted.has(key) ? 'measured' : value
+  }
+  return stamped
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,6 +1277,8 @@ export function harnessDimensionAvailability(
    'kimi-code',
    'kimicode',
    'devin',
+   'commandcode',
+   'command-code',
    'codebuff',
    'codewhale',
  ]

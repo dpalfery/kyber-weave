@@ -15,6 +15,7 @@ import {
   reconcileExpiredPending,
 } from '../canon/log-ingest.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { relinkQuarantinedClaudeLogs } from '../tools/backfill.js'
 
 /**
  * @deprecated Superseded by `ingestBatch`, which puts a span through the
@@ -123,6 +124,22 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       )
     },
   })
+
+  // One-time relink of Claude request bodies quarantined before their model
+  // call arrived (D5), run once the scheduler exists so a relink can request a
+  // projection refresh. A failure is logged and never stops the service.
+  try {
+    const startedAt = Date.now()
+    const report = relinkQuarantinedClaudeLogs(canon, { now: startedAt })
+    console.log(chalk.dim(
+      `[${new Date().toLocaleTimeString()}] Relinked ${report.relinked} of ${report.scanned} quarantined Claude request bodies in ${Date.now() - startedAt} ms`,
+    ))
+    // Like the live batch paths: an enrichment changed stored records, so the
+    // derived-session projection must follow.
+    if (report.relinked > 0) void scheduler.request()
+  } catch (err) {
+    console.error(chalk.red('[relink] quarantined Claude body relink failed; service continues:'), err)
+  }
 
   const toCanon: SignalBatchSink = {
     upsertMany: (spans) => {

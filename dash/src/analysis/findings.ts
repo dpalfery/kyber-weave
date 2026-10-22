@@ -506,7 +506,7 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
   const invokedNames = new Set<string>()
   for (const toolRec of toolRecords) {
     const resolvedName =
-      attributeOf(toolRec, ['gen_ai.tool.name', 'tool.name']) ??
+      attributeOf(toolRec, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ??
       (toolRec.name !== 'tool.invoke' ? toolRec.name : undefined)
     invokedNames.add((resolvedName ?? toolRec.name).trim())
   }
@@ -643,7 +643,7 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
     } else if (r.op === 'tool.invoke') {
       const toolName =
         (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
-        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ??
         'tool.invoke'
       const args = r.raw && typeof r.raw === 'object' ? (r.raw as Record<string, unknown>)['arguments'] : undefined
       const argsHash = attributeOf(r, ['gen_ai.tool.arguments_hash'])
@@ -854,7 +854,7 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
 
       const toolName =
         (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
-        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ??
         'tool'
       // One fallback order, lazily: attributes first without touching raw;
       // the raw fallback runs only when the byte count is still unknown and

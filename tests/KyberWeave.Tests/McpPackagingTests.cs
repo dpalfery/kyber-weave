@@ -76,6 +76,7 @@ public class McpPackagingTests
     [InlineData("docs_analysis_candidates")]
     [InlineData("docs_glossary")]
     [InlineData("docs_status")]
+    [InlineData("agent_coding_standards")]
     public void McpToolDescriptionsScoreAsRoutingMetadata(string toolName)
     {
         DescriptionScore score = ScoreDescription(toolName);
@@ -118,7 +119,7 @@ public class McpPackagingTests
 
         Assert.Contains("docs_explore", text, StringComparison.Ordinal);
         Assert.Contains("before grepping", text, StringComparison.Ordinal);
-        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status" })
+        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status", "agent_coding_standards" })
         {
             Assert.Contains(tool, text, StringComparison.Ordinal);
         }
@@ -154,6 +155,7 @@ public class McpPackagingTests
         Assert.Equal(0, Boundary("docs_analysis_candidates"));
         Assert.Equal(0, Boundary("docs_glossary"));
         Assert.Equal(0, Boundary("docs_status"));
+        Assert.Equal(0, Boundary("agent_coding_standards"));
     }
 
     /// <summary>
@@ -167,12 +169,38 @@ public class McpPackagingTests
     [InlineData("docs_analysis_candidates")]
     [InlineData("docs_glossary")]
     [InlineData("docs_status")]
+    [InlineData("agent_coding_standards")]
     public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string toolName)
     {
         McpServerToolAttribute attribute = McpToolMethod(toolName).GetCustomAttribute<McpServerToolAttribute>()!;
 
         Assert.True(attribute.ReadOnly, $"{toolName} must declare ReadOnly so clients see readOnlyHint.");
         Assert.False(attribute.OpenWorld, $"{toolName} queries a local corpus and must not claim an open world.");
+    }
+
+    /// <summary>
+    /// A client binds arguments to a tool by the names the server publishes, so a renamed
+    /// parameter or a changed default breaks callers while leaving the suite green as long as
+    /// nothing pins them. <c>docs_analysis_candidates</c> and <c>docs_glossary</c> are pinned in
+    /// <c>McpAnalysisToolsTests</c>; this is the same pin for the coding-standards lookup. Its
+    /// declared name is already covered — the theory above resolves each tool through it, so a
+    /// rename fails there — as are its annotations; the parameter contract was the gap.
+    /// </summary>
+    /// <remarks>
+    /// The declared default is asserted as the literal a client sees on the wire rather than
+    /// through <c>DocumentIndex.DefaultCharBudget</c>, matching the sibling pin: a constant that
+    /// moves has moved the published default too, and that is what a bound client notices.
+    /// </remarks>
+    [Fact]
+    public void AgentCodingStandardsIsPinnedToTheParameterContractClientsBindBy()
+    {
+        MethodInfo tool = McpToolMethod("agent_coding_standards");
+
+        Assert.Equal(typeof(string), tool.ReturnType);
+        Assert.Equal(
+            ["technology", "topic", "charBudget"],
+            tool.GetParameters().Select(parameter => parameter.Name));
+        Assert.Equal(12_000, tool.GetParameters()[2].DefaultValue);
     }
 
     private static MethodInfo McpToolMethod(string toolName)

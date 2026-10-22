@@ -164,7 +164,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
                             SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
                             SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
-                            SquadTarget.Antigravity or SquadTarget.Devin;
+                            SquadTarget.Antigravity or SquadTarget.Devin or SquadTarget.CommandCode;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -396,6 +396,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
             SquadTarget.ZCode => ResolveZCodeAgentOutputPath(agent, fallbackProfiles),
             SquadTarget.Devin => ResolveDevinAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.CommandCode => $".commandcode/agents/{agent.Name}.md",
             _ => null
         };
 
@@ -482,6 +483,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Pi when !suppressedSkillIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
             SquadTarget.ZCode when !suppressedSkillIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
             SquadTarget.Devin when !suppressedSkillIdentities.Contains(name) => $".devin/skills/{name}/SKILL.md",
+            SquadTarget.CommandCode when !suppressedSkillIdentities.Contains(name) => $".commandcode/skills/{name}/SKILL.md",
             _ => null
         };
 

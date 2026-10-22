@@ -18,6 +18,8 @@ You implement ASP.NET Core backend code. You follow the path declared as **<csha
 
 Use the `csharp-dev` skill when working on .NET implementation.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: Clean Architecture, ASP.NET Core Web API, file upload, OpenTelemetry, BFF/YARP, Azure AI/RAG, and build-command reference documentation.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
@@ -54,7 +56,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 4. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 5. Hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
-   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or subsystem failure cluster within this invocation. If not green after 3 iterations, halt immediately and trip the circuit breaker.
+   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or subsystem failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If not green after 3 iterations, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Verify that all modified and proposed files are strictly within authorized task scope. If resolving a failure requires expanding blast radius into out-of-scope files or unrelated components, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
    - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing Failure Cluster A causes Failure Cluster B to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for B regresses A (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If a failing test fixture asserts legacy internal implementation details or requirements that contradict the task's approved design invariant, do not twist production code to satisfy invalid invariants. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
@@ -69,6 +71,15 @@ Your packet is your whole scope. Do not open files under the directories named b
    - **Do not run ReSharper InspectCode.** It is no longer part of this gate. A solution-wide load, run twice by every worker, was both the dominant cost of the gate and its largest remaining source of contention. InspectCode now runs **once per run**, as the `inspectcode` review gate the host declares, and the `static-analysis-triage` lens attributes its findings to the accumulated diff. What you owe this gate is the deterministic fix pass above, which erases most of what InspectCode would otherwise report. Anything it does raise against your files returns to you as a rework item.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<csharp-coding-standard>** by that registry name.
@@ -79,6 +90,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 - Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Completion digest
 
@@ -89,6 +101,7 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of C# file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, types touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=csharp-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```
 

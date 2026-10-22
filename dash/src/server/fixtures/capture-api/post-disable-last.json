@@ -40,6 +40,7 @@
         "missingKeys": [
           "experimental.openTelemetry"
         ],
+        "mismatchedKeys": [],
         "drift": null
       }
     ],
@@ -54,7 +55,9 @@
         }
       }
     ],
-    "statusLines": []
+    "statusLines": [],
+    "health": "off",
+    "issues": []
   },
   "receiver": {
     "hosted": true,

@@ -34,6 +34,10 @@ apm_modules/
 .cursor/**/*.env.*
 !.cursor/**/*.env.example
 
+# Agent harness worktrees are nested git checkouts, never source.
+.claude/worktrees/
+.kilo/worktrees/
+
 node_modules/
 
 .local-release/

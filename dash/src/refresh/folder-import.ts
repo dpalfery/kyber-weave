@@ -12,7 +12,7 @@
 // reads none, and recording it as a refresh would make the audit trail claim work that
 // never happened.
 
-import { projectCanonicalStore } from '../canon/projection.js'
+import { projectCanonicalStore, projectionIsCurrent } from '../canon/projection.js'
 import type { RefreshTrigger } from '../canon/refresh-run.js'
 import { purgeExpiredContent } from '../canon/retention.js'
 import type { CanonStore } from '../canon/store.js'
@@ -76,10 +76,26 @@ export async function importFolderHistory(
   )
 }
 
+/**
+ * The periodic pass: retention, then the projection.
+ *
+ * The purge keeps its own time-based cadence — its trigger is a retention
+ * deadline, not a change in the corpus — so it runs on every pass and only
+ * the projection is gated. The purge runs FIRST so a projection that does
+ * happen never caches content that is about to be removed.
+ *
+ * The gate is the projection's own: it compares the corpus against what the
+ * last projection saw (the records-write marker, the detector version and the
+ * parser contracts) and skips the rebuild when nothing moved. A rebuild over a
+ * real corpus is ~26 s of CPU, and running it on a timer whether or not
+ * anything changed is what starved the dashboard's HTTP handlers.
+ */
 export async function runMaintenancePass(store: CanonStore, now: Date): Promise<void> {
   // Purge before projecting: the projection must not cache content that is about to be
   // removed, or the derived views would keep showing it until the next refresh.
   purgeExpiredContent(store, now)
+
+  if (projectionIsCurrent(store)) return
   await projectCanonicalStore(store)
 }
 

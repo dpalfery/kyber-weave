@@ -11,18 +11,18 @@ last-reviewed: 2026-10-12
 
 ## Status
 
-Accepted, 2026-09-12. Records the Copilot rendering contract delivered with the Hotshot Logistics golden sync. Does not change the semantic capability lattice used by other harnesses.
+Accepted, 2026-09-12. Records the Copilot rendering contract for exact per-agent tool membership with one cross-agent emission order. Does not change the semantic capability lattice used by other harnesses.
 
 ## Context
 
 GitHub Copilot custom-agent `tools` is a closed, platform-specific allow-list. Mapping it from the shared capability vocabulary is lossy: granular edit tools (`edit/createFile`, `edit/rename`, …) and per-agent membership cannot be recovered from `filesystem.write` alone.
 
-The Hotshot golden tree pins exact membership per agent. Independently, a single global emission order maximizes shared serialized prefixes across the 24-agent roster. Per-agent ordering would churn YAML even when membership is unchanged.
+The canonical source pins exact membership per agent. Independently, a single global emission order maximizes shared serialized prefixes across the 24-agent roster. Per-agent ordering would churn YAML even when membership is unchanged.
 
 ## Decision
 
 1. **Membership is lossless and Copilot-specific.** Each canonical agent declares `copilot-tools`. `CopilotRenderer` emits that set, not a capability-to-tool reconstruction. Unknown identifiers, duplicates, or an order the catalog cannot project are validation failures.
-2. **Order is global and has no per-agent exceptions.** `CopilotToolCatalog.OrderedTools` is the only sequence. `Normalize` filters that sequence against the agent's membership. Frequency-descending golden counts motivated the sequence; they are not a runtime cache-hit guarantee.
+2. **Order is global and has no per-agent exceptions.** `CopilotToolCatalog.OrderedTools` is the only sequence. `Normalize` filters that sequence against the agent's membership. Frequency-descending usage counts motivated the sequence; they are not a runtime cache-hit guarantee.
 3. **Capability remains an upper bound, not a membership source.** A Copilot-specific capability profile may further withhold tools that the lattice cannot express as `ask`; it must not add tools the agent did not declare and must not widen the shared cross-harness profile.
 4. **Serialization stays a YAML flow sequence** with MCP wildcards single-quoted. That shape is part of the Copilot contract, not a formatter preference.
 
@@ -56,8 +56,7 @@ allow-list already grants, so an agent with an explicit `tools` list cannot disc
 tools without naming it. It slots directly after `vscode` and binds to no capability
 (`null`, like `vscode` and `todo`): discovery over the already-allowed set confers no new
 grant, so no capability profile changes. Per the consequences above, the slot, the binding,
-and the golden membership update (`PostGoldenToolAdditions` in the golden contract tests;
-the SHA-pinned manifest itself stays historical) landed together, and every canonical
+and the canonical membership update landed together, and every canonical
 agent declares it.
 
 Architect membership note (same date): the architect's `copilot-tools` moved from the
@@ -69,17 +68,17 @@ reasoning and is left intact.
 
 ## Alternatives Considered
 
-- **Capability-to-tool map as the allow-list.** Rejected. It cannot preserve architect granular-edit tools or golden per-agent sets.
+- **Capability-to-tool map as the allow-list.** Rejected. It cannot preserve architect granular-edit tools or canonical per-agent sets.
 - **Per-agent source order.** Rejected. Membership-identical agents would still differ in bytes and destroy shared prefixes.
 - **Unconditional `vscode`/`todo` plus capability-gated extras.** Rejected as a membership rule (it silently adds tools). Ungoverned tools may still require no capability *check*; they must still be declared in `copilot-tools` to appear.
 
 ## Consequences
 
-- Adding a Copilot tool identifier requires a catalog order slot, capability binding, and golden membership updates together.
-- Rendered Copilot agents differ from Hotshot golden files only in tool *order*, not membership or bodies.
+- Adding a Copilot tool identifier requires a catalog order slot, capability binding, and canonical membership updates together.
+- Tool *order* is normalized through the catalog; membership and bodies come from the canonical source.
 - Other harness renderers continue to ignore `copilot-tools`.
 
 ## Related
 
 - [Kyber-Squad architecture](../kyber-squad/architecture.md)
-- [Plan: Kyber-Squad Hotshot golden copy synchronization](../archive/plans/2026-08-29-kyber-squad-hotshot-golden-sync.md) (superseded; membership and order harvested here)
+- [Superseded Copilot sync plan](../archive/plans/2026-08-29-kyber-squad-hotshot-golden-sync.md) (superseded; membership and order harvested here)

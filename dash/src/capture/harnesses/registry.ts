@@ -62,6 +62,40 @@ export type PendingHarnessWriter = {
 }
 
 /**
+ * The live state of one declared file, handed to a harness's exporter
+ * resolver. `observed` carries only the keys the harness declares, mapped to
+ * their live value (absent keys are `undefined`); `processEnv` is the
+ * environment the *caller* can legitimately vouch for, and is omitted when the
+ * caller cannot see the one that decides — the server-side status route cannot
+ * see a GUI-launched editor's environment, so it passes nothing and the
+ * resolution says so instead of reporting an override as absent.
+ */
+export type CaptureExporterInput = {
+  observed: Readonly<Record<string, unknown>>
+  processEnv?: Readonly<Record<string, string | undefined>>
+}
+
+/**
+ * The exporter a harness will actually use, resolved from its config state
+ * and the process environment. WHY this exists beside `statusWarnings`: a
+ * warning keys on one config value, but a harness's exporter can be decided by
+ * a conjunction — for Copilot the settings keys *and* an environment override
+ * the GUI never inherits from a shell. Keys can be present and correct while
+ * the pipeline still resolves to the dev-null file exporter, which is a
+ * failure, not a pass.
+ */
+export type CaptureExporterResolution = {
+  /** The exporter the harness will resolve, e.g. `otlp-http` or `file`. */
+  exporter: string
+  /** True only when records would reach the receiver: the pipeline is on. */
+  delivering: boolean
+  /** One status line naming the resolved exporter. */
+  line: string
+  /** The precise, actionable warning shown when `delivering` is false. */
+  warning: string
+}
+
+/**
  * One config file a managed harness owns. Each file is its own D11 unit:
  * its path, format and desired values are independent of the others.
  */
@@ -81,6 +115,15 @@ export type CaptureConfigFile = {
    * it reads the file; the harness does not edit.
    */
   ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
+  /**
+   * Dotted prefixes whose keys are ONE literal property, never a nested tree
+   * (VS Code settings: `github.copilot.chat.otel`). Reading, writing and
+   * restoring then address the flat property, and `enable` refuses a
+   * pre-existing nested block instead of writing beside it.
+   */
+  literalKeyPrefixes?: readonly string[]
+  /** Status-only: the exporter this file's harness will actually resolve. */
+  exporterResolution?: (input: CaptureExporterInput) => CaptureExporterResolution
 }
 
 /**
@@ -122,6 +165,14 @@ export type ManagedHarnessWriter = {
    * file's own `ensureIfAbsentKeys` is what `enable` reads instead.
    */
   ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
+  /**
+   * Literal dotted prefixes for the single-file surface; see
+   * `CaptureConfigFile.literalKeyPrefixes`. When `configFiles` is set, each
+   * file's own declaration is what the core reads instead.
+   */
+  literalKeyPrefixes?: readonly string[]
+  /** Status-only exporter resolver for the single-file surface. */
+  exporterResolution?: (input: CaptureExporterInput) => CaptureExporterResolution
   /** When set, each entry is written, receipted and restored on its own. */
   configFiles?: readonly CaptureConfigFile[]
   statusWarnings?: readonly CaptureStatusWarning[]

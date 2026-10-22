@@ -12,8 +12,196 @@
 // surface consumes what `buildSessions()` cached, whichever adapter fed
 // the store.
 
+import { setImmediate as scheduleImmediate } from 'node:timers'
+
 import { buildSessions, type BuildSessionsReport } from './sessions.js'
-import type { CanonStore } from './store.js'
+import { DETECTOR_VERSION, SCHEMA_VERSION, type CanonStore } from './store.js'
+import { descriptorFor } from '../refresh/registry.js'
+import { getPricingGenerationKey } from '../pricing/models.js'
+
+/**
+ * Metadata key: the records-write marker the last projection observed.
+ *
+ * The gate compares the corpus's current marker against this one: a different
+ * value means the corpus moved since the last rebuild, so the derived tables
+ * are stale and must be rebuilt.
+ */
+const PROJECTION_RECORDS_MARKER_KEY = 'projection_records_marker'
+
+/**
+ * Metadata key: the parser-contract fingerprint the last projection observed.
+ *
+ * The fingerprint holds, per source checkpoint, the contract version the
+ * checkpoint was written under AND the version the registry asks for now. Both
+ * halves matter: the registry half catches a contract bump in the code (the
+ * stored checkpoints still name the old contract), and the stored half catches
+ * a checkpoint that was invalidated (its version was re-stamped under the new
+ * contract, and the corpus it covers is about to be re-read).
+ */
+const PROJECTION_PARSER_CONTRACTS_KEY = 'projection_parser_contracts'
+
+/**
+ * Metadata key: the pricing fingerprint the last projection observed.
+ *
+ * WHY the gate needs it: a session's derived cost is priced from the bundled
+ * pricing table, not from the corpus. A binary whose pricing table moved —
+ * a repriced model, a new pricing rule — therefore changes the money the
+ * dashboard shows while every record, every detector and every parser
+ * contract stays exactly as it was. The other gate inputs cannot see that,
+ * so a maintenance tick that skipped the projection would serve stale money
+ * figures until the next refresh.
+ */
+const PROJECTION_PRICING_KEY = 'projection_pricing'
+
+/**
+ * Metadata key: the store's schema version the last projection observed.
+ *
+ * WHY the gate needs it: the other four inputs describe the CORPUS and the
+ * RULES that read it -- the records that moved, the detectors that ran, the
+ * contracts that parsed, the prices that costed. None of them describes the
+ * store's SHAPE. A schema bump changes what a row means (which columns
+ * exist, what a payload holds) and changes none of the four, so a
+ * maintenance tick that ran after a store migrated saw "nothing changed" and
+ * skipped the projection -- leaving the derived tables describing a shape
+ * the store no longer has, for as long as the corpus itself stayed still.
+ *
+ * The version is compared as a string, exactly as the store stamps it.
+ */
+const PROJECTION_SCHEMA_VERSION_KEY = 'projection_schema_version'
+
+/**
+ * Metadata key: the store's own schema-version stamp.
+ *
+ * The store writes it when it is created and rewrites it on every migration
+ * step, so it names the shape the rows in that store have.
+ */
+const STORE_SCHEMA_VERSION_KEY = 'schema_version'
+
+/**
+ * The pricing state of this build, as one comparable string.
+ *
+ * `getPricingGenerationKey` is the pricing module's own signature of
+ * everything that can change a rendered cost with no session file changing:
+ * the pricing-behaviour version, the freshness of the live LiteLLM cache, and
+ * the content digest of the bundled snapshot and fallback tables. A build
+ * that ships a repriced model changes the digest; a live repricing changes
+ * the timestamp. Either must force one projection.
+ */
+function pricingFingerprint(): string {
+  return getPricingGenerationKey()
+}
+
+/**
+ * The parser-contract state of the corpus, as one comparable string.
+ *
+ * Empty when the store holds no checkpoints: a corpus that was never read
+ * from a source has no contract to have moved.
+ */
+function parserContractFingerprint(store: CanonStore): string {
+  return store
+    .listSourceCheckpoints()
+    .map((checkpoint) => {
+      const current = descriptorFor(checkpoint.harnessId)?.parserContractVersion
+      return `${checkpoint.harnessId}|${checkpoint.sourceKey}|${checkpoint.parserContractVersion}|${current ?? '-'}`
+    })
+    .sort()
+    .join(';')
+}
+
+/**
+ * Whether the derived tables still describe the corpus.
+ *
+ * Five inputs, and all five are required. The records-write marker says the
+ * corpus itself moved (an ingest, a wipe, a repricing write-back). The
+ * detector version says the rules that read the corpus moved. The parser
+ * contracts say the reading of the corpus moved. The pricing fingerprint says
+ * the rates the corpus is priced with moved. The schema version says the
+ * store's SHAPE moved -- a migration reshaped the rows the derived tables
+ * were built from. Any one of them can leave the derived tables describing a
+ * corpus that no longer exists, or money figures that are no longer the
+ * money, and a gate that watched only one of them would serve a stale view.
+ */
+export function projectionIsCurrent(store: CanonStore): boolean {
+  const recordedMarker = store.getMetadata(PROJECTION_RECORDS_MARKER_KEY)
+  if (recordedMarker === undefined) return false
+  if (recordedMarker !== String(store.recordsWriteMarker())) return false
+  // The store's own detector stamp against this build's: a stamp that names
+  // an older generation means the derived findings were produced by rules
+  // this build has replaced.
+  if (store.getDetectorVersion() !== DETECTOR_VERSION) return false
+  if (store.getMetadata(PROJECTION_PARSER_CONTRACTS_KEY) !== parserContractFingerprint(store)) return false
+  // The pricing table the derived costs came from, against this build's: a
+  // repriced model changes the money without changing the corpus.
+  if (store.getMetadata(PROJECTION_PRICING_KEY) !== pricingFingerprint()) return false
+  // The store's schema version against the one the last projection saw: a
+  // store that was migrated since then holds different columns, and the
+  // derived tables were built against the old ones. A record that names no
+  // version at all -- a projection made by a build that had no such input --
+  // is unknown, and unknown reads as stale rather than as current.
+  const recordedSchema = store.getMetadata(PROJECTION_SCHEMA_VERSION_KEY)
+  if (recordedSchema === undefined) return false
+  if (recordedSchema !== store.getMetadata(STORE_SCHEMA_VERSION_KEY)) return false
+  return true
+}
+
+/**
+ * Record what the projection just built saw, so the next pass can tell
+ * whether anything moved since.
+ *
+ * Read AFTER the projection: the projection's own repricing write-back bumps
+ * the records marker, and a marker read before the pass would make every
+ * later pass look like a change.
+ *
+ * Recorded by EVERY projection, not only by the maintenance pass: the refresh
+ * projects too, and a gate whose state only the maintenance pass refreshed
+ * would rebuild the corpus the refresh had just rebuilt.
+ */
+function recordProjectionState(store: CanonStore): void {
+  store.setMetadata(PROJECTION_RECORDS_MARKER_KEY, String(store.recordsWriteMarker()))
+  store.setMetadata(PROJECTION_PARSER_CONTRACTS_KEY, parserContractFingerprint(store))
+  // The costs the projection just derived came from this build's pricing
+  // table, so the store records which table that was — the same way it
+  // records the detector generation that produced the findings.
+  store.setMetadata(PROJECTION_PRICING_KEY, pricingFingerprint())
+  // The shape the projection just built against, so a later migration is
+  // visible to the gate: a store reshaped since then needs a new projection
+  // even when the corpus itself did not move. A store that carries no
+  // version stamp is recorded as this build's, so the state is never absent.
+  store.setMetadata(
+    PROJECTION_SCHEMA_VERSION_KEY,
+    store.getMetadata(STORE_SCHEMA_VERSION_KEY) ?? String(SCHEMA_VERSION),
+  )
+  // The derived findings were just produced by this build's detectors, so the
+  // store's stamp may name them. Stamping here is what makes the detector
+  // input converge instead of forcing a rebuild on every pass.
+  store.setDetectorVersion()
+}
+
+/**
+ * Hand the event loop back for one turn.
+ *
+ * WHY: a full projection over a real corpus is ~26 s of CPU. Run to
+ * completion on one thread, it starves every other caller of the loop — an
+ * HTTP handler answering `GET /api/kyber/meta` measured 23 s during a
+ * projection and 23 ms between them. A yield between units of work bounds a
+ * waiter's wait to one unit of work plus its own cost, however long the pass
+ * as a whole takes.
+ *
+ * `setImmediate`, not a resolved promise: a promise continuation is a
+ * microtask, and microtasks never reach the check phase where the loop
+ * processes I/O. Only a real turn lets a pending handler run.
+ *
+ * The `node:timers` setImmediate, not the global one: they are the same
+ * function in Node, but a test that fakes timers replaces the global with a
+ * fake that only fires when the test advances the clock. A projection that
+ * waits for a turn nobody will deliver never finishes, and a test that
+ * projects would hang rather than fail.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleImmediate(resolve)
+  })
+}
 
 /**
  * The sole full projection over the canonical store: rebuild every derived
@@ -26,7 +214,9 @@ import type { CanonStore } from './store.js'
  * write when already correct), and a re-ingest overwrite self-heals it.
  */
 export async function projectCanonicalStore(store: CanonStore): Promise<BuildSessionsReport> {
-  return buildSessions(store)
+  const report = await buildSessions(store, { yieldToLoop: yieldToEventLoop })
+  recordProjectionState(store)
+  return report
 }
 
 export type CanonicalProjectionSchedulerOptions = {

@@ -11,6 +11,9 @@ code-refs:
   - registerKyberCommands
   - refreshHarnessSources
   - purgeExpiredContent
+  - runTranscriptSync
+  - formatSessionTitle
+  - relinkQuarantinedClaudeLogs
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -131,22 +134,28 @@ KyberDash maintains all normalized data in SQLite at `~/.kyberdash/canon.db` ([A
 
 ### 1. Starting the OTLP Ingest Receiver
 
-The web dashboard does not start the collector automatically. Ingest is a separate command
-that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and `POST /v1/logs`,
-then persists to `canon.db`. Logs enrich their correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)):
+There is exactly one KyberDash engine per user ([ADR 0039](../adr/0039-single-instance-engine.md)),
+and the OTLP receiver is its child, listening for OTLP over HTTP on `127.0.0.1:4318` at
+`POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. Logs enrich their
+correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)).
+
+The engine holds a local IPC endpoint (`~/.kyberdash/engine.sock`, a named pipe on Windows)
+and records itself in `~/.kyberdash/engine.json` (pid, executable, version, URL). The CLI and
+the tray both ensure-or-attach through it, from the same executable:
 
 ```bash
-# Start receiver via the kyber command group
-node dash/dist/cli.js kyber otel --port 4318 --host 127.0.0.1
+# Start the engine, or attach to the one that is running (exit 0 either way)
+kyberdash web --no-open
 
-# Backward-compatible alias
-node dash/dist/cli.js otel --port 4318
+# Turn the hosted receiver on and ensure the engine; never binds a second receiver
+kyberdash otel
 ```
 
-Run that command when you want a standalone collector. When a `kyberdash web` server is
-running, `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) hosts the same receiver as a child
-of that server instead, and `settings.receiver.hosted` ([§2d](#2d-shared-settings-and-pause))
-records which of the two the current setup uses.
+A second `kyberdash web` attaches to the running engine instead of starting another. An
+engine from a different build is asked to shut down and replaced by the newer one. A custom
+`--port` or `--host` on `kyberdash otel` is refused: the receiver is `127.0.0.1:4318`.
+`kyberdash otel --serve` is the internal form the engine uses for its receiver child; do not
+start it by hand.
 
 ### 1a. Enabling Claude Code content on the sender
 
@@ -242,7 +251,7 @@ Capturable versus inherent-empty Claude buckets are recorded in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 
 Coverage window persistence: every refresh run records its window in
-`refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
+`refresh_run.history_weeks` (added in schema 16). The value is the `--history-weeks` argument of
 that run (default 2). Rows written before window tracking read as `null`, which surfaces
 render as "coverage window unknown (recorded before window tracking)" — never as 2 and
 never as 0, per [honest unobservability](../rules/honest-unobservability.md). A scoped
@@ -338,7 +347,34 @@ The dashboard reaches it at `POST /api/kyber/import-history` with a body carryin
 `{weeks?, harness | harnesses}`, from the Maintenance panel's **Import folder history**
 control; the tray reaches the same route from its popover.
 
+**Importing `antigravity-cli`.** `--harness antigravity` selects only the `~/.gemini/antigravity`
+descriptor. `antigravity-cli` and `antigravity-ide` are separate descriptors, so name them
+explicitly. To import the `antigravity-cli` conversations, name that harness and use a window of at
+least 2 weeks. The window is counted in whole weeks back from the run, so an older conversation is
+not read:
+
+```bash
+node dash/dist/cli.js dash import-history --weeks 2 --harness antigravity-cli
+```
+
+The dashboard's import picker offers only harnesses that already hold samples (`sampleCount > 0`,
+`dash/web/src/components/maintenance/MaintenancePanel.tsx`). Until `antigravity-cli` holds samples,
+the command above is the way to import it. The picker cannot offer it today (todo
+[antigravity-cli-backfill-import-picker](../todo/antigravity-cli-backfill-import-picker.md)).
+
+A `--harness antigravity` import, or a refresh run with that id, does not include `antigravity-cli`
+or `antigravity-ide`. The family scope is shadowed by the descriptor id (todo
+[antigravity-family-scope-resolve-harness](../todo/antigravity-family-scope-resolve-harness.md)), so
+name each descriptor. Use a window of at least two weeks, so that the chosen conversation falls inside it.
+After an import, the transcript activity appears only for sessions whose conversation database was
+imported. OTLP-only sessions with no conversation database, and those with a slug session id, get
+no transcript activity (see the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing)).
+
 ### 2d. Shared settings and Pause
+
+For the user-facing configure surface — the shipped `kyberdash dash settings` commands and
+the dashboard's Settings drawer — see the [adoption guide](onboarding.md#configure). This
+section is the operator detail beneath it.
 
 Five settings, stored in `canon.db` metadata (`dash/src/settings/shared-settings.ts`), so a
 change made in one place is the change every other surface sees. Reads fail closed: an
@@ -466,6 +502,13 @@ validate before touching the live store:
 node dash/dist/cli.js kyber build --db /tmp/canon.db
 ```
 
+**Antigravity descriptions after an edit.** Antigravity skill descriptions are read from each skill's
+`SKILL.md` when its session payload is built. The lookup is cached by file path and revalidated by
+the file's mtime and size, so an edited `SKILL.md` is read again with no engine restart. The new
+text appears on the next projection pass that rebuilds the session. To see an edit at once, run
+`kyber build`, which calls `buildSessions` directly. The maintenance pass alone may skip projection
+while the corpus is unchanged, so it may not show the edit until the next pass.
+
 **Capture fixtures.** The sanitized G0 captures live in `dash/src/canon/fixtures/skills/<harness>/`,
 one folder for each of `claude-code`, `copilot-chat`, `copilot-cli`, `antigravity`, `pi`, and
 `opencode`. Each folder has a README stating what was found or not found. The `copilot-cli`,
@@ -473,6 +516,147 @@ one folder for each of `claude-code`, `copilot-chat`, `copilot-cli`, `antigravit
 Copilot CLI, Pi, or OpenCode skill records. The captures are sanitized: ids, paths, and timestamps
 are replaced. The Claude `skill_listing` parser test reads `claude-code/capture-listing.jsonl`.
 The per-harness status is in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+
+### 2h. Subagent session hierarchy and post-run transcript synchronization
+
+Subagent execution is modeled as a first-class session hierarchy with dual spend accounting,
+honest title formatting, and background transcript synchronization
+([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+
+#### Subagent session hierarchy and Sessions explorer nesting
+
+Subagents spawn with stable session IDs derived from their harness telemetry:
+- Primary Claude sessions: `claude-code/<session-id>`
+- Claude subagents with a known agent ID: `<parent-session-id>#agent-<agentId>`
+- Copilot subagents (and fallbacks): `<parent-session-id>#<span-id>`
+
+The web dashboard Sessions explorer (`page-sessions`) renders subagent sessions nested beneath
+their parent session in a tree hierarchy rather than interleaving them as disconnected top-level
+sessions.
+
+#### Dual spend accounting via read-time rollups
+
+KyberDash maintains dual spend visibility across the delegation tree:
+- **Direct unaggregated metrics**: The parent session row in SQLite (`canon.db`) preserves its own
+  unaggregated `turn_count`, `request_count`, `total_input`, `total_output`, and `cost_usd`. This
+  ensures direct parent execution work is not overwritten or inflated in the raw store.
+- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions` or
+  `/api/kyber/session/:sessionId`, the API dynamically calculates a `rollup` summary aggregating
+  turns, requests, token counts, and cost USD across the parent and all nested subagent children.
+- Both surfaces (Web and Tray) display the rolled-up totals alongside direct metrics without
+  double-counting.
+
+#### Honest title formatting (`formatSessionTitle`)
+
+Session titles in the explorer are synthesized via `formatSessionTitle` (`dash/src/canon/naming.ts`
+and `dash/web/src/lib/labels.ts`), adhering to honest unobservability:
+- **Title format**: `<agent name> · <task summary>` when both are available from telemetry.
+- **Machine-label suppression**: `isMachineLabel` detects and suppresses raw telemetry identities
+  (such as span operations like `.llm_request`, model labels like `chat claude-3-5-sonnet`, raw
+  UUID strings, `synth:` prefixes, and `<synthetic>` or `<unknown>` model tags) so they never
+  masquerade as human titles.
+- **Fallbacks**: If task summary is absent or machine-generated, the title falls back to
+  `<agent name> · session`, `<task summary>`, `<human label>`, `<harness> session`, or shortened
+  session ID (`formatSessionId`). When telemetry is completely absent, it renders a clean fallback
+  rather than fabricating prompt summaries or fake agent identities.
+
+#### Engine-hosted transcript sync job lifecycle (`runTranscriptSync`)
+
+For harnesses where subagent turns and spend are recorded in secondary transcript files on disk
+(e.g., Claude Code subagent JSONL transcripts), the CLI engine runs an incremental synchronization
+job (`dash/src/sync/transcript-sync.ts`):
+
+- **Job lifecycle and state machine**:
+  1. `pending`: A new session with a transcript path is registered awaiting ingestion.
+  2. `synced`: `runTranscriptSync` reads newly appended bytes from `transcript_offset`, parses
+     turns with `processDelta`, updates `transcript_offset = fileSize`, `synced_at = nowIso`, and
+     recalculates session spend.
+  3. `settled`: If no new bytes are appended and the session has been inactive for >= 30 minutes
+     (`(now - lastActivity) >= 30 * 60_000`), the session transitions to `settled` with `settled_at`
+     stamped. Settled sessions are bypassed on future sync passes.
+  4. `unavailable`: If the transcript file is missing or unreadable and more than 24 hours have elapsed
+     since session start/end, `sync_status` transitions to `unavailable`.
+- **Lock arbitration**: Before starting a sync pass, `runTranscriptSync` inspects `STORE_LOCK_FILE`
+  (`~/.kyberdash/canon.lock`). If the store lock is held by `dash clean`, `dash refresh`, or manual
+  rebuild (`readLockHolder !== null`), `runTranscriptSync` yields immediately with `{ outcome: 'busy' }`.
+  It never attempts to force a lock, wait indefinitely, or block user operations.
+- **Display layer boundary**: Following [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md),
+  the sync job runs exclusively inside the CLI engine's `JobHost` under `kyberdash web`. The tray and
+  the web dashboard contain no job runners or schedulers; they query the resulting sessions and rollups
+  via `/api/kyber/*`.
+
+### 2i. Claude request-body relink and quarantined count
+
+Before the request-body correlation fix, a Claude Code `api_request_body` log that arrived before
+its model call was quarantined and never reconnected. The rule that now matches it is described in
+the [architecture](architecture.md#claude-request-body-log-correlation) and the
+[telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
+
+**What runs on start.** When the OTLP collector service starts (the receiver that `kyberdash web`
+hosts, or `kyberdash otel`), it runs `relinkQuarantinedClaudeLogs` once, after the store opens. The pass:
+
+- reads the `quarantined_logs` rows with `harness = 'claude-code'` above the watermark, in log
+  timestamp order, and applies the same matcher as the live path;
+- on a match, enriches the record, removes the quarantined row, and marks the log enriched;
+- skips a body whose matched record is older than the 14-day content window. Its row stays
+  quarantined, because the content it would attach has already been purged;
+- leaves unmatched, tied, and skipped rows in quarantine;
+- isolates each log: one whose matching or enrichment throws is counted, its row stays in quarantine,
+  and the pass continues. One warning at the end gives the count and up to ten log ids, never a
+  payload;
+- treats a matched record whose timestamp does not parse as expired, so its row stays quarantined;
+- prints one line, `Relinked N of M quarantined Claude request bodies in T ms`, and, when N is above
+  zero, requests the derived-session projection as the live batch paths do. A failure is logged and
+  does not stop the service.
+
+**Startup cost.** The pass is synchronous and runs once per start, before the receiver accepts traffic.
+It reads quarantined rows in bounded pages: at most 100 rows and 16 MiB of stored payload per page. A
+page always holds at least one row, so one oversized payload cannot stall the pass, and memory stays
+flat however large the quarantine is. A store with a large backlog pays one scan; later starts scan
+nothing past the watermark. The elapsed time is in the `Relinked N of M ... in T ms` line. A
+quarantined row whose stored payload is not valid JSON is skipped and kept in quarantine. The pass
+prints one warning per start with the count and up to ten log ids, never the payload. The skip does
+not stop the pass, and the watermark still moves past such a row, so later starts do not retry it.
+
+**The watermark.** The pass stores the highest rowid it left in quarantine in `metadata` under
+`claude_body_relink_watermark` (never lower than the previous value), written after every page so a
+crash mid-pass keeps the progress made. A later start scans only rows
+above it, so a row the pass left in quarantine is **not retried by later starts**. The live path
+handles bodies that arrive while the service runs, and it does not re-match rows already in
+quarantine. No shipped command resets the watermark.
+
+**Checking the quarantined count.** Snapshot the store first, so the query does not read a live WAL
+database (the same method the T0 measurement used):
+
+```bash
+sqlite3 ~/.kyberdash/canon.db ".backup /path/to/canon-copy.db"
+
+# Quarantined Claude request bodies, and why they were left there
+sqlite3 /path/to/canon-copy.db "SELECT reason, COUNT(*) FROM quarantined_logs WHERE harness = 'claude-code' GROUP BY reason;"
+
+# Bodies still waiting for a call
+sqlite3 /path/to/canon-copy.db "SELECT COUNT(*) FROM pending_logs WHERE harness = 'claude-code';"
+
+# The relink watermark (absent before the first pass)
+sqlite3 /path/to/canon-copy.db "SELECT value FROM metadata WHERE key = 'claude_body_relink_watermark';"
+```
+
+The per-reason counts are also in the Status panel and in `GET /api/kyber/coverage`. After a restart
+with a healthy sender, expect the count to fall to the accepted residual: about 0.44% of trace-bearing
+body logs, plus any context-free body that carries no session id, which quarantines at once. A
+context-free body that names a session pends for the 15-minute window and is counted only if it
+outlasts it. Bodies older than the 14-day window stay quarantined, so a store with older history keeps
+a higher count. This is expected, not a fault.
+
+**Derived session rows.** The relink changes stored records, not the derived session rows (the session
+payload, which includes the Skills view). A relink that enriched at least one call requests the
+projection itself; otherwise a `dash refresh`, an accepted OTLP batch, or a manual build rebuilds
+them. If a session still shows no skill listing after a restart,
+run the build against the store:
+
+```bash
+node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
+```
 
 ### 3. Raw Content Backfill and Re-normalization
 
@@ -497,7 +681,7 @@ re-attributing live Antigravity rows after an adapter change).
 
 Tool execution outputs captured during file or OTLP ingest are bounded to 64KiB (`MAX_TOOL_RESULT_BYTES = 65_536`) in stored parts (`part: 'tool_result_content'`). Truncated records carry `truncated: true`, with pre-truncation byte length stored in `attributes['gen_ai.tool.result_bytes']`.
 
-When reader extraction or normalization contracts change (such as tool extraction in #180 or request/response turn deduplication in #232), the source's `PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts` is incremented. Running `kyber-weave dash refresh` detects that existing `source_checkpoint` entries carry an older contract version, marks them stale, and automatically re-reads and re-synthesizes historical sessions without requiring manual database deletion.
+When reader extraction or normalization contracts change (such as tool extraction in #180 or request/response turn deduplication in #232), the source's `PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts` is incremented. Running `kyberdash dash refresh` detects that existing `source_checkpoint` entries carry an older contract version, marks them stale, and automatically re-reads and re-synthesizes historical sessions without requiring manual database deletion.
 
 > **Warning:** unscoped `kyber renormalize` quarantines every row the
 > fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
@@ -737,6 +921,7 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
+  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
@@ -749,6 +934,24 @@ filters, so narrowing one page's scope never touches the A/B selectors.
     text for the first turn listed. Per-harness availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
+    - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
+      and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
+      reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
+      CLI shows the listed names, descriptions and derived tokens from the `<available_skills>` block
+      of the system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
+      `skill` tool requests the parser reads on each message; a session with none shows not measurable.
+      Copilot CLI tool invocations are not ingested yet (todo
+      [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
+    - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
+      for an Antigravity session, or no system prompt in the journal for Copilot CLI (a session older than
+      the 14-day content purge keeps no prompt). For that
+      side the payload carries a not-measurable object, not a count. A count of `0` is a measured
+      none: the transcript or journal was read and no skill was invoked.
+    - *Partly covered Antigravity sessions.* A turn the transcript does not cover shows no
+      `skills_invoked` and is not counted as a none. When only some turns are covered, the invoked
+      figures cover those turns, and the panel reads "Invocations measured on X of Y turns". A fully
+      covered session shows no such line; the coverage rule is in the
+      [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
   - *Execution Timeline / Call Tree* (`5 · Execution Timeline`): Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare**: Phase-aligned run comparison (`page-compare`), reached from the top
@@ -1073,6 +1276,9 @@ it silently when `kyberdash` is not on `PATH`. Do not edit `agy` settings to cal
 directly, and do not replace or edit an existing status-line implementation as part of this
 setup.
 
+The recorder writes no transcript path, and a status-line row carries no pairing id, so a
+status-line row gets no transcript tool calls or skill reads.
+
 The command is implemented and synthetically verified, but it collects nothing until the
 owner deploys the `agy` variant and activates it by hand. No live collection is claimed
 here.
@@ -1218,5 +1424,6 @@ here.
 - [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, analyses, and surfaces.
 - [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — why the tray and the dashboard hold no jobs.
 - [KyberDash Overview](README.md) — Product vision, motivation, and capabilities.
+- [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — Subagent session hierarchy, post-run transcript synchronization, and read-time spend rollups.
 - [Feature Local Run and Test Standard](../rules/feature-runbooks.md) — Standards governing local execution runbooks across all features.
 - [Component Catalog](../catalog.md) — Canonical inventory of components and owners.

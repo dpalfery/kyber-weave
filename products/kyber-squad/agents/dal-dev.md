@@ -18,6 +18,8 @@ You implement the persistence layer. You follow the path declared as **<data-acc
 
 Use the `dal-dev` skill when working on the persistence layer.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: schema-contract consumption, ADO.NET repositories, and FluentMigrator reference documentation.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
@@ -67,6 +69,15 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
    - **Do not run ReSharper InspectCode.** It is no longer part of this gate. A solution-wide load, run twice by every worker, was both the dominant cost of the gate and its largest remaining source of contention. InspectCode now runs **once per run**, as the `inspectcode` review gate the host declares, and the `static-analysis-triage` lens attributes its findings to the accumulated diff. What you owe this gate is the deterministic fix pass above, which erases most of what InspectCode would otherwise report. Anything it does raise against your files returns to you as a rework item.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve the registry names above.
@@ -74,6 +85,7 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
 - Never author application services or test files.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
@@ -86,5 +98,6 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of persistence file paths changed or created>
 SUMMARY: <2–4 sentences: repositories/migrations touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=dal-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

@@ -51,8 +51,9 @@ describe('registered top-level commands', () => {
         .commands.map(command => command.name())
         .sort()
     expect(sub('kyber')).toEqual(['antigravity-statusline', 'backfill', 'build', 'capture', 'cursor-hook', 'otel', 'renormalize'])
-    // The dash group grew by design (issue #319): import-history (alias `import`) and settings.
-    expect(sub('dash')).toEqual(['clean', 'import-history', 'refresh', 'settings'])
+    // The dash group grew by design (issue #319): import-history (alias `import`) and settings,
+    // and then vacuum, which reclaims the store's freelist.
+    expect(sub('dash')).toEqual(['clean', 'import-history', 'refresh', 'settings', 'vacuum'])
   })
 
   it('keep report as the default command', () => {

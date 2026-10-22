@@ -99,6 +99,29 @@ function parseSessionContentPath(pathname: string): string | null {
 }
 
 /**
+ * `/api/kyber/session/:id/summary` — the bounded session summary.
+ *
+ * <remarks>
+ * Everything between the prefix and the `/summary` suffix is the session id,
+ * so an encoded id stays intact. `null` means this is not the summary route,
+ * so the detail route below can still claim the path.
+ *
+ * The id comes back raw, not decoded: the caller decodes it with
+ * {@link decodePathId}, which reports a malformed percent-encoding as a client
+ * error instead of letting a `URIError` escape as a 500. The quarantine and
+ * problem routes decode their id the same way, for the same reason.
+ * </remarks>
+ */
+function parseSessionSummaryPath(pathname: string): string | null {
+  const prefix = '/api/kyber/session/'
+  const suffix = '/summary'
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null
+  const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
+  if (!middle || middle.endsWith('/')) return null
+  return middle
+}
+
+/**
  * `/api/kyber/span/:spanId/attributes` — the harness-emitted attribute map for
  * one span (R9.2). Session payloads no longer carry these inline; see
  * `CanonStore.spanAttributes`.
@@ -168,6 +191,36 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
     sessionId: decodeURIComponent(sessionIdRaw).trim(),
     turnIndex,
   }
+}
+
+/**
+ * `/api/kyber/session/:id/turn/:index` — one turn's measured counters.
+ *
+ * <remarks>
+ * The sibling of the turn-content route: that route answers
+ * `/turn/:index/content`, this one answers the turn's figures. The two
+ * suffixes are disjoint — the content route only claims paths ending in
+ * `/content` — so neither route shadows the other, in either direction.
+ *
+ * The id comes back raw, like the summary route's: the caller decodes it
+ * with {@link decodePathId}, so a malformed percent-encoding is the client
+ * error it is and never a 500.
+ * </remarks>
+ */
+function parseSessionTurnPath(pathname: string): { sessionId: string; turnIndex: number } | null {
+  const prefix = '/api/kyber/session/'
+  const turnMarker = '/turn/'
+  if (!pathname.startsWith(prefix)) return null
+  const rest = pathname.slice(prefix.length)
+  const turnIdx = rest.lastIndexOf(turnMarker)
+  if (turnIdx === -1) return null
+  const sessionIdRaw = rest.slice(0, turnIdx)
+  const turnIndexRaw = rest.slice(turnIdx + turnMarker.length)
+  if (!sessionIdRaw || !turnIndexRaw) return null
+  // A turn index is a number: anything else is not this route, and the
+  // detail route below answers it as the session id it cannot find.
+  if (!/^\d+$/.test(turnIndexRaw)) return null
+  return { sessionId: sessionIdRaw, turnIndex: parseInt(turnIndexRaw, 10) }
 }
 
 interface PaginationParams {
@@ -857,6 +910,41 @@ export function handleKyberRequest(
     return true
   }
 
+  // One turn's measured counters. Must run before the /session/:id detail
+  // route below, which would otherwise treat ".../turn/1" as part of the
+  // session id and 404 it. Additive: the turn-content route above and the
+  // detail route below are untouched.
+  const turnFiguresRoute = parseSessionTurnPath(url.pathname)
+  if (turnFiguresRoute !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const sessionId = decodePathId(turnFiguresRoute.sessionId)
+    if (sessionId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed session id' })
+      return true
+    }
+    if (!sessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    const figures = bridge.getSessionTurnFigures(sessionId, turnFiguresRoute.turnIndex)
+    if (!figures) {
+      // The one not-found body the sibling turn-content route answers: an
+      // unknown session and an unknown turn are one shape here, so the turn
+      // surface keeps one not-found body.
+      sendKyberJson(res, 404, { error: 'Turn content not found' })
+      return true
+    }
+    sendKyberJson(res, 200, {
+      session_id: sessionId,
+      turn_index: turnFiguresRoute.turnIndex,
+      ...figures,
+    })
+    return true
+  }
+
   // Full-fidelity content. Must run before /session/:id — that handler would
   // otherwise treat ".../content" as part of the session id and 404.
   const contentSessionId = parseSessionContentPath(url.pathname)
@@ -904,6 +992,40 @@ export function handleKyberRequest(
       return true
     }
     sendKyberJson(res, 200, body)
+    return true
+  }
+
+  // The bounded session summary. Must run before the /session/:id detail route
+  // below, which would otherwise treat ".../summary" as part of the session id
+  // and 404 it. Additive: the detail route itself is untouched.
+  const summarySessionId = parseSessionSummaryPath(url.pathname)
+  if (summarySessionId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    // Decoded with the shared helper, so a malformed percent-encoding is the
+    // client error it is — the 400 shape the quarantine and problem routes
+    // give for the same fault — and never the 500 an uncaught URIError
+    // surfaces as.
+    const sessionId = decodePathId(summarySessionId)
+    if (sessionId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed session id' })
+      return true
+    }
+    if (!sessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    // No run or execution linkage is served: neither the `session` table nor
+    // the session payload holds such a field, so a link here would be invented
+    // rather than measured.
+    const summary = bridge.getSessionSummary(sessionId)
+    if (!summary) {
+      sendKyberJson(res, 404, { error: 'Session not found' })
+      return true
+    }
+    sendKyberJson(res, 200, summary)
     return true
   }
 
@@ -1496,53 +1618,7 @@ export function handleKyberRequest(
     return true
   }
 
-  // Backward-compatible endpoints for older/legacy callers
-  if (url.pathname === '/api/kyber/context') {
-    if (req.method !== 'GET') {
-      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    }
-    let id = (url.searchParams.get('id') ?? '').trim()
-    if (!id) {
-      const list = bridge.listSessions(1)
-      if (list.length === 0) {
-        sendKyberJson(res, 404, { error: 'No sessions available' })
-        return true
-      }
-      id = list[0].session_id
-    }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
-      sendKyberJson(res, 404, { error: 'Session not found' })
-      return true
-    }
-    sendKyberJson(res, 200, payload.context ?? {})
-    return true
-  }
-
-  if (url.pathname === '/api/kyber/schema') {
-    if (req.method !== 'GET') {
-      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    }
-    let id = (url.searchParams.get('id') ?? '').trim()
-    if (!id) {
-      const list = bridge.listSessions(1)
-      if (list.length === 0) {
-        sendKyberJson(res, 404, { error: 'No sessions available' })
-        return true
-      }
-      id = list[0].session_id
-    }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
-      sendKyberJson(res, 404, { error: 'Session not found' })
-      return true
-    }
-    sendKyberJson(res, 200, payload.schema ?? null)
-    return true
-  }
-
+  // Backward-compatible endpoint for older/legacy callers.
   if (url.pathname === '/api/kyber/timeline') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
@@ -1557,12 +1633,15 @@ export function handleKyberRequest(
       }
       id = list[0].session_id
     }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
+    // The timeline is session metadata, so it is read as one narrow fragment
+    // of the payload rather than as the whole session blob the route used to
+    // page in for it.
+    const timeline = bridge.getSessionTimeline(id)
+    if (!timeline) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
-    sendKyberJson(res, 200, payload.timeline ?? [])
+    sendKyberJson(res, 200, timeline.timeline ?? [])
     return true
   }
 

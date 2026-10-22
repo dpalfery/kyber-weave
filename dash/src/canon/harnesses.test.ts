@@ -871,20 +871,23 @@ describe('CanonStore — session retrieval encapsulation (ADR 0008, Task E2)', (
       payload: { context: { measurable: true } },
     })
 
-    const allSessions = store.listSessions()
+    // The store lists sessions through its streaming seam: the same rows,
+    // newest first, yielded one at a time so a listing never materializes
+    // every payload at once.
+    const allSessions = [...store.iterateSessions()]
     expect(allSessions).toHaveLength(3)
     // Newest first
     expect(allSessions[0]?.sessionId).toBe('sess-copilot-2')
 
-    const copilotSessions = store.listSessions('copilot')
+    const copilotSessions = [...store.iterateSessions('copilot')]
     expect(copilotSessions).toHaveLength(2)
     expect(copilotSessions.map((s) => s.sessionId)).toEqual(['sess-copilot-2', 'sess-copilot-1'])
 
-    const cursorSessions = store.listSessions('cursor')
+    const cursorSessions = [...store.iterateSessions('cursor')]
     expect(cursorSessions).toHaveLength(1)
     expect(cursorSessions[0]?.sessionId).toBe('sess-cursor-1')
 
-    const absentSessions = store.listSessions('aider')
+    const absentSessions = [...store.iterateSessions('aider')]
     expect(absentSessions).toHaveLength(0)
 
     const session = store.getSession('sess-copilot-1')

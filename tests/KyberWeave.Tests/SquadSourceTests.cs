@@ -100,16 +100,16 @@ public sealed class SquadSourceTests
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "spark1.3 contributor")]
-    [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
+    [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("fast", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=low]")]
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
     [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.7 (copilot)")]
     [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
-    [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
+    [InlineData("general", "opencode", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("general", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=medium]")]
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
@@ -247,7 +247,7 @@ public sealed class SquadSourceTests
             source.ModelProfiles.Profiles.ContainsKey("reviewer"),
             "models.yml does not declare a 'reviewer' profile.");
 
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
         int reviewerMemberCount = source.Agents.Count(agent => reviewerAgents.Contains(agent.Name));
         Assert.True(
             reviewerMemberCount > 0,
@@ -265,10 +265,10 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void CodeReviewerReviewLensReviewTriageTaskReviewerDeclareReviewerProfile()
+    public void CodeReviewerReviewLensReviewTriageDeclareReviewerProfile()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
 
         foreach (string agentName in reviewerAgents)
         {

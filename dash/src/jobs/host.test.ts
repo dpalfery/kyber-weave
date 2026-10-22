@@ -236,6 +236,49 @@ describe('JobHost: pause stops only scheduled jobs', () => {
     expect(maintenanceRuns).toBeGreaterThan(afterStart)
   })
 
+  describe('transcript sync failures', () => {
+    const makeSyncHost = (sync: () => unknown): JobHost => {
+      const host = new JobHost({
+        store,
+        stateDir,
+        program: 'kyberdash',
+        clock,
+        spawner,
+        tickIntervalMs: TICK_MS,
+        maintenance: () => {},
+        sync: sync as () => Promise<void>,
+      })
+      hosts.push(host)
+      return host
+    }
+
+    it('records a thrown sync as lastSyncFailure and clears it after a clean pass', async () => {
+      let fail = true
+      const host = makeSyncHost(() => {
+        if (fail) throw new Error('EACCES: transcript unreadable')
+      })
+      await host.start()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBe('EACCES: transcript unreadable'))
+
+      fail = false
+      await host.tick()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBeNull())
+    })
+
+    it('records a failed outcome from the sync job with its reason', async () => {
+      const host = makeSyncHost(async () => ({ outcome: 'failed', reason: 'disk full' }))
+      await host.start()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBe('disk full'))
+    })
+
+    it('does not treat a busy sync as a failure', async () => {
+      const host = makeSyncHost(async () => ({ outcome: 'busy' }))
+      await host.start()
+      await host.tick()
+      expect(host.getStatus().lastSyncFailure).toBeNull()
+    })
+  })
+
   it.each(['web', 'tray'] as const)('still starts a manual refresh requested by %s', async (trigger) => {
     const host = makeHost()
     await host.start()
@@ -473,5 +516,43 @@ describe('JobHost: shutdown', () => {
     const status = host.getStatus()
     expect(status.lastFailure).toBeNull()
     expect(status.lastSuccessAt).toBe(new Date(T0).toISOString())
+  })
+})
+
+describe('failure artifact pruning keeps the newest', () => {
+  it('evicts the oldest by time, not the alphabetically first kind', async () => {
+    const { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, utimesSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const root = mkdtempSync(join(tmpdir(), 'kyber-host-prune-'))
+    const store = new CanonStore(':memory:')
+    try {
+      const host = new JobHost({ store, stateDir: root, program: 'true', maintenance: () => {} })
+      const dir = join(root, 'failures')
+      mkdirSync(dir, { recursive: true })
+      const oldTime = new Date('2026-01-01T00:00:00.000Z')
+      const newTime = new Date('2026-06-01T00:00:00.000Z')
+      // Ten stale refresh artifacts plus one fresh clean artifact. Plain
+      // sort() orders 'clean-…' before 'refresh-…', so it evicts the fresh
+      // clean file while keeping a stale refresh one.
+      for (let i = 0; i < 10; i += 1) {
+        const day = String(i + 1).padStart(2, '0')
+        const name = `refresh-2026-01-${day}T00-00-00-000Z.stderr.log`
+        const p = join(dir, name)
+        writeFileSync(p, 'old', 'utf8')
+        utimesSync(p, oldTime, oldTime)
+      }
+      const fresh = join(dir, 'clean-2026-06-01T00-00-00-000Z.stderr.log')
+      writeFileSync(fresh, 'fresh', 'utf8')
+      utimesSync(fresh, newTime, newTime)
+      expect(readdirSync(dir)).toHaveLength(11)
+      ;(host as unknown as { pruneFailureArtifacts: (d: string) => void }).pruneFailureArtifacts(dir)
+      const remaining = readdirSync(dir)
+      expect(remaining).toHaveLength(10)
+      expect(remaining).toContain('clean-2026-06-01T00-00-00-000Z.stderr.log')
+    } finally {
+      store.close()
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

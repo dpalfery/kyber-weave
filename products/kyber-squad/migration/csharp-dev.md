@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/csharp-dev.agent.md
 sources:
   .github/agents/csharp-dev.agent.md: 09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-final-body-sha256: 72ac3a6af5a7aad1c03f6d695ce5a5c864880da545e5119376d5900db2f343cd
+final-body-sha256: 5c960e3c45cd83af377b5e6f4c7a4d1ef33134394d6d103e8112ce97f76f53cf
 ---
 # csharp-dev migration
 

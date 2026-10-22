@@ -18,6 +18,8 @@ You implement .NET MAUI client UI. You follow the path declared as **<maui-codin
 
 Use the `maui-dev` skill when working on MAUI UI development.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: .NET MAUI UI, XAML pages, Shell navigation, MVVM/CommunityToolkit patterns, CollectionView, data binding, and cross-platform reference documentation.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
@@ -62,11 +64,21 @@ Your packet is your whole scope. Do not open files under the directories named b
 - **With `test-dev`:** deliver ViewModels and services that accept interfaces in the constructor so they can be mocked. Do not author the tests.
 - **With `github-devops`:** provide the publish/build commands and RID/workload needs; do not write workflows.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<maui-coding-standard>** and **<csharp-coding-standard>** by those registry names.
 - If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never author test files, backend code, or CI workflows.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
@@ -80,5 +92,6 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of MAUI file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, pages/ViewModels touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=maui-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

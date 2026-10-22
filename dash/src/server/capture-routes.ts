@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { runCaptureAction, type CaptureActionResult } from '../capture/actions.js'
 import { CAPTURE_HARNESS_REGISTRY } from '../capture/harnesses/registry.js'
 import { DEFAULT_CAPTURE_ENDPOINT, type CaptureEvent } from '../capture/index.js'
+import { assessCapture, assessHarness, type CaptureReceiverView } from '../capture/health.js'
 import { probeReceiver, type HealthFetcher } from '../capture/probe.js'
 import {
   buildCaptureStatus,
@@ -100,7 +101,7 @@ function statusContext(settings: CaptureRouteSettings): StatusContext {
 async function receiverView(
   hosted: boolean,
   settings: CaptureRouteSettings,
-): Promise<{ hosted: boolean; liveness: string; detail: string }> {
+): Promise<CaptureReceiverView> {
   if (!hosted) return { hosted, liveness: 'unknown', detail: NOT_HOSTED_DETAIL }
   const probe = await probeReceiver(DEFAULT_CAPTURE_ENDPOINT, settings.fetchHealth, settings.probeTimeoutMs)
   return { hosted, liveness: probe.state, detail: probe.detail }
@@ -221,11 +222,15 @@ async function answerGet(
 ): Promise<void> {
   const ctx = statusContext(settings)
   const hosted = readSetting(store, SETTING_KEYS.receiverHosted) === 'on'
-  const harnesses = buildCaptureStatus(ctx)
+  const receiver = await receiverView(hosted, settings)
+  // Every read is the full deterministic check: files re-read, receiver re-probed,
+  // verdicts recomputed. The drawer's "Check configuration" button is this GET.
+  const { harnesses, check } = assessCapture(buildCaptureStatus(ctx), receiver, ctx.endpoint)
   io.sendJson(res, 200, {
     platform: ctx.env.platform,
-    receiver: await receiverView(hosted, settings),
+    receiver,
     harnesses,
+    check,
   })
 }
 
@@ -289,7 +294,13 @@ async function answerPost(
   }
 
   const statuses = buildCaptureStatus(ctx)
-  const harnessState = statuses.find((status) => status.id === request.harness) as CaptureHarnessStatus
+  const rawState = statuses.find((status) => status.id === request.harness) as CaptureHarnessStatus
+  // The write path does not re-probe liveness (the drawer re-reads status after a
+  // confirmed write); it judges the receiver by the hosted switch alone.
+  const harnessState = {
+    ...rawState,
+    ...assessHarness(rawState, { hosted, liveness: 'unknown', detail: '' }, ctx.endpoint),
+  }
   // D7: only reported, never acted on. Disable never stops the receiver.
   const lastManagedHarnessDisabled =
     request.action === 'disable' &&

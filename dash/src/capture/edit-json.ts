@@ -20,6 +20,59 @@ export type JsonScalar = string | boolean | number | null
 export type JsonPrior = { present: boolean; value?: unknown }
 
 /**
+ * Dotted prefixes whose keys are ONE literal property, never a nested tree.
+ *
+ * WHY this exists: VS Code stores Copilot chat OTel on the single property
+ * `github.copilot.chat.otel`, whose name contains dots. Splitting the name
+ * writes a nested `github` > `copilot` > `chat` > `otel` tree, which VS Code
+ * never reads — the file looks right and Copilot keeps the dev-null file
+ * exporter. A declaration names the prefix; every reader and editor below
+ * then addresses `"<prefix>"` as one property and its children under it.
+ */
+export type LiteralKeyPrefixes = readonly string[]
+
+/** The longest declared literal prefix that governs `key`, if any. */
+function literalPrefixFor(key: string, literalPrefixes?: LiteralKeyPrefixes): string | undefined {
+  if (literalPrefixes === undefined) return undefined
+  let best: string | undefined
+  for (const prefix of literalPrefixes) {
+    if (key !== prefix && !key.startsWith(`${prefix}.`)) continue
+    if (best === undefined || prefix.length > best.length) best = prefix
+  }
+  return best
+}
+
+/**
+ * The declared literal prefix `document` holds as a *nested* object, if any.
+ * That shape is unreadable to the harness and must not be written beside.
+ */
+function nestedLiteralChain(value: unknown, literalPrefixes?: LiteralKeyPrefixes): string | undefined {
+  if (literalPrefixes === undefined) return undefined
+  for (const prefix of literalPrefixes) {
+    let current: unknown = value
+    let complete = true
+    for (const segment of prefix.split('.')) {
+      if (!isRecord(current) || !Object.hasOwn(current, segment)) {
+        complete = false
+        break
+      }
+      current = current[segment]
+    }
+    if (complete) return prefix
+  }
+  return undefined
+}
+
+/** Refusal text for the shape above. Names the flat property to write instead. */
+function nestedLiteralRefusal(prefix: string): string {
+  const chain = prefix.split('.').join(' > ')
+  return (
+    `refusing to write a nested "${chain}" object: VS Code reads the OTel settings only as the single ` +
+    `property "${prefix}", so a nested block configures nothing. Replace it with "${prefix}": { ... } and re-run.`
+  )
+}
+
+/**
  * Resolve the jsonc-parser path for a key against the current document.
  *
  * An existing property whose name contains dots is one segment
@@ -31,8 +84,20 @@ export type JsonPrior = { present: boolean; value?: unknown }
  * stored there. The longest existing name wins so a shorter prefix such as
  * `vendor` cannot hide that property. A key that matches nothing is still
  * split, so writers can create nested exporter fields.
+ *
+ * A declared literal prefix overrides both rules: a key under it is addressed
+ * as that one property plus the remaining segments, whether or not the
+ * property already exists, so a fresh document gets the flat form.
  */
-function resolveKeyPath(parsed: unknown, key: string): Array<string | number> {
+function resolveKeyPath(
+  parsed: unknown,
+  key: string,
+  literalPrefixes?: LiteralKeyPrefixes,
+): Array<string | number> {
+  const literal = literalPrefixFor(key, literalPrefixes)
+  if (literal !== undefined) {
+    return key === literal ? [literal] : [literal, ...key.slice(literal.length + 1).split('.')]
+  }
   const segments = key.split('.')
   const path: Array<string | number> = []
   let current: unknown = parsed
@@ -152,12 +217,20 @@ export function jsonParseRefusal(content: string): string | undefined {
 }
 
 /** Read one key out of already-parsed JSON. */
-export function getJsonValue(parsed: unknown, key: string): JsonPrior {
-  return getByPath(parsed, resolveKeyPath(parsed, key))
+export function getJsonValue(
+  parsed: unknown,
+  key: string,
+  literalPrefixes?: LiteralKeyPrefixes,
+): JsonPrior {
+  return getByPath(parsed, resolveKeyPath(parsed, key, literalPrefixes))
 }
 
 /** Read the presence and value of each key in a JSON/JSONC document. */
-export function readJsonKeys(content: string, keys: readonly string[]): Record<string, JsonPrior> {
+export function readJsonKeys(
+  content: string,
+  keys: readonly string[],
+  literalPrefixes?: LiteralKeyPrefixes,
+): Record<string, JsonPrior> {
   const result: Record<string, JsonPrior> = {}
   const { body } = splitBom(content)
   if (body.trim() === '') {
@@ -170,7 +243,7 @@ export function readJsonKeys(content: string, keys: readonly string[]): Record<s
     for (const key of keys) result[key] = { present: false }
     return result
   }
-  for (const key of keys) result[key] = getJsonValue(parsed.value, key)
+  for (const key of keys) result[key] = getJsonValue(parsed.value, key, literalPrefixes)
   return result
 }
 
@@ -178,8 +251,13 @@ export type JsonApplyResult = {
   content: string
   prior: Record<string, JsonPrior>
   changed: boolean
-  /** Set when the document did not parse. `content` is the original text. */
+  /** Set when the document did not parse, or holds a nested literal block. */
   refused?: string
+  /**
+   * Why the edit refused. `unparseable` is the document; `nested-literal` is a
+   * declared literal property present as a nested object VS Code ignores.
+   */
+  refusalKind?: 'unparseable' | 'nested-literal'
 }
 
 /**
@@ -187,19 +265,40 @@ export type JsonApplyResult = {
  * the receipt. A missing or empty document starts from `{}`. Scalars are
  * passed through so jsonc-parser emits a JSON literal; stringifying first
  * would store `"true"` or `"0"` and the receipt would not match the file.
+ *
+ * A declared literal prefix present as a nested object refuses the whole
+ * edit: writing the flat property beside it would leave the owner with two
+ * configurations and VS Code reading neither.
  */
 export function applyJsonEdits(
   content: string,
   desired: Record<string, JsonScalar>,
+  literalPrefixes?: LiteralKeyPrefixes,
 ): JsonApplyResult {
   const { bom, body } = splitBom(content)
   const base = body.trim() === '' ? '{}\n' : body
   const parsed = parseDocument(base)
   if (parsed.errors.length > 0) {
-    return { content, prior: {}, changed: false, refused: parseRefusal(parsed.errors, bom.length) }
+    return {
+      content,
+      prior: {},
+      changed: false,
+      refusalKind: 'unparseable',
+      refused: parseRefusal(parsed.errors, bom.length),
+    }
+  }
+  const nested = nestedLiteralChain(parsed.value, literalPrefixes)
+  if (nested !== undefined) {
+    return {
+      content,
+      prior: {},
+      changed: false,
+      refusalKind: 'nested-literal',
+      refused: nestedLiteralRefusal(nested),
+    }
   }
   const prior: Record<string, JsonPrior> = {}
-  for (const key of Object.keys(desired)) prior[key] = getJsonValue(parsed.value, key)
+  for (const key of Object.keys(desired)) prior[key] = getJsonValue(parsed.value, key, literalPrefixes)
 
   let next = base
   for (const [key, value] of Object.entries(desired)) {
@@ -207,9 +306,15 @@ export function applyJsonEdits(
     // its literal addressing from the prior read above.
     const step = parseDocument(next)
     if (step.errors.length > 0) {
-      return { content, prior, changed: false, refused: parseRefusal(step.errors, bom.length) }
+      return {
+        content,
+        prior,
+        changed: false,
+        refusalKind: 'unparseable',
+        refused: parseRefusal(step.errors, bom.length),
+      }
     }
-    const path = resolveKeyPath(step.value, key)
+    const path = resolveKeyPath(step.value, key, literalPrefixes)
     const edits = modify(next, path, value, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     })
@@ -239,6 +344,7 @@ export type JsonRevertResult = {
 export function revertJsonEdits(
   content: string,
   records: Record<string, { written: unknown; prior: JsonPrior }>,
+  literalPrefixes?: LiteralKeyPrefixes,
 ): JsonRevertResult {
   const { bom, body } = splitBom(content)
   const parsed = parseDocument(body)
@@ -247,7 +353,7 @@ export function revertJsonEdits(
   }
   const drift: JsonDrift[] = []
   for (const [key, record] of Object.entries(records)) {
-    const current = getJsonValue(parsed.value, key)
+    const current = getJsonValue(parsed.value, key, literalPrefixes)
     const same = JSON.stringify(current.present ? current.value : undefined) === JSON.stringify(record.written)
     if (!current.present || !same) {
       drift.push({
@@ -271,7 +377,7 @@ export function revertJsonEdits(
     if (step.errors.length > 0) {
       return { content, drift, changed: false, refused: parseRefusal(step.errors, bom.length) }
     }
-    const path = resolveKeyPath(step.value, key)
+    const path = resolveKeyPath(step.value, key, literalPrefixes)
     const edits = modify(next, path, value, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     })

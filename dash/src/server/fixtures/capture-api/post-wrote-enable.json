@@ -16,6 +16,10 @@
           "after": true
         },
         {
+          "key": "github.copilot.chat.otel.dbSpanExporter.enabled",
+          "after": true
+        },
+        {
           "key": "github.copilot.chat.otel.exporterType",
           "after": "otlp-http"
         },
@@ -53,6 +57,7 @@
         "exists": true,
         "expectedKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
@@ -60,12 +65,14 @@
         ],
         "presentKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
           "github.copilot.chat.otel.maxAttributeSizeChars"
         ],
         "missingKeys": [],
+        "mismatchedKeys": [],
         "drift": null
       },
       {
@@ -75,6 +82,7 @@
         "exists": false,
         "expectedKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
@@ -82,12 +90,17 @@
         ],
         "presentKeys": [],
         "missingKeys": [],
+        "mismatchedKeys": [],
         "drift": null
       }
     ],
     "warnings": [],
     "manualSteps": [],
-    "statusLines": []
+    "statusLines": [
+      "exporter: otlp-http (settings at the values enable writes; the editor's environment is not visible from here)"
+    ],
+    "health": "ok",
+    "issues": []
   },
   "receiver": {
     "hosted": true,

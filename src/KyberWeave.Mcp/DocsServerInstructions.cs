@@ -21,7 +21,9 @@ public static class DocsServerInstructions
         appropriate.
 
         Also available: docs_for_symbol (which documents describe a code symbol, before changing
-        it), docs_glossary (what a term means here), docs_analysis_candidates (duplicated or
+        it), agent_coding_standards (how this repository writes code in a named technology, and
+        the rule ids that standard states, before writing or reviewing code in it),
+        docs_glossary (what a term means here), docs_analysis_candidates (duplicated or
         contradictory documentation), and docs_status (which repository and revision the
         documentation comes from).
         """;

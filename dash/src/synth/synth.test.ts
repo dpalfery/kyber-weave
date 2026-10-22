@@ -40,6 +40,7 @@ import {
   measurabilityFor,
   spanIdFor,
   synthesizeCall,
+  synthesizeToolCall,
   type TokenConvention,
 } from './synth.js'
 
@@ -536,8 +537,8 @@ describe('measurability declarations for the file-sourced path', () => {
       ],
     })
     expect(withPrompt.content.system_prompt).toBe('You are Kilo.')
-    expect(withPrompt.measurability?.['system_prompt']).toBeUndefined()
-    expect(withPrompt.measurability?.['tool_definitions']).toBeUndefined()
+    expect(withPrompt.measurability?.['system_prompt']).toBe('measured')
+    expect(withPrompt.measurability?.['tool_definitions']).toBe('measured')
     // What the store still cannot supply stays declared.
     expect(withPrompt.measurability?.['instruction_context']).toMatchObject({ availability: 'not_measurable' })
     expect(withPrompt.measurability?.['schema_cost']).toMatchObject({ availability: 'not_measurable' })
@@ -608,6 +609,169 @@ describe('measurability declarations for the file-sourced path', () => {
       envelope({ harnessId: 'claude-cli', sourceKey: 'claude-cli:s-1' }),
     )
     expect(other.measurability).toEqual(measurabilityFor('claude'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D8 — a declared-unmeasurable content key is lifted per record, and only
+// where the record's own paired reader turn carries that key. Copilot CLI and
+// Antigravity are the two readers whose journals settle the question record
+// by record rather than per file.
+// ---------------------------------------------------------------------------
+
+const COPILOT_CLI_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** A Copilot CLI turn, paired (or not) with the reader turn the journal carried. */
+function copilotCliRecord(readerTurn?: ReaderTurn): CanonicalRecord {
+  const parsed = call({ provider: 'copilot', deduplicationKey: 'copilot:s-1:m-1' })
+  return synthesizeCall(
+    parsed,
+    undefined,
+    readerTurn,
+    envelope({ call: parsed, harnessId: 'copilot-cli', sourceKey: 'copilot-cli:s-1' }),
+  )
+}
+
+/** An Antigravity turn of the given harness, paired (or not) with its reader turn. */
+function antigravityRecord(harnessId: string, readerTurn?: ReaderTurn): CanonicalRecord {
+  const parsed = call({ provider: 'antigravity', deduplicationKey: 'antigravity:s-1:m-1' })
+  return synthesizeCall(
+    parsed,
+    undefined,
+    readerTurn,
+    envelope({ call: parsed, harnessId, sourceKey: `${harnessId}:s-1` }),
+  )
+}
+
+describe('D8 — Copilot CLI measurability is lifted per paired reader turn', () => {
+  it('measures system_prompt only on a record whose paired turn carries a system_prompt part', () => {
+    const paired = copilotCliRecord({
+      parts: [{ part: 'system_prompt', text: 'You are GitHub Copilot CLI.' }],
+    })
+    expect(paired.measurability?.['system_prompt']).toBe('measured')
+  })
+
+  it('keeps an unpaired Copilot CLI record system_prompt not measurable, with a Copilot CLI reason', () => {
+    const unpaired = copilotCliRecord(undefined)
+    expect(unpaired.measurability?.['system_prompt']).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Copilot CLI/),
+    })
+  })
+
+  it('keeps system_prompt not measurable on a paired turn that carries no system_prompt part', () => {
+    const paired = copilotCliRecord({
+      parts: [{ part: 'conversation_history', text: 'run the parity check' }],
+    })
+    expect(paired.measurability?.['system_prompt']).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Copilot CLI/),
+    })
+  })
+
+  it('keeps tool_definitions not measurable with the journal-specific reason, even when the system prompt quotes a <tools> section', () => {
+    // The `<tools>` block in a Copilot CLI system prompt is usage guidance, not
+    // the offered tool set, so a turn carrying it must not lift tool_definitions.
+    const paired = copilotCliRecord({
+      parts: [{ part: 'system_prompt', text: 'Use the tools in <tools> wisely.' }],
+    })
+    expect(paired.measurability?.['tool_definitions']).toEqual({
+      availability: 'not_measurable',
+      reason: COPILOT_CLI_TOOL_DEFINITIONS_REASON,
+    })
+  })
+})
+
+describe('D8 — Antigravity tool_definitions are measured only where catalogue definitions were paired', () => {
+  for (const harnessId of ['antigravity', 'antigravity-cli', 'antigravity-ide']) {
+    it(`measures ${harnessId} tool_definitions on a record whose paired turn carries catalogue definitions`, () => {
+      const paired = antigravityRecord(harnessId, {
+        parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }],
+      })
+      expect(paired.measurability?.['tool_definitions']).toBe('measured')
+    })
+
+    it(`states on an unpaired ${harnessId} record that Antigravity does not export tool definitions`, () => {
+      const unpaired = antigravityRecord(harnessId, undefined)
+      expect(unpaired.measurability?.['tool_definitions']).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/Antigravity does not export tool definitions/),
+      })
+    })
+
+    it(`states on a paired ${harnessId} record without definitions that Antigravity does not export tool definitions`, () => {
+      const paired = antigravityRecord(harnessId, {
+        parts: [{ part: 'conversation_history', text: 'run the parity check' }],
+      })
+      expect(paired.measurability?.['tool_definitions']).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/Antigravity does not export tool definitions/),
+      })
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// D6 — a transcript-covered Antigravity call states its invoked skills, even
+// when none were invoked. The covering marker is the paired reader turn: a
+// call the transcript covers carries one, an uncovered call does not.
+// ---------------------------------------------------------------------------
+
+const INVOKED_SKILLS_KEY = 'kyber.skills.invoked'
+
+describe('D30 — an Antigravity call states its invoked skills, [] included, whatever its reader turn', () => {
+  it('keeps an empty invoked-skills list on an Antigravity call its paired reader turn covers', () => {
+    const parsed = call({ provider: 'antigravity', skills: [], deduplicationKey: 'antigravity:s-1:m-1' })
+    const record = synthesizeCall(
+      parsed,
+      undefined,
+      { parts: [] },
+      envelope({ call: parsed }),
+    )
+    expect(record.raw as Record<string, unknown>).toHaveProperty(INVOKED_SKILLS_KEY, [])
+  })
+
+  it('keeps an empty invoked-skills list on an antigravity-cli call with no reader turn, the array being the measured none', () => {
+    const parsed = call({ provider: 'antigravity', skills: [], deduplicationKey: 'antigravity:s-1:m-1' })
+    const record = synthesizeCall(parsed, undefined, undefined, envelope({ call: parsed, harnessId: 'antigravity-cli' }))
+    expect((record.raw as Record<string, unknown>)[INVOKED_SKILLS_KEY]).toEqual([])
+  })
+
+  it('carries no invoked-skills key on an antigravity-cli call that has no skills field and only a catalogue reader turn', () => {
+    // The reader turn is a catalogue pairing, not a transcript: it does not make an absent list a measured none.
+    const parsed = call({ provider: 'antigravity', deduplicationKey: 'antigravity:s-1:m-1' })
+    const record = synthesizeCall(
+      parsed,
+      undefined,
+      { parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }] },
+      envelope({ call: parsed, harnessId: 'antigravity-cli' }),
+    )
+    expect(Object.keys(record.raw as Record<string, unknown>)).not.toContain(INVOKED_SKILLS_KEY)
+  })
+
+  it('carries no invoked-skills key on an Antigravity call with no skills field that no transcript covers', () => {
+    const parsed = call({ provider: 'antigravity', deduplicationKey: 'antigravity:s-1:m-1' })
+    const record = synthesizeCall(parsed, undefined, undefined, envelope({ call: parsed }))
+    expect(Object.keys(record.raw as Record<string, unknown>)).not.toContain(INVOKED_SKILLS_KEY)
+  })
+
+  it.each([
+    ['claude', 'claude-cli'],
+    ['codex', 'codex-cli'],
+    ['copilot', 'copilot-cli'],
+  ])('still drops an empty invoked-skills list for %s, with or without a reader turn', (provider, harnessId) => {
+    const parsed = call({ provider, skills: [], deduplicationKey: `${provider}:s-1:t-0` })
+    const withReader = synthesizeCall(parsed, undefined, { parts: [] }, envelope({ call: parsed, harnessId }))
+    const withoutReader = synthesizeCall(parsed, undefined, undefined, envelope({ call: parsed, harnessId }))
+    expect(Object.keys(withReader.raw as Record<string, unknown>)).not.toContain(INVOKED_SKILLS_KEY)
+    expect(Object.keys(withoutReader.raw as Record<string, unknown>)).not.toContain(INVOKED_SKILLS_KEY)
+  })
+
+  it('still drops an empty invoked-skills list for codex when a reader turn pairs it', () => {
+    const parsed = call({ provider: 'codex', skills: [], deduplicationKey: 'codex:s-1:t-0' })
+    const record = synthesizeCall(parsed, undefined, { parts: [] }, envelope({ call: parsed, harnessId: 'codex-cli' }))
+    expect(Object.keys(record.raw as Record<string, unknown>)).not.toContain(INVOKED_SKILLS_KEY)
   })
 })
 
@@ -1504,4 +1668,101 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(typeof untimedSpan?.measurability?.duration).toBe("object")
     expect((untimedSpan?.measurability?.duration as { availability: string })?.availability).toBe("not_measurable")
   })
+});
+
+// ---------------------------------------------------------------------------
+// D29 — a tool.invoke child is not a paired reader turn. It takes its own
+// duration and tool_result_content, but a key a lift harness declares not
+// measurable (tool_definitions on Antigravity) stays not measurable on the
+// child: the child carries no parts of that key, so it does not inherit the
+// carrier's lifted state.
+// ---------------------------------------------------------------------------
+
+/** A carrier call paired with its reader turn, plus the parsed call a child is built from. */
+function pairedCarrier(harnessId: string, readerTurn: ReaderTurn): { parent: CanonicalRecord; parsed: ParsedProviderCall } {
+  const provider = harnessId.startsWith('antigravity') ? 'antigravity' : 'copilot'
+  const parsed = call({ provider, deduplicationKey: `${provider}:s-1:m-1` })
+  const parent = synthesizeCall(parsed, undefined, readerTurn, envelope({ call: parsed, harnessId, sourceKey: `${harnessId}:s-1` }))
+  return { parent, parsed }
+}
+
+describe('D29 — a tool.invoke child does not inherit a lifted key it cannot carry', () => {
+  it('keeps an Antigravity CLI child tool_definitions not measurable, with the Antigravity reason, while its carrier measured the catalogue', () => {
+    const { parent, parsed } = pairedCarrier('antigravity-cli', {
+      parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }],
+    })
+    expect(parent.measurability?.['tool_definitions']).toBe('measured')
+
+    const child = synthesizeToolCall(
+      parent,
+      { id: 'tc-run', name: 'run_command', arguments: { command: 'ls' } },
+      { toolCallId: 'tc-run', content: 'listing' },
+      0,
+      parsed,
+    )
+
+    expect(child.measurability?.['tool_definitions']).toEqual(measurabilityFor('antigravity-cli')['tool_definitions'])
+    expect(child.measurability?.['tool_definitions']).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  const liftHarnesses: Array<{ harnessId: string; readerTurn: ReaderTurn }> = [
+    {
+      harnessId: 'antigravity-cli',
+      readerTurn: { parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }] },
+    },
+  ]
+  for (const { harnessId, readerTurn } of liftHarnesses) {
+    it(`measures tool_result_content on a ${harnessId} child whose result has content, and states it not measurable on a child with no result`, () => {
+      const { parent: lifted, parsed } = pairedCarrier(harnessId, readerTurn)
+      // None of the lift harnesses declares tool_result_content, so the lift rule never
+      // stamps it on a carrier. The carrier's measured state is set here directly, to put
+      // the child rule under test against the state the task says the carrier can hold.
+      const carrier: CanonicalRecord = {
+        ...lifted,
+        measurability: { ...lifted.measurability, tool_result_content: 'measured' },
+      }
+
+      const withResult = synthesizeToolCall(
+        carrier,
+        { id: 'tc-1', name: 'view', arguments: { path: 'a.txt' }, durationMs: 1_500 },
+        { toolCallId: 'tc-1', content: 'file body' },
+        0,
+        parsed,
+      )
+      expect(withResult.measurability?.['tool_result_content']).toBe('measured')
+      expect(withResult.durationMs).toBe(1_500)
+      expect(withResult.measurability?.['duration']).toBe('measured')
+
+      const noResult = synthesizeToolCall(
+        carrier,
+        { id: 'tc-2', name: 'bash', arguments: { command: 'ls' }, durationMs: 1_500 },
+        undefined,
+        1,
+        parsed,
+      )
+      expect(noResult.measurability?.['tool_result_content']).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/\S/),
+      })
+      expect(noResult.durationMs).toBe(1_500)
+      expect(noResult.measurability?.['duration']).toBe('measured')
+    })
+  }
+
+  for (const provider of ['claude', 'codex'] as const) {
+    it(`leaves a ${provider} child's measurability exactly the carrier's, with only duration stamped (regression guard)`, () => {
+      const parsed = call({ provider, deduplicationKey: `${provider}:s-1:t-1` })
+      const parent = synthesizeCall(parsed)
+
+      const child = synthesizeToolCall(
+        parent,
+        { id: 'tc-r', name: 'Read', arguments: { path: 'x' }, durationMs: 1_500 },
+        { toolCallId: 'tc-r', content: 'ok' },
+        0,
+        parsed,
+      )
+
+      expect(child.measurability).toEqual({ ...parent.measurability, duration: 'measured' })
+    })
+  }
 });

@@ -47,6 +47,7 @@ const REQUIRED_HARNESS_IDS = [
 const REMAINING_HARNESS_IDS = [
   'codewhale',
   'codebuff',
+  'commandcode',
   'devin',
   'droid',
   'dsh',
@@ -81,6 +82,7 @@ const INVENTORY_PROVIDER_NAMES = [
   'codewhale',
   'codebuff',
   'codex',
+  'commandcode',
   'copilot',
   'devin',
   'droid',
@@ -129,12 +131,16 @@ describe('HarnessSourceRegistry', () => {
   it('keeps an explicit content capability disposition for every harness descriptor', () => {
     const expectedHarnessIds = [...REQUIRED_HARNESS_IDS, ...REMAINING_HARNESS_IDS]
     const existingReaderHarnessIds = new Set([
+      'antigravity',
+      'antigravity-cli',
+      'antigravity-ide',
       'claude-cli',
       'claude-desktop',
       'claude-unclassified',
       'codex-cli',
       'codex-desktop',
       'codex-unclassified',
+      'commandcode',
       'copilot-cli',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
@@ -433,5 +439,29 @@ describe('HarnessSourceRegistry', () => {
     const digest = createHash('sha256').update(digested.path).digest('hex').slice(0, 16)
     expect(sourceKeyFor('pi', digested)).toBe(`pi:${digest}`)
     expect(sourceKeyFor('pi', digested)).not.toContain('/Users/dave')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D12 — the Antigravity and Copilot parser contracts move apart
+// ---------------------------------------------------------------------------
+
+describe('parserContractVersionFor — Antigravity and Copilot contracts (D12)', () => {
+  it('assigns Antigravity contract version 2 for its provider and every Antigravity harness', () => {
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-cli' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-ide' })).toBe('2')
+  })
+
+  it('assigns Copilot contract version 3 for the copilot provider, whatever the harness', () => {
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-cli' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-vscode' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-jetbrains' })).toBe('3')
+  })
+
+  it('leaves the other skills-contract providers on contract version 2', () => {
+    for (const providerName of ['opencode', 'cline-cli', 'codewhale', 'openclaude', 'dsh']) {
+      expect(parserContractVersionFor({ providerName, harnessId: providerName })).toBe('2')
+    }
   })
 })

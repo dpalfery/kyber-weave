@@ -66,7 +66,7 @@ import { billableOutputTokens } from '../pricing/models.js'
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
 import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
-import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
+import { FILE_SOURCE_PREFIX, measurabilityForChild, measurabilityForRecord, surveyFamily } from '../canon/measurability.js'
 import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
   ReaderToolCall,
@@ -222,6 +222,8 @@ export type TokenConvention = 'exclusive' | 'inclusive'
  *   * pi / omp — `usage.input` excludes cache; `usage.cacheRead` /
  *     `usage.cacheWrite` are separate counters (the same shape the pi
  *     adapter's GenAI evidence records).
+ *   * commandcode — the session's AI SDK `inputTokens` includes both
+ *     cache classes; dash/src/providers/commandcode.ts subtracts them.
  *   * every other provider funnels through the same Anthropic-semantics
  *     normalization before yielding a call.
  */
@@ -235,6 +237,7 @@ export const PROVIDER_CONVENTIONS: ReadonlyMap<string, TokenConvention> = new Ma
       'codebuff',
       'codewhale',
       'codex',
+      'commandcode',
       'copilot',
       // Upstream's three Copilot surface filters. They are the same harness
       // reached through different front ends, so they share Copilot's
@@ -447,8 +450,17 @@ export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
  * The skill names a parsed call invoked, in first-seen order with repeats
  * collapsed. Undefined when there are none, so the caller omits the key rather
  * than storing an empty list. Names are only ever the parser's own reports.
+ *
+ * Antigravity is the exception (D6, D30): its parser sets `skills` only on a call
+ * a transcript covers, so an array there, `[]` included, is a measured statement
+ * ("none invoked") and is kept whatever reader turn paired the call. An absent
+ * list there is not measured. Every other provider drops an empty list, since
+ * for them an empty list is an absence.
  */
 export function invokedSkillsOf(call: ParsedProviderCall): string[] | undefined {
+  if (surveyFamily(call.provider) === 'antigravity') {
+    return Array.isArray(call.skills) ? Array.from(new Set(call.skills)) : undefined
+  }
   if (call.skills === undefined || call.skills.length === 0) return undefined
   return Array.from(new Set(call.skills))
 }
@@ -519,32 +531,9 @@ export function synthesizeCall(
   const invokedSkills = invokedSkillsOf(call)
   const listedSkills = listedSkillsOf(call)
   const absentOutputReason = copilotAbsentOutputReason(call)
-  // Stamps key on the parsed provider — the reader rows are declared per
-  // provider — except kilo-vscode-legacy: it shares kilo-code's provider
-  // string and reader registration but reads the legacy task tree, which
-  // carries no reader-compatible parts. Its own row declares every content
-  // bucket unmeasurable, so the envelope's harness id must select it here;
-  // keying on `harness` for every record would re-key other split surfaces
-  // (claude-cli, copilot-vscode) whose providers already carry the right
-  // row, so the exception stays scoped to the one id whose store differs.
-  // (`call.provider` itself must not be renamed: nativeRecordIdentity
-  // slices the deduplication key on the provider prefix.)
-  const declared = measurabilityFor(harness === 'kilo-vscode-legacy' ? harness : call.provider)
-  // Kilo's system prompt and tool definitions arrive from the capture plugin for some
-  // turns and not others, so a turn whose reader supplied one measured it, whatever the
-  // provider's default says. Scoped to those two buckets: other readers (Cursor) supply a
-  // bucket they deliberately declare incomplete.
-  const capturedBuckets =
-    call.provider === 'kilo-code' && harness !== 'kilo-vscode-legacy'
-      ? ['system_prompt', 'tool_definitions']
-      : []
-  const supplied = new Set(
-    readerTurn?.parts
-      .filter((part) => part.text !== '' && capturedBuckets.includes(part.part))
-      .map((part) => part.part),
-  )
+  const carriedKeys = new Set((readerTurn?.parts ?? []).map((part) => part.part))
   const measurability = {
-    ...Object.fromEntries(Object.entries(declared).filter(([metric]) => !supplied.has(metric as never))),
+    ...measurabilityForRecord(call.provider, harness, carriedKeys),
     ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
   }
 
@@ -831,7 +820,12 @@ export function synthesizeToolCall(
     parts,
     cost: { basis: 'unknown', status: 'no_rate' },
     measurability: {
-      ...parentRecord.measurability,
+      ...measurabilityForChild(
+        parentRecord.measurability ?? {},
+        provider,
+        parentRecord.harness,
+        new Set(toolResult?.content !== undefined ? ['tool_result_content'] : []),
+      ),
       duration: durationAvailability,
     },
     attributes,

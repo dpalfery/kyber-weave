@@ -1,0 +1,893 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "claude-code-desktop"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "2.42304.2"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "com.anthropic.claude_code"
+          },
+          "spans": [
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000001",
+              "name": "claude_code.interaction",
+              "kind": 1,
+              "startTimeUnixNano": "1792411200000000000",
+              "endTimeUnixNano": "1792411217403000000",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "interaction"
+                  }
+                },
+                {
+                  "key": "user_prompt",
+                  "value": {
+                    "stringValue": "[sanitized user prompt]"
+                  }
+                },
+                {
+                  "key": "user_prompt_length",
+                  "value": {
+                    "intValue": "24"
+                  }
+                },
+                {
+                  "key": "interaction.sequence",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000002",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411200026000000",
+              "endTimeUnixNano": "1792411211441986560",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "1200"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "90"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000009",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792411206007000000",
+              "endTimeUnixNano": "1792411207895979776",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_sanitized_b"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "000000000000000a",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792411206017000000",
+              "endTimeUnixNano": "1792411207896292608",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "tool.execution"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_sanitized_b"
+                  }
+                },
+                {
+                  "key": "success",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000009"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000005",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792411211419000000",
+              "endTimeUnixNano": "1792411211426228992",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Task"
+                  }
+                },
+                {
+                  "key": "subagent_type",
+                  "value": {
+                    "stringValue": "sanitized-agent"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_sanitized_a"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000006",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792411211420000000",
+              "endTimeUnixNano": "1792411211426321920",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "tool.execution"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_sanitized_a"
+                  }
+                },
+                {
+                  "key": "success",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000005"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000003",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411211459000000",
+              "endTimeUnixNano": "1792411215993060352",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2400"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "60"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000007",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411211535000000",
+              "endTimeUnixNano": "1792411214252422656",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "3100"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "400"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000006"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000008",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411215735000000",
+              "endTimeUnixNano": "1792411223471160576",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "3300"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "500"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000006"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000001",
+              "spanId": "0000000000000004",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411215996000000",
+              "endTimeUnixNano": "1792411217388571136",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "3900"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "120"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "0000000000000001"
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000002",
+              "spanId": "000000000000000b",
+              "name": "claude_code.interaction",
+              "kind": 1,
+              "startTimeUnixNano": "1792411220403000000",
+              "endTimeUnixNano": "1792411223003000000",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "span.type",
+                  "value": {
+                    "stringValue": "interaction"
+                  }
+                },
+                {
+                  "key": "user_prompt",
+                  "value": {
+                    "stringValue": "[sanitized user prompt]"
+                  }
+                },
+                {
+                  "key": "user_prompt_length",
+                  "value": {
+                    "intValue": "24"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "5a1e0000000000000000000000000002",
+              "spanId": "000000000000000c",
+              "name": "claude_code.llm_request",
+              "kind": 3,
+              "startTimeUnixNano": "1792411220429000000",
+              "endTimeUnixNano": "1792411223003000000",
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "2.42304.2"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "[sanitized]"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-0000000000d1"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2100"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "70"
+                  }
+                }
+              ],
+              "status": {
+                "code": 1
+              },
+              "parentSpanId": "000000000000000b"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

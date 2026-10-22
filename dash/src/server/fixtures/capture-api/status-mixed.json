@@ -25,6 +25,7 @@
           "exists": true,
           "expectedKeys": [
             "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.exporterType",
             "github.copilot.chat.otel.otlpEndpoint",
             "github.copilot.chat.otel.captureContent",
@@ -36,9 +37,11 @@
             "github.copilot.chat.otel.otlpEndpoint"
           ],
           "missingKeys": [
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.captureContent",
             "github.copilot.chat.otel.maxAttributeSizeChars"
           ],
+          "mismatchedKeys": [],
           "drift": null
         },
         {
@@ -48,6 +51,7 @@
           "exists": false,
           "expectedKeys": [
             "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.exporterType",
             "github.copilot.chat.otel.otlpEndpoint",
             "github.copilot.chat.otel.captureContent",
@@ -55,12 +59,36 @@
           ],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
-      "warnings": [],
+      "warnings": [
+        {
+          "code": "exporter-not-delivering",
+          "text": "exporter resolves to file (dev-null): the github.copilot.chat.otel settings keys are not all at the values enable writes. Run \"kyberdash kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it."
+        }
+      ],
       "manualSteps": [],
-      "statusLines": []
+      "statusLines": [
+        "exporter: file (dev-null) — Copilot discards every span"
+      ],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "missing-keys",
+          "severity": "blocking",
+          "text": "Missing github.copilot.chat.otel.dbSpanExporter.enabled, github.copilot.chat.otel.captureContent, github.copilot.chat.otel.maxAttributeSizeChars",
+          "path": "/Users/example/Library/Application Support/Code/User/settings.json",
+          "remedy": "Use Enable to write the missing keys (previewed first)."
+        },
+        {
+          "code": "exporter-not-delivering",
+          "severity": "blocking",
+          "text": "exporter resolves to file (dev-null): the github.copilot.chat.otel settings keys are not all at the values enable writes. Run \"kyberdash kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it.",
+          "remedy": "Follow the warning text; the exporter must be OTLP/HTTP for records to arrive."
+        }
+      ]
     },
     {
       "id": "claude-code",
@@ -107,6 +135,7 @@
             "env.OTEL_EXPORTER_OTLP_ENDPOINT"
           ],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -117,7 +146,17 @@
         }
       ],
       "manualSteps": [],
-      "statusLines": []
+      "statusLines": [],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "endpoint-differs",
+          "severity": "blocking",
+          "text": "env.OTEL_EXPORTER_OTLP_ENDPOINT is http://127.0.0.1:4319; the KyberDash receiver listens at http://127.0.0.1:4318",
+          "path": "/Users/example/.claude/settings.json",
+          "remedy": "Set it to http://127.0.0.1:4318, then restart Claude Code so it reads the change. KyberDash never overwrites an endpoint you set."
+        }
+      ]
     },
     {
       "id": "codex",
@@ -138,6 +177,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -145,7 +185,9 @@
       "manualSteps": [],
       "statusLines": [
         "no [otel] table is present; coverage comes from session files"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     },
     {
       "id": "opencode",
@@ -170,6 +212,7 @@
           "missingKeys": [
             "experimental.openTelemetry"
           ],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -184,7 +227,9 @@
           }
         }
       ],
-      "statusLines": []
+      "statusLines": [],
+      "health": "off",
+      "issues": []
     },
     {
       "id": "pi",
@@ -207,6 +252,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -216,7 +262,9 @@
         "extension: collector (@dpalfery/pi-statusline)",
         "extension: ObservMe (observme.yaml)",
         "warn: both the collector and ObservMe are loaded"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     },
     {
       "id": "antigravity",
@@ -237,6 +285,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -251,7 +300,16 @@
         "statusline bridge: /Users/example/.local/bin/antigravity-statusline-bridge.sh",
         "bridge route: the statusline script posts to 4318",
         "declaredContextWindow snippet: span.set_attribute(\"declaredContextWindow\", <positive token count>)"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     }
-  ]
+  ],
+  "check": {
+    "checkedAt": "2026-10-18T00:00:00.000Z",
+    "health": "attention",
+    "enabled": 2,
+    "attention": 2,
+    "issueCount": 3
+  }
 }

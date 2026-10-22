@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
@@ -77,111 +78,162 @@ export function AgentSessionRow({
   open,
   onToggle,
   onSelectSession,
+  subagentsExpanded = false,
+  onToggleSubagents,
+  isChild = false,
 }: {
   s: KyberSessionSummary
   open: boolean
   onToggle: () => void
   onSelectSession: (id: string) => void
+  subagentsExpanded?: boolean
+  onToggleSubagents?: (e?: React.MouseEvent) => void
+  isChild?: boolean
 }) {
   const sessionId = s.session_id || s.sessionId || ''
-  const isSubagent = Boolean(s.is_subagent || s.isSubagent)
+  const isSubagent = Boolean(s.is_subagent || s.isSubagent || isChild)
   const parentSession = s.parent_session || s.parentSession || null
-  const turnCount = s.turn_count ?? s.turnCount ?? null
-  const costUsd = s.cost_usd ?? s.costUsd ?? null
+  const turnCount = (!isChild && s.rollup?.turn_count != null) ? s.rollup.turn_count : (s.turn_count ?? s.turnCount ?? null)
+  // The wire rollup carries a summed `cost_usd` and no pricing block. When it has a figure the
+  // cell shows it (beside the rolled-up turns); with none, the session's own cost block says why.
+  const rolledCostUsd = !isChild && s.rollup?.cost_usd != null ? s.rollup.cost_usd : null
+  const ownCostUsd = s.cost_usd ?? s.costUsd ?? null
+  const hasSubagents = Boolean(s.subagents && s.subagents.length > 0)
 
   return (
     <div className={cn('border-t border-border first:border-t-0', open && 'bg-interactive-secondary/30')}>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-interactive-secondary/50"
-        data-testid={`agent-session-row-${sessionId}`}
+      {/* The row is a flex strip of sibling controls: the subagent toggle and the parent link
+          are never inside the row button, so no button contains another. */}
+      <div
+        className={cn(
+          'flex w-full items-center transition-colors hover:bg-interactive-secondary/50',
+          isChild && 'pl-5'
+        )}
       >
-        <svg
-          viewBox="0 0 16 16"
-          width="10"
-          height="10"
-          className={cn('shrink-0 text-tertiary-foreground transition-transform', open && 'rotate-90')}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+        {hasSubagents && (
+          <button
+            type="button"
+            data-testid={`subagent-toggle-${sessionId}`}
+            aria-label={`Toggle subagents for ${sessionId}`}
+            aria-expanded={subagentsExpanded}
+            onClick={(e) => onToggleSubagents?.(e)}
+            className="ml-3 shrink-0 p-1 text-tertiary-foreground transition-colors hover:text-foreground"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              className={cn('transition-transform', subagentsExpanded && 'rotate-90')}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 3l5 5-5 5" />
+            </svg>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left"
+          data-testid={`agent-session-row-${sessionId}`}
         >
-          <path d="M6 3l5 5-5 5" />
-        </svg>
+          <svg
+            viewBox="0 0 16 16"
+            width="10"
+            height="10"
+            className={cn('shrink-0 text-tertiary-foreground transition-transform', open && 'rotate-90')}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M6 3l5 5-5 5" />
+          </svg>
 
-        <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
-          {formatSessionId(sessionId)}
-        </span>
-
-        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
-          <span>
-            {formatSessionTitle({
-              label: s.label,
-              sessionId,
-              agentName: s.agent_name ?? s.agentName,
-              harness: s.harness,
-            }) || <span className="text-tertiary-foreground">untitled session</span>}
+          <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
+            {formatSessionId(sessionId)}
           </span>
-          {isSubagent && (
-            <span className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] text-tertiary-foreground font-mono">
-              subagent
+
+          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
+            <span title={sessionId}>
+              {formatSessionTitle({
+                label: s.label,
+                sessionId,
+                agentName: s.agent_name ?? s.agentName,
+                  harness: s.harness,
+              }) || <span className="text-tertiary-foreground">untitled session</span>}
             </span>
-          )}
-        </span>
+            {isSubagent && (
+              <span
+                data-testid="subagent-indicator"
+                className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] text-tertiary-foreground font-mono"
+              >
+                subagent
+              </span>
+            )}
+          </span>
+
+          {/* Harness badge */}
+          <span
+            className={cn(
+              'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
+              s.harness === 'copilot'
+                ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                : s.harness === 'gemini'
+                  ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
+                  : s.harness === 'pi'
+                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                    : 'bg-interactive-secondary text-foreground border-border'
+            )}
+            data-testid="agent-harness-badge"
+          >
+            {s.harness}
+          </span>
+
+          {/* Turn count */}
+          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+            {turnCount != null ? `${turnCount} turns` : '—'}
+          </span>
+
+          {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
+          <span
+            data-testid="agent-session-cost"
+            title={rolledCostUsd != null ? 'Cost including subagents' : s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
+            className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
+          >
+            {rolledCostUsd != null
+              ? usd(rolledCostUsd)
+              : s.cost
+                ? formatCostFigure(normalizeCostBlock(s.cost))
+                : ownCostUsd != null
+                  ? usd(ownCostUsd)
+                  : '—'}
+          </span>
+
+          {/* Timestamp */}
+          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+            {formatSessionTime(s.started)}
+          </span>
+        </button>
 
         {parentSession && (
           <button
             type="button"
             data-testid="parent-session-link"
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelectSession(parentSession)
-            }}
-            className="shrink-0 text-xs text-primary hover:underline font-mono"
+            onClick={() => onSelectSession(parentSession)}
+            className="mr-4 shrink-0 text-xs text-primary hover:underline font-mono"
             title={`Parent session: ${parentSession}`}
           >
             parent: {formatSessionId(parentSession)}
           </button>
         )}
-
-        {/* Harness badge */}
-        <span
-          className={cn(
-            'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
-            s.harness === 'copilot'
-              ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-              : s.harness === 'gemini'
-                ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
-                : s.harness === 'pi'
-                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                  : 'bg-interactive-secondary text-foreground border-border'
-          )}
-          data-testid="agent-harness-badge"
-        >
-          {s.harness}
-        </span>
-
-        {/* Turn count */}
-        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
-          {turnCount != null ? `${turnCount} turns` : '—'}
-        </span>
-
-        {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
-        <span
-          data-testid="agent-session-cost"
-          title={s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
-          className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
-        >
-          {s.cost ? formatCostFigure(normalizeCostBlock(s.cost)) : costUsd != null ? usd(costUsd) : '—'}
-        </span>
-
-        {/* Timestamp */}
-        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
-          {formatSessionTime(s.started)}
-        </span>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-border">
@@ -208,6 +260,8 @@ export interface ContextExplorerProps {
    * user has just closed must not stay selected on the other side.
    */
   onSelectSession?: (sessionId: string | undefined) => void
+  /** Optional initial session list used by testing or custom embeddings. */
+  sessions?: KyberSessionSummary[]
 }
 
 /**
@@ -217,7 +271,7 @@ export interface ContextExplorerProps {
  * Doctor and this list, and a second strip over the same store would put the
  * same choice on screen twice, each able to disagree with the other.
  */
-export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplorerProps = {}) {
+export function ContextExplorer({ activeHarness, onSelectSession, sessions: initialSessions }: ContextExplorerProps = {}) {
   const scope = scopeOf(activeHarness)
   // Expansion is remembered against the scope that opened it, and dropped when
   // the shell moves to another: a session chosen under one harness must never
@@ -229,6 +283,8 @@ export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplo
     scope,
     id: null,
   })
+  const [expandedSubagents, setExpandedSubagents] = useState<Record<string, boolean>>({})
+
   if (scope !== renderedScope) {
     setRenderedScope(scope)
     setExpanded({ scope, id: null })
@@ -237,6 +293,13 @@ export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplo
   const selectSession = (id: string | null) => {
     setExpanded({ scope, id })
     onSelectSession?.(id ?? undefined)
+  }
+
+  const toggleSubagents = (id: string) => {
+    setExpandedSubagents((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }))
   }
 
   // One unfiltered read backs every scope, so a harness this machine has never
@@ -252,12 +315,16 @@ export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplo
     staleTime: 30_000,
   })
 
+  const sourceData = initialSessions ?? kyberData
   const sessions =
-    scope === ALL_HARNESS ? kyberData : kyberData?.filter((s) => s.harness === scope)
+    scope === ALL_HARNESS ? sourceData : sourceData?.filter((s) => s.harness === scope)
+
+  const isLoading = initialSessions ? false : isKyberLoading
+  const isError = initialSessions ? false : isKyberError
 
   return (
     <Card className="overflow-hidden">
-      {isKyberLoading && (
+      {isLoading && (
         <div className="flex flex-col gap-2 p-4" data-testid="explorer-loading">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-9" />
@@ -265,13 +332,13 @@ export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplo
         </div>
       )}
 
-      {isKyberError && (
+      {isError && (
         <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-error">
           Failed to load sessions: {String((kyberError as Error)?.message)}
         </p>
       )}
 
-      {!isKyberLoading && !isKyberError && kyberData && (
+      {!isLoading && !isError && sourceData && (
         <>
           {sessions?.length === 0 && (
             <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
@@ -283,14 +350,36 @@ export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplo
           )}
           {sessions?.map((s) => {
             const sid = s.session_id || s.sessionId || ''
+            const hasSubagents = Boolean(s.subagents && s.subagents.length > 0)
+            const isSubagentsExpanded = Boolean(expandedSubagents[sid])
             return (
-              <AgentSessionRow
-                key={sid}
-                s={s}
-                open={openId === sid}
-                onToggle={() => selectSession(openId === sid ? null : sid)}
-                onSelectSession={(id) => selectSession(id)}
-              />
+              <React.Fragment key={sid}>
+                <AgentSessionRow
+                  s={s}
+                  open={openId === sid}
+                  onToggle={() => selectSession(openId === sid ? null : sid)}
+                  onSelectSession={(id) => selectSession(id)}
+                  subagentsExpanded={isSubagentsExpanded}
+                  onToggleSubagents={() => toggleSubagents(sid)}
+                />
+                {hasSubagents && isSubagentsExpanded && (
+                  <div data-testid="subagent-children" className="pl-6 border-l border-border/50">
+                    {s.subagents!.map((child) => {
+                      const childSid = child.session_id || child.sessionId || ''
+                      return (
+                        <AgentSessionRow
+                          key={childSid}
+                          s={child}
+                          open={openId === childSid}
+                          onToggle={() => selectSession(openId === childSid ? null : childSid)}
+                          onSelectSession={(id) => selectSession(id)}
+                          isChild
+                        />
+                      )
+                    })}
+                  </div>
+                )}
+              </React.Fragment>
             )
           })}
         </>

@@ -36,6 +36,7 @@ import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
 import { opencodeAdapter } from './adapters/opencode.js'
 import { piAdapter } from './adapters/pi.js'
+import { derivePiToolRecords } from './adapters/pi-tools.js'
 import { AdapterRegistry } from './adapters/registry.js'
 import {
   observedNamespaces,
@@ -388,6 +389,10 @@ export function ingestBatchWithAdapters(
   let rejected = 0
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
+  // Derived tool span ids already claimed in this batch. The same Pi
+  // (session, call id) recurs on every turn span, and within one batch the
+  // store has none of them yet, so this is what keeps the first sighting.
+  const derivedSeen = new Set<string>()
   for (const [index, raw] of rawSpans.entries()) {
     const harness = attributed.get(raw.spanId)
     if (harness === undefined) continue
@@ -451,6 +456,23 @@ export function ingestBatchWithAdapters(
     const group = byHarness.get(harness)
     if (group === undefined) byHarness.set(harness, { adapter, records: [record] })
     else group.records.push(record)
+
+    // Pi exports no child tool spans: the tool calls its conversation carries
+    // inline are recovered here and stored with their turn. Harness-scoped on
+    // purpose — every other OTLP harness emits real `gen_ai.tool.name` spans,
+    // and deriving from those would double-count them.
+    if (harness === 'pi') {
+      const piGroup = byHarness.get(harness)
+      if (piGroup !== undefined) {
+        for (const toolRecord of derivePiToolRecords(record, raw)) {
+          // Keep the first write (an earlier batch's, or this batch's): the
+          // call's parent and timing are then the earliest turn that carried it.
+          if (derivedSeen.has(toolRecord.spanId) || store.has(toolRecord.spanId)) continue
+          derivedSeen.add(toolRecord.spanId)
+          piGroup.records.push(toolRecord)
+        }
+      }
+    }
   }
 
   let claimed = 0

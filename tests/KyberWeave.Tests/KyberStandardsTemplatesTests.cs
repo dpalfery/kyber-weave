@@ -16,10 +16,12 @@ public sealed class KyberStandardsTemplatesTests
         "csharp",
         "data-access-layer",
         "github-actions",
+        "go",
         "maui",
         "pulumi",
         "python",
         "react",
+        "rust",
         "sql",
         "tauri",
         "test"
@@ -45,10 +47,12 @@ public sealed class KyberStandardsTemplatesTests
     [InlineData("csharp")]
     [InlineData("data-access-layer")]
     [InlineData("github-actions")]
+    [InlineData("go")]
     [InlineData("maui")]
     [InlineData("pulumi")]
     [InlineData("python")]
     [InlineData("react")]
+    [InlineData("rust")]
     [InlineData("sql")]
     [InlineData("tauri")]
     [InlineData("test")]

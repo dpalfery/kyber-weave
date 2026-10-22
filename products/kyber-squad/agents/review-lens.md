@@ -29,6 +29,15 @@ SKIPPED: <one sentence naming what the lens needs and what the diff contains ins
 
 and stop. Skipping is a first-class, expected outcome, not a failure and not a shortcut. A council is only affordable because most lenses skip most diffs. What is **not** acceptable is skipping silently, skipping because the analysis looked like work, or returning "no findings" when you mean "this lens does not apply" — those are different claims and the reviewer treats them differently.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema.
+
 # 2. Read the code, not just the diff
 
 A diff shows changed lines, not their meaning. Before reporting anything, open the files the change touches and read enough of the surrounding code to know whether the change is actually wrong. A finding derived only from the `+` lines, with no knowledge of the caller, the base class, or the existing pattern, is the single largest source of false positives in automated review.

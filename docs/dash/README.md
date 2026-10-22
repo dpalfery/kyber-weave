@@ -4,7 +4,7 @@ title: KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflow
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-16
 ---
 
 # KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflows
@@ -59,6 +59,8 @@ Both surfaces are display layers: they hold no feature logic, no scheduler, and 
 
 The following technical documentation pages are published in this directory:
 
+* **Adoption Guide ([`onboarding.md`](onboarding.md))** — Installing KyberDash with `install.sh`, installing and updating the tray, and configuring the shared settings with `kyberdash dash settings`.
+* **Requirements ([`requirements.md`](requirements.md))** — The numbered `KD-*` requirements contract and the invariants the engine holds.
 * **Operational Runbook ([`runbook.md`](runbook.md))** — Local development, CLI maintenance commands (`kyber build`, `dash refresh`), the tray deployment, and test suites across all surfaces.
 * **Architecture ([`architecture.md`](architecture.md))** — Canonical-store ingest, 6-level diagnostic spine, pure signals engine, finding contracts, and REST API contract.
 * **Telemetry Inventory ([`telemetry-inventory.md`](telemetry-inventory.md))** — Verified per-harness collection and measurability outcomes, including owner-controlled runtime gates.

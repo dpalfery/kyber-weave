@@ -44,8 +44,18 @@ const KILO_PARSER_CONTRACT_VERSION = '4'
 // to the providers named in SKILLS_CONTRACT_PROVIDER_NAMES; the VS Code
 // `cline` descriptor and hermes do not fill skills and keep their versions.
 const SKILLS_CONTRACT_VERSION = '2'
+// v2: Antigravity's own contract, split from the default. Tool definitions are
+// measured only on records whose paired turn carries catalogue definitions, and
+// a transcript-covered call states its empty skills list (D6, D8). Stale
+// checkpoints under v1 re-synthesize so those declarations upsert over them.
+const ANTIGRAVITY_PARSER_CONTRACT_VERSION = '2'
+// v3: Copilot's own contract, moved out of the shared skills contract. Copilot
+// CLI's system_prompt is now measured per record, on the records whose paired
+// journal turn carries it (D-C), so its measurability differs from v2. That
+// changed declaration requires re-deriving stored records, so checkpoints under
+// v2 re-synthesize. Copilot is kept at 3 for that reason alone.
+const COPILOT_PARSER_CONTRACT_VERSION = '3'
 const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
-  'copilot',
   'opencode',
   'cline-cli',
   'codewhale',
@@ -63,6 +73,10 @@ const CURSOR_PARSER_CONTRACT_VERSION = '2'
 // declared-window payload upserts over stale rows (ADR 0016 repair contract).
 // v3: invoked skill names onto turn records (`kyber.skills.invoked`).
 const PI_PARSER_CONTRACT_VERSION = '3'
+// v2: content reader registered (one turn per assistant message, keyed by the
+// message id) and assistant calls stamped with that id as pairingId for pairing.
+// Version-invalidated checkpoints re-open the unit so the parts upsert (ADR 0016).
+const COMMANDCODE_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -101,6 +115,15 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
     return PI_PARSER_CONTRACT_VERSION
   }
+  if (partial.providerName === 'antigravity') {
+    return ANTIGRAVITY_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'copilot') {
+    return COPILOT_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'commandcode' || partial.harnessId === 'commandcode') {
+    return COMMANDCODE_PARSER_CONTRACT_VERSION
+  }
   if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
     return SKILLS_CONTRACT_VERSION
   }
@@ -123,6 +146,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   codebuff: job(['codebuff']),
   codex: job(['codex-cli', 'codex-desktop', 'codex-unclassified']),
   copilot: job(['copilot-cli', 'copilot-vscode', 'copilot-jetbrains', 'copilot-agent']),
+  commandcode: job(['commandcode']),
   devin: job(['devin']),
   droid: job(['droid']),
   dsh: job(['dsh']),
@@ -360,6 +384,14 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
     nativeFormat: 'native-session',
   }),
   descriptor({
+    harnessId: 'commandcode',
+    label: 'Command Code',
+    providerName: 'commandcode',
+    classifier: 'provider-identity',
+    sourceRootLabel: '~/.commandcode/projects',
+    nativeFormat: 'jsonl',
+  }),
+  descriptor({
     harnessId: 'devin',
     label: 'Devin',
     providerName: 'devin',
@@ -575,6 +607,9 @@ export type HarnessContentCapability = {
 }
 
 const READER_HARNESS_IDS = new Set([
+  'antigravity',
+  'antigravity-cli',
+  'antigravity-ide',
   ...CLAUDE_HARNESS_IDS,
   'codex-cli',
   'codex-desktop',
@@ -583,6 +618,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
+  'commandcode',
   ...KILO_HARNESS_IDS,
   'opencode',
   'pi',

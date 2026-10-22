@@ -5,6 +5,9 @@ internal sealed class ReviewYamlSection
 {
     public List<ReviewGateYaml>? Gates { get; init; }
 
+    /// <summary>Agent slug to its ordered task gates, as the operator wrote them.</summary>
+    public Dictionary<string, List<ReviewTaskGateYaml>?>? TaskGates { get; init; }
+
     public ReviewCoverageYaml? Coverage { get; init; }
 
     public ReviewDuplicatesYaml? Duplicates { get; init; }
@@ -28,6 +31,24 @@ internal sealed class ReviewGateYaml
     public bool? Blocking { get; init; }
 
     public int? TimeoutSeconds { get; init; }
+}
+
+/// <summary>One entry of <c>review.task-gates.&lt;agent&gt;</c>.</summary>
+internal sealed class ReviewTaskGateYaml
+{
+    public string? Id { get; init; }
+
+    public List<string>? Include { get; init; }
+
+    public string? Os { get; init; }
+
+    public List<string>? Run { get; init; }
+
+    public List<string>? Fix { get; init; }
+
+    public bool? Blocking { get; init; }
+
+    public int? Timeout { get; init; }
 }
 
 /// <summary>The <c>review.coverage</c> mapping.</summary>

@@ -5,7 +5,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
   SessionCostPanel,
-  SessionTokenTotals,
   formatCostFigure,
   normalizeCostBlock,
   STATUS_WORDS,
@@ -216,7 +215,7 @@ describe('SessionCostPanel: formatCostFigure & CostStatus in words (Rule 2)', ()
 })
 
 describe('SessionCostPanel: absent value is not zero (Rule 3)', () => {
-  it('a cost with no value renders reason in words and keeps token totals measurable upstairs', () => {
+  it('a cost with no value renders reason in words, not zero', () => {
     const block: CostBlock = {
       basis: 'unknown',
       status: 'no_rate',
@@ -237,15 +236,6 @@ describe('SessionCostPanel: absent value is not zero (Rule 3)', () => {
     // Reason stated in words, not zero
     expect(html).toContain('no published rate')
     expect(html).not.toContain('$0.00')
-
-    // The totals moved into Session Overview: same figures, same section.
-    const totalsHtml = renderHtml(
-      React.createElement(SessionTokenTotals, { summary: session.summary })
-    )
-    expect(totalsHtml).toContain('50.0K')
-    expect(totalsHtml).toContain('2.5K')
-    expect(totalsHtml).toContain('30.0K')
-    expect(totalsHtml).toContain('10.0K')
   })
 })
 
@@ -395,109 +385,6 @@ describe('SessionCostPanel: per-model breakdown (byModel)', () => {
     const html = renderHtml(element)
 
     expect(html).not.toContain('data-testid="cost-by-model"')
-  })
-})
-
-describe('SessionCostPanel: token totals moved into Session Overview', () => {
-  it('renders the same totals through SessionTokenTotals without the lower cost wrapper', () => {
-    const session = {
-      summary: {
-        total_input: 100000,
-        total_output: 5000,
-        total_cache_read: 75000,
-        total_cache_creation: 15000,
-        cost: { basis: 'published', status: 'priced', value: 1.1, currency: 'USD' },
-      },
-    }
-
-    const element = React.createElement(SessionTokenTotals, { summary: session.summary })
-    const html = renderHtml(element)
-
-    // Same section, same figures, same honest ratio.
-    expect(html).toContain('data-testid="cost-tokens-section"')
-    expect(html).toContain('Underlying Token Totals')
-    expect(html).toContain('100.0K')
-    expect(html).toContain('5.0K')
-    expect(html).toContain('75.0K')
-    expect(html).toContain('15.0K')
-    expect(html).toContain('75.0%')
-    // No lower-panel wrapper around the moved section.
-    expect(html).not.toContain('data-testid="session-cost-panel"')
-  })
-
-  it('no longer renders the totals as a separate lower section in SessionCostPanel', () => {
-    const session = {
-      summary: {
-        total_input: 100000,
-        total_output: 5000,
-        total_cache_read: 75000,
-        total_cache_creation: 15000,
-        cost: { basis: 'published', status: 'priced', value: 1.1, currency: 'USD' },
-      },
-    }
-
-    const element = React.createElement(SessionCostPanel, { session })
-    const html = renderHtml(element)
-
-    // The cost panel keeps its cost content; the totals moved upstairs.
-    expect(html).toContain('data-testid="session-cost-panel"')
-    expect(html).toContain('$1.10')
-    expect(html).not.toContain('data-testid="cost-tokens-section"')
-    expect(html).not.toContain('Underlying Token Totals')
-  })
-})
-
-describe('SessionCostPanel: token totals & honest cache hit ratio', () => {
-  it('renders honest cache hit ratio from total_cache_read / total_input', () => {
-    const session = {
-      summary: {
-        total_input: 100000,
-        total_output: 5000,
-        total_cache_read: 75000,
-        total_cache_creation: 15000,
-        cost: { basis: 'published', status: 'priced', value: 1.1, currency: 'USD' },
-      },
-    }
-
-    const element = React.createElement(SessionTokenTotals, { summary: session.summary })
-    const html = renderHtml(element)
-
-    // 75000 / 100000 = 75.0%
-    expect(html).toContain('75.0%')
-    expect(html).toContain('100.0K')
-    expect(html).toContain('5.0K')
-    expect(html).toContain('75.0K')
-    expect(html).toContain('15.0K')
-  })
-
-  it('reports cache hit ratio as "not measurable" when input is 0 or missing, never 0.0%', () => {
-    const session = {
-      summary: {
-        total_input: 0,
-        total_output: 0,
-        total_cache_read: 0,
-        total_cache_creation: 0,
-      },
-    }
-
-    const element = React.createElement(SessionTokenTotals, { summary: session.summary })
-    const hitRatioEl = findByTestId(element, 'token-cache-hit-ratio')
-    expect(hitRatioEl).toBeDefined()
-
-    const html = renderHtml(element)
-    // Never invent 0.0% when input is 0
-    expect(html).toContain('not measurable')
-  })
-
-  it('reports absent token metrics as "not measurable", never inventing 0', () => {
-    const session = {
-      summary: {},
-    }
-
-    const element = React.createElement(SessionTokenTotals, { summary: session.summary })
-    const html = renderHtml(element)
-
-    expect(html).toContain('not measurable')
   })
 })
 

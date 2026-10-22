@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-16
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -23,7 +23,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 68 supplemental resources, for 92 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 23 canonical agent instruction bodies and 27 canonical skill identities under `products/kyber-squad/`. The skill tree retains 78 supplemental resources, for 105 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A target-scoped internal capability profile (`copilot-capability-profile`, `devin-capability-profile`) may validate exact target tool membership but must not replace or widen the shared capability profile or metadata; a profile marked `target: <name>` is rejected when assigned as an agent's shared `capability-profile`; a `<target>-capability-profile` naming a profile without that marker is rejected; and a primary agent naming `devin-capability-profile` is rejected because Devin lowers primaries to skills with no tool allow-list ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)). |
 | **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 12-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. Lock and receipt state is kept under the user home (`~/.kyber-weave/squad/`), never in the repository ([ADR 0037](../adr/0037-squad-state-in-user-home.md)). |
@@ -42,7 +42,7 @@ Mechanics live in [architecture §9](architecture.md#9-conductor-execution-circu
 
 | Decision | Requirement |
 |---|---|
-| **Q1 — Two-level caps** | A worker may make at most 3 incremental test-fix-verify attempts against the same failing fixture or cluster in one invocation. The conductor may dispatch at most 2 rework workers for that cluster in the run. Cluster identity is the first-observed test ID recorded on the execution artifact. The dispatch tally increments only on rework dispatch. |
+| **Q1 — Two-level caps** | A worker may make at most 3 incremental test-fix-verify attempts against the same failing fixture or cluster in one implementation or rework dispatch. The conductor may dispatch rework at most 2 times for that cluster in the run, including follow-ups to a retained worker. Cluster identity is the first-observed test ID recorded on the execution artifact. The dispatch tally increments only on rework dispatch and never resets on resumption, replacement, or compaction. |
 | **Q2 — Oscillation** | A first one-way regression (A causes B to fail) consumes one worker iteration. `THRASH_OSCILLATION_DETECTED` trips only on A→B→A or a repeating failure signature. |
 | **Q3 — Invariant contradiction** | Workers must not satisfy contradictory invariants. A fixture that asserts obsolete details conflicting with the approved design trips `INVARIANT_CONTRADICTION`. |
 | **Q4 — JEV checkpoints** | Before and after each fix, workers check blast radius, oscillation, invariant consistency, and the 3-iteration cap. The closed trigger set is `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`. |
@@ -50,18 +50,26 @@ Mechanics live in [architecture §9](architecture.md#9-conductor-execution-circu
 
 No ADR: the decisions constrain instruction bodies, not the render or transaction engine.
 
+Implementation ownership remains with the original task session through task-gate rework
+and verification wherever the harness supports continuation. There is no reviewer session;
+a failing or missing `TASK_GATE:` line returns to the original worker.
+Self-contained packets and recovery briefs remain mandatory for unsupported or lost
+sessions and for context that has become unreliable. The conductor records actual
+session handles or the reason they are unavailable; unrelated tasks do not share a
+task session. See [task session continuity](architecture.md#task-session-continuity).
+
 ---
 
 ## Degradation Contract
 
 Harnesses differ in their native capabilities (e.g. support for primary agents, subagent spawning, interactive confirmation prompts, and tool filtering). When a target harness cannot natively execute a canonical capability, Kyber-Squad degrades safely according to explicit rules.
 
-The product currently has eight agent/skill intersections. Two — `product-owner` and `bug-crusher`
+The product currently has ten agent/skill intersections. Two — `product-owner` and `bug-crusher`
 — are **primary shared identities**: root agents whose body is a thin wrapper that loads the
 same-name canonical skill, which carries the role ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)).
 Their canonical skill is the entry point and is emitted on every target; a target that renders a
 primary through an additional entry-point form (Claude, Factory) does not duplicate it, and a target
-that lowers a primary (Cursor, Pi, ZCode, Devin, Warp) reuses it. The remaining six are distinct-body
+that lowers a primary (Cursor, Pi, ZCode, Devin, Warp) reuses it. The remaining eight are distinct-body
 collisions: fallback targets (Warp) preserve each of those skills and emit the matching agent as
 `role-<name>`. `conductor` has an unoccupied skill identity and on Warp lowers to a same-name
 role skill.
@@ -112,15 +120,15 @@ Kyber-Squad enforces a strict non-broadening guarantee across all translations:
 
 If a target harness cannot guarantee the containment or authorization boundaries specified in an agent's capability profile, the engine will narrow the permission or omit the component entirely.
 
-## Golden-render and knowledge-retention requirement
+## Render and knowledge-retention requirement
 
-`code-review-loop` is authored in Kyber-Squad and has no Hotshot baseline. Every imported
+`code-review-loop` is authored in Kyber-Squad. Every imported
 canonical raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
-Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
-skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive
+canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
+skill is folded into `create-pull-request`, and the three retired `-v3` agent identities survive
 only as folded provenance in their canonical migration reports. Renderers project every file an
-owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 122
+owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 123
 files with no dangling link; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/`

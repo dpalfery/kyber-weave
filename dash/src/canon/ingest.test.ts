@@ -584,7 +584,7 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     )
     const bodyParts = [
       { part: 'system_prompt', text: 'Body-parse system prompt.' },
-      { part: 'conversation_history', text: 'Body-parse turn text.' },
+      { part: 'conversation_history', text: 'Body-parse turn text.', role: 'user' },
     ]
     expect(store.get('llm-1')?.parts).toEqual(bodyParts)
 
@@ -618,7 +618,7 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
 
     expect(store.get('llm-1')?.parts).toEqual([
       { part: 'system_prompt', text: 'Body-parse system prompt.' },
-      { part: 'conversation_history', text: 'Body-parse turn text.' },
+      { part: 'conversation_history', text: 'Body-parse turn text.', role: 'user' },
     ])
     expect(notMeasurableReason(store, 'llm-1', 'conversation_history')).toBeUndefined()
     store.close()

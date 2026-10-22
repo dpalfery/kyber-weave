@@ -213,7 +213,7 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, and Antigravity are native;
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, Command Code, and Antigravity are native;
     /// Warp is fallback role-skill lowering (to <c>.warp/skills/</c>). Antigravity is native via
     /// per-agent directories at <c>.agents/agents/{name}/agent.md</c> with canonical skills at
     /// <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
@@ -240,6 +240,7 @@ internal static class SquadCommandComposition
             new WarpRenderer(),
             new ZCodeRenderer(),
             new DevinRenderer(),
+            new CommandCodeRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>

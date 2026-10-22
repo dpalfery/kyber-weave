@@ -35,6 +35,16 @@ public sealed class ConfigRegConfig
     public const string TodoIndexProperty = "todo-index";
     public const string SpecificationIndexProperty = "specification-index";
 
+    /// <summary>
+    /// Registry property carrying the repository's autonomy setting. Reserved: unlike every
+    /// other property it holds a value, not a path, so a host may not declare it under
+    /// <c>config-reg:</c>.
+    /// </summary>
+    public const string AutonomyProperty = "autonomy";
+
+    public const string SupervisedAutonomy = "supervised";
+    public const string AutonomousAutonomy = "autonomous";
+
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
 
@@ -57,6 +67,14 @@ public sealed class ConfigRegConfig
 
     /// <summary>Entries the host added to <c>config-reg:</c>, in the order it wrote them.</summary>
     public IReadOnlyList<ConfigRegEntry> Additions { get; init; } = [];
+
+    /// <summary>
+    /// The top-level <c>autonomy:</c> setting — <see cref="SupervisedAutonomy"/> or
+    /// <see cref="AutonomousAutonomy"/> — or null when the repository did not set one, which
+    /// agents read as supervised. Rendered into the Config Reg block only when set, and never
+    /// resolved as a path.
+    /// </summary>
+    public string? Autonomy { get; init; }
 
     public static ConfigRegConfig ProductDefaults { get; } = new();
 
