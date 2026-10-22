@@ -1518,16 +1518,23 @@ Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 `claude-code` and `opencode` — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
 and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
 (`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
-`enable` installs the capture plugin file and `disable` removes it, each with its own digest
-receipt (`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt). The capture route
-accepts `kilo` because `MANAGED_IDS` includes any writer with a `filePlugin`, `GET` reports it as
-`managed` (state from `kiloPluginState`), and the web drawer needs no change: a managed row with a
-state gets Enable and Disable. A file plugin never turns the OTLP receiver on and is excluded from
-`lastManagedHarnessDisabled`. Adding one needs no web change: `readHarness`
+`enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` answers
+**400** because `MANAGED_IDS` excludes it. Adding one needs no web change: `readHarness`
 (`dash/web/src/lib/kyberApi.ts`) falls back to `status-only` for a `mode` it does not recognise,
 and `CAPTURE_MAX_HARNESSES` bounds the list.
 
-**Kilo Code is not a key writer, by decision** (ADR 0031, 2026-10-21 amendments). Kilo
+**The exception is a pending writer that declares a `filePlugin` (Kilo).** `enable` installs the
+capture plugin file and `disable` removes it, each with its own digest receipt
+(`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt). `MANAGED_IDS` includes any writer
+with a `filePlugin`, so the route accepts `kilo`; `GET` reports it as `managed` with its state from
+`kiloPluginState` (`on`, `off`, `partial` for an older plugin of ours, `unknown` for an edited,
+foreign or unreadable file); and the web drawer needs no change, because a managed row with a state
+gets Enable and Disable. A file plugin never turns the OTLP receiver on, never promises to in its
+preview, and is excluded from `lastManagedHarnessDisabled`. A corrupt shared key receipt does not
+block a run that selects only file plugins, because they never read it.
+
+**Kilo Code is not a key writer, by decision** (ADR 0031, 2026-10-21 amendments): its row is a
+file plugin, switched from Settings or the CLI as above. Kilo
 has no config key that turns on local telemetry export: `OTEL_EXPORTER_OTLP_ENDPOINT` is
 environment-only and no config field sets it, while the one on/off key,
 `experimental.openTelemetry`, gates Kilo's PostHog product analytics. Writing that key would breach

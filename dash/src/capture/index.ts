@@ -440,7 +440,7 @@ function statusLines(
           ? `  config: ${path} (unreadable: ${read.error})`
           : `  config: ${path} (${read.found ? 'found' : 'missing'})`,
       )
-      const described = writer.describeStatus?.(home)
+      const described = writer.describeStatus?.(home, { env })
       if (described !== undefined && described.length > 0) {
         // Replaces the static reason. Pi returns lines that are already
         // indented; Antigravity returns bare lines, which get the same
@@ -810,7 +810,10 @@ async function runEnable(
   const err: string[] = []
   let exitCode = 0
   const loaded = loadReceiptState(home)
-  if (loaded.corrupt) {
+  // The key receipt matters only to key writers; a file plugin keeps its own. A corrupt
+  // shared receipt must not block a run that never reads it.
+  const usesKeyReceipt = writers.some((writer) => writer.kind === 'managed')
+  if (loaded.corrupt && usesKeyReceipt) {
     // Replacing an unreadable receipt would lose the prior values `disable`
     // restores from. Refuse and leave it for the owner to inspect.
     const harness = writers[0]?.id ?? ''
@@ -1238,7 +1241,7 @@ async function runDisable(
   // never-enabled. This holds for every disable path, not only the Settings opt-in — a
   // plain disable that noops past a corrupt receipt would report "nothing to do" (exit 0)
   // and mask the corruption, while enable already refuses it.
-  if (receiptState.corrupt) {
+  if (receiptState.corrupt && writers.some((writer) => writer.kind === 'managed')) {
     const harness = writers[0]?.id ?? ''
     err.push(`kyberdash capture: refusing to disable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
     events.push({ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' })

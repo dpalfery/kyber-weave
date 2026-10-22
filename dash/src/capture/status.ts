@@ -366,7 +366,7 @@ function buildOne(
     // A file plugin is switchable from Settings, so it reports as managed: the one
     // "file" is the plugin and no config key is declared, written or drift-checked.
     const plugin = writer.filePlugin.state(ctx.home, ctx.env)
-    const lines = (writer.describeStatus?.(ctx.home, { redact: true }) ?? [])
+    const lines = (writer.describeStatus?.(ctx.home, { redact: true, env: ctx.env }) ?? [])
       .map((line) => line.trim())
       .filter((line) => line !== '')
     return {
@@ -399,7 +399,7 @@ function buildOne(
   if (writer.kind === 'pending') {
     const path = writer.resolvePath(ctx.home, ctx.env)
     const read = readTextIfPresent(path)
-    const described = writer.describeStatus?.(ctx.home, { redact: true })
+    const described = writer.describeStatus?.(ctx.home, { redact: true, env: ctx.env })
     const lines = (described ?? []).map((line) => line.trim()).filter((line) => line !== '')
     return {
       id: writer.id,

@@ -87,6 +87,22 @@ describe('installKiloPlugin', () => {
   })
 })
 
+describe('an unreadable plugin path', () => {
+  it('install refuses with reason unreadable instead of throwing', () => {
+    const home = makeHome()
+    mkdirSync(kiloPluginPaths(home).pluginFile, { recursive: true })
+    const result = installKiloPlugin(home)
+    expect(result).toMatchObject({ exitCode: 1, outcome: 'refused', reason: 'unreadable' })
+  })
+
+  it('uninstall refuses with reason unreadable instead of throwing', () => {
+    const home = makeHome()
+    mkdirSync(kiloPluginPaths(home).pluginFile, { recursive: true })
+    const result = uninstallKiloPlugin(home)
+    expect(result).toMatchObject({ exitCode: 1, outcome: 'refused', reason: 'unreadable' })
+  })
+})
+
 describe('uninstallKiloPlugin', () => {
   it('removes the plugin and the receipt but keeps captured data', () => {
     const home = makeHome()
@@ -169,6 +185,27 @@ describe('describeKiloPluginStatus', () => {
     const lines = describeKiloPluginStatus(home).join('\n')
     expect(lines).toMatch(/modified/)
     expect(lines).not.toMatch(/secret owner text/)
+  })
+
+  it('ignores an index line with a non-finite timestamp instead of crashing', () => {
+    const home = makeHome()
+    installKiloPlugin(home)
+    const { storeDir } = kiloPluginPaths(home)
+    mkdirSync(storeDir, { recursive: true })
+    writeFileSync(
+      join(storeDir, 'index.jsonl'),
+      '{"ts":1e999,"sessionID":"a"}\n{"ts":2000,"sessionID":"b"}\n',
+    )
+    const lines = describeKiloPluginStatus(home).join('\n')
+    expect(lines).toMatch(/captured calls: 1 across 1 sessions/)
+    expect(lines).toMatch(/last call: 1970-01-01T00:00:02/)
+  })
+
+  it('reports unreadable, without throwing, when the plugin path is not a readable file', () => {
+    const home = makeHome()
+    mkdirSync(kiloPluginPaths(home).pluginFile, { recursive: true })
+    const lines = describeKiloPluginStatus(home).join('\n')
+    expect(lines).toMatch(/plugin: unreadable/)
   })
 
   it('never throws on a corrupt index', () => {

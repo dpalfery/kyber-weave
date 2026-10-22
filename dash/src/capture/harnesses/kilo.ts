@@ -22,9 +22,9 @@ import { envJoin, type PathEnv } from '../paths.js'
 import type { PendingHarnessWriter } from './registry.js'
 
 /** Fixed facts plus the plugin's own state. Nothing in the owner's config is read. */
-function describeKiloStatus(home: string): readonly string[] {
+function describeKiloStatus(home: string, options?: { env?: PathEnv }): readonly string[] {
   return [
-    ...describeKiloPluginStatus(home),
+    ...describeKiloPluginStatus(home, options?.env),
     'captures: system prompt, tool definitions and skills catalog, from the capture plugin (restart Kilo after enabling)',
     'usage source: Kilo usage and message content are collected from kilo.db through folder import',
   ]

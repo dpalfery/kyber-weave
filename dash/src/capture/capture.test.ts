@@ -315,6 +315,19 @@ describe('capture enable and disable on the Kilo plugin harness', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(before)
   })
 
+  it.each(['enable', 'disable'] as const)(
+    '%s works for kilo alone when the shared key receipt is corrupt, because the plugin keeps its own',
+    async (action) => {
+      const home = makeHome()
+      mkdirSync(join(home, '.kyberdash'), { recursive: true })
+      writeFileSync(join(home, '.kyberdash', 'capture-receipt.json'), '{ not json')
+      if (action === 'disable') await run('enable', home)
+      const result = await run(action, home)
+      expect(result.exitCode).toBe(0)
+      expect(readFileSync(join(home, '.kyberdash', 'capture-receipt.json'), 'utf8')).toBe('{ not json')
+    },
+  )
+
   it('enable refuses to overwrite a plugin file the owner wrote', async () => {
     const home = makeHome()
     mkdirSync(join(home, '.config', 'kilo', 'plugin'), { recursive: true })

@@ -1179,15 +1179,18 @@ touches the receiver setting.
 
 **Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
 and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
-**Codex**, **pi**, **Antigravity** and **Kilo Code** are status-only: status reports them,
-`enable` and `disable` do not write them, and the drawer shows them read-only. OpenCode reads its
+**Codex**, **pi** and **Antigravity** are status-only: status reports them, `enable` and
+`disable` do not write them, and the drawer shows them read-only. **Kilo Code** is a file plugin
+rather than a key writer: `enable` installs one plugin file, `disable` removes it, and the drawer
+shows it with Enable and Disable. OpenCode reads its
 OTLP endpoint from the process environment, so `enable` writes only its flag; the drawer and
 `status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
 KyberDash cannot see whether the shell that launches OpenCode has it set.
 
-**Kilo Code row.** The `kilo` row is read-only on purpose (ADR 0031, 2026-10-21 amendment): Kilo
+**Kilo Code row.** The `kilo` row is not a key writer (ADR 0031, 2026-10-21 amendments): Kilo
 has no config key that turns on local telemetry export, and `experimental.openTelemetry` is its
-product-analytics switch. The row reports whether Kilo is installed and carries one manual step,
+product-analytics switch, so the row's Enable installs the capture plugin file instead and never
+touches `kilo.jsonc` or the OTLP receiver. The row reports whether Kilo is installed and carries one manual step,
 `kilo-folder-import`, with no environment variable:
 
 ```bash

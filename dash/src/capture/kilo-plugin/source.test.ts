@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -123,11 +123,27 @@ describe('kilo capture plugin source', () => {
     expect(() => readFileSync(join(store, 'index.jsonl'))).toThrow()
   })
 
-  it('creates the store private to the owner', async () => {
+  // POSIX mode bits: Windows has no equivalent to assert.
+  it.skipIf(process.platform === 'win32')('creates the store private to the owner', async () => {
     const { hooks } = await loadPlugin()
     await oneCall(hooks, 'ses_1', ['x'])
     expect(statSync(store).mode & 0o077).toBe(0)
     expect(statSync(join(store, 'index.jsonl')).mode & 0o077).toBe(0)
     chmodSync(store, 0o700)
+  })
+
+  it.skipIf(process.platform === 'win32')('tightens a store that already exists with wider permissions', async () => {
+    mkdirSync(join(store, 'blobs'), { recursive: true, mode: 0o755 })
+    chmodSync(store, 0o755)
+    chmodSync(join(store, 'blobs'), 0o755)
+    writeFileSync(join(store, 'index.jsonl'), '', { mode: 0o644 })
+    chmodSync(join(store, 'index.jsonl'), 0o644)
+    const { hooks } = await loadPlugin()
+    await oneCall(hooks, 'ses_1', ['x'])
+    expect(statSync(store).mode & 0o077).toBe(0)
+    expect(statSync(join(store, 'blobs')).mode & 0o077).toBe(0)
+    expect(statSync(join(store, 'index.jsonl')).mode & 0o077).toBe(0)
+    const blob = readdirSync(join(store, 'blobs'))[0]!
+    expect(statSync(join(store, 'blobs', blob)).mode & 0o077).toBe(0)
   })
 })

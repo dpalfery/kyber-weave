@@ -47,7 +47,7 @@ export type PendingHarnessWriter = {
    * `redact` is set by the structured (API) status: it must not echo text copied
    * from config the owner wrote. The CLI text omits it and is unchanged.
    */
-  describeStatus?: (home: string, options?: { redact?: boolean }) => readonly string[]
+  describeStatus?: (home: string, options?: { redact?: boolean; env?: PathEnv }) => readonly string[]
   /**
    * A harness that owns one whole file (a plugin) instead of config keys. The
    * file carries its own receipt, so `enable` and `disable` call these and write

@@ -69,7 +69,8 @@ telemetry export" and could re-enable vendor analytics for an owner who opted ou
 therefore joins `codex`, `pi` and `antigravity` as a `kind: 'pending'` writer: `status` reports its
 install evidence, its fixed status lines and one manual step (`kilo-folder-import`, with no `env`),
 `enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` refuses it
-with **400**. The row states that Kilo's OTLP export is env-gated and carries no model spans,
+with **400** (both points are superseded by the Kilo capture plugin amendment below: Kilo now
+installs a plugin file and the route accepts it). The row states that Kilo's OTLP export is env-gated and carries no model spans,
 usage or content, and that Kilo usage comes from kilo.db through folder import. Nothing else in
 this record moves: the managed write scope stays `claude-code`, `copilot` and `opencode`, decision
 4's receiver coupling is untouched because a status-only row never couples to the receiver, and a

@@ -56,11 +56,18 @@ describe('kilo capture writer declaration', () => {
     expect(win32Path.startsWith('C:\\Users\\me\\')).toBe(true)
     expect(win32Path).not.toContain('/')
     // A caller that never injects a path environment keeps the host's own join.
-    expect(kiloHarness.resolvePath('/home/me').startsWith('/home/me')).toBe(true)
+    expect(kiloHarness.resolvePath('/home/me').startsWith(join('/home/me'))).toBe(true)
   })
 })
 
 describe('kilo status text', () => {
+  it('reads the plugin where the injected path environment installed it', async () => {
+    const home = makeHome()
+    const env = { platform: process.platform }
+    kiloHarness.filePlugin!.install(home, env, { dryRun: false })
+    expect(kiloHarness.describeStatus!(home, { env }).join('\n')).toMatch(/plugin: installed/)
+  })
+
   it('states the plugin state, what it captures and where usage comes from, with no OTLP framing', async () => {
     const home = makeHome()
     writeKiloConfig(home, '{}\n')

@@ -438,6 +438,14 @@ describe('kilo plugin capture status', () => {
     expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('unknown')
   })
 
+  it('reports unknown instead of throwing when the plugin path is a directory', () => {
+    const home = makeHome()
+    mkdirSync(kiloPluginFile(home), { recursive: true })
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo.state).toBe('unknown')
+    expect(kilo.statusLines.join('\n')).toMatch(/plugin: unreadable/)
+  })
+
   it('reports unknown for a plugin the owner edited since install', async () => {
     const home = makeHome()
     await runCapture('enable', { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER })

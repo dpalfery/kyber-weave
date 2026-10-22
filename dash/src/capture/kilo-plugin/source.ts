@@ -27,7 +27,7 @@ export const KILO_PLUGIN_MARKER = '// kyberdash-capture-plugin v1'
 export const KILO_PLUGIN_SOURCE = `${KILO_PLUGIN_MARKER}
 // Installed by "kyberdash kyber capture enable --harness kilo". Remove with "kyberdash kyber capture disable --harness kilo".
 // Writes Kilo's system prompt and tool definitions to local files only. No network access.
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -46,13 +46,27 @@ function safely(fn) {
   }
 }
 
+// Node applies a mode only when it creates a path, so a store that already exists with wider
+// permissions would keep them. Tighten each path once per process, never widen.
+const tightened = new Set()
+function tighten(path, mode) {
+  if (tightened.has(path)) return
+  tightened.add(path)
+  try {
+    if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode)
+  } catch {}
+}
+
 function blob(text) {
   const hash = createHash('sha256').update(text).digest('hex')
   const path = join(BLOBS, hash)
   if (!existsSync(path)) {
     mkdirSync(BLOBS, { recursive: true, mode: 0o700 })
+    tighten(ROOT, 0o700)
+    tighten(BLOBS, 0o700)
     writeFileSync(path, text, { mode: 0o600 })
   }
+  tighten(path, 0o600)
   return hash
 }
 
@@ -97,7 +111,9 @@ async function server() {
           toolHashes: Object.fromEntries(toolHashes),
         }
         mkdirSync(ROOT, { recursive: true, mode: 0o700 })
+        tighten(ROOT, 0o700)
         appendFileSync(join(ROOT, 'index.jsonl'), JSON.stringify(line) + '\\n', { mode: 0o600 })
+        tighten(join(ROOT, 'index.jsonl'), 0o600)
       }),
   }
 }
