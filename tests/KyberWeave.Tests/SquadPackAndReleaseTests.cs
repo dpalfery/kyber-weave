@@ -49,7 +49,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "rust-dev",
         "sql-database-architect",
         "tauri-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     private static readonly string[] CanonicalSkills =
@@ -80,7 +81,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     [Fact]
@@ -149,15 +151,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 22 canonical agents
-        Assert.Equal(22, CanonicalAgents.Length);
+        // Presence of all 23 canonical agents
+        Assert.Equal(23, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 27 canonical skills
-        Assert.Equal(27, CanonicalSkills.Length);
+        // Presence of all 28 canonical skills
+        Assert.Equal(28, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

@@ -35,6 +35,7 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\README.md" LogicalName="Standards.sql.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\README.md" LogicalName="Standards.tauri.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\README.md" LogicalName="Standards.test.md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\README.md" LogicalName="Standards.typescript.md" />
   </ItemGroup>
 
   <ItemGroup>

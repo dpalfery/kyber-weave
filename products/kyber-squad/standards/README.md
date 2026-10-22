@@ -2,7 +2,7 @@
 
 A starting standard per technology, for a repository adopting
 `<docs-root>/standards/<technology>/`. These are **templates, not governance**: `squad install`
-does not deploy them, and nothing reads one until a host adopts it — all thirteen at once with
+does not deploy them, and nothing reads one until a host adopts it — all fourteen at once with
 `kyber-weave docs init . --kyber-standards`, or one at a time by hand, as below.
 
 ## Using one
@@ -45,7 +45,9 @@ The seven templates that match the seven review references are `csharp`, `react`
 were written with the `rust-dev` and `go-dev` agents
 ([#287](https://github.com/dpalfery/kyber-weave/issues/287)), which only name
 **<rust-coding-standard>** and **<go-coding-standard>**; Rust under a Tauri app's `src-tauri`
-follows `tauri` instead. `pulumi` and
+follows `tauri` instead. `typescript` was written with the `typescript-dev` agent
+([#237](https://github.com/dpalfery/kyber-weave/issues/237)), which only names
+**<typescript-coding-standard>**; React UI TypeScript follows `react` instead. `pulumi` and
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
 and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
