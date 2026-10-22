@@ -32,7 +32,7 @@ public sealed class KyberStandardsTemplatesTests
     /// Kyber-Weave embeds all 14 canonical Kyber Squad coding standards templates.
     /// </summary>
     [Fact]
-    public void AllEnumeratesAllElevenCanonicalTechnologies()
+    public void AllEnumeratesAllFourteenCanonicalTechnologies()
     {
         IReadOnlyList<string> all = KyberStandardsTemplates.All;
 
