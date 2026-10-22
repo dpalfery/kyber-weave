@@ -35,22 +35,26 @@ for (const s of sessions) {
 }
 
 // After: one query for the set, grouped in memory.
-const ids = sessions.map((s) => s.id);
-const placeholders = ids.map(() => '?').join(', ');
-const calls = db
-  .prepare(`SELECT session_id, name FROM tool_calls WHERE session_id IN (${placeholders})`)
-  .all(...ids) as { session_id: string; name: string }[]; // row type matches the SELECT list
+function toolCallsBySession(db: DatabaseSync, ids: readonly string[]): Map<string, string[]> {
+  const bySession = new Map<string, string[]>();
+  if (ids.length === 0) return bySession; // `IN ()` is a syntax error
 
-const bySession = new Map<string, string[]>();
-for (const c of calls) {
-  const list = bySession.get(c.session_id) ?? [];
-  list.push(c.name);
-  bySession.set(c.session_id, list);
+  const placeholders = ids.map(() => '?').join(', ');
+  const calls = db
+    .prepare(`SELECT session_id, name FROM tool_calls WHERE session_id IN (${placeholders})`)
+    .all(...ids) as { session_id: string; name: string }[]; // row type matches the SELECT list
+
+  for (const c of calls) {
+    const list = bySession.get(c.session_id) ?? [];
+    list.push(c.name);
+    bySession.set(c.session_id, list);
+  }
+  return bySession;
 }
 ```
 
-The placeholder list is built from `?` marks only; the values stay bound. Return early when
-`ids` is empty — `IN ()` is a syntax error. SQLite caps bound
+The placeholder list is built from `?` marks only; the values stay bound. The early return
+matters: with no ids the statement would be `IN ()`, which SQLite rejects. SQLite caps bound
 parameters per statement (32,766 by default on current builds), so chunk very large id sets,
 or use a join or a temporary table instead. A `JOIN` with a `GROUP BY` is often simpler still.
 
