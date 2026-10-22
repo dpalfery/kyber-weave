@@ -20,6 +20,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadTypeScriptSpecialistTests
 {
+    /// <summary>Every reference the <c>typescript-dev</c> skill ships, so none can drop from a render.</summary>
+    private static readonly string[] ReferenceStems =
+        ["types-and-absent-values", "data-access", "errors-and-async", "esm-and-gates"];
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
@@ -36,7 +40,7 @@ public sealed class SquadTypeScriptSpecialistTests
 
     /// <summary>
     /// A fresh install on any approved target delivers the specialist with its standard lookup and
-    /// its skill's references. A target that dropped it would leave the conductor delegating to an
+    /// all four of its skill's references. A target that dropped it would leave the conductor delegating to an
     /// agent that does not exist there.
     /// </summary>
     [Theory]
@@ -59,12 +63,11 @@ public sealed class SquadTypeScriptSpecialistTests
             principals,
             f => Encoding.UTF8.GetString(f.Content.Span)
                 .Contains("<typescript-coding-standard>", StringComparison.Ordinal));
-        Assert.Contains(
-            principals,
-            f => f.RelativePath.Contains("types-and-absent-values", StringComparison.Ordinal));
-        Assert.Contains(
-            principals,
-            f => f.RelativePath.Contains("data-access", StringComparison.Ordinal));
+        Assert.All(
+            ReferenceStems,
+            stem => Assert.Contains(
+                principals,
+                f => f.RelativePath.Contains(stem, StringComparison.Ordinal)));
     }
 
     /// <summary>
