@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-22
 ---
 
 # Distribution and release flow
@@ -179,7 +179,58 @@ pre-publish manifest check before creating a GitHub Release. This check verifies
 [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
 and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
 
-On success, the workflow creates a GitHub Release with the 21 assets, the manifest, and changelogs (passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
+On success, the workflow creates a GitHub Release with the 21 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
+
+### Release notes
+
+Each Release page shows a **what changed** section first, then the install block and the asset
+table. A pre-release notice, when there is one, sits above the what-changed section. The section is GitHub's generated list of merged pull requests since the comparison
+base, followed by a **Full Changelog** compare link. Commits pushed without a pull request
+appear only through that compare link. The list is not grouped into categories: the repository
+has no `.github/release.yml`, so every merged pull request appears in one list.
+
+The comparison base is computed by the `version` job, which runs
+`scripts/next-release-version.sh --notes-base --for <tag>`, with the tag it just computed, for a manually dispatched run:
+
+| Release being cut | Compared with |
+|---|---|
+| Stable (e.g. `0.1.7`) | The highest lower stable tag. Every RC on the line in between is covered by that one comparison, so the stable notes show everything since the last stable. |
+| RC (e.g. `0.1.7-rc.10`) | The highest lower stable or RC tag. |
+
+Rules that apply to both:
+
+- The tag being released is never its own base, and `-dev.N` tags are ignored.
+- The major-version guard is not applied to the tags below the released tag, so `v1.0.0-rc.2`
+  compares with `v1.0.0-rc.1` even though no stable `v1.0.0` exists yet. A mistyped higher-major
+  tag (for example `v1.0.6-rc.6` while releasing `v0.1.7-rc.10`) is above the released tag and
+  is never the base.
+- If no earlier tag qualifies (for example, the first release), the base is empty and the
+  notes request omits `previous_tag_name`.
+
+**Tag push.** A tag pushed by hand (`git tag v0.2.0 && git push origin v0.2.0`) has no
+computed base. The notes request omits `previous_tag_name`, and GitHub uses its default
+previous release.
+
+**Failure is fail-closed.** Notes are generated inside the `release` job, after the approval
+click. The job asks the generate-notes API up to two times, with a 10-second pause between
+attempts. If both fail, the job stops before `gh release create`, so no tag and no Release
+exist. Re-running the workflow is clean.
+
+**Order on the page.** A pre-release notice (hyphenated versions only) comes first, then the
+what-changed section, then the install heading. The notes are passed to `gh release create`
+with `--notes-file`.
+
+**Post-publish check.** After the Release is live, the job reads the notes back and verifies:
+
+- the compare link `…/compare/<previous>...<tag>` is present (skipped when there is no base);
+- the changes section appears before the install heading;
+- the prerelease flag matches the version (set when it contains a hyphen).
+
+As with the asset check, a failure here fails the job but does not unpublish the Release.
+
+**Out of scope.** Grouping the list into categories by pull-request label is not configured.
+There is no `.github/release.yml`, so GitHub's default flat list is used. Adding that file is
+a separate change to the pipeline.
 
 The workflow also pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages (`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
@@ -202,7 +253,7 @@ Kyber-Weave uses standard semantic versioning tags:
 When a version containing a hyphen (`-`) is processed:
 
 - `.github/workflows/release.yml` passes `--prerelease` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
-- Release notes automatically include a pre-release callout banner highlighting the candidate version.
+- Release notes automatically include a pre-release callout banner highlighting the candidate version. The banner sits above the what-changed section. Each tag type compares against a different earlier tag; see [Release notes](#release-notes).
 - Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`. This is a maintainer/testing channel only, not a supported end-user install path (see [Other published artifacts](#other-published-artifacts)).
 
 ### Binary versioning and inspection
