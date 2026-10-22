@@ -255,7 +255,7 @@ jobs:
           - { rid: linux-x64,    os: ubuntu-latest, exe: "",  archive: tar.gz }
           - { rid: win-x64,      os: ubuntu-latest, exe: ".exe", archive: zip }
     env:
-      NODE_VERSION: "24.21.0"
+      NODE_VERSION: "24.22.1"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -506,7 +506,7 @@ jobs:
           - { rid: darwin-x64,   os: macos-14,        target: x86_64-apple-darwin,    asset: kyberdash-tray-darwin-x64.zip }
           - { rid: win-x64,      os: windows-latest,  target: x86_64-pc-windows-msvc, asset: kyberdash-tray-win-x64-setup.exe }
     env:
-      NODE_VERSION: "24.21.0"
+      NODE_VERSION: "24.22.1"
       TEAM_ID: J2UNNQ466J
     steps:
       - name: Checkout
