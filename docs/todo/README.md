@@ -48,6 +48,7 @@ last-reviewed: YYYY-MM-DD
 | [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill and retained subagent in a live Claude Code session; the renderer and CI checks do not establish runtime behaviour. |
 | [squad-lease-contention-cross-process.md](squad-lease-contention-cross-process.md) | KyberSquad | draft | `SquadDeploymentStateTests` lease-contention cases fail on a fixed 5-second wait when the machine is loaded; root cause not yet reproduced. |
 | [kyberdash-skills-view-follow-ups.md](kyberdash-skills-view-follow-ups.md) | KyberDash | draft | Non-blocking follow-ups from the skills view: inactive-skill finding volume, listing-delta payload growth, missing Pi, OpenCode, Copilot CLI and Claude Desktop captures, a live visual check, and small cleanups. |
+| [kyberdash-job-problem-reconciliation.md](kyberdash-job-problem-reconciliation.md) | KyberDash | draft | A `harness:<id>:job` `PROVIDER_PARSE_ERROR` row persists after the store heals because `reconcileSourceProblems` owns source-keyed rows only; deferred from the Kilo collection plan with three candidate repairs. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

@@ -89,15 +89,27 @@ export const FILE_SOURCE_UNMEASURABLE: readonly string[] = [
  * Per-reader limits for the transcript formats D5 supports. Claude stores
  * conversation and tool-result content but injects prompts and tool schemas
  * at runtime. Codex stores prompts, instructions, conversation, and results,
- * but records tool names rather than definition schemas.
+ * but records tool names rather than definition schemas. Kilo's shared
+ * runtime stores conversation text and completed tool output in kilo.db but
+ * never the runtime prompt, its schemas, or instruction context (D7). The Kilo
+ * capture plugin supplies the prompt and schemas per turn; the synthesizer
+ * lifts those two declarations for a turn the plugin recorded.
  */
 export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new Map([
   ['claude', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['claude-code', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['codex', ['schema_cost', 'tool_definitions']],
   ['opencode', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
-  ['kilo', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
-  ['kilo-code', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['kilo', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  ['kilo-code', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  // The shared-runtime harness reads the same kilo.db store as its provider,
+  // so its capability row names the same limitation instead of falling
+  // through to the survey family.
+  ['kilo-shared-runtime', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
+  // The legacy VS Code task tree shares the provider and the reader
+  // registration but not the store: ui_messages.json has no reader-compatible
+  // parts, so nothing the SQLite reader measures is measurable there either.
+  ['kilo-vscode-legacy', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot-vscode', ['schema_cost', 'system_prompt', 'tool_definitions', 'tool_result_content']],
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],

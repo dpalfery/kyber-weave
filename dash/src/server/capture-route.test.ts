@@ -96,6 +96,7 @@ const codexPath = (home: string) => join(home, '.codex', 'config.toml')
 const piSettingsPath = (home: string) => join(home, '.pi', 'agent', 'settings.json')
 const piObservMePath = (home: string) => join(home, '.pi', 'agent', 'observme.yaml')
 const antigravityPath = (home: string) => join(home, '.gemini', 'antigravity-cli', 'settings.json')
+const kiloConfigPath = (home: string) => join(home, '.config', 'kilo', 'kilo.jsonc')
 
 /**
  * A Claude settings document whose telemetry block sits exactly at the managed values,
@@ -280,6 +281,7 @@ describe('GET /api/kyber/capture', () => {
     writeConfig(copilotStablePath(home), copilotPartialConfig())
     writeConfig(opencodePath(home), '{\n  // synthetic opencode fixture\n}\n')
     writeConfig(codexPath(home), '# synthetic codex config\n')
+    writeConfig(kiloConfigPath(home), '{}\n')
     writeConfig(piSettingsPath(home), `${JSON.stringify({ packages: ['@dpalfery/pi-statusline'] }, null, 2)}\n`)
     writeConfig(piObservMePath(home), '# synthetic ObservMe fixture\nendpoint: http://127.0.0.1:4318/v1/traces\n')
     const bridgeScript = join(home, 'bin', 'antigravity-statusline-bridge.sh')
@@ -323,10 +325,12 @@ describe('GET /api/kyber/capture', () => {
       'opencode',
       'pi',
       'antigravity',
+      'kilo',
     ])
 
     const fixtureHarnesses = (loadFixture('status-mixed') as CaptureBodyView).harnesses ?? []
     const fixtureById = new Map(fixtureHarnesses.map((harness) => [String(harness.id), harness]))
+    // The shared fixture predates kilo; its six rows are still compared field by field.
     for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity']) {
       const harness = harnessById(body, id)
       const fixtureHarness = fixtureById.get(id)
@@ -414,7 +418,7 @@ describe('GET /api/kyber/capture', () => {
         text: 'Add span.set_attribute("declaredContextWindow", <positive token count>) on the statusline bridge\'s chat span; the window exists only when the user declares it',
       },
     ])
-    for (const id of ['codex', 'pi', 'antigravity']) {
+    for (const id of ['codex', 'pi', 'antigravity', 'kilo']) {
       expect(harnessById(body, id)).toMatchObject({
         mode: 'status-only',
         installed: 'detected',
@@ -423,6 +427,16 @@ describe('GET /api/kyber/capture', () => {
         warnings: [],
       })
     }
+
+    // Kilo is reported honestly: the drawer shows the plugin state and the two steps the
+    // user owns, and no environment variable to set.
+    const kilo = harnessById(body, 'kilo')
+    expect(kilo.displayName).toBe('Kilo Code')
+    expect((kilo.statusLines as unknown[]).length).toBeGreaterThan(0)
+    expect(kilo.manualSteps).toHaveLength(2)
+    expect(kilo.manualSteps[0]).toMatchObject({ id: 'kilo-capture-plugin' })
+    expect(kilo.manualSteps[1]).toMatchObject({ id: 'kilo-folder-import' })
+    expect(kilo.manualSteps[1]!['env']).toBeUndefined()
   })
 
   it('reports drift for a receipted file the owner changed since enable', async () => {
@@ -494,7 +508,7 @@ describe('GET /api/kyber/capture', () => {
 
     const { status, body } = await callRoute('GET', PATH, { deps })
     expect(status).toBe(200)
-    for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity']) {
+    for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity', 'kilo']) {
       const harness = harnessById(body, id)
       expect(harness.installed).toBe(id === 'claude-code' ? 'unknown' : 'not-detected')
       expect(harness.installEvidence).toEqual([`synthetic ${id} evidence`])
@@ -606,24 +620,44 @@ describe('POST /api/kyber/capture', () => {
     expect(existsSync(receiptPathForHome(home))).toBe(false)
   })
 
-  it.each(['codex', 'pi', 'antigravity'])(
-    'rejects a status-only harness (%s) with 400 and writes nothing',
-    async (harness) => {
-      const home = makeHome()
-      const configPath = codexPath(home)
-      writeConfig(configPath, '# synthetic codex config\n')
-      const deps = makeCaptureDeps(captureSettings(home))
+  it.each([
+    ['codex', codexPath],
+    ['pi', piSettingsPath],
+    ['antigravity', antigravityPath],
+    ['kilo', kiloConfigPath],
+  ])('rejects a status-only harness (%s) with 400 and writes nothing', async (harness, pathFor) => {
+    const home = makeHome()
+    const configPath = pathFor(home)
+    writeConfig(configPath, '# synthetic status-only config\n')
+    const deps = makeCaptureDeps(captureSettings(home))
 
-      const { status, body } = await callRoute('POST', PATH, {
-        deps,
-        payload: { action: 'enable', harness, dryRun: false },
-      })
-      expect(status).toBe(400)
-      expect(ownKeys(body)).toEqual(['error'])
-      expect(readFileSync(configPath, 'utf8')).toBe('# synthetic codex config\n')
-      expect(existsSync(receiptPathForHome(home))).toBe(false)
-    },
-  )
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'enable', harness, dryRun: false },
+    })
+    expect(status).toBe(400)
+    expect(ownKeys(body)).toEqual(['error'])
+    expect(readFileSync(configPath, 'utf8')).toBe('# synthetic status-only config\n')
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
+
+  it('rejects a status-only harness as a dry run too: a pending writer is never managed', async () => {
+    // `dryRun: true` is the drawer's preview path. A pending harness has no managed key to
+    // preview, so the request is malformed rather than an empty preview.
+    const home = makeHome()
+    const configPath = kiloConfigPath(home)
+    writeConfig(configPath, '{ "model": "synthetic" }\n')
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'enable', harness: 'kilo', dryRun: true },
+    })
+    expect(status).toBe(400)
+    expect(ownKeys(body)).toEqual(['error'])
+    expect(readFileSync(configPath, 'utf8')).toBe('{ "model": "synthetic" }\n')
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
 
   it('rejects a confirm whose echo carries more changes than the client keeps with 400', async () => {
     // The client caps each event at 64 changes (CAPTURE_MAX_CHANGES). A larger bound here

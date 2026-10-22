@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-10-21
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -57,6 +57,36 @@ while the CLI keeps writing every declared file. The harness write scope is unch
 managed harnesses stay claude-code, copilot and opencode, with codex, pi and antigravity
 status-only — and [ADR 0026](0026-kyber-utilities-owned-files-not-settings.md)'s bar on Kyber
 Utilities writing harness settings is untouched.
+
+Amended 2026-10-21 (the Kilo Code collection plan): the harness scope gains `kilo` as a
+**status-only** harness, appended last in `CAPTURE_HARNESS_REGISTRY`. Kilo is the first harness
+whose absence from the managed set is itself the decision rather than an unmapped surface. It has
+no config key that turns on local telemetry export — `OTEL_EXPORTER_OTLP_ENDPOINT` is
+environment-only and no config field sets it — and its only on/off key,
+`experimental.openTelemetry`, gates Kilo's PostHog product analytics, defaults to `true`, and is
+not a local export switch. Writing that key would breach decision 1's "only the keys that enable
+telemetry export" and could re-enable vendor analytics for an owner who opted out. `kilo`
+therefore joins `codex`, `pi` and `antigravity` as a `kind: 'pending'` writer: `status` reports its
+install evidence, its fixed status lines and one manual step (`kilo-folder-import`, with no `env`),
+`enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` refuses it
+with **400**. The row states that Kilo's OTLP export is env-gated and carries no model spans,
+usage or content, and that Kilo usage comes from kilo.db through folder import. Nothing else in
+this record moves: the managed write scope stays `claude-code`, `copilot` and `opencode`, decision
+4's receiver coupling is untouched because a status-only row never couples to the receiver, and a
+future config-level Kilo export key would be an additive change rather than a revision of this
+paragraph.
+
+Amended 2026-10-21 (Kilo capture plugin): the owned unit may be a whole file, not only keys.
+`kilo` stays `kind: 'pending'` for the key machinery, and so stays out of the Settings route's
+writable set (`POST /api/kyber/capture` still answers 400), but it gains a `filePlugin`:
+`enable` installs `~/.config/kilo/plugin/kyberdash-capture.js` and `disable` removes it only while
+its SHA-256 still matches the digest in `~/.kyberdash/kilo-plugin-receipt.json`. An owner edit is
+left in place and reported, a file KyberDash did not write is never overwritten, and
+`kilo.jsonc` is never read or written. The plugin records Kilo's assembled system prompt, tool
+definitions and skills catalog to local files under `~/.kyberdash/capture/kilo` and has no network
+code; this replaces the OTLP framing of the earlier amendment, because Kilo's OTLP stream cannot
+carry those buckets and its plugin hooks can. Nothing in decisions 1 to 4 moves: no telemetry
+export key is written, and the receiver coupling is untouched.
 
 ## Context
 

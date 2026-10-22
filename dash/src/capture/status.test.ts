@@ -53,6 +53,34 @@ const insidersPath = (home: string) => copilotFile(home, 'vscode-insiders')
 const codexPath = (home: string) => pjoin(HOST, home, '.codex', 'config.toml')
 const piSettingsPath = (home: string) => pjoin(HOST, home, '.pi', 'agent', 'settings.json')
 
+/**
+ * The VS Code Stable user-data root, following the same seam Copilot's settings path
+ * uses: win32 roots at the (injected) application-data directory, darwin at
+ * `~/Library/Application Support`, linux at `~/.config`.
+ */
+function vscodeUserDataRoot(home: string): string {
+  const { appData } = hostEnv(home)
+  if (HOST === 'win32') return pjoin(HOST, appData ?? home, 'Code')
+  if (HOST === 'darwin') return pjoin(HOST, home, 'Library', 'Application Support', 'Code')
+  return pjoin(HOST, home, '.config', 'Code')
+}
+
+const kiloConfigDir = (home: string) => pjoin(HOST, home, '.config', 'kilo')
+const kiloConfigFile = (home: string) => pjoin(HOST, kiloConfigDir(home), 'kilo.jsonc')
+const kiloSharedRuntimeDb = (home: string) => pjoin(HOST, home, '.local', 'share', 'kilo', 'kilo.db')
+const kiloVscodeGlobalStorage = (home: string) =>
+  pjoin(HOST, vscodeUserDataRoot(home), 'User', 'globalStorage', 'kilocode.kilo-code')
+
+/** Create one of the places a detection probe looks for, so the real filesystem answers. */
+function createProbeSource(path: string, kind: 'file' | 'directory'): void {
+  if (kind === 'file') {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, '')
+    return
+  }
+  mkdirSync(path, { recursive: true })
+}
+
 function byId(statuses: readonly CaptureHarnessStatus[], id: string): CaptureHarnessStatus {
   const found = statuses.find((status) => status.id === id)
   if (found === undefined) throw new Error(`no status for ${id}`)
@@ -100,6 +128,7 @@ describe('buildCaptureStatus over a temporary home', () => {
       ['opencode', 'managed'],
       ['pi', 'status-only'],
       ['antigravity', 'status-only'],
+      ['kilo', 'status-only'],
     ])
   })
 
@@ -312,6 +341,88 @@ describe('buildCaptureStatus over a temporary home', () => {
       `${appData}\\Code\\User\\settings.json`,
       `${appData}\\Code - Insiders\\User\\settings.json`,
     ])
+  })
+})
+
+describe('kilo status-only capture status (T3a)', () => {
+  it('lists kilo as a status-only harness that is not applicable, with an inert file row', () => {
+    const home = makeHome()
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo).toMatchObject({
+      id: 'kilo',
+      displayName: 'Kilo Code',
+      mode: 'status-only',
+      installed: 'not-detected',
+      state: 'not-applicable',
+      receipt: 'absent',
+      warnings: [],
+    })
+    // Status-only declares no managed keys, so nothing here is ever written: the file
+    // row is the config surface the status points at, and it stays empty.
+    expect(kilo.files).toHaveLength(1)
+    const file = kilo.files[0]!
+    expect(file.path.startsWith(kiloConfigDir(home))).toBe(true)
+    expect(file).toMatchObject({
+      applicable: false,
+      expectedKeys: [],
+      presentKeys: [],
+      missingKeys: [],
+      drift: null,
+    })
+  })
+
+  it.each([
+    ['the config directory', kiloConfigDir, 'directory'],
+    ['the shared-runtime database', kiloSharedRuntimeDb, 'file'],
+    ['the VS Code Stable globalStorage directory', kiloVscodeGlobalStorage, 'directory'],
+  ] as const)('is detected when %s exists, with one evidence line', (_label, sourceOf, kind) => {
+    const home = makeHome()
+    const source = sourceOf(home)
+    createProbeSource(source, kind)
+
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo.installed).toBe('detected')
+    // One question with three alternatives, so a detected harness carries one line
+    // naming the place that answered rather than three.
+    expect(kilo.installEvidence).toHaveLength(1)
+    expect(kilo.installEvidence[0]).toContain(source)
+  })
+
+  it('is not-detected when none of the three places exists', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    expect(kilo.installed).toBe('not-detected')
+    expect(kilo.installEvidence).toHaveLength(1)
+  })
+
+  it('states the plugin state, what it captures and where usage comes from, with no OTLP framing', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    const lines = kilo.statusLines.join('\n')
+    expect(lines.trim()).not.toBe('')
+    expect(lines).toMatch(/plugin: not installed/)
+    expect(lines).toMatch(/system prompt, tool definitions and skills/)
+    expect(lines).toMatch(/kilo\.db/)
+    expect(lines).toMatch(/folder import/i)
+    expect(lines).not.toMatch(/OTLP/)
+  })
+
+  it('never echoes text from kilo.jsonc', () => {
+    const home = makeHome()
+    const sentinel = 'synthetic-kilo-config-NEVER-ECHO-0123456789'
+    writeConfig(kiloConfigFile(home), `{ "model": "${sentinel}" }\n`)
+
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(JSON.stringify(kilo)).not.toContain(sentinel)
+  })
+
+  it('names two manual steps, the plugin install and the folder import, with no environment variable', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    expect(kilo.manualSteps.map((step) => step.id)).toEqual(['kilo-capture-plugin', 'kilo-folder-import'])
+    for (const step of kilo.manualSteps) {
+      // Commands and settings the user runs, never an env var the drawer could set for them.
+      expect(step.env).toBeUndefined()
+    }
+    expect(kilo.manualSteps[0]!.text).toMatch(/capture enable --harness kilo/)
+    expect(kilo.manualSteps[1]!.text).toMatch(/Scheduled folder import|import-history --harness kilo-shared-runtime/)
   })
 })
 

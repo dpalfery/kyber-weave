@@ -77,7 +77,7 @@ export type StatusContext = {
   home: string
   env: PathEnv
   endpoint: string
-  /** Defaults to the six registered harnesses. */
+  /** Defaults to every harness in the registry. */
   writers?: readonly CaptureHarnessWriter[]
   /** Replaces filesystem detection for every harness (a test, or a host that knows better). */
   installProbe?: (harnessId: string) => {
@@ -112,6 +112,24 @@ function manualStepsFor(writer: CaptureHarnessWriter, endpoint: string): Capture
         text:
           'Add span.set_attribute("declaredContextWindow", <positive token count>) on the statusline ' +
           "bridge's chat span; the window exists only when the user declares it",
+      },
+    ]
+  }
+  if (writer.id === 'kilo') {
+    return [
+      {
+        id: 'kilo-capture-plugin',
+        text:
+          'Run `kyberdash kyber capture enable --harness kilo` to install the plugin that records the system prompt, ' +
+          'tool definitions and skills catalog, then restart Kilo',
+      },
+      {
+        id: 'kilo-folder-import',
+        // No env: a folder import is a setting or a command the user runs,
+        // never a variable the drawer could suggest a value for.
+        text:
+          'Kilo usage and messages come from kilo.db: point Maintenance → Scheduled folder import ' +
+          'at the Kilo data folder, or run `kyberdash dash import-history --harness kilo-shared-runtime`',
       },
     ]
   }

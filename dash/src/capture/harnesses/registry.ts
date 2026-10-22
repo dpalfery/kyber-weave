@@ -1,4 +1,5 @@
-// The capture harness registry (T8): the six D6 harnesses in one place.
+// The capture harness registry (T8): the six D6 harnesses plus Kilo Code (P3),
+// in one place.
 //
 // Every writer module is a "pending discovery" stub until its Phase 2 task
 // maps the harness's real OTLP exporter surface and turns it into a managed
@@ -15,11 +16,13 @@
 // a harness module cannot grow a second writer that bypasses D11.
 
 import type { JsonScalar } from '../edit-json.js'
+import type { KiloPluginResult } from '../kilo-plugin/install.js'
 import type { PathEnv } from '../paths.js'
 import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
 import { codexHarness } from './codex.js'
 import { copilotHarness } from './copilot.js'
+import { kiloHarness } from './kilo.js'
 import { opencodeHarness } from './opencode.js'
 import { piHarness } from './pi.js'
 
@@ -36,14 +39,25 @@ export type PendingHarnessWriter = {
   /**
    * Home-dependent status lines. When set and non-empty, `status` prints
    * these instead of the static `reason`. Pi names the loaded extension;
-   * Antigravity reports the statusline bridge. `enable` and `disable` do
-   * not call this and never write config.
+   * Antigravity reports the statusline bridge; Kilo states the fixed
+   * ingest-boundary facts. `enable` and `disable` do not call this and
+   * never write config.
    */
   /**
    * `redact` is set by the structured (API) status: it must not echo text copied
    * from config the owner wrote. The CLI text omits it and is unchanged.
    */
   describeStatus?: (home: string, options?: { redact?: boolean }) => readonly string[]
+  /**
+   * A harness that owns one whole file (a plugin) instead of config keys. The
+   * file carries its own receipt, so `enable` and `disable` call these and write
+   * nothing to the key receipt. The Settings route stays read-only for it.
+   */
+  filePlugin?: {
+    install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
+    uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
+    path: (home: string, env: PathEnv | undefined) => string
+  }
 }
 
 /**
@@ -115,7 +129,7 @@ export type ManagedHarnessWriter = {
 
 export type CaptureHarnessWriter = PendingHarnessWriter | ManagedHarnessWriter
 
-/** The six D6 harnesses, the default `--harness` set. */
+/** The seven harnesses, the default `--harness` set. Kilo is appended last. */
 export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   copilotHarness,
   claudeCodeHarness,
@@ -123,6 +137,7 @@ export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   opencodeHarness,
   piHarness,
   antigravityHarness,
+  kiloHarness,
 ]
 
 export const SUPPORTED_CAPTURE_HARNESS_IDS: readonly string[] = CAPTURE_HARNESS_REGISTRY.map(

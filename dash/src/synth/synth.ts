@@ -519,8 +519,32 @@ export function synthesizeCall(
   const invokedSkills = invokedSkillsOf(call)
   const listedSkills = listedSkillsOf(call)
   const absentOutputReason = copilotAbsentOutputReason(call)
+  // Stamps key on the parsed provider — the reader rows are declared per
+  // provider — except kilo-vscode-legacy: it shares kilo-code's provider
+  // string and reader registration but reads the legacy task tree, which
+  // carries no reader-compatible parts. Its own row declares every content
+  // bucket unmeasurable, so the envelope's harness id must select it here;
+  // keying on `harness` for every record would re-key other split surfaces
+  // (claude-cli, copilot-vscode) whose providers already carry the right
+  // row, so the exception stays scoped to the one id whose store differs.
+  // (`call.provider` itself must not be renamed: nativeRecordIdentity
+  // slices the deduplication key on the provider prefix.)
+  const declared = measurabilityFor(harness === 'kilo-vscode-legacy' ? harness : call.provider)
+  // Kilo's system prompt and tool definitions arrive from the capture plugin for some
+  // turns and not others, so a turn whose reader supplied one measured it, whatever the
+  // provider's default says. Scoped to those two buckets: other readers (Cursor) supply a
+  // bucket they deliberately declare incomplete.
+  const capturedBuckets =
+    call.provider === 'kilo-code' && harness !== 'kilo-vscode-legacy'
+      ? ['system_prompt', 'tool_definitions']
+      : []
+  const supplied = new Set(
+    readerTurn?.parts
+      .filter((part) => part.text !== '' && capturedBuckets.includes(part.part))
+      .map((part) => part.part),
+  )
   const measurability = {
-    ...measurabilityFor(call.provider),
+    ...Object.fromEntries(Object.entries(declared).filter(([metric]) => !supplied.has(metric as never))),
     ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
   }
 

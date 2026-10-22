@@ -249,22 +249,22 @@ describe('HarnessSourceRegistry', () => {
     expect(descriptorFor('antigravity-cli')?.label).toBe('Antigravity CLI')
     expect(descriptorFor('antigravity-ide')?.label).toBe('Antigravity IDE')
     expect(descriptorFor('kilo-shared-runtime')?.label).toBe('Kilo shared runtime')
-    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('3')
+    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('4')
     expect(descriptorFor('kilo-vscode-legacy')?.label).toBe('Kilo for VS Code (legacy)')
-    expect(descriptorFor('kilo-vscode-legacy')?.parserContractVersion).toBe('3')
+    expect(descriptorFor('kilo-vscode-legacy')?.parserContractVersion).toBe('4')
     expect(descriptorFor('kimi-code')?.providerName).toBe('kimicode')
     expect(PROVIDER_DISPOSITIONS.kimicode).toEqual({ kind: 'alias-of', harnessId: 'kimi-code' })
   })
 
-  it('assigns kilo contract version 3 by named harness or kilo-code provider, not a kilo- prefix', () => {
+  it('assigns kilo contract version 4 by named harness or kilo-code provider, not a kilo- prefix', () => {
     expect(parserContractVersionFor({
       providerName: 'kilo-code',
       harnessId: 'kilo-shared-runtime',
-    })).toBe('3')
+    })).toBe('4')
     expect(parserContractVersionFor({
       providerName: 'other',
       harnessId: 'kilo-vscode-legacy',
-    })).toBe('3')
+    })).toBe('4')
     expect(parserContractVersionFor({
       providerName: 'kilo-experimental',
       harnessId: 'kilo-experimental-ide',

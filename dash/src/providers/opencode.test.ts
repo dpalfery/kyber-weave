@@ -270,6 +270,30 @@ skipUnlessSqlite('opencode provider - session discovery', () => {
     expect(sessions.every(s => s.provider === 'opencode')).toBe(true)
   })
 
+  it('surfaces a present-but-unreadable opencode.db as a marked source, not a silent skip', async () => {
+    // Shared sqlite-session-parser behavior (T1b): a db the directory listing
+    // sees but discovery cannot read stays discovered as a marker source whose
+    // recorded failure the parse throws — a present store must never read as
+    // an empty provider.
+    const ocDir = join(tmpDir, 'opencode')
+    await mkdir(ocDir, { recursive: true })
+    const dbPath = join(ocDir, 'opencode.db')
+    await writeFile(dbPath, 'this is not a sqlite database\n'.repeat(8))
+
+    const provider = createOpenCodeProvider(tmpDir)
+    const sessions = await provider.discoverSessions()
+
+    expect(sessions).toHaveLength(1)
+    const marker = sessions[0]!
+    expect(marker.path).toContain('opencode.db')
+    expect(marker.unreadableStoreError).toBeTruthy()
+
+    const consume = async () => {
+      for await (const _ of provider.createSessionParser(marker, new Set()).parse()) void _
+    }
+    await expect(consume()).rejects.toThrow(/opencode\.db/)
+  })
+
   it('ignores non-opencode db files in the directory', async () => {
     const dbPath = createTestDb(tmpDir)
     withTestDb(dbPath, (db) => {
@@ -353,6 +377,11 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
     expect(call.sessionId).toBe('sess-1')
     expect(call.timestamp).toBe(new Date(1700000001000).toISOString())
     expect(call.deduplicationKey).toBe('opencode:sess-1:msg-2')
+    // T2b regression guard: pairingId is a Kilo-store opt-in. OpenCode's calls
+    // must stay byte-identical — the key absent, not present-and-undefined —
+    // because `matchingTurns` treats a pairing key as a claim on a reader turn.
+    expect('pairingId' in call).toBe(false)
+    expect(call.turnId).toBeUndefined()
   })
 
   it('normalizes opencode MCP tool names for shared MCP reporting', async () => {

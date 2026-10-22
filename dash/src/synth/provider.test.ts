@@ -24,6 +24,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { ParsedProviderCall } from '../providers/types.js'
 import { copilot } from '../providers/copilot.js'
 import { createCursorProvider } from '../providers/cursor.js'
+import { createKiloCodeProvider } from '../providers/kilo-code.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
 import { contextLimitOf } from '../canon/context-window.js'
 import { CanonStore } from '../canon/store.js'
@@ -145,6 +146,90 @@ function cursorEvidenceDb(): string {
     db.close()
   }
   return dbPath
+}
+
+/**
+ * A kilo.db shaped so index pairing and id pairing disagree: a zero-token
+ * assistant message sits between the two token-bearing ones. `buildAssistantCall`
+ * yields a call for it (it carries text), the reader yields no turn for it, so
+ * the call list is one longer than the turn list.
+ */
+function kiloPairingStore(): { sessionId: string; sourcePath: string } {
+  const root = mkdtempSync(join(tmpdir(), 'kyber-kilo-pairing-'))
+  tempRoots.push(root)
+  const dbPath = join(root, 'kilo.db')
+  const sessionId = 'sess-kilo-pairing'
+  const db = new DatabaseSync(dbPath)
+  try {
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
+        slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL,
+        version TEXT NOT NULL, time_created INTEGER, time_updated INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        time_created INTEGER, time_updated INTEGER, data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL, time_created INTEGER,
+        time_updated INTEGER, data TEXT NOT NULL
+      );
+    `)
+
+    const now = Date.parse('2026-09-10T10:00:00.000Z')
+    db.prepare(`INSERT INTO session (id, project_id, parent_id, slug, directory, title, version,
+                                     time_created, time_updated, time_archived)
+                VALUES (?, 'proj-1', NULL, 'slug-pairing', '/Users/hal/myproject', 'Kilo pairing',
+                        '1.4.2', ?, ?, NULL)`)
+      .run(sessionId, now, now)
+
+    const message = (id: string, offsetMs: number, data: Record<string, unknown>) => {
+      db.prepare(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`)
+        .run(id, sessionId, now + offsetMs, now + offsetMs, JSON.stringify(data))
+    }
+    const part = (id: string, messageId: string, offsetMs: number, data: Record<string, unknown>) => {
+      db.prepare(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, messageId, sessionId, now + offsetMs, now + offsetMs, JSON.stringify(data))
+    }
+
+    message('msg-u1', 0, { role: 'user' })
+    part('part-u1', 'msg-u1', 0, { type: 'text', text: 'first question' })
+    message('msg-a1', 1000, { role: 'assistant', modelID: 'claude-opus-4-6', tokens_input: 100, tokens_output: 20 })
+    part('part-a1-text', 'msg-a1', 1000, { type: 'text', text: 'first answer' })
+    part('part-a1-tool', 'msg-a1', 1000, {
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: { status: 'completed', input: { command: 'ls' }, output: 'first tool output' },
+    })
+    message('msg-router', 2000, { role: 'assistant', modelID: 'edenai/router-model' })
+    part('part-router', 'msg-router', 2000, { type: 'text', text: 'router filler answer' })
+    message('msg-u2', 3000, { role: 'user' })
+    part('part-u2', 'msg-u2', 3000, { type: 'text', text: 'second question' })
+    message('msg-a2', 4000, { role: 'assistant', modelID: 'claude-opus-4-6', tokens_input: 300, tokens_output: 60 })
+    part('part-a2-text', 'msg-a2', 4000, { type: 'text', text: 'second answer' })
+    part('part-a2-tool', 'msg-a2', 4000, {
+      type: 'tool',
+      callID: 'call-2',
+      tool: 'read',
+      state: { status: 'error', input: { filePath: '/nope' }, output: 'ENOENT: no such file' },
+    })
+  } finally {
+    db.close()
+  }
+  return { sessionId, sourcePath: `${dbPath}:${sessionId}` }
+}
+
+/** Parse a Kilo source unit through the provider seam, as refresh does. */
+async function kiloCalls(sourcePath: string): Promise<ParsedProviderCall[]> {
+  const provider = createKiloCodeProvider()
+  const source = { path: sourcePath, project: 'myproject', provider: 'kilo-code' }
+  const calls: ParsedProviderCall[] = []
+  for await (const entry of provider.createSessionParser(source, new Set()).parse()) calls.push(entry)
+  return calls
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,6 +1169,79 @@ describe('T3 static source capability readers', () => {
     const record = result.records[0]!
     expect((record.parts ?? []).length).toBeGreaterThan(0)
     expect(record.content.conversation_history).toContain('codex pairing conversation')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T2 — Kilo reader parts pair to their call by pairingId (decision D7)
+// ---------------------------------------------------------------------------
+
+describe('T2 — Kilo reader-to-call pairing', () => {
+  async function ingestKilo(sourcePath: string, sessionId: string) {
+    const calls = await kiloCalls(sourcePath)
+    const result = await ingestProviders(['kilo-code'], () => ({
+      calls,
+      filePath: sourcePath,
+      harnessId: 'kilo-shared-runtime',
+      sourceKey: `kilo-shared-runtime:${sessionId}`,
+    }))
+    return { calls, result }
+  }
+
+  it('attaches each assistant message its own conversation and tool-result parts, not its neighbour\'s', async () => {
+    const { sessionId, sourcePath } = kiloPairingStore()
+    const { calls, result } = await ingestKilo(sourcePath, sessionId)
+
+    // Premise: the parser yields a call for the zero-token router message, so
+    // the call list is longer than the turn list and index pairing cannot be
+    // right — every call after the skipped message would take its neighbour's
+    // content.
+    expect(calls.map((call) => call.deduplicationKey)).toEqual([
+      `kilo-code:${sessionId}:msg-a1`,
+      `kilo-code:${sessionId}:msg-router`,
+      `kilo-code:${sessionId}:msg-a2`,
+    ])
+    expect(result.problems).toEqual([])
+
+    const turns = result.records.filter((record) => record.op === 'llm.invoke')
+    expect(turns).toHaveLength(3)
+    const [first, router, second] = turns
+
+    expect(first!.content.conversation_history).toBe('first question\nfirst answer')
+    expect(first!.content.tool_result_content).toBe('first tool output')
+    // The router message has no reader turn: no parts at all, and — the point —
+    // it did not take the next message's parts positionally.
+    expect(router!.parts).toBeUndefined()
+    expect(router!.content).toEqual({})
+    expect(second!.content.conversation_history).toBe('second question\nsecond answer')
+    expect(second!.content.tool_result_content).toBe('ENOENT: no such file')
+  })
+
+  it('synthesizes each tool call under the turn it belongs to, with the errored result marked', async () => {
+    const { sessionId, sourcePath } = kiloPairingStore()
+    const { result } = await ingestKilo(sourcePath, sessionId)
+
+    const parents = result.records.filter((record) => record.op === 'llm.invoke')
+    const toolRecords = result.records.filter((record) => record.op === 'tool.invoke')
+    expect(toolRecords.map((record) => record.name)).toEqual(['bash', 'read'])
+    expect(toolRecords.map((record) => record.parentSpanId)).toEqual([parents[0]!.spanId, parents[2]!.spanId])
+    expect(toolRecords[1]!.status, 'a state.status === "error" part is an errored tool record').toBe('error')
+    expect(toolRecords[1]!.parts?.[0]?.text).toBe('ENOENT: no such file')
+  })
+
+  it('declares the record\'s content measured while prompt, definitions and schema stay unmeasurable', async () => {
+    const { sessionId, sourcePath } = kiloPairingStore()
+    const { result } = await ingestKilo(sourcePath, sessionId)
+    const first = result.records.filter((record) => record.op === 'llm.invoke')[0]!
+
+    expect(first.measurability?.['conversation_history'], 'kilo.db stores the conversation').toBeUndefined()
+    expect(first.measurability?.['tool_result_content'], 'kilo.db stores completed tool output').toBeUndefined()
+    for (const metric of ['system_prompt', 'tool_definitions', 'instruction_context', 'schema_cost']) {
+      expect(first.measurability?.[metric], `${metric} must stay declared not measurable`).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.any(String),
+      })
+    }
   })
 })
 

@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-21
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -229,7 +229,7 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '3'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '4'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`, raised from `'3'` when the kilo.db reader began attaching conversation and tool-result parts) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
 sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
 falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
 bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
@@ -252,6 +252,26 @@ surface's **Refresh data** asks the engine to run this lifecycle over
 run that always imports ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
+
+**A present-but-unreadable store is a problem, not an empty history.** Discovery
+(`discoverSqliteSessions` in `dash/src/providers/sqlite-session-parser.ts`) no longer `continue`s
+past a SQLite store that exists but will not open, or that fails its required-table check. It
+returns a marker source carrying `unreadableStoreError`, and `parse()` throws that recorded reason
+**unconditionally** rather than re-opening: a transient cause (a `SQLITE_BUSY` lock) may have
+cleared by parse time, and a second successful open would present the failure as an empty store.
+The job-level catch in `refreshHarnessSources` (`dash/src/refresh/orchestrator.ts`) then records
+exactly one `PROVIDER_PARSE_ERROR` on `harness:<harnessId>:job`, attributed to the harness and
+naming the database, and the run continues for every other harness. This is the R1.2/R1.3 split
+documented in `dash/src/synth/provider.ts` applied to a database rather than a file: an **absent**
+store stays silent, and a store discovered earlier but gone by open time stays silent too, because
+absence is a negative existence check. The shape is the same for the OpenCode databases.
+
+**The job row is not reconciled after a repair.** `reconcileSourceProblems`
+(`dash/src/canon/store.ts`) owns `harness:<harnessId>:<sourceKey>:<code>` rows only (#243), so a
+job-level row survives the store healing and stays in the Problems list until that harness is
+cleaned. Per-harness Clean deletes the harness's problem rows along with its records, provenance
+and checkpoints. This is a recorded gap, not a measured zero and not a reconciliation contract:
+the repair is deliberately deferred, and the runbook carries the workaround.
 
 ### Claude Desktop and CLI file-synth content
 
@@ -278,6 +298,49 @@ counters-only: `purgeExpiredContent` empties their parts in the same run
 ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). The
 bucket table and repair boundary are in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
+
+### Kilo Code content reader and id-based pairing
+
+Kilo's shared runtime stores one `message` row per turn and one `part` row per fragment in
+`~/.local/share/kilo/kilo.db`. `kiloReader` (`dash/src/synth/readers/kilo.ts`) reads the session
+tree through the parser's own recursive CTE and the parser's own source shape
+`<kilo.db>:<sessionId>` (the final colon segment is the session id). It yields one turn per
+**token-bearing** assistant message, in `time_created, id` order, with `nativeRecordId` equal to
+the Kilo `message.id`. A missing store or session yields zero turns without throwing; a store that
+exists but will not open keeps the open error, so the ingest seam reports it instead of reading an
+empty history.
+
+Pairing is by id, never by index. `createSqliteSessionParser` also emits a call for a zero-token
+assistant message that still carries text (a router reply), so the call list and the reader's turn
+list are different lengths, and index pairing would attach each turn's content to its neighbour's
+call. The `pairingIdFromMessageId` opt-in on `SqliteProviderConfig` stamps
+`pairingId = message.id`; only `kilo-code` sets it, and OpenCode's parser output stays
+byte-identical. `turnId` remains span identity and `pairingId` is pairing-only, which is the key
+`matchingTurns` already honours. The reader declares `positionalPairingUnsafe` for the same reason.
+
+Measurability follows the store rather than the harness's ambition. `kilo`, `kilo-code` and
+`kilo-shared-runtime` declare `['schema_cost', 'system_prompt', 'tool_definitions',
+'instruction_context']` in `READER_UNMEASURABLE` as the default, and the synthesizer drops
+`system_prompt` and `tool_definitions` from a Kilo record's measurability when the reader supplied
+them for that turn from the capture plugin's store (`dash/src/synth/readers/kilo-capture.ts`), and `kilo-vscode-legacy` declares every canonical
+content key because the legacy task tree carries no reader-compatible parts. The buckets and what
+supplies them are tabulated in the
+[telemetry inventory](telemetry-inventory.md#kilo-code-capture-plugin-and-why-not-otlp).
+`KILO_PARSER_CONTRACT_VERSION` is `'4'`: the reader now attaches conversation and tool-result
+parts, so counters-only checkpoints under `'3'` are re-read rather than migrated, per ADR 0016's
+repair contract.
+
+**Per-record measurability keys on the harness id for `kilo-vscode-legacy` only.**
+`synthesizeRecord` (`dash/src/synth/synth.ts`) stamps `measurabilityFor(call.provider)` because the
+reader rows are declared per provider. `kilo-vscode-legacy` shares `kilo-code`'s provider string
+and reader registration but reads the legacy task tree, so keying on `call.provider` alone would
+make those records measurable-by-absence — a content claim the store cannot support. The stamp
+therefore selects the envelope's harness id (`harnessIdFor`) for that one id, while
+`call.provider`, `deduplicationKey`, `nativeRecordIdentity` and every other harness's stamps stay
+untouched: re-keying on `harness` for every record would re-stamp other split surfaces
+(`claude-cli`, `copilot-vscode`) whose providers already carry the right row. `call.provider`
+itself must not be renamed, because `nativeRecordIdentity` slices the deduplication key on the
+provider prefix.
 
 ## The shared canonical projection
 
@@ -823,7 +886,7 @@ prefers the fuller row as keeper, and joined counters are never summed. File+fil
 pairs under the folded `cursor` share are admitted, not only OTel+file. Raw ingest rows
 remain provenance; the join applies when derived tables rebuild.
 
-**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, then to `4` for issue #216 (PR #276, synth parts), and the current Claude contract is `7` (bumped for skill listings; see the [skills view contract](#skills-view-contract)), with Codex and Kilo at `3`, invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
+**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, then to `4` for issue #216 (PR #276, synth parts), and the current Claude contract is `7` (bumped for skill listings; see the [skills view contract](#skills-view-contract)), with Codex at `3` and Kilo at `4` (bumped when the kilo.db reader began attaching content), invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
 
 Copilot OTLP sessions are excluded from the `tool_yield` digest deliberately. No Copilot
 producer path can yet vouch that tool-call telemetry is complete, so an absent
@@ -1068,6 +1131,31 @@ per-process mutex (`dash/src/capture/lock.ts`) that queues overlapping requests,
 enable becomes a no-op rather than a race; another process is not covered.
 Paths resolve through a platform seam (`dash/src/capture/paths.ts`), so macOS, Linux and
 Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
+
+**The registry is seven harnesses.** `CAPTURE_HARNESS_REGISTRY`
+(`dash/src/capture/harnesses/registry.ts`) declares three managed writers — `copilot`,
+`claude-code` and `opencode` — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
+and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
+(`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
+`enable` installs the capture plugin file and `disable` removes it, each with its own digest
+receipt (`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt), and
+`POST /api/kyber/capture` answers **400** because `MANAGED_IDS` excludes it. Adding one needs no web change: `readHarness`
+(`dash/web/src/lib/kyberApi.ts`) falls back to `status-only` for a `mode` it does not recognise,
+and `CAPTURE_MAX_HARNESSES` bounds the list.
+
+**Kilo Code is not a key writer, by decision** (ADR 0031, 2026-10-21 amendments). Kilo
+has no config key that turns on local telemetry export: `OTEL_EXPORTER_OTLP_ENDPOINT` is
+environment-only and no config field sets it, while the one on/off key,
+`experimental.openTelemetry`, gates Kilo's PostHog product analytics. Writing that key would breach
+decision 1's "only the keys that enable telemetry export" and could re-enable vendor analytics for
+an owner who opted out. Install detection probes three traces — the config directory
+`<home>/.config/kilo`, the shared-runtime database `<home>/.local/share/kilo/kilo.db`, and the VS
+Code Stable globalStorage directory `kilocode.kilo-code` (win32 under the application-data root,
+darwin under `~/Library/Application Support`, linux under `~/.config`, through the same platform
+seam Copilot's settings paths use) — and its single manual step, `kilo-folder-import`, carries no
+`env` because a folder import is a setting or a command rather than a variable. Only those three
+paths count as detected; VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config are not
+probed. The `statusLines` are fixed facts and never echo text the owner wrote in `kilo.jsonc`.
 
 ### Turn inspection numbering and resolution contracts (issue #184)
 
