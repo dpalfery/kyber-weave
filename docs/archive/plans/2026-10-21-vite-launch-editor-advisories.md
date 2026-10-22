@@ -14,7 +14,7 @@ development-mode: test-first
 **Status: Complete — T0–T5 finished 2026-10-22 on the local checkout (three lockfiles only;
 no `package.json` edits; no push — local `main` still diverged from `origin/main`).**
 
-Frontmatter is `status: current`, the governed ontology value for an active plan; the body
+Frontmatter was `status: current` while active (now `archived`); the body
 and plan index carry the execution lifecycle. `development-mode: test-first` (human did
 not opt out). Supervised autonomy: answers below were relayed by the conductor from the
 human; nothing was inferred.
