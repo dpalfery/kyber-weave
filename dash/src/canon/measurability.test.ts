@@ -20,6 +20,7 @@ import {
 import { sourceFor, synthesizeCall, type ParsedProviderCall } from '../synth/synth.js'
 import {
   FILE_SOURCE_PREFIX,
+  READER_UNMEASURABLE,
   SURVEYED_HARNESSES,
   cacheAvailability,
   contextCompositionAvailability,
@@ -27,6 +28,7 @@ import {
   harnessFamily,
   isFileSource,
   measurabilityFor,
+  measurabilityForRecord,
   normalizeHarnessName,
   parseHarnessFilter,
   prefixAvailability,
@@ -34,6 +36,7 @@ import {
   sourceDisplayName,
   sourceSpellingsForHarness,
 } from './measurability.js'
+import { descriptorFor } from '../refresh/registry.js'
 
 // ---------------------------------------------------------------------------
 // Fixture kit
@@ -530,6 +533,75 @@ describe('parseHarnessFilter — only declared spellings resolve', () => {
     for (const spelling of ['kilo', 'kilo-code', 'Kilo-Shared-Runtime', 'kilo-vscode-legacy']) {
       expect(parseHarnessFilter(spelling).kind).toBe('harness')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T2 — the Kilo kilo.db reader's declaration (decision D7)
+// ---------------------------------------------------------------------------
+
+/** The ids the Kilo SQLite store's reader is registered under. */
+const KILO_READER_IDS = ['kilo', 'kilo-code'] as const
+/**
+ * The harness ids whose records are read from kilo.db: the provider's own id
+ * and the shared-runtime harness the SQLite store is classified as. The legacy
+ * VS Code task tree shares the provider but not the store, so it is not
+ * asserted here.
+ */
+const KILO_SQLITE_HARNESS_IDS = ['kilo', 'kilo-code', 'kilo-shared-runtime'] as const
+/** What kilo.db never records: the runtime prompt, its schemas, and its instructions. */
+const KILO_UNMEASURABLE = ['instruction_context', 'schema_cost', 'system_prompt', 'tool_definitions'] as const
+
+describe('READER_UNMEASURABLE — the Kilo reader measures conversation and tool results (D7)', () => {
+  it('declares the buckets kilo.db carries measurable and the ones it never records not measurable', () => {
+    for (const id of KILO_READER_IDS) {
+      const row = READER_UNMEASURABLE.get(id)
+      expect(row, `${id} must declare its own reader row`).toBeDefined()
+      expect(row, `${id} stores the conversation text`).not.toContain('conversation_history')
+      expect(row, `${id} stores completed tool output`).not.toContain('tool_result_content')
+      // Exact, because this row is what the harness capability surface shows an
+      // operator: a leftover bucket would say the dashboard cannot measure what
+      // the reader now does.
+      expect([...(row ?? [])].sort(), `${id} cannot measure what the store never records`)
+        .toEqual([...KILO_UNMEASURABLE])
+    }
+  })
+
+  it('answers composition measurable and schema ranking not measurable for every kilo.db harness', () => {
+    for (const harness of KILO_SQLITE_HARNESS_IDS) {
+      const measurability = getMeasurability(`${FILE_SOURCE_PREFIX}${harness}`, harness)
+      expect(measurability['conversation_history'], `${harness} conversation history`).toBeUndefined()
+      expect(measurability['tool_result_content'], `${harness} tool-result content`).toBeUndefined()
+      for (const metric of KILO_UNMEASURABLE) expectNotMeasurable(measurability[metric])
+      expect(contextCompositionAvailability(measurability), `${harness} composition`).toBe('measured')
+      expectNotMeasurable(schemaRankingAvailability(measurability))
+    }
+  })
+
+  it('lifts system_prompt and tool_definitions only on a record whose turn carried them', () => {
+    const bare = measurabilityForRecord('kilo-code', 'kilo-shared-runtime', new Set())
+    expectNotMeasurable(bare['system_prompt'])
+    expectNotMeasurable(bare['tool_definitions'])
+
+    const captured = measurabilityForRecord('kilo-code', 'kilo-shared-runtime', new Set(['system_prompt', 'tool_definitions']))
+    expect(captured['system_prompt']).toBe('measured')
+    expect(captured['tool_definitions']).toBe('measured')
+    // What no store supplies stays declared.
+    expectNotMeasurable(captured['instruction_context'])
+    expectNotMeasurable(captured['schema_cost'])
+  })
+
+  it('declares the legacy task tree whole, even on a turn that carries parts', () => {
+    const legacy = measurabilityForRecord('kilo-code', 'kilo-vscode-legacy', new Set(['system_prompt']))
+    for (const key of ['conversation_history', 'system_prompt', 'tool_definitions']) expectNotMeasurable(legacy[key])
+  })
+
+  it('pins the parser contract bump that makes stale Kilo checkpoints re-read', () => {
+    // The reader began attaching content to Kilo records, so every checkpoint
+    // written under contract 3 has to be re-read: the bump is the ADR 0016
+    // repair contract (same-span upsert over stale counters-only rows), not a
+    // migration.
+    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('4')
   })
 })
 

@@ -290,7 +290,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion bumps to Claude (7), Codex/Kilo/Pi/Copilot (3/3/3/3), Cursor (2), and leaves others at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (7), Codex/Kilo/Pi/Copilot (3/4/3/3), Cursor (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
     expect(claudeCli?.parserContractVersion).toBe("7")
@@ -302,7 +302,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     const pi = descriptorFor("pi")
     const copilot = descriptorFor("copilot-cli")
     expect(codex?.parserContractVersion).toBe("3")
-    expect(kilo?.parserContractVersion).toBe("3")
+    expect(kilo?.parserContractVersion).toBe("4")
     expect(cursor?.parserContractVersion).toBe("2")
     expect(pi?.parserContractVersion).toBe("3")
     expect(copilot?.parserContractVersion).toBe("3")
@@ -951,7 +951,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     }
   })
 
-  it('re-reads kilo.db shared-runtime sessions and advances parserContractVersion from 1 to 2, populating records (#227)', async () => {
+  it('re-reads kilo.db shared-runtime sessions and advances parserContractVersion from 1 to 4, populating records (#227)', async () => {
     const root = tempDir()
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
@@ -1037,7 +1037,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       const sourceKey = sourceKeyFor('kilo-shared-runtime', kiloSession!)
       const descriptor = descriptorFor('kilo-shared-runtime')
       expect(descriptor).toBeDefined()
-      expect(descriptor?.parserContractVersion).toBe('3')
+      expect(descriptor?.parserContractVersion).toBe('4')
 
       // Pre-seed a stale checkpoint with legacy contract version '1' and 3 claimed records
       // but 0 actual records in the database (reproducing the issue #227 state).
@@ -1079,7 +1079,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('kilo-shared-runtime', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('3')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('4')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       expect(updatedCheckpoint?.recordCount).toBe(1)
 

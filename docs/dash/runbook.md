@@ -1162,7 +1162,7 @@ same engine. Both run the one implementation
 dashboard holds no capture logic of its own
 ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
-**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all six) and
+**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all seven) and
 `--endpoint <url>` (OTLP/HTTP only; default `http://127.0.0.1:4318`):
 
 ```bash
@@ -1179,11 +1179,37 @@ touches the receiver setting.
 
 **Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
 and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
-**Codex**, **pi**, and **Antigravity** are status-only: status reports them, `enable` and
-`disable` do not write them, and the drawer shows them read-only. OpenCode reads its OTLP
-endpoint from the process environment, so `enable` writes only its flag; the drawer and
+**Codex**, **pi** and **Antigravity** are status-only: status reports them, `enable` and
+`disable` do not write them, and the drawer shows them read-only. **Kilo Code** is a file plugin
+rather than a key writer: `enable` installs one plugin file, `disable` removes it, and the drawer
+shows it with Enable and Disable. OpenCode reads its
+OTLP endpoint from the process environment, so `enable` writes only its flag; the drawer and
 `status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
 KyberDash cannot see whether the shell that launches OpenCode has it set.
+
+**Kilo Code row.** The `kilo` row is not a key writer (ADR 0031, 2026-10-21 amendments): Kilo
+has no config key that turns on local telemetry export, and `experimental.openTelemetry` is its
+product-analytics switch, so the row's Enable installs the capture plugin file instead and never
+touches `kilo.jsonc` or the OTLP receiver. The row reports whether Kilo is installed and carries one manual step,
+`kilo-folder-import`, with no environment variable:
+
+```bash
+# either turn on Maintenance → Scheduled folder import,
+# or import once from the shared-runtime store:
+kyberdash dash import-history --harness kilo-shared-runtime
+```
+
+It is detected from any **one** of three traces, and nothing else counts as detected:
+
+| Probe | Path |
+|---|---|
+| config directory | `<home>/.config/kilo` |
+| shared-runtime database | `<home>/.local/share/kilo/kilo.db` |
+| VS Code Stable globalStorage directory | `…/Code/User/globalStorage/kilocode.kilo-code` (`%APPDATA%` on Windows, `~/Library/Application Support` on macOS) |
+
+VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
+installed only there has none of the three traces, so the row says not detected while Kilo itself
+works — run the import above and ignore the row.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows
@@ -1351,6 +1377,48 @@ here.
   cache-creation rate to state a surcharge.
 - **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
   "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
+
+### 10. Kilo shows no data
+
+- **Cause, most often:** scheduled folder import is off. Kilo's usage and messages reach KyberDash
+  only through a harness-source job over kilo.db (no OTLP adapter claims its spans).
+  `settings.folder_import.scheduled` is off by default, and the last manual import may predate the
+  sessions you are looking at.
+- **Fix:** import once, or turn scheduled import on in Maintenance:
+  ```bash
+  kyberdash dash import-history --harness kilo-shared-runtime
+  ```
+  Then check the harness's checkpoint: `source_checkpoint` rows for `kilo-shared-runtime` and
+  `kilo-vscode-legacy` are the evidence that a job actually read the store.
+- **Check the store is where KyberDash looks:** `~/.local/share/kilo/kilo.db` (the XDG data home is
+  honoured). The legacy Cline-style task tree under
+  `…/Code/User/globalStorage/kilocode.kilo-code` is a separate harness, `kilo-vscode-legacy`; it
+  carries no reader-compatible content, so its turns show counters with honest not-measured
+  content rather than empty content.
+- **A `PROVIDER_PARSE_ERROR` naming kilo.db** means the file exists but will not open, or is
+  missing an expected table (`session`, `message`, `part`). That is a reported problem, not an
+  empty history — an absent store stays silent. A store that was locked or corrupt and has since
+  healed leaves the old job-level row behind: `reconcileSourceProblems` reconciles source-unit rows
+  only, so the row stays until that harness is cleaned. Workaround: a per-harness
+  [`dash clean`](#2b-database-clean-dash-clean) removes the harness's problem rows — it also wipes
+  its records and checkpoints, so the next refresh re-reads them.
+- **System prompt, tool definitions or skills show "not measurable":** those come from the Kilo
+  capture plugin, not kilo.db. Install it with the **Enable** button on the Kilo Code row in
+  Settings, or `kyberdash kyber capture enable --harness kilo`,
+  restart Kilo (CLI, VS Code window or desktop app), and check `kyberdash kyber capture status
+  --harness kilo`: `plugin: installed` and `captured calls: N` mean it is recording. Only turns made
+  after the install carry the buckets. `disable` removes the plugin and keeps what it captured under
+  `~/.kyberdash/capture/kilo`; delete that directory to discard it, since the prompt can contain text
+  from your instruction files.
+- **Do not set `OTEL_EXPORTER_OTLP_ENDPOINT` for Kilo to "turn OTel on".** Kilo's OTLP stream
+  carries no model spans, usage or content (AI SDK span recording is off upstream), and its
+  `Session.*` spans are claimed by the OpenCode adapter, so they land as quarantined non-model
+  spans attributed to the **OpenCode** source. That is noise, not Kilo records. The Settings row
+  says the same and deliberately offers no endpoint variable.
+- **Settings row says "not detected":** see the three probe paths under
+  [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS
+  Code Insiders, JetBrains or a non-standard Windows location is not detected by design; the
+  import above still works.
 
 ---
 

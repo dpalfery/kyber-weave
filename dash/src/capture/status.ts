@@ -84,7 +84,7 @@ export type StatusContext = {
   home: string
   env: PathEnv
   endpoint: string
-  /** Defaults to the six registered harnesses. */
+  /** Defaults to every harness in the registry. */
   writers?: readonly CaptureHarnessWriter[]
   /** Replaces filesystem detection for every harness (a test, or a host that knows better). */
   installProbe?: (harnessId: string) => {
@@ -119,6 +119,18 @@ function manualStepsFor(writer: CaptureHarnessWriter, endpoint: string): Capture
         text:
           'Add span.set_attribute("declaredContextWindow", <positive token count>) on the statusline ' +
           "bridge's chat span; the window exists only when the user declares it",
+      },
+    ]
+  }
+  if (writer.id === 'kilo') {
+    return [
+      {
+        id: 'kilo-folder-import',
+        // No env: a folder import is a setting or a command the user runs,
+        // never a variable the drawer could suggest a value for.
+        text:
+          'Kilo usage and messages come from kilo.db: point Maintenance → Scheduled folder import ' +
+          'at the Kilo data folder, or run `kyberdash dash import-history --harness kilo-shared-runtime`',
       },
     ]
   }
@@ -350,10 +362,44 @@ function buildOne(
     ? { installed: injected.installed, evidence: [...injected.evidence] }
     : detectInstall(writer, ctx.home, ctx.env, existence)
 
+  if (writer.kind === 'pending' && writer.filePlugin !== undefined) {
+    // A file plugin is switchable from Settings, so it reports as managed: the one
+    // "file" is the plugin and no config key is declared, written or drift-checked.
+    const plugin = writer.filePlugin.state(ctx.home, ctx.env)
+    const lines = (writer.describeStatus?.(ctx.home, { redact: true, env: ctx.env }) ?? [])
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+    return {
+      id: writer.id,
+      displayName: writer.displayName,
+      mode: 'managed',
+      installed: detection.installed,
+      installEvidence: [...detection.evidence],
+      state: plugin.state,
+      receipt: plugin.receipt ? 'recorded' : 'absent',
+      files: [
+        {
+          id: 'plugin',
+          path: writer.filePlugin.path(ctx.home, ctx.env),
+          applicable: true,
+          exists: plugin.exists,
+          expectedKeys: [],
+          presentKeys: [],
+          missingKeys: [],
+          mismatchedKeys: [],
+          drift: null,
+        },
+      ],
+      warnings: [],
+      manualSteps: manualStepsFor(writer, ctx.endpoint),
+      statusLines: lines,
+    }
+  }
+
   if (writer.kind === 'pending') {
     const path = writer.resolvePath(ctx.home, ctx.env)
     const read = readTextIfPresent(path)
-    const described = writer.describeStatus?.(ctx.home, { redact: true })
+    const described = writer.describeStatus?.(ctx.home, { redact: true, env: ctx.env })
     const lines = (described ?? []).map((line) => line.trim()).filter((line) => line !== '')
     return {
       id: writer.id,

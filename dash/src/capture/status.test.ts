@@ -12,6 +12,7 @@ import { DEFAULT_CAPTURE_ENDPOINT, runCapture } from './index.js'
 import { buildCaptureStatus, buildHarnessStatus, createApplicabilityFilter } from './status.js'
 import type { CaptureHarnessStatus, StatusContext } from './status.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
+import { KILO_PLUGIN_SOURCE } from './kilo-plugin/source.js'
 
 const temporaryHomes: string[] = []
 
@@ -52,6 +53,34 @@ const stablePath = (home: string) => copilotFile(home, 'vscode-stable')
 const insidersPath = (home: string) => copilotFile(home, 'vscode-insiders')
 const codexPath = (home: string) => pjoin(HOST, home, '.codex', 'config.toml')
 const piSettingsPath = (home: string) => pjoin(HOST, home, '.pi', 'agent', 'settings.json')
+
+/**
+ * The VS Code Stable user-data root, following the same seam Copilot's settings path
+ * uses: win32 roots at the (injected) application-data directory, darwin at
+ * `~/Library/Application Support`, linux at `~/.config`.
+ */
+function vscodeUserDataRoot(home: string): string {
+  const { appData } = hostEnv(home)
+  if (HOST === 'win32') return pjoin(HOST, appData ?? home, 'Code')
+  if (HOST === 'darwin') return pjoin(HOST, home, 'Library', 'Application Support', 'Code')
+  return pjoin(HOST, home, '.config', 'Code')
+}
+
+const kiloConfigDir = (home: string) => pjoin(HOST, home, '.config', 'kilo')
+const kiloConfigFile = (home: string) => pjoin(HOST, kiloConfigDir(home), 'kilo.jsonc')
+const kiloSharedRuntimeDb = (home: string) => pjoin(HOST, home, '.local', 'share', 'kilo', 'kilo.db')
+const kiloVscodeGlobalStorage = (home: string) =>
+  pjoin(HOST, vscodeUserDataRoot(home), 'User', 'globalStorage', 'kilocode.kilo-code')
+
+/** Create one of the places a detection probe looks for, so the real filesystem answers. */
+function createProbeSource(path: string, kind: 'file' | 'directory'): void {
+  if (kind === 'file') {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, '')
+    return
+  }
+  mkdirSync(path, { recursive: true })
+}
 
 function byId(statuses: readonly CaptureHarnessStatus[], id: string): CaptureHarnessStatus {
   const found = statuses.find((status) => status.id === id)
@@ -100,6 +129,7 @@ describe('buildCaptureStatus over a temporary home', () => {
       ['opencode', 'managed'],
       ['pi', 'status-only'],
       ['antigravity', 'status-only'],
+      ['kilo', 'managed'],
     ])
   })
 
@@ -354,6 +384,127 @@ describe('buildCaptureStatus over a temporary home', () => {
       `${appData}\\Code\\User\\settings.json`,
       `${appData}\\Code - Insiders\\User\\settings.json`,
     ])
+  })
+})
+
+describe('kilo plugin capture status', () => {
+  const kiloPluginFile = (home: string) => pjoin(HOST, kiloConfigDir(home), 'plugin', 'kyberdash-capture.js')
+
+  it('lists kilo as a managed harness, off until the plugin is installed, with the plugin as its one file', () => {
+    const home = makeHome()
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo).toMatchObject({
+      id: 'kilo',
+      displayName: 'Kilo Code',
+      mode: 'managed',
+      installed: 'not-detected',
+      state: 'off',
+      receipt: 'absent',
+      warnings: [],
+    })
+    // The one file is the plugin itself: no config keys are declared or written.
+    expect(kilo.files).toHaveLength(1)
+    expect(kilo.files[0]).toMatchObject({
+      id: 'plugin',
+      path: kiloPluginFile(home),
+      applicable: true,
+      exists: false,
+      expectedKeys: [],
+      presentKeys: [],
+      missingKeys: [],
+      drift: null,
+    })
+  })
+
+  it('reports on with a recorded receipt after the plugin is installed', async () => {
+    const home = makeHome()
+    await runCapture('enable', { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER })
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo).toMatchObject({ mode: 'managed', state: 'on', receipt: 'recorded' })
+    expect(kilo.files[0]).toMatchObject({ exists: true })
+  })
+
+  it('reports partial for an older plugin of its own, which Enable upgrades', () => {
+    const home = makeHome()
+    writeConfig(kiloPluginFile(home), '// kyberdash-capture-plugin v0\nold\n')
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('partial')
+  })
+
+  it.each([
+    ['a file KyberDash did not write', 'export default {}\n'],
+  ])('reports unknown for %s, so the row offers no action', (_name, content) => {
+    const home = makeHome()
+    writeConfig(kiloPluginFile(home), content)
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('unknown')
+  })
+
+  it('reports unknown instead of throwing when the plugin path is a directory', () => {
+    const home = makeHome()
+    mkdirSync(kiloPluginFile(home), { recursive: true })
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo.state).toBe('unknown')
+    expect(kilo.statusLines.join('\n')).toMatch(/plugin: unreadable/)
+  })
+
+  it('reports unknown for a plugin the owner edited since install', async () => {
+    const home = makeHome()
+    await runCapture('enable', { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER })
+    writeConfig(kiloPluginFile(home), `${KILO_PLUGIN_SOURCE}// owner edit\n`)
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('unknown')
+  })
+
+  it.each([
+    ['the config directory', kiloConfigDir, 'directory'],
+    ['the shared-runtime database', kiloSharedRuntimeDb, 'file'],
+    ['the VS Code Stable globalStorage directory', kiloVscodeGlobalStorage, 'directory'],
+  ] as const)('is detected when %s exists, with one evidence line', (_label, sourceOf, kind) => {
+    const home = makeHome()
+    const source = sourceOf(home)
+    createProbeSource(source, kind)
+
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo.installed).toBe('detected')
+    // One question with three alternatives, so a detected harness carries one line
+    // naming the place that answered rather than three.
+    expect(kilo.installEvidence).toHaveLength(1)
+    expect(kilo.installEvidence[0]).toContain(source)
+  })
+
+  it('is not-detected when none of the three places exists', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    expect(kilo.installed).toBe('not-detected')
+    expect(kilo.installEvidence).toHaveLength(1)
+  })
+
+  it('states the plugin state, what it captures and where usage comes from, with no OTLP framing', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    const lines = kilo.statusLines.join('\n')
+    expect(lines.trim()).not.toBe('')
+    expect(lines).toMatch(/plugin: not installed/)
+    expect(lines).toMatch(/system prompt, tool definitions and skills/)
+    expect(lines).toMatch(/kilo\.db/)
+    expect(lines).toMatch(/folder import/i)
+    expect(lines).not.toMatch(/OTLP/)
+  })
+
+  it('never echoes text from kilo.jsonc', () => {
+    const home = makeHome()
+    const sentinel = 'synthetic-kilo-config-NEVER-ECHO-0123456789'
+    writeConfig(kiloConfigFile(home), `{ "model": "${sentinel}" }\n`)
+
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(JSON.stringify(kilo)).not.toContain(sentinel)
+  })
+
+  it('names exactly one manual step, the folder import, with no environment variable', () => {
+    const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
+    expect(kilo.manualSteps).toHaveLength(1)
+    const step = kilo.manualSteps[0]!
+    expect(step.id).toBe('kilo-folder-import')
+    // The plugin has its own Enable button; the folder import is a setting or command the
+    // user runs, never an env var the drawer could set for them.
+    expect(step.env).toBeUndefined()
+    expect(step.text).toMatch(/Scheduled folder import|import-history --harness kilo-shared-runtime/)
   })
 })
 

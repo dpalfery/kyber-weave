@@ -27,7 +27,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { allProviderNames } from '../providers/index.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
-import { validateTokens, type CanonicalRecord, type ContentPart } from '../canon/types.js'
+import { CANONICAL_CONTENT_KEYS, validateTokens, type CanonicalRecord, type ContentPart } from '../canon/types.js'
 import type { ReaderToolCall, ReaderToolResult, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import {
   DEFAULT_CONVENTION,
@@ -524,6 +524,26 @@ describe('cost blocks (R5.1, R5.2, R5.4)', () => {
 // ---------------------------------------------------------------------------
 
 describe('measurability declarations for the file-sourced path', () => {
+  it('stops declaring a bucket unmeasurable when the reader supplied it for that turn', () => {
+    const kilo = call({ provider: 'kilo-code' })
+    const without = synthesizeCall(kilo)
+    expect(without.measurability?.['system_prompt']).toMatchObject({ availability: 'not_measurable' })
+    expect(without.measurability?.['tool_definitions']).toMatchObject({ availability: 'not_measurable' })
+
+    const withPrompt = synthesizeCall(kilo, undefined, {
+      parts: [
+        { part: 'system_prompt', text: 'You are Kilo.', order: 0 },
+        { part: 'tool_definitions', text: '{"id":"bash"}', order: 1 },
+      ],
+    })
+    expect(withPrompt.content.system_prompt).toBe('You are Kilo.')
+    expect(withPrompt.measurability?.['system_prompt']).toBe('measured')
+    expect(withPrompt.measurability?.['tool_definitions']).toBe('measured')
+    // What the store still cannot supply stays declared.
+    expect(withPrompt.measurability?.['instruction_context']).toMatchObject({ availability: 'not_measurable' })
+    expect(withPrompt.measurability?.['schema_cost']).toMatchObject({ availability: 'not_measurable' })
+  })
+
   it('declares Claude’s unavailable buckets while retaining its stored conversation and results', () => {
     const record = synthesizeCall(call())
     expect(record.measurability).toEqual(measurabilityFor('claude'))
@@ -548,6 +568,47 @@ describe('measurability declarations for the file-sourced path', () => {
     const antigravity = synthesizeCall(call({ provider: 'antigravity', model: 'gemini-2.5-pro' }))
     expect(antigravity.harness).toBe('antigravity')
     expect(antigravity.harness).not.toBe('gemini')
+  })
+
+  it('stamps kilo-vscode-legacy task-tree records all-content-unmeasurable while the shared kilo.db store keeps its buckets (F3)', () => {
+    // The legacy task tree and the shared runtime share the kilo-code
+    // provider string and the reader registration, but not the store:
+    // ui_messages.json supplies no reader-compatible parts, so a stamp
+    // keyed on call.provider would declare its records measurable for
+    // content the source can never carry.
+    const legacy = synthesizeCall(
+      call({ provider: 'kilo-code', model: 'kilo-model', deduplicationKey: 'kilo-code:task-1:m-1', sessionId: 'task-1' }),
+      undefined,
+      undefined,
+      envelope({ harnessId: 'kilo-vscode-legacy', sourceKey: 'kilo-vscode-legacy:task-1' }),
+    )
+    expect(legacy.harness).toBe('kilo-vscode-legacy')
+    for (const metric of ['schema_cost', ...CANONICAL_CONTENT_KEYS]) {
+      expect(legacy.measurability?.[metric], `${metric} must be declared not_measurable`).toMatchObject({
+        availability: 'not_measurable',
+      })
+    }
+
+    const shared = synthesizeCall(
+      call({ provider: 'kilo-code', model: 'kilo-model', deduplicationKey: 'kilo-code:s-1:m-1' }),
+      undefined,
+      undefined,
+      envelope({ harnessId: 'kilo-shared-runtime', sourceKey: 'kilo-shared-runtime:s-1' }),
+    )
+    // kilo.db genuinely stores conversation text and completed tool output;
+    // undeclared means measured.
+    expect(shared.measurability?.['conversation_history']).toBeUndefined()
+    expect(shared.measurability?.['tool_result_content']).toBeUndefined()
+    expect(shared.measurability?.['system_prompt']).toMatchObject({ availability: 'not_measurable' })
+
+    // A non-Kilo envelope keeps its provider-keyed stamps untouched.
+    const other = synthesizeCall(
+      call(),
+      undefined,
+      undefined,
+      envelope({ harnessId: 'claude-cli', sourceKey: 'claude-cli:s-1' }),
+    )
+    expect(other.measurability).toEqual(measurabilityFor('claude'))
   })
 })
 
