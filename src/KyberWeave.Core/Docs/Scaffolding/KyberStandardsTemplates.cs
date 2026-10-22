@@ -43,7 +43,8 @@ public static class KyberStandardsTemplates
         "rust",
         "sql",
         "tauri",
-        "test"
+        "test",
+        "typescript"
     ];
 
     private static readonly FrozenDictionary<string, string> Templates = LoadEmbeddedTemplates();

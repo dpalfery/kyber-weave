@@ -222,6 +222,7 @@ public sealed class CopilotRendererTests
     [InlineData("sql-database-architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("tauri-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("test-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("typescript-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -628,7 +629,7 @@ public sealed class CopilotRendererTests
         "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
         "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'product-owner', " +
         "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'rust-dev', 'sql-database-architect', " +
-        "'tauri-dev', 'test-dev']")]
+        "'tauri-dev', 'test-dev', 'typescript-dev']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(

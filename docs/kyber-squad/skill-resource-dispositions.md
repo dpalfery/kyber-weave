@@ -5,14 +5,14 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-22
 ---
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 78 supplemental files that sit
-beside the 27 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 78 resources, a reader can answer three questions: what kind of
+This reference is the content-preservation audit for the 82 supplemental files that sit
+beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+that, for every one of those 82 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -133,11 +133,15 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/test-dev/references/rust-go-test-patterns.md` | technique | retain-in-place | rendered | — | Rust and Go test technique; runner and assertion policy lives in `<test-coding-standard>` § Rust and § Go (D2). |
 | `skills/test-dev/references/test-maintainability.md` | technique | retain-in-place | rendered | — | Test-maintainability technique; not a host-reversible policy (D2). |
 | `skills/test-dev/references/unit-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 8 duplicate Policy-line ledger rows below point to `<test-coding-standard>`. |
+| `skills/typescript-dev/references/data-access.md` | technique | retain-in-place | rendered | — | Column-selection, N+1, bounded-read, and transaction technique; data-access policy lives in `<typescript-coding-standard>` (D2). |
+| `skills/typescript-dev/references/errors-and-async.md` | technique | retain-in-place | rendered | — | Error-subclass, promise, cancellation, and shutdown technique; the policy lives in `<typescript-coding-standard>` (D2). |
+| `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
+| `skills/typescript-dev/references/types-and-absent-values.md` | technique | retain-in-place | rendered | — | Narrowing and absent-value technique; typing and absent-value policy lives in `<typescript-coding-standard>` (D2). |
 
-Seventy-eight rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 60
+Eighty-two rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 64
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 77 `rendered`, 1 `packaged-only`.
+`policy-migrated-to-template`). Delivery: 81 `rendered`, 1 `packaged-only`.
 
 ## Policy-line ledger
 

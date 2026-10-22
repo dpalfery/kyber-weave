@@ -62,7 +62,8 @@ public sealed class SquadCanonicalContentTests
         "rust-dev",
         "sql-database-architect",
         "tauri-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -94,11 +95,11 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// Agents authored after the Hotshot migration — the review-council workers, `bug-crusher`,
-    /// and the Rust and Go specialists — are canonical-only roles and are deliberately excluded
+    /// and the Rust, Go, and TypeScript specialists — are canonical-only roles and are deliberately excluded
     /// from Hotshot migration provenance.
     /// </summary>
     private static readonly string[] ExpectedNewAgents =
-        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev"];
+        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev", "typescript-dev"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
@@ -131,7 +132,8 @@ public sealed class SquadCanonicalContentTests
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -151,7 +153,8 @@ public sealed class SquadCanonicalContentTests
         "product-owner",
         "python-dev",
         "rust-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -169,7 +172,8 @@ public sealed class SquadCanonicalContentTests
         "maui-dev",
         "python-dev",
         "rust-dev",
-        "test-dev"
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
@@ -417,6 +421,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("sql-database-architect")]
     [InlineData("tauri-dev")]
     [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
     public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -653,6 +658,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("sql-database-architect")]
     [InlineData("tauri-dev")]
     [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
     public void DeveloperAgentBodyNamesTaskGateAndEmitsDigestLine(string agentName)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);

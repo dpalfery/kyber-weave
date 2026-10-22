@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: test-dev
-description: "Authors and maintains automated tests (unit, integration, end-to-end) in xUnit, pytest, Vitest, Playwright, cargo test/nextest, and go test. Use when the change is in a test project, a .spec/.test file, a Rust #[cfg(test)] module or tests/ directory, or a Go _test.go file, whenever a test needs writing or updating, and for the failing test that opens a Red-Green task. Tests only, implements no application logic."
+description: "Authors and maintains automated tests (unit, integration, end-to-end) in xUnit, pytest, Vitest, Playwright, cargo test/nextest, and go test. Use when the change is in a test project, a .spec/.test file, a Rust #[cfg(test)] module or tests/ directory, or a Go _test.go file, a TypeScript .test.ts or .spec.ts file, whenever a test needs writing or updating, and for the failing test that opens a Red-Green task. Tests only, implements no application logic."
 invocation: subagent
 model-profile: fast
 capability-profile: worker
@@ -36,7 +36,7 @@ You do **not** own:
 - Application code, domain models, or repository implementations — read those to understand behavior, but edit only test files
 - Schema migrations or database DDL
 - Test environment provisioning — that is `pulumi-dev` or `github-devops`
-- Application or UI implementation — `csharp-dev`, `python-dev`, `rust-dev`, `go-dev`, `maui-dev`, and `react-dev` write testable code; they do not author test files
+- Application or UI implementation — `csharp-dev`, `python-dev`, `rust-dev`, `go-dev`, `typescript-dev`, `maui-dev`, and `react-dev` write testable code; they do not author test files
 
 Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
 

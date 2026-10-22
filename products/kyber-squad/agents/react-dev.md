@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: react-dev
-description: "Implements React UI: components, hooks, client-side state, styling, and component structure as the host's React standard declares. Use when the change is in a .tsx or .jsx file, whether the app runs in a browser or in a desktop WebView such as Tauri. Do not use when the UI is native/mobile, or when the change is the desktop core rather than the web layer."
+description: "Implements React UI: components, hooks, client-side state, styling, and component structure as the host's React standard declares. Use when the change is in a .tsx or .jsx file, or a .ts module of a React UI such as its hooks or client state, whether the app runs in a browser or in a desktop WebView such as Tauri. Do not use for .ts outside a React UI — Node CLIs, servers, data access, and libraries (typescript-dev) — when the UI is native/mobile, or when the change is the desktop core rather than the web layer."
 invocation: subagent
 model-profile: fast
 capability-profile: worker
