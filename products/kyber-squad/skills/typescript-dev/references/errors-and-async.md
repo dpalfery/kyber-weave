@@ -111,7 +111,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 export async function poll(signal: AbortSignal): Promise<void> {
   while (!signal.aborted) {
     await tick();
-    await sleep(30_000, undefined, { signal }).catch(() => undefined); // abort ends the wait
+    try {
+      await sleep(30_000, undefined, { signal });
+    } catch (err: unknown) {
+      if (!signal.aborted) throw err; // only an abort ends the wait quietly
+    }
   }
 }
 ```
