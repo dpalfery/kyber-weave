@@ -781,12 +781,19 @@ jobs:
               exit 0
             fi
             if [ "$attempt" -eq "$retry" ]; then
+              echo "Tauri apt install failed after $retry attempts; handing the archive back before exiting." >&2
+              # Best-effort: the cache save runs as the runner user, so a
+              # root-owned archive would add a save warning to the failure.
+              sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives || true
               exit 1
             fi
             echo "Tauri apt attempt $attempt/$retry failed, retrying in 30s..." >&2
             sleep 30
             attempt=$((attempt + 1))
           done
+          # Unreachable when the loop above runs (the last attempt exits
+          # inside), but hand the archive back here too if ever reached.
+          sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives || true
           exit 1
 
       - name: Setup Node for Linux tray build
