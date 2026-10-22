@@ -38,7 +38,7 @@ namespace KyberWeave.Tests;
 /// the declared runtimes, a stub <c>git</c> that returns a synthetic branch and porcelain state,
 /// network-denying stubs for <c>curl</c>/<c>wget</c>/<c>nc</c>, and a stub <c>kyberdash</c> for the
 /// <c>agy</c> hand-off. The Pi variant runs through a <c>node --test</c> harness with a stub
-/// extension context.
+/// pi extension host.
 /// </para>
 /// <para>
 /// <b>Pinned artifact layout (contract this suite owns; T5 must satisfy it).</b>
@@ -49,14 +49,15 @@ namespace KyberWeave.Tests;
 /// the two command files, so this suite fixes them.
 /// </para>
 /// <para>
-/// <b>Pinned Pi extension contract (the plan delegates the stub-context shape to this suite).</b>
-/// The extracted <c>statusbar.ts</c> exports an activation function — <c>activate(ctx)</c> or a
-/// default export — and reads its data from <c>ctx</c>: <c>ctx.ui.mode</c> (<c>"tui"</c> or
-/// <c>"plain"</c>), <c>ctx.ui.setStatus(text)</c>, <c>ctx.ui.setWidget(text)</c>, <c>ctx.cwd</c>,
-/// <c>ctx.model</c>, <c>ctx.branch</c>, <c>ctx.tokens.{input,output,cache,total}</c>,
-/// <c>ctx.costUsd</c>, and <c>ctx.turns</c>. The plan's T0 outcome Pi row owns the segments and the
-/// <c>setStatus</c>/<c>setWidget</c> calls and records that this suite owns the stub-context shape
-/// they are read from.
+/// <b>Pinned Pi extension contract (the plan delegates the host shape to this suite).</b>
+/// The extracted <c>statusbar.ts</c> default-exports a factory for the pi 1.3 extension host:
+/// it subscribes to <c>session_start</c> (and <c>agent_end</c>/<c>agent_settled</c> re-render
+/// requests) and registers a <c>ctx.ui.setFooter()</c> component for <c>"tui"</c> sessions,
+/// reading live data from <c>ctx.cwd</c>, <c>ctx.model</c>,
+/// <c>ctx.sessionManager.getBranch()</c>, and the footer-data provider's
+/// <c>getGitBranch()</c>/<c>onBranchChange()</c>. Outside <c>"tui"</c> it registers nothing
+/// and writes nothing, so loading the extension never pollutes command output. The harness
+/// below stubs that host shape and renders the registered footer at 80 columns.
 /// </para>
 /// </remarks>
 public sealed class UtilitiesStatusLineArtifactTests : IDisposable
@@ -502,11 +503,11 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
         AssertSucceeded(result, "Pi");
         string report = File.ReadAllText(reportPath);
-        string[] status = ReportStrings(report, "setStatus");
-        string[] widget = ReportStrings(report, "setWidget");
-        string rendered = string.Join("\n", status);
-        Assert.True(status.Length > 0, "The Pi extension recorded no ctx.ui.setStatus call in TUI mode.");
-        Assert.True(widget.Length > 0, "The Pi extension recorded no ctx.ui.setWidget call in TUI mode.");
+        string[] footerCalls = ReportStrings(report, "uiCalls");
+        string[] footer = ReportStrings(report, "footer");
+        Assert.Contains("setFooter", footerCalls);
+        Assert.True(footer.Length > 0, "The Pi extension registered no footer component in TUI mode.");
+        string rendered = string.Join("\n", footer);
         AssertRendersValue(rendered, "PI", "PI badge");
         AssertRendersValue(rendered, "📁", "repository name");
         AssertRendersValue(rendered, PiWorkspaceName, "repository name");
@@ -527,7 +528,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionWritesItsStatusToStandardErrorOutsideTuiMode()
+    public void PiExtensionRegistersNoFooterOutsideTuiMode()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
@@ -538,13 +539,10 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
         AssertSucceeded(result, "Pi");
         string report = File.ReadAllText(reportPath);
-        string[] status = ReportStrings(report, "setStatus");
+        string[] footerCalls = ReportStrings(report, "uiCalls");
         string[] stderr = ReportStrings(report, "stderr");
-        Assert.True(status.Length == 0, "The Pi extension used ctx.ui.setStatus outside TUI mode.");
-        string rendered = string.Join("\n", stderr);
-        Assert.True(stderr.Length > 0, "The Pi extension wrote nothing to stderr outside TUI mode.");
-        AssertRendersValue(rendered, "PI", "PI badge");
-        AssertRendersValue(rendered, PiModelDisplayName, "model");
+        Assert.DoesNotContain("setFooter", footerCalls);
+        Assert.True(stderr.Length == 0, "The Pi extension wrote to stderr outside TUI mode.");
     }
 
     [Fact]
@@ -611,7 +609,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui");
 
         AssertSucceeded(result, "Pi");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "setStatus"))
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"))
                           + "\n"
                           + string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "stderr"));
         Assert.DoesNotContain(CanaryValue, rendered, StringComparison.Ordinal);
@@ -1466,9 +1464,10 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                """;
 
     /// <summary>
-    /// The stub extension context the Pi variant is driven through. It records
-    /// <c>ctx.ui.setStatus</c> and <c>ctx.ui.setWidget</c> calls and captures stderr, and writes a
-    /// JSON report the C# suite asserts against.
+    /// The stub pi extension host the Pi variant is driven through. It offers the host shape
+    /// the artifact registers with (<c>pi.on</c>), a stub session context, and a stub
+    /// footer-data provider; it records <c>ui</c> calls, renders the registered footer at 80
+    /// columns, captures stderr, and writes a JSON report the C# suite asserts against.
     /// </summary>
     private const string PiHarnessScript = """
                                            import { after, test } from 'node:test'
@@ -1476,24 +1475,70 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                            import { readFileSync, writeFileSync } from 'node:fs'
                                            import { pathToFileURL } from 'node:url'
 
-                                           const report = { setStatus: [], setWidget: [], stderr: [], error: null }
+                                           const report = { uiCalls: [], footer: [], stderr: [], error: null }
 
                                            const fixture = JSON.parse(readFileSync(process.env.PI_FIXTURE, 'utf8'))
+                                           const mode = process.env.PI_MODE
 
-                                           const ui = {
-                                             mode: process.env.PI_MODE,
-                                             setStatus: (text) => { report.setStatus.push(String(text)) },
-                                             setWidget: (text) => { report.setWidget.push(String(text)) },
+                                           // One assistant entry per turn; the first carries the fixture usage so
+                                           // the rendered totals match the fixture exactly.
+                                           const entries = []
+                                           const turns = fixture.turns ?? 1
+                                           for (let i = 0; i < turns; i++) {
+                                             entries.push({
+                                               type: 'message',
+                                               message: {
+                                                 role: 'assistant',
+                                                 usage: i === 0
+                                                   ? {
+                                                       input: fixture.tokens.input,
+                                                       output: fixture.tokens.output,
+                                                       cacheRead: fixture.tokens.cache,
+                                                       cacheWrite: 0,
+                                                       totalTokens: fixture.tokens.total,
+                                                       cost: { total: fixture.costUsd },
+                                                     }
+                                                   : {
+                                                       input: 0,
+                                                       output: 0,
+                                                       cacheRead: 0,
+                                                       cacheWrite: 0,
+                                                       totalTokens: 0,
+                                                       cost: { total: 0 },
+                                                     },
+                                               },
+                                             })
                                            }
 
+                                           const handlers = {}
+                                           const pi = {
+                                             on: (event, handler) => {
+                                               (handlers[event] ??= []).push(handler)
+                                               return () => {}
+                                             },
+                                           }
+
+                                           const footerData = {
+                                             getGitBranch: () => fixture.branch,
+                                             onBranchChange: () => () => {},
+                                           }
+
+                                           const tui = { requestRender: () => {} }
+
                                            const context = {
-                                             ui,
+                                             mode,
                                              cwd: fixture.cwd,
-                                             model: fixture.model,
-                                             branch: fixture.branch,
-                                             tokens: fixture.tokens,
-                                             costUsd: fixture.costUsd,
-                                             turns: fixture.turns,
+                                             model: { id: fixture.model },
+                                             sessionManager: { getBranch: () => entries },
+                                             ui: {
+                                               setFooter: (factory) => {
+                                                 report.uiCalls.push('setFooter')
+                                                 const component = factory(tui, {}, footerData)
+                                                 for (const line of component.render(80)) {
+                                                   report.footer.push(String(line))
+                                                 }
+                                               },
+                                             },
                                            }
 
                                            process.stderr.write = (chunk) => { report.stderr.push(String(chunk)); return true }
@@ -1502,11 +1547,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              writeFileSync(process.env.PI_REPORT, JSON.stringify(report))
                                            })
 
-                                           test('the extracted extension activates against the stub context', async () => {
+                                           test('the extracted extension registers against the stub host', async () => {
                                              const module = await import(pathToFileURL(process.env.PI_ARTIFACT).href)
-                                             const activate = typeof module.activate === 'function' ? module.activate : module.default
-                                             assert.equal(typeof activate, 'function', 'the extension must export activate() or a default function')
-                                             await activate(context)
+                                             const factory = module.default
+                                             assert.equal(typeof factory, 'function', 'the extension must default-export a factory function')
+                                             await factory(pi)
+                                             assert.ok(
+                                               Array.isArray(handlers['session_start']) && handlers['session_start'].length > 0,
+                                               'the extension must subscribe to session_start')
+                                             for (const handler of handlers['session_start'] ?? []) {
+                                               await handler({}, context)
+                                             }
                                            })
                                            """;
 

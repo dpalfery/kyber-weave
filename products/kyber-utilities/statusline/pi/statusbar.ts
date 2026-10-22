@@ -1,23 +1,32 @@
 /**
  * Pi status-line extension — a standalone Kyber Utilities artifact.
  *
- * `activate(ctx)` renders one branded bar from the session fields pi exposes
- * on the extension context:
+ * `export default` receives the pi extension host and registers a custom footer
+ * for interactive sessions:
  *
  *   [PI] 📁 repo │ 🌿 branch │ 🤖 model │ ⚡ total (in:x out:y cache:z) │ 💰 $cost │ ⏳ turn #n
  *
- * THE THING TO GET RIGHT: there is no single output that works in both modes.
- * In "tui" mode pi owns the screen and repaints it, so the bar goes through
- * `ctx.ui.setStatus` plus a below-editor `ctx.ui.setWidget` — a raw write to
- * stderr would be torn up by the next repaint. In every other mode there is
- * no widget surface and nothing repaints, so a plain stderr write is both
- * safe and the only option.
+ * THE THING TO GET RIGHT: the bar must be ui-owned. In "tui" mode pi owns the
+ * screen and repaints it, so the bar is a `ctx.ui.setFooter()` component that pi
+ * renders every frame — a raw write to stderr would be torn up by the next
+ * repaint. Outside "tui" (print/json/rpc, including `--help`) there is no
+ * footer surface, so the extension registers nothing and writes nothing; a
+ * load-time stderr write would pollute command output.
+ *
+ * Live data comes from three places, matching the pi 1.3 extension host:
+ *
+ * - repository: the basename of `ctx.cwd`;
+ * - branch: `footerData.getGitBranch()`, re-rendering on `onBranchChange`;
+ * - model, tokens, cost, turns: `ctx.model` plus the assistant usage summed
+ *   across `ctx.sessionManager.getBranch()`, re-rendered on `agent_end` and
+ *   `agent_settled`.
  *
  * The extension opens no sockets, writes no files, and echoes no environment.
- * It depends on nothing but the context pi hands it.
+ * It depends on nothing but the host pi hands it and imports no packages, so
+ * the staged file also loads under plain `node --test` harnesses.
  */
 
-/** The session fields this bar needs, read straight off the pi context. */
+/** The session fields this bar needs, folded from the pi session. */
 interface StatusLineSummary {
   repo?: string;
   branch?: string;
@@ -31,21 +40,61 @@ interface StatusLineSummary {
   turnCount?: number;
 }
 
-/** The pinned slice of the pi extension context this artifact reads. */
-interface StatusLineContext {
-  ui?: {
-    /** "tui" means a live terminal UI owns the screen — do not write to it. */
-    mode?: string;
-    setStatus?: (text: string) => void;
-    /** Persistent bar rendered below the editor; undefined content removes it. */
-    setWidget?: (text: string, options?: { placement?: string }) => void;
+/** The per-message usage pi reports on assistant session entries. */
+interface AssistantUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+  cost?: { total?: number };
+}
+
+/** The slice of a pi session entry this artifact reads. */
+interface SessionBranchEntry {
+  type?: string;
+  message?: {
+    role?: string;
+    usage?: AssistantUsage;
   };
+}
+
+/** The slice of pi's footer-data provider this artifact reads. */
+interface FooterDataView {
+  getGitBranch(): string | null;
+  onBranchChange(callback: () => void): () => void;
+}
+
+/** The slice of pi's TUI handle this artifact reads. */
+interface TuiView {
+  requestRender(): void;
+}
+
+/** The footer component shape pi renders below the editor. */
+interface FooterComponent {
+  render(width: number): string[];
+  invalidate(): void;
+  dispose?(): void;
+}
+
+/** The slice of the pi session context this artifact reads. */
+interface SessionContextView {
+  mode?: string;
   cwd?: string;
-  model?: string | { id?: string; name?: string };
-  branch?: string;
-  tokens?: { input?: number; output?: number; cache?: number; total?: number };
-  costUsd?: number;
-  turns?: number;
+  model?: { id?: string; name?: string };
+  sessionManager?: { getBranch(): SessionBranchEntry[] };
+  ui?: {
+    setFooter(
+      factory:
+        | ((tui: TuiView, theme: unknown, footerData: FooterDataView) => FooterComponent)
+        | undefined,
+    ): void;
+  };
+}
+
+/** The slice of the pi extension host this artifact registers with. */
+interface ExtensionHostView {
+  on(event: string, handler: (...args: never[]) => void): () => void;
 }
 
 /** Format a number in compact "k" notation. */
@@ -88,7 +137,7 @@ export function visibleWidth(s: string): number {
 /**
  * Pack segments into lines that each fit `columns`.
  *
- * pi clips a widget line at the terminal edge rather than wrapping it, so a bar
+ * pi clips a footer line at the terminal edge rather than wrapping it, so a bar
  * wider than the window silently loses its tail -- on an 80-column terminal
  * that is the cost and turn segments, the two a person is most likely watching.
  * Wrapping keeps every segment on screen; a terminal too narrow for even one
@@ -169,73 +218,129 @@ function basename(p: string | undefined): string | undefined {
   return parts[parts.length - 1] || undefined;
 }
 
-/** pi may hand the model as a plain string or as an {id, name} object. */
-function modelLabel(model: StatusLineContext['model']): string | undefined {
-  if (typeof model === 'string') return model || undefined;
-  if (model && typeof model === 'object') {
-    const value = model.name ?? model.id;
-    return value === undefined || value === null ? undefined : String(value);
-  }
-  return undefined;
+/** pi hands the model as an object with an id; fall back to a name. */
+function modelLabel(model: SessionContextView['model']): string | undefined {
+  if (!model) return undefined;
+  const value = model.id ?? model.name;
+  return value === undefined || value === null ? undefined : String(value);
 }
 
-/** Fold the extension context into the summary the segments render from. */
-function summaryFromContext(ctx: StatusLineContext): StatusLineSummary {
+/**
+ * Fold a live pi session into the summary the segments render from.
+ *
+ * Token, cost, and turn counts come from the assistant entries on the current
+ * branch, the same source pi's own footer reads; the branch arrives from the
+ * footer-data provider, which watches the worktree for changes.
+ */
+export function summaryFromSession(
+  cwd: string | undefined,
+  modelId: string | undefined,
+  branch: string | null | undefined,
+  entries: SessionBranchEntry[] | undefined,
+): StatusLineSummary {
+  let freshInput = 0;
+  let output = 0;
+  let cache = 0;
+  let cost = 0;
+  let turns = 0;
+  for (const entry of entries ?? []) {
+    if (entry?.type !== 'message' || entry.message?.role !== 'assistant') continue;
+    turns += 1;
+    const usage = entry.message.usage;
+    if (!usage) continue;
+    freshInput += usage.input ?? 0;
+    output += usage.output ?? 0;
+    cache += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+    cost += usage.cost?.total ?? 0;
+  }
   return {
-    repo: basename(ctx.cwd),
-    branch: ctx.branch,
-    model: modelLabel(ctx.model),
-    freshInput: ctx.tokens?.input,
-    output: ctx.tokens?.output,
-    cacheRead: ctx.tokens?.cache,
+    repo: basename(cwd),
+    branch: branch ?? undefined,
+    model: modelId ?? undefined,
+    freshInput,
+    output,
+    cacheRead: cache,
     cacheCreation: 0,
-    totalTokens: ctx.tokens?.total,
-    totalCostUsd: ctx.costUsd,
-    turnCount: ctx.turns,
+    totalTokens: freshInput + output + cache,
+    totalCostUsd: cost,
+    turnCount: turns,
   };
 }
 
 /**
- * Render the status bar by whichever route the current mode actually shows.
- *
- * In "tui" mode the bar must be ui-owned — `setStatus` for the compact line
- * plus `setWidget` for the full bar below the editor. Outside "tui"
- * (print/json/rpc) there is no such surface, so stderr is the only safe write.
- * Both calls are best-effort: a ui failure must never take the session down
- * with it.
+ * Build the footer component pi renders below the editor. The component reads
+ * the session live on every render, so tokens, cost, and turns stay current
+ * without re-registration; branch changes arrive through the provider's watcher.
  */
-function renderToUi(ctx: StatusLineContext, summary: StatusLineSummary): void {
-  if (ctx.ui?.mode === 'tui') {
-    try {
-      ctx.ui.setStatus?.(renderStatusBar(summary));
-    } catch {
-      // Swallow — the status line is best-effort.
-    }
-    // Fall back to 80 when the width is unknown (not a tty): too narrow is
-    // recoverable -- it just wraps -- whereas guessing too wide clips.
-    const columns = process.stdout.columns || 80;
-    try {
-      ctx.ui.setWidget?.(renderStatusBarLines(summary, columns).join('\n'),
-        { placement: 'belowEditor' });
-    } catch {
-      // Swallow — the status line is best-effort.
-    }
-    return;
+export function createFooter(ctx: SessionContextView, footerData: FooterDataView, tui: TuiView): FooterComponent {
+  let unsubscribe: (() => void) | undefined;
+  try {
+    unsubscribe = footerData.onBranchChange(() => {
+      try {
+        tui.requestRender();
+      } catch {
+        // Swallow — the status line is best-effort.
+      }
+    });
+  } catch {
+    unsubscribe = undefined;
   }
-
-  process.stderr.write(renderStatusBar(summary) + '\n');
+  return {
+    invalidate() {},
+    dispose() {
+      try {
+        unsubscribe?.();
+      } catch {
+        // Swallow — cleanup must never fail the host.
+      }
+    },
+    render(width: number): string[] {
+      const columns = typeof width === 'number' && width > 0 ? width : 80;
+      const summary = summaryFromSession(
+        ctx.cwd,
+        modelLabel(ctx.model),
+        footerData.getGitBranch(),
+        ctx.sessionManager?.getBranch(),
+      );
+      return renderStatusBarLines(summary, columns);
+    },
+  };
 }
 
 /**
- * Extension entry point. pi hands us the context; the bar is painted once from
- * whatever the session already knows.
+ * Extension entry point. pi calls this once on load; the footer itself is
+ * registered per session, only for interactive ("tui") sessions that have a
+ * footer surface. Re-renders are requested when an agent run ends and when
+ * the branch watcher fires, so the bar tracks the session without polling.
  */
-export function activate(ctx: StatusLineContext): void {
+export default function (pi: ExtensionHostView): void {
+  let activeTui: TuiView | undefined;
+  const requestRender = () => {
+    try {
+      activeTui?.requestRender();
+    } catch {
+      // Swallow — the status line is best-effort and must never fail the host.
+    }
+  };
   try {
-    renderToUi(ctx, summaryFromContext(ctx));
+    pi.on('agent_end', requestRender);
+    pi.on('agent_settled', requestRender);
+    pi.on('session_shutdown', () => {
+      activeTui = undefined;
+    });
+    pi.on('session_start', (_event: unknown, ctx: SessionContextView) => {
+      try {
+        if (!ctx || ctx.mode !== 'tui') return;
+        if (typeof ctx.ui?.setFooter !== 'function') return;
+        ctx.ui.setFooter((tui: TuiView, _theme: unknown, footerData: FooterDataView) => {
+          activeTui = tui;
+          return createFooter(ctx, footerData, tui);
+        });
+      } catch {
+        // Swallow — the status line is best-effort and must never fail the host.
+      }
+    });
   } catch {
     // Swallow — the status line is best-effort and must never fail the host.
   }
 }
-
-export default activate;
