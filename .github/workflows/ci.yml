@@ -716,15 +716,85 @@ jobs:
         os: [macos-latest, windows-latest, ubuntu-24.04]
     permissions:
       contents: read
+    env:
+      # Single source for the Tauri apt package list: the cache-key step
+      # hashes this and the install step installs it, so the two cannot drift.
+      TAURI_APT_PACKAGES: libwebkit2gtk-4.1-dev build-essential libgtk-3-dev libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Tauri Linux build dependencies
+      # apt-get update on this job is seconds. The multi-minute stalls are
+      # apt-get install pulling ~60 MB from azure.archive.ubuntu.com at tens of
+      # kB/s. A restored deb archive lets apt install from disk, and apt still
+      # checks each deb against the signed index, so a stale file is re-fetched
+      # rather than installed. The primary key is the package list plus the ISO
+      # week: caches are immutable, a package-list change misses, and each week
+      # stores a new entry. restore-keys reuse the previous week when those
+      # debs still match. actions/cache reads and writes as the runner user, so
+      # the root-owned archive is handed over before restore and again after
+      # install; a root-owned deb is unreadable to that save.
+      - name: Resolve Tauri apt cache key
+        if: runner.os == 'Linux'
+        id: tauri-apt-key
+        run: |
+          set -euo pipefail
+          printf '%s' "$TAURI_APT_PACKAGES" | sha256sum | awk '{print "packages=" $1}' >> "$GITHUB_OUTPUT"
+          date -u +'week=%G-W%V' >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Tauri apt archive ownership
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libgtk-3-dev libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          set -euo pipefail
+          sudo mkdir -p /var/cache/apt/archives/partial
+          sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives
+
+      - name: Cache Tauri Linux apt packages
+        if: runner.os == 'Linux'
+        id: tauri-apt-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-tauri-apt-${{ steps.tauri-apt-key.outputs.packages }}-${{ steps.tauri-apt-key.outputs.week }}
+          restore-keys: |
+            ${{ runner.os }}-tauri-apt-${{ steps.tauri-apt-key.outputs.packages }}-
+
+      - name: Install Tauri Linux build dependencies
+        if: runner.os == 'Linux'
+        # Retry loop handles quick flakes only; a hung apt is killed by the step timeout.
+        # Depends on env.retry, the attempt budget this loop reads (no new retry action).
+        timeout-minutes: 45
+        env:
+          retry: "3"
+        run: |
+          set -euo pipefail
+          attempt=1
+          while [ "$attempt" -le "$retry" ]; do
+            # Unquoted on purpose: the job env holds a space-separated list.
+            if sudo apt-get update && sudo apt-get install -y $TAURI_APT_PACKAGES; then
+              # Incomplete downloads live in partial/; the lock is root-owned.
+              # Neither belongs in the cache, and the save runs as the runner.
+              sudo rm -rf /var/cache/apt/archives/partial
+              sudo rm -f /var/cache/apt/archives/lock
+              sudo mkdir -p /var/cache/apt/archives/partial
+              sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives
+              exit 0
+            fi
+            if [ "$attempt" -eq "$retry" ]; then
+              echo "Tauri apt install failed after $retry attempts; handing the archive back before exiting." >&2
+              # Best-effort: the cache save runs as the runner user, so a
+              # root-owned archive would add a save warning to the failure.
+              sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives || true
+              exit 1
+            fi
+            echo "Tauri apt attempt $attempt/$retry failed, retrying in 30s..." >&2
+            sleep 30
+            attempt=$((attempt + 1))
+          done
+          # Unreachable when the loop above runs (the last attempt exits
+          # inside), but hand the archive back here too if ever reached.
+          sudo chown -R "$(id -un):$(id -gn)" /var/cache/apt/archives || true
+          exit 1
 
       - name: Setup Node for Linux tray build
         if: runner.os == 'Linux'
