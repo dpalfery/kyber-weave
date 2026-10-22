@@ -695,9 +695,73 @@ jobs:
             security delete-keychain "$KEYCHAIN" || true
           fi
 
+  sbom:
+    # One aggregate SBOM for the whole release, covering the .NET, npm and Cargo
+    # dependency closures. It runs before `release` so the release job can attach
+    # it, and its output is uploaded as an artifact that the release job downloads
+    # alongside the binaries.
+    #
+    # The .NET SDK is set up here because the .NET cataloger needs a *.deps.json,
+    # which only a publish produces. scripts/generate-sbom.sh publishes
+    # KyberWeave.Cli and KyberWeave.Mcp framework-dependent and non-single-file
+    # into a throwaway directory, and copies only the deps.json into the scanned
+    # tree. Without the SDK the SBOM would fall back to the checked-in
+    # packages.lock.json files, which under-report .NET because
+    # src/KyberWeave.Mcp has no lock file.
+    name: Generate SBOM
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # The generator caches the pinned Syft tarball under the documented cache root
+      # and re-verifies its SHA-256 on every run, so a restored cache is checked
+      # before it is used rather than trusted.
+      - name: Cache the pinned Syft tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kyber-weave
+          key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Generate the SBOM
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p sbom-out
+          bash scripts/generate-sbom.sh sbom-out "${VERSION}"
+
+      - name: Validate the SBOM against the CycloneDX schema
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The generator already validates its own output, but the check is
+          # repeated here so that a schema violation is visible as its own step
+          # in the workflow log rather than only as a generator failure.
+          python3 scripts/validate-sbom.py \
+            "sbom-out/kyber-weave-sbom-${VERSION}.cdx.json" \
+            --require-ecosystems npm,cargo,nuget
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sbom
+          path: sbom-out/kyber-weave-sbom-*.cdx.json
+          retention-days: 14
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release (David Palfery must approve)
-    needs: [version, build, build-kyberdash, build-tray, pack-squad]
+    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
     environment: release
@@ -755,9 +819,15 @@ jobs:
           | KyberDash tray | \`kyberdash-tray-darwin-<arch>.zip\` / \`kyberdash-tray-win-x64-setup.exe\` |
           | Squad APM | \`kyber-squad-<version>.zip\` |
           | Squad Plugins | \`kyber-squad-plugin-<version>.zip\` |
+          | SBOM | \`kyber-weave-sbom-<version>.cdx.json\` (CycloneDX 1.6) |
 
           Kyber-Weave RIDs (\`osx-*\`, .NET): \`linux-x64\`, \`linux-arm64\`, \`osx-x64\`, \`osx-arm64\`, \`win-x64\`.
           KyberDash RIDs (\`darwin-*\`, Node SEA): \`linux-x64\`, \`linux-arm64\`, \`darwin-x64\`, \`darwin-arm64\`, \`win-x64\`.
+
+          The SBOM is a machine-readable inventory of the third-party components this
+          release depends on across the .NET, npm and Cargo ecosystems, for feeding
+          vulnerability scanners and licence audits. It is listed in \`SHA256SUMS.txt\`,
+          so the same verification command that checks the binaries checks it too.
 
           Install:
           \`\`\`bash
@@ -823,7 +893,7 @@ jobs:
           done <<< "$ASSETS_JSON"
 
           # Compare expected vs. published as sorted sets: both must contain
-          # exactly the 20 expected assets plus SHA256SUMS.txt (21 total).
+          # exactly the 21 expected assets plus SHA256SUMS.txt (22 total).
           # Sort and compare to catch both missing and extra assets.
           echo "Performing asset inventory verification..."
           declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")

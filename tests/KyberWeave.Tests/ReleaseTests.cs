@@ -1052,9 +1052,11 @@ public sealed class ReleaseTests
         string verifyStep = workflow[verifyIndex..];
         Assert.Contains("bash scripts/verify-release-checksums.sh release-assets \"${VERSION}\"", verifyStep, StringComparison.Ordinal);
 
-        // The release job cannot publish what has not been built.
+        // The release job cannot publish what has not been built. The SBOM is in
+        // the list because the published asset list contains it, so a release
+        // that published without one would fail the post-publish inventory check.
         Assert.Contains(
-            "needs: [version, build, build-kyberdash, build-tray, pack-squad]",
+            "needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom]",
             workflow,
             StringComparison.Ordinal);
     }
@@ -1193,9 +1195,9 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
 
-        // Must output exactly 20 lines (one per asset).
+        // Must output exactly 21 lines (one per asset).
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(20, lines.Length);
+        Assert.Equal(21, lines.Length);
 
         // The three tray assets must be in the list: both darwin architectures and Windows setup.
         Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
@@ -1255,7 +1257,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Helper array of all 20 expected release assets for fixture tests.
+    /// Helper array of all 21 expected release assets for fixture tests.
     /// </summary>
     private static readonly string[] ReleaseAssets =
     [
@@ -1278,11 +1280,12 @@ public sealed class ReleaseTests
         "kyberdash-tray-darwin-x64.zip",
         "kyberdash-tray-win-x64-setup.exe",
         "kyber-squad-{0}.zip",
-        "kyber-squad-plugin-{0}.zip"
+        "kyber-squad-plugin-{0}.zip",
+        "kyber-weave-sbom-{0}.cdx.json"
     ];
 
     /// <summary>
-    /// The complete fixture with all 20 expected assets present and no extras.
+    /// The complete fixture with all 21 expected assets present and no extras.
     /// The script must exit 0 and create a valid SHA256SUMS.txt.
     /// </summary>
     [Fact]
@@ -1293,7 +1296,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 21 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1317,10 +1320,10 @@ public sealed class ReleaseTests
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
 
-        // The manifest must have 20 lines (one per asset).
+        // The manifest must have 21 lines (one per asset).
         string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
         string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(20, manifestLines.Length);
+        Assert.Equal(21, manifestLines.Length);
 
         // Each line must match the format: 64 hex characters, two spaces, filename.
         foreach (string line in manifestLines)
@@ -1368,6 +1371,56 @@ public sealed class ReleaseTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
         Assert.Contains(missingAsset, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// A release directory that has every expected asset except the SBOM fails
+    /// verification, and the diagnostic names the SBOM.
+    /// </summary>
+    /// <remarks>
+    /// The SBOM is a release asset like any other, so the pre-publish check is
+    /// fail-closed on it: a release whose SBOM job did not produce a file must
+    /// not publish. This pins that specifically, because the missing-asset test
+    /// above removes whichever asset happens to be last in the list.
+    /// </remarks>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsAMissingSbom()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+        string sbomName = "kyber-weave-sbom-" + version + ".cdx.json";
+
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            if (asset == sbomName)
+            {
+                continue;
+            }
+
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(sbomName, result.StandardError, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
     }
 
@@ -1426,7 +1479,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 21 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1479,7 +1532,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 21 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1509,7 +1562,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Against an empty asset directory the script exits non-zero, reports all 20
+    /// Against an empty asset directory the script exits non-zero, reports all 21
     /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
     /// and does not print "unbound variable". The last assertion guards the
     /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
@@ -1543,13 +1596,14 @@ public sealed class ReleaseTests
         // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
         Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
 
-        // Stderr must report all 20 missing assets.
+        // Stderr must report all 21 missing assets.
         int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
-        Assert.Equal(20, missingCount);
+        Assert.Equal(21, missingCount);
 
         // Must name the first and last expected assets.
         Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("kyber-squad-plugin-" + version + ".zip", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-sbom-" + version + ".cdx.json", result.StandardError, StringComparison.Ordinal);
 
         // Must not write a manifest when all assets are missing.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));

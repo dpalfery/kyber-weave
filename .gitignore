@@ -40,6 +40,11 @@ apm_modules/
 
 node_modules/
 
+# Python bytecode. The repo ships one Python script (scripts/validate-sbom.py);
+# importing it, rather than running it, would otherwise leave this behind.
+__pycache__/
+*.pyc
+
 .local-release/
 
 # --- dash/ build output ---

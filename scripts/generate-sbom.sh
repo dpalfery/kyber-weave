@@ -66,9 +66,14 @@
 # Without a .NET SDK the publish step is skipped with a warning and the SBOM falls back
 # to the checked-in packages.lock.json files. That fallback under-reports .NET:
 # src/KyberWeave.Mcp has no packages.lock.json, so its NuGet dependencies
-# (ModelContextProtocol, Microsoft.Extensions.Hosting and their transitives) are absent
-# from the SBOM. The script says so loudly rather than emitting a quietly incomplete
-# document, and the nuget ecosystem check drops to a warning for the same reason.
+# (ModelContextProtocol, ModelContextProtocol.Core, Microsoft.Extensions.Hosting and
+# their transitives) are absent from the SBOM.
+#
+# That fallback is a LOCAL-DEVELOPMENT path, not release-grade coverage. The release
+# and CI jobs always have the .NET SDK, so what is published is the full closure — on
+# this machine the staged publish recovers 32 NuGet packages the lock files miss.
+# The script says so loudly rather than emitting a quietly incomplete document, and
+# the nuget ecosystem check drops to a warning for the same reason.
 #
 # The npm and cargo ecosystems do not degrade: Syft parses package-lock.json and
 # Cargo.lock directly, so neither needs its toolchain installed to be cataloged.
@@ -280,6 +285,12 @@ SYFT_BIN="$(resolve_syft "$PLATFORM")"
 STAGING_DIR=""
 PUBLISH_DIR=""
 DOTNET_COVERAGE="lockfile-only"
+
+# First-party assemblies and projects. These are what this repository builds, not
+# what it depends on, so they must not appear in the component list: the root
+# component already represents the product. The deps.json roots are appended to
+# this list once the publish has told us what they are called.
+FIRST_PARTY_NAMES="kyberweave.core kyberweave.cli kyberweave.mcp"
 cleanup() {
     if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
         rm -rf "$STAGING_DIR"
@@ -364,6 +375,16 @@ stage_dotnet() {
     if [[ "$deps" -eq 0 ]]; then
         die "the staged publish produced no *.deps.json; Syft would have nothing to catalog"
     fi
+
+    # The root project of a deps.json is emitted by Syft as a component of its own:
+    # the deps.json is named after the assembly, and the assembly is the root
+    # package. Those are the products themselves, not third-party dependencies, so
+    # their names are collected here and dropped from the component list.
+    local root
+    for root in "${PUBLISH_DIR}"/*/*.deps.json; do
+        FIRST_PARTY_NAMES="${FIRST_PARTY_NAMES} $(basename "$root" .deps.json)"
+    done
+
     log "staged ${deps} deps.json file(s) under ${STAGING_DIR}"
     DOTNET_COVERAGE="full"
 }
@@ -420,13 +441,13 @@ done
 # validation see the same document.
 # ---------------------------------------------------------------------------
 python3 - "${RAW_FILE}" "${OUT_FILE}" "${REPO_ROOT}" "${VERSION}" "${DEDUPE}" \
-         "${DOTNET_COVERAGE}" "${ALLOW_PARTIAL}" "${SYFT_VERSION}" <<'PY'
+         "${DOTNET_COVERAGE}" "${ALLOW_PARTIAL}" "${SYFT_VERSION}" "${FIRST_PARTY_NAMES}" <<'PY'
 import json
 import os
 import sys
 from collections import Counter, OrderedDict
 
-raw_path, out_path, repo_root, version, dedupe, coverage, allow_partial, syft_version = sys.argv[1:9]
+raw_path, out_path, repo_root, version, dedupe, coverage, allow_partial, syft_version, first_party = sys.argv[1:10]
 dedupe = dedupe == "1"
 allow_partial = allow_partial == "1"
 
@@ -495,17 +516,32 @@ metadata["properties"].extend([
     {"name": "kyber-weave:sbom:deduplicated", "value": "true" if dedupe else "false"},
 ])
 
-# --- drop first-party project references --------------------------------------------
-# A packages.lock.json records a project reference ("type": "Project") as if it were a
-# package. Syft's packages-lock cataloger emits it as a NuGet component with no
-# resolved version, so it would ship as a "package" called kyberweave.core at version
-# UNKNOWN. It is first-party code, not a third-party dependency, and the root
-# component already represents it. Syft's deps.json cataloger excludes project
-# references by default; this brings the lockfile path in line with that.
+# --- drop first-party components ---------------------------------------------------
+# Two shapes of first-party component reach the component list, and neither is a
+# third-party dependency:
+#
+#   * A packages.lock.json records a project reference ("type": "Project") as if it
+#     were a package, and Syft's packages-lock cataloger emits it as a NuGet
+#     component with no resolved version.
+#   * The root project of a deps.json is the assembly the deps.json is named
+#     after, and Syft's deps cataloger emits it as a component too.
+#
+# Both are this repository's own code. The root component already represents the
+# product, so listing them again would claim the release depends on itself. The
+# names are supplied by the caller: the project names are known here, and the
+# deps.json roots are discovered from what the publish produced.
+first_party_names = {name.strip().lower() for name in first_party.split() if name.strip()}
 first_party = []
 for component in components:
     purl = component.get("purl") or ""
-    if purl.startswith("pkg:nuget/") and "@" not in purl:
+    if not purl.startswith("pkg:nuget/"):
+        continue
+    name = (component.get("name") or "").lower()
+    if name in first_party_names:
+        first_party.append(component)
+    elif "@" not in purl:
+        # A NuGet component with no version at all is a project reference from a
+        # packages.lock.json, which never carries a resolved version.
         first_party.append(component)
 if first_party:
     dropped_refs = {component.get("bom-ref") for component in first_party}
@@ -520,7 +556,7 @@ if first_party:
         entry["dependsOn"] = [t for t in (entry.get("dependsOn") or []) if t not in dropped_refs]
         pruned.append(entry)
     bom["dependencies"] = pruned
-    print("dropped %d first-party project reference(s) presented as NuGet packages: %s"
+    print("dropped %d first-party component(s) presented as NuGet packages: %s"
           % (len(first_party), ", ".join(sorted(c.get("name", "?") for c in first_party))))
 
 # --- collapse duplicate packages --------------------------------------------------
@@ -679,6 +715,36 @@ with open(out_path, "w", encoding="utf-8") as handle:
 print("")
 print("SBOM written: %s" % out_path)
 PY
+
+# ---------------------------------------------------------------------------
+# Schema validation — the last gate.
+#
+# The Python pass above checks the shape of the document this script produced. That
+# is not the same as checking it against the CycloneDX schema, and the difference
+# is not academic: during development, a document that satisfied every hand-written
+# check was still rejected by the schema (the schema requires the `dependencies`
+# array to hold unique entries). So the generated file is validated against the
+# vendored CycloneDX 1.6 schema before it is accepted.
+#
+# A failure here removes the file: a rejected SBOM must not be left on disk for a
+# later step to publish.
+# ---------------------------------------------------------------------------
+VALIDATOR="${REPO_ROOT}/scripts/validate-sbom.py"
+[[ -f "$VALIDATOR" ]] || die "the SBOM validator is missing: ${VALIDATOR}"
+
+VALIDATOR_ARGS=(--require-ecosystems npm,cargo,nuget)
+if [[ "$DOTNET_COVERAGE" != "full" ]]; then
+    # Without the .NET SDK the nuget coverage is knowingly partial, so a missing
+    # nuget ecosystem is a warning rather than an error. npm and cargo are not
+    # affected: Syft reads those lock files directly, so their absence means the
+    # scan did not do what it was asked to do.
+    VALIDATOR_ARGS+=(--optional-ecosystems nuget)
+fi
+
+if ! python3 "$VALIDATOR" "${OUT_FILE}" "${VALIDATOR_ARGS[@]}"; then
+    rm -f "${OUT_FILE}"
+    die "the generated SBOM failed CycloneDX schema validation and was removed"
+fi
 
 log ""
 log "SBOM: ${OUT_FILE}"
