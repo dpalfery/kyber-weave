@@ -12,6 +12,7 @@ import { DEFAULT_CAPTURE_ENDPOINT, runCapture } from './index.js'
 import { buildCaptureStatus, buildHarnessStatus, createApplicabilityFilter } from './status.js'
 import type { CaptureHarnessStatus, StatusContext } from './status.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
+import { KILO_PLUGIN_SOURCE } from './kilo-plugin/source.js'
 
 const temporaryHomes: string[] = []
 
@@ -128,7 +129,7 @@ describe('buildCaptureStatus over a temporary home', () => {
       ['opencode', 'managed'],
       ['pi', 'status-only'],
       ['antigravity', 'status-only'],
-      ['kilo', 'status-only'],
+      ['kilo', 'managed'],
     ])
   })
 
@@ -344,31 +345,62 @@ describe('buildCaptureStatus over a temporary home', () => {
   })
 })
 
-describe('kilo status-only capture status (T3a)', () => {
-  it('lists kilo as a status-only harness that is not applicable, with an inert file row', () => {
+describe('kilo plugin capture status', () => {
+  const kiloPluginFile = (home: string) => pjoin(HOST, kiloConfigDir(home), 'plugin', 'kyberdash-capture.js')
+
+  it('lists kilo as a managed harness, off until the plugin is installed, with the plugin as its one file', () => {
     const home = makeHome()
     const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
     expect(kilo).toMatchObject({
       id: 'kilo',
       displayName: 'Kilo Code',
-      mode: 'status-only',
+      mode: 'managed',
       installed: 'not-detected',
-      state: 'not-applicable',
+      state: 'off',
       receipt: 'absent',
       warnings: [],
     })
-    // Status-only declares no managed keys, so nothing here is ever written: the file
-    // row is the config surface the status points at, and it stays empty.
+    // The one file is the plugin itself: no config keys are declared or written.
     expect(kilo.files).toHaveLength(1)
-    const file = kilo.files[0]!
-    expect(file.path.startsWith(kiloConfigDir(home))).toBe(true)
-    expect(file).toMatchObject({
-      applicable: false,
+    expect(kilo.files[0]).toMatchObject({
+      id: 'plugin',
+      path: kiloPluginFile(home),
+      applicable: true,
+      exists: false,
       expectedKeys: [],
       presentKeys: [],
       missingKeys: [],
       drift: null,
     })
+  })
+
+  it('reports on with a recorded receipt after the plugin is installed', async () => {
+    const home = makeHome()
+    await runCapture('enable', { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER })
+    const kilo = byId(buildCaptureStatus(ctxFor(home)), 'kilo')
+    expect(kilo).toMatchObject({ mode: 'managed', state: 'on', receipt: 'recorded' })
+    expect(kilo.files[0]).toMatchObject({ exists: true })
+  })
+
+  it('reports partial for an older plugin of its own, which Enable upgrades', () => {
+    const home = makeHome()
+    writeConfig(kiloPluginFile(home), '// kyberdash-capture-plugin v0\nold\n')
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('partial')
+  })
+
+  it.each([
+    ['a file KyberDash did not write', 'export default {}\n'],
+  ])('reports unknown for %s, so the row offers no action', (_name, content) => {
+    const home = makeHome()
+    writeConfig(kiloPluginFile(home), content)
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('unknown')
+  })
+
+  it('reports unknown for a plugin the owner edited since install', async () => {
+    const home = makeHome()
+    await runCapture('enable', { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER })
+    writeConfig(kiloPluginFile(home), `${KILO_PLUGIN_SOURCE}// owner edit\n`)
+    expect(byId(buildCaptureStatus(ctxFor(home)), 'kilo').state).toBe('unknown')
   })
 
   it.each([
@@ -414,15 +446,15 @@ describe('kilo status-only capture status (T3a)', () => {
     expect(JSON.stringify(kilo)).not.toContain(sentinel)
   })
 
-  it('names two manual steps, the plugin install and the folder import, with no environment variable', () => {
+  it('names exactly one manual step, the folder import, with no environment variable', () => {
     const kilo = byId(buildCaptureStatus(ctxFor(makeHome())), 'kilo')
-    expect(kilo.manualSteps.map((step) => step.id)).toEqual(['kilo-capture-plugin', 'kilo-folder-import'])
-    for (const step of kilo.manualSteps) {
-      // Commands and settings the user runs, never an env var the drawer could set for them.
-      expect(step.env).toBeUndefined()
-    }
-    expect(kilo.manualSteps[0]!.text).toMatch(/capture enable --harness kilo/)
-    expect(kilo.manualSteps[1]!.text).toMatch(/Scheduled folder import|import-history --harness kilo-shared-runtime/)
+    expect(kilo.manualSteps).toHaveLength(1)
+    const step = kilo.manualSteps[0]!
+    expect(step.id).toBe('kilo-folder-import')
+    // The plugin has its own Enable button; the folder import is a setting or command the
+    // user runs, never an env var the drawer could set for them.
+    expect(step.env).toBeUndefined()
+    expect(step.text).toMatch(/Scheduled folder import|import-history --harness kilo-shared-runtime/)
   })
 })
 

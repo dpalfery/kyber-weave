@@ -77,8 +77,11 @@ future config-level Kilo export key would be an additive change rather than a re
 paragraph.
 
 Amended 2026-10-21 (Kilo capture plugin): the owned unit may be a whole file, not only keys.
-`kilo` stays `kind: 'pending'` for the key machinery, and so stays out of the Settings route's
-writable set (`POST /api/kyber/capture` still answers 400), but it gains a `filePlugin`:
+`kilo` stays `kind: 'pending'` for the key machinery but gains a `filePlugin`, which makes the
+Settings route accept it (`POST /api/kyber/capture` switches it through the same preview and
+confirm flow, and `GET` reports it as `managed` with state `on`, `off`, `partial` for an older
+plugin of ours, or `unknown` for an edited or foreign file). A file plugin never turns the OTLP
+receiver on, and never counts toward "the last managed harness was disabled". The writer:
 `enable` installs `~/.config/kilo/plugin/kyberdash-capture.js` and `disable` removes it only while
 its SHA-256 still matches the digest in `~/.kyberdash/kilo-plugin-receipt.json`. An owner edit is
 left in place and reported, a file KyberDash did not write is never overwritten, and

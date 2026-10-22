@@ -7,10 +7,16 @@
 // removes it. Usage and message content still come from kilo.db through folder import.
 //
 // The plugin file owns itself (digest receipt in kilo-plugin/install.ts), so this writer is
-// not a key writer: it stays out of the Settings route's writable set, and `status` never
-// echoes text the owner wrote in kilo.jsonc.
+// not a key writer: Settings reports and switches it as one file, and `status` never echoes
+// text the owner wrote in kilo.jsonc.
 
-import { describeKiloPluginStatus, installKiloPlugin, kiloPluginPaths, uninstallKiloPlugin } from '../kilo-plugin/install.js'
+import {
+  describeKiloPluginStatus,
+  installKiloPlugin,
+  kiloPluginPaths,
+  kiloPluginState,
+  uninstallKiloPlugin,
+} from '../kilo-plugin/install.js'
 import { envJoin, type PathEnv } from '../paths.js'
 
 import type { PendingHarnessWriter } from './registry.js'
@@ -19,7 +25,7 @@ import type { PendingHarnessWriter } from './registry.js'
 function describeKiloStatus(home: string): readonly string[] {
   return [
     ...describeKiloPluginStatus(home),
-    'captures: system prompt, tool definitions and skills catalog, from the capture plugin',
+    'captures: system prompt, tool definitions and skills catalog, from the capture plugin (restart Kilo after enabling)',
     'usage source: Kilo usage and message content are collected from kilo.db through folder import',
   ]
 }
@@ -39,5 +45,6 @@ export const kiloHarness: PendingHarnessWriter = {
     install: (home, env, options) => installKiloPlugin(home, env, options),
     uninstall: (home, env, options) => uninstallKiloPlugin(home, env, options),
     path: (home, env) => kiloPluginPaths(home, env).pluginFile,
+    state: (home, env) => kiloPluginState(home, env),
   },
 }

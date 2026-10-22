@@ -17,7 +17,14 @@ export type KiloPluginPaths = { pluginFile: string; receiptFile: string; storeDi
 
 export type KiloPluginOutcome = 'wrote' | 'would-write' | 'restored' | 'would-restore' | 'noop' | 'refused'
 
-export type KiloPluginResult = { exitCode: number; outcome: KiloPluginOutcome; out: string[]; err: string[] }
+export type KiloPluginResult = {
+  exitCode: number
+  outcome: KiloPluginOutcome
+  /** Why a refusal happened: `conflict` for a file that is not ours, `drift` for an owner edit. */
+  reason?: 'conflict' | 'drift'
+  out: string[]
+  err: string[]
+}
 
 type KiloPluginReceipt = { version: 1; path: string; sha256: string }
 
@@ -60,6 +67,7 @@ export function installKiloPlugin(
     return {
       exitCode: 1,
       outcome: 'refused',
+      reason: 'conflict',
       out: [],
       err: [`kyberdash capture: refusing to overwrite ${pluginFile}: it was not written by KyberDash`],
     }
@@ -99,6 +107,7 @@ export function uninstallKiloPlugin(
     return {
       exitCode: 1,
       outcome: 'refused',
+      reason: 'drift',
       out: [],
       err: [`kyberdash capture: ${pluginFile} changed since install; leaving it in place. Delete it yourself to remove it.`],
     }
@@ -116,13 +125,38 @@ export function uninstallKiloPlugin(
   }
 }
 
+export type KiloPluginState = {
+  /** on: current and intact. partial: an older plugin of ours. off: absent. unknown: not ours or edited. */
+  state: 'on' | 'off' | 'partial' | 'unknown'
+  exists: boolean
+  receipt: boolean
+}
+
+/** What the Settings row reports. Reads two files and never throws. */
+export function kiloPluginState(home: string, env?: PathEnv): KiloPluginState {
+  const { pluginFile, receiptFile } = kiloPluginPaths(home, env)
+  const receipt = readReceipt(receiptFile)
+  let installed: string | undefined
+  try {
+    installed = readIfPresent(pluginFile)
+  } catch {
+    return { state: 'unknown', exists: true, receipt: receipt !== undefined }
+  }
+  if (installed === undefined) return { state: 'off', exists: false, receipt: receipt !== undefined }
+  const ours = installed.startsWith('// kyberdash-capture-plugin')
+  // With no receipt the marker is all that says the file is ours; with one, its digest must hold.
+  const intact = receipt === undefined || sha256Hex(installed) === receipt.sha256
+  const state = !ours || !intact ? 'unknown' : installed === KILO_PLUGIN_SOURCE ? 'on' : 'partial'
+  return { state, exists: true, receipt: receipt !== undefined }
+}
+
 /** Fixed-format status lines. Never echoes owner-written text. */
 export function describeKiloPluginStatus(home: string, env?: PathEnv): string[] {
   const { pluginFile, receiptFile, storeDir } = kiloPluginPaths(home, env)
   const installed = readIfPresent(pluginFile)
   const lines: string[] = []
   if (installed === undefined) {
-    lines.push('plugin: not installed (run: kyberdash kyber capture enable --harness kilo)')
+    lines.push('plugin: not installed')
   } else {
     const recorded = readReceipt(receiptFile)?.sha256
     const intact = sha256Hex(installed) === (recorded ?? sha256Hex(KILO_PLUGIN_SOURCE))

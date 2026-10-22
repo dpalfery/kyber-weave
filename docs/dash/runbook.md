@@ -1194,7 +1194,8 @@ here.
   [`dash clean`](#2b-database-clean-dash-clean) removes the harness's problem rows — it also wipes
   its records and checkpoints, so the next refresh re-reads them.
 - **System prompt, tool definitions or skills show "not measurable":** those come from the Kilo
-  capture plugin, not kilo.db. Install it with `kyberdash kyber capture enable --harness kilo`,
+  capture plugin, not kilo.db. Install it with the **Enable** button on the Kilo Code row in
+  Settings, or `kyberdash kyber capture enable --harness kilo`,
   restart Kilo (CLI, VS Code window or desktop app), and check `kyberdash kyber capture status
   --harness kilo`: `plugin: installed` and `captured calls: N` mean it is recording. Only turns made
   after the install carry the buckets. `disable` removes the plugin and keeps what it captured under

@@ -118,12 +118,6 @@ function manualStepsFor(writer: CaptureHarnessWriter, endpoint: string): Capture
   if (writer.id === 'kilo') {
     return [
       {
-        id: 'kilo-capture-plugin',
-        text:
-          'Run `kyberdash kyber capture enable --harness kilo` to install the plugin that records the system prompt, ' +
-          'tool definitions and skills catalog, then restart Kilo',
-      },
-      {
         id: 'kilo-folder-import',
         // No env: a folder import is a setting or a command the user runs,
         // never a variable the drawer could suggest a value for.
@@ -298,6 +292,39 @@ function buildOne(
   let detection: InstallDetection = injected
     ? { installed: injected.installed, evidence: [...injected.evidence] }
     : detectInstall(writer, ctx.home, ctx.env, existence)
+
+  if (writer.kind === 'pending' && writer.filePlugin !== undefined) {
+    // A file plugin is switchable from Settings, so it reports as managed: the one
+    // "file" is the plugin and no config key is declared, written or drift-checked.
+    const plugin = writer.filePlugin.state(ctx.home, ctx.env)
+    const lines = (writer.describeStatus?.(ctx.home, { redact: true }) ?? [])
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+    return {
+      id: writer.id,
+      displayName: writer.displayName,
+      mode: 'managed',
+      installed: detection.installed,
+      installEvidence: [...detection.evidence],
+      state: plugin.state,
+      receipt: plugin.receipt ? 'recorded' : 'absent',
+      files: [
+        {
+          id: 'plugin',
+          path: writer.filePlugin.path(ctx.home, ctx.env),
+          applicable: true,
+          exists: plugin.exists,
+          expectedKeys: [],
+          presentKeys: [],
+          missingKeys: [],
+          drift: null,
+        },
+      ],
+      warnings: [],
+      manualSteps: manualStepsFor(writer, ctx.endpoint),
+      statusLines: lines,
+    }
+  }
 
   if (writer.kind === 'pending') {
     const path = writer.resolvePath(ctx.home, ctx.env)

@@ -792,6 +792,7 @@ async function runEnable(
               harness: writer.id,
               fileId: 'plugin',
               path: writer.filePlugin.path(home, env),
+              ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
             })
           }
           continue
@@ -1212,6 +1213,7 @@ async function runDisable(
             harness: writer.id,
             fileId: 'plugin',
             path: writer.filePlugin.path(home, env),
+            ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
           })
         }
         continue

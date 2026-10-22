@@ -16,7 +16,7 @@
 // a harness module cannot grow a second writer that bypasses D11.
 
 import type { JsonScalar } from '../edit-json.js'
-import type { KiloPluginResult } from '../kilo-plugin/install.js'
+import type { KiloPluginResult, KiloPluginState } from '../kilo-plugin/install.js'
 import type { PathEnv } from '../paths.js'
 import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
@@ -57,6 +57,7 @@ export type PendingHarnessWriter = {
     install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
     uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
     path: (home: string, env: PathEnv | undefined) => string
+    state: (home: string, env: PathEnv | undefined) => KiloPluginState
   }
 }
 

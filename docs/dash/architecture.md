@@ -1138,8 +1138,11 @@ Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
 (`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
 `enable` installs the capture plugin file and `disable` removes it, each with its own digest
-receipt (`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt), and
-`POST /api/kyber/capture` answers **400** because `MANAGED_IDS` excludes it. Adding one needs no web change: `readHarness`
+receipt (`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt). The capture route
+accepts `kilo` because `MANAGED_IDS` includes any writer with a `filePlugin`, `GET` reports it as
+`managed` (state from `kiloPluginState`), and the web drawer needs no change: a managed row with a
+state gets Enable and Disable. A file plugin never turns the OTLP receiver on and is excluded from
+`lastManagedHarnessDisabled`. Adding one needs no web change: `readHarness`
 (`dash/web/src/lib/kyberApi.ts`) falls back to `status-only` for a `mode` it does not recognise,
 and `CAPTURE_MAX_HARNESSES` bounds the list.
 
