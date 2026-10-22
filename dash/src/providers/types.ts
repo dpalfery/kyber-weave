@@ -26,6 +26,13 @@ export type SessionSource = {
   // this discriminant (`jsonl`, `session-store`, `chatsession`, `transcript`,
   // `otel`, `jetbrains`). Optional because other providers never set it.
   sourceType?: 'jsonl' | 'session-store' | 'chatsession' | 'transcript' | 'otel' | 'jetbrains'
+  // Set only on synthetic marker sources (sqlite-session-parser's
+  // `__unreadable-store__` suffix): the db file exists but discovery already
+  // failed to read it this pass, and this carries WHY. The read path throws
+  // the recorded reason rather than re-opening — a transient cause (busy
+  // lock) may have cleared by parse time, and a succeeding second open
+  // would masquerade the failure as an empty store.
+  unreadableStoreError?: string
 }
 
 export type SessionParser = {

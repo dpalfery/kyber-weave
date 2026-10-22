@@ -1,7 +1,8 @@
 // Harness-agnostic capture command core for D3, D9 and D11 (T8).
 //
-// `kyberdash kyber capture status | enable | disable` points the six D6
-// harnesses' OTLP exporters at the KyberDash receiver. Only OTLP/HTTP
+// `kyberdash kyber capture status | enable | disable` acts on the capture
+// registry's harnesses, pointing the managed OTLP exporters at the KyberDash
+// receiver (pending writers report status and are never written). Only OTLP/HTTP
 // endpoints may be written. macOS, Linux and Windows are all supported:
 // since D14 every path resolves through the platform-aware seam in paths.ts,
 // so Windows runs in-process with no script shipped (ADR 0031 amendment).
@@ -61,7 +62,7 @@ export const DEFAULT_CAPTURE_ENDPOINT = 'http://127.0.0.1:4318'
 export type CaptureAction = 'status' | 'enable' | 'disable'
 
 export type CaptureRunOptions = {
-  /** Harness ids to act on; defaults to the six D6 registry harnesses. */
+  /** Harness ids to act on; defaults to every harness in the registry. */
   harnessIds?: string[]
   /** OTLP receiver origin. Only OTLP/HTTP (http/https) may be written. */
   endpoint?: string
@@ -439,7 +440,7 @@ function statusLines(
           ? `  config: ${path} (unreadable: ${read.error})`
           : `  config: ${path} (${read.found ? 'found' : 'missing'})`,
       )
-      const described = writer.describeStatus?.(home)
+      const described = writer.describeStatus?.(home, { env })
       if (described !== undefined && described.length > 0) {
         // Replaces the static reason. Pi returns lines that are already
         // indented; Antigravity returns bare lines, which get the same
@@ -809,7 +810,10 @@ async function runEnable(
   const err: string[] = []
   let exitCode = 0
   const loaded = loadReceiptState(home)
-  if (loaded.corrupt) {
+  // The key receipt matters only to key writers; a file plugin keeps its own. A corrupt
+  // shared receipt must not block a run that never reads it.
+  const usesKeyReceipt = writers.some((writer) => writer.kind === 'managed')
+  if (loaded.corrupt && usesKeyReceipt) {
     // Replacing an unreadable receipt would lose the prior values `disable`
     // restores from. Refuse and leave it for the owner to inspect.
     const harness = writers[0]?.id ?? ''
@@ -827,6 +831,22 @@ async function runEnable(
   try {
     for (const writer of writers) {
       if (writer.kind === 'pending') {
+        if (writer.filePlugin !== undefined) {
+          const installed = writer.filePlugin.install(home, env, { dryRun })
+          out.push(...installed.out)
+          err.push(...installed.err)
+          if (installed.exitCode !== 0) exitCode = installed.exitCode
+          if (installed.outcome !== 'restored' && installed.outcome !== 'would-restore') {
+            events.push({
+              kind: installed.outcome,
+              harness: writer.id,
+              fileId: 'plugin',
+              path: writer.filePlugin.path(home, env),
+              ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
+            })
+          }
+          continue
+        }
         out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
         continue
       }
@@ -1221,7 +1241,7 @@ async function runDisable(
   // never-enabled. This holds for every disable path, not only the Settings opt-in — a
   // plain disable that noops past a corrupt receipt would report "nothing to do" (exit 0)
   // and mask the corruption, while enable already refuses it.
-  if (receiptState.corrupt) {
+  if (receiptState.corrupt && writers.some((writer) => writer.kind === 'managed')) {
     const harness = writers[0]?.id ?? ''
     err.push(`kyberdash capture: refusing to disable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
     events.push({ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' })
@@ -1232,6 +1252,22 @@ async function runDisable(
 
   for (const writer of writers) {
     if (writer.kind === 'pending') {
+      if (writer.filePlugin !== undefined) {
+        const removed = writer.filePlugin.uninstall(home, env, { dryRun })
+        out.push(...removed.out)
+        err.push(...removed.err)
+        if (removed.exitCode !== 0) exitCode = removed.exitCode
+        if (removed.outcome !== 'wrote' && removed.outcome !== 'would-write') {
+          events.push({
+            kind: removed.outcome,
+            harness: writer.id,
+            fileId: 'plugin',
+            path: writer.filePlugin.path(home, env),
+            ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
+          })
+        }
+        continue
+      }
       out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
       continue
     }

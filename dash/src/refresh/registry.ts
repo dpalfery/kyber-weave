@@ -35,7 +35,11 @@ const CLAUDE_PARSER_CONTRACT_VERSION = '7'
 // must not be reused or previously dropped sessions stay missing after upgrade.
 // v3 (both): invoked skill names onto turn records (`kyber.skills.invoked`).
 const CODEX_PARSER_CONTRACT_VERSION = '3'
-const KILO_PARSER_CONTRACT_VERSION = '3'
+// v4: the kilo.db reader now attaches conversation and tool-result parts to
+// records, pairing by `message.id`. Stale counters-only checkpoints under v3
+// must be re-read so the same-span content upserts over them (ADR 0016 repair
+// contract), not a migration.
+const KILO_PARSER_CONTRACT_VERSION = '4'
 // v2: invoked skill names onto turn records (`kyber.skills.invoked`). Applies
 // to the providers named in SKILLS_CONTRACT_PROVIDER_NAMES; the VS Code
 // `cline` descriptor and hermes do not fill skills and keep their versions.

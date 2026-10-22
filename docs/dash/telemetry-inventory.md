@@ -53,20 +53,87 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Command Code (`commandcode`) | JSONL counter ingest from `~/.commandcode/projects/<slugified-cwd>/<session-id>.jsonl` (`dash/src/providers/commandcode.ts`), with the format verified against the published `command-code` 1.84.0 package. Each assistant entry whose `usage` carries any non-zero counter becomes one call. The AI SDK's `inputTokens` includes both cache classes, so the provider subtracts `cacheReadTokens` and `cacheWriteTokens` to recover fresh input. Cost is the transcript's `costUsd` when it is positive (reported); otherwise it is priced from the model pricing table and marked `costIsEstimated`. The content reader (`commandcodeReader`, `dash/src/synth/readers/commandcode.ts`) yields one turn per assistant message, keyed by the message id as `nativeRecordId`, which the counter call carries as `pairingId`, so the two join by id; `turnId` stays unset, so record identity keeps its digest (envelopes carry no `nativeRecordId`). Assistant text becomes `conversation_history`, tool calls come from `tool_use` blocks, and tool results from the following user message attach to their turn. An assistant message without a `usage` object produces no counter call, so its text is dropped. The user prompt rides on the counter call as `userMessage`, not as a content part. The hyphenated `command-code` filter spelling folds to the stored id `commandcode` (`normalizeHarnessName`, `dash/src/canon/measurability.ts`), so `?harness=command-code` matches the stored rows. Provider and reader behaviour is pinned by unit tests on synthetic transcripts. | No OTLP adapter claims Command Code, so collection is file-source only, through `dash refresh`. Content is limited to what the transcript stores. The reader declares `schema_cost`, `system_prompt`, `instruction_context`, and `tool_definitions` not measurable (`READER_UNMEASURABLE`). `tool_result_content` is measured: it is not listed in `READER_UNMEASURABLE`, and paired tool-result text is written to its tool record without a not-measurable declaration. Tool records report `status: ok` for any paired result; a call with no following result reads `status: unset`. The reader sets `isError` only from an `is_error` flag on the tool-result block, and the `command-code` 1.84.0 writer persists no error flag, so an error call is indistinguishable from a successful one. Parser contract `2` (`COMMANDCODE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`): advancing it makes existing checkpoints stale. No live owner session is recorded. |
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. KyberDash can now set the `opencode.jsonc` OpenTelemetry flag from the Settings drawer or `kyberdash kyber capture enable --harness opencode` (see [in-app enablement](#in-app-collection-enablement)). | The endpoint is read from the process environment, not the file, so `OTEL_EXPORTER_OTLP_ENDPOINT` must still be set by the owner where OpenCode launches. Owner enablement and a live turn are required before collection can be verified. |
-| Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 3). Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported. Undocumented live OTel surface remains uncollected. |
+| Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 4). `kiloReader` (`dash/src/synth/readers/kilo.ts`) is the content half of the same store: one turn per token-bearing assistant message, `nativeRecordId` equal to the Kilo `message.id`, paired to the parser's calls by `pairingId` rather than by position. Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported, and the content buckets in [Kilo Code OTLP surface](#kilo-code-otlp-surface-documented-not-ingested) come from `message` and `part` rows. Its OTel surface is now documented and is **not ingested**: Kilo emits no model spans, usage or content. The Settings drawer row installs and removes the capture plugin (Enable and Disable), and usage collection is gated on folder import, which is scheduled off by default. |
 | Devin | File-source ingest reads CLI transcripts under `~/.local/share/devin/cli/transcripts/` and session metadata from `sessions.db`. Discovery and parse do not require `devin.acuUsdRate`; a missing or non-finite rate still yields token/tool calls with `costIsEstimated: true` (`costUSD: 0` is never a measured zero). Doctor names the missing rate when sessions exist. | Set `devin.acuUsdRate` in `~/.kyberdash/config.json` to price ACU usage; until then cost is unpriced, not absent. |
 | Warp | SQLite history under the Group Containers path opens through the read-only cache (`copyFileBestEffort`). Readable source bytes produce records even when copyfile(2) returns EPERM/EACCES; a true source EACCES/EPERM is surfaced to doctor as `permission-denied` (Full Disk Access on darwin) instead of empty sessions. Cache-dir write failures are not classified as source TCC denials. | Owner grants Full Disk Access (macOS) when the source path is TCC-denied; no fabricated rows. |
 
 ## In-app collection enablement
 
 The Settings drawer in the web dashboard (and `kyberdash kyber capture`) can switch OTLP
-collection on or off for three harnesses: Copilot, Claude Code and OpenCode. Codex, pi and
-Antigravity are reported read-only. Enabling edits the harness's own config and, on a real
+collection on or off for three of the seven registered harnesses by editing their config keys:
+Copilot, Claude Code and OpenCode. For Kilo Code it installs or removes the capture plugin file
+instead of editing a key, and that never turns the OTLP receiver on. Codex, pi and Antigravity
+are reported read-only. Enabling a key writer edits the harness's own config and, on a real
 enable, turns the OTLP receiver on; it is not evidence of collection. The inventory rows above
 stay gated on an owner capture: a green enable proves keys were written, not that the harness
 exported a turn. See the
 [runbook](runbook.md#harness-opentelemetry-capture) and
 [ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md).
+
+## Kilo Code capture plugin and why not OTLP
+
+**[VERIFIED]** Kilo Code's OTLP export is switched on **only** by `OTEL_EXPORTER_OTLP_ENDPOINT`
+in the process environment (`packages/core/src/observability/otlp.ts` in
+`Kilo-Org/kilocode` at `42530c80`, read 2026-10-21). No config key sets the endpoint. Traces go
+to `/v1/traces` and logs to `/v1/logs`, with `service.name` `opencode` and resource attributes
+`opencode.client` (`cli` by default, `vscode` from the extension), `opencode.run` and
+`deployment.environment.name`. AI SDK span recording is explicitly off upstream
+(`experimental_telemetry: { isEnabled: false }` in `packages/opencode/src/session/llm.ts`), so
+the stream carries Effect application spans and logs only — no model call, no token usage and no
+prompt or completion content. The one on/off key, `experimental.openTelemetry`, gates Kilo's
+PostHog product analytics, defaults to `true`, and is not a local export switch.
+
+KyberDash ingests no Kilo OTLP and claims nothing from it. A `Session.*` span matches
+`opencodeAdapter.detect` (a `Session.` name prefix scores 1) and is quarantined as non-model
+under the OpenCode source; `Tool.execute` carries `tool.name` rather than `gen_ai.tool.name`, so
+`canonicalOp` returns `unspecified`; HTTP spans are structural. Resource attributes and
+`service.name` are never attribution evidence
+([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)). Setting the endpoint by
+hand therefore adds OpenCode-attributed quarantine noise and produces no record. Kilo usage
+comes from kilo.db through folder import, and the **Kilo Code** row in the Settings drawer says
+so and carries the plugin's Enable and Disable.
+
+**What does carry the missing buckets: the capture plugin.** Kilo is an OpenCode fork and loads
+any module in `~/.config/kilo/plugin/` whose default export is `{ id, server }`. Its plugin hooks
+run while each model request is built, upstream of the layer that switches AI SDK spans off:
+`experimental.chat.system.transform` sees the assembled system prompt (persona, agent prompt,
+environment block, skills catalog and instruction files), `tool.definition` sees each offered
+tool's description and schema, and `chat.params` sees the agent, model and provider
+(`packages/plugin/src/index.ts` and `packages/opencode/src/session/llm/request.ts` in
+`Kilo-Org/kilocode`, read 2026-10-21; verified live against Kilo 7.4.16: one run captured a
+27 KB prompt containing the project's `AGENTS.md` text and the skills catalog, plus 18 tool
+definitions). `kyberdash kyber capture enable --harness kilo` installs one plugin file,
+`kyberdash-capture.js`, that appends to `~/.kyberdash/capture/kilo` (content-addressed `blobs/`
+plus an `index.jsonl` with one line per model call); it has no network code. `disable` removes
+the file only while its digest still matches the receipt. The hooks are `experimental.*`
+upstream, so `status` reports the call count and last-call time, and a Kilo that stops emitting
+reads as "none yet", not as an error.
+
+The content Kilo does supply is file content, read from `message` and `part` rows by
+`kiloReader`, plus the plugin's store joined by the user message an assistant message answers
+(`parentID`) and the nearest call in time
+([ADR 0029](../adr/0029-kyberdash-per-bucket-otel-first-content-precedence.md)
+leaves the file reader as the per-bucket baseline; with no Kilo OTel content, this reader is the
+whole of Kilo's content):
+
+| Content bucket | From kilo.db? | Notes |
+|---|---|---|
+| `conversation_history` | Yes | The preceding user text and the assistant `text` / `markdown` parts. |
+| `tool_result_content` | Yes | The output a tool part's `state` recorded when it completed or errored. |
+| `toolCalls` / `toolResults` | Yes | `callID`, `tool`, `state.input`, `state.output`; a `status: 'error'` state sets `isError`. |
+| `system_prompt` | Plugin store only | From the capture plugin for turns it recorded, including the skills catalog and instruction files; otherwise honest `not_measurable` — kilo.db stores no runtime prompt. |
+| `tool_definitions` | Plugin store only | From the capture plugin for turns it recorded; otherwise honest `not_measurable`. |
+| `instruction_context` | No | Honest `not_measurable` — it is inside the captured system prompt and not separable from it. |
+| `schema_cost` | No | No schema or cache-write charge data. |
+
+`reasoning`, `patch`, `step-start`, `step-finish`, `file` and `compaction` parts are not content
+buckets and are never promoted to one. An absent bucket stays absent, never zero
+([honest unobservability](../rules/honest-unobservability.md)). The legacy
+`kilo-vscode-legacy` task tree (`ui_messages.json` under the VS Code globalStorage directory)
+carries no reader-compatible parts, so every content bucket stays `not_measurable` there — its
+`READER_UNMEASURABLE` row lists all canonical content keys, and per-record measurability keys on
+the harness id for that one id (see
+[architecture](architecture.md#kilo-code-content-reader-and-id-based-pairing)).
 
 ## Claude Desktop and CLI file-synth parts (issue #216)
 
@@ -331,7 +398,7 @@ payload contract are in the [skills view contract](architecture.md#skills-view-c
 | Antigravity (`antigravity`, `antigravity-cli`, `antigravity-ide`) | **Measured** on `llm.invoke` spans from `gen_ai.skills`, one string `Active Skills: a, b, ...`. The listing carries names only; descriptions come from each skill's `SKILL.md` (see [Antigravity skill descriptions](#antigravity-skill-descriptions)). `gen_ai.usage.skill_tokens` is the harness-reported per-turn resident size, identical on every turn in the owner's data. The conversation-database path sets no listing key, so a session has a listing only where OTLP spans supplied one. | **Inferred from the conversation transcript** (`<root>/brain/<conversationId>/.system_generated/logs/transcript.jsonl`): a `view_file` whose path's basename is `SKILL.md` counts as one read of the skill named by its parent directory. A read is not proof the skill was followed. A call the transcript covers carries the reads of its own segment as `kyber.skills.invoked`, and `[]` when the transcript was read and named no skill. A turn without the key is not measured. Where no record of a session carries that key, invocation is **not measurable**, with a reason that names the transcript. Where only some turns carry it, invocations are measured over those turns, and the view says how many there are. See [Antigravity transcript pairing](#antigravity-transcript-pairing). | OTLP spans claimed by `antigravityAdapter` (see [Verified harness outcomes](#verified-harness-outcomes)), and the conversation databases read by `dash refresh`, with the transcript read beside each database. No separate skill setting. Parser contract `2`, parse cache version `6`. | **Verified** for the listing (one real `llm.invoke` span). Invocation is inferred from transcript `SKILL.md` reads. Fixture: `dash/src/canon/fixtures/skills/antigravity/`. |
 | Pi (`pi`) | **Not measurable**, with a reason that names the absent source. | Parser-extracted names only, where the Pi parser provides them, stored as raw `kyber.skills.invoked`. Wire format **unverified**. | Pi file-source ingest. The Pi parser contract was bumped for the skills work (`PI_PARSER_CONTRACT_VERSION` is `3`). | **Unverified.** The owner's store holds no Pi records. Fixture README: `dash/src/canon/fixtures/skills/pi/`. |
 | OpenCode (`opencode`) | **Not measurable**, with a reason that names the absent source. Wire format **unverified**. | Parser-extracted names only, where the OpenCode parser provides them, stored as raw `kyber.skills.invoked`. | OpenTelemetry enablement through [in-app enablement](#in-app-collection-enablement) (`opencode.jsonc`). The endpoint still comes from the process environment. | **Unverified.** The owner's store holds no OpenCode records. Fixture README: `dash/src/canon/fixtures/skills/opencode/`. |
-| Other file-ingested harnesses that record invoked names (Codex, Kilo Code, Cline CLI, CodeWhale, OpenClaude, DSH) | No listing source was verified for these in G0. They are **not measurable** until one is. | Parser-extracted names only, where the parser provides them, stored as raw `kyber.skills.invoked`. The parsers' contract versions were bumped for this work (Codex is `3`, Kilo is `3`). | Dot-folder or file-source ingest through `dash refresh`. | **Unverified.** |
+| Other file-ingested harnesses that record invoked names (Codex, Kilo Code, Cline CLI, CodeWhale, OpenClaude, DSH) | No listing source was verified for these in G0. They are **not measurable** until one is. | Parser-extracted names only, where the parser provides them, stored as raw `kyber.skills.invoked`. The parsers' contract versions were bumped for this work (Codex is `3`, Kilo is `4` after the kilo.db reader work). | Dot-folder or file-source ingest through `dash refresh`. | **Unverified.** |
 | Any other or unknown harness | **Not measurable**, with a reason. | Only where the parser supplies names. | None beyond the harness's own collection. | **Unverified.** |
 
 **Invoked names on the turn record.** For file-ingested harnesses, the parsers already extract
@@ -696,6 +763,12 @@ per-server schema bands.
    not `~/.kyberdash/canon.db`.
 5. `GET /api/kyber/findings` has no `harness` query. HarnessDetail filters findings in
    `fetchFindings` on the client; unstamped legacy finding rows are visible on every tab.
+6. Kilo Code collection has not been exercised against the owner's live store. Run
+   `KYBERDASH_VERBOSE=1 kyberdash dash import-history --db /tmp/kilo-check.db --harness
+   kilo-shared-runtime --weeks 16` against a **temporary** store, confirm records for the
+   2026-07 to 2026-10 sessions, then open a Kilo session's Context view and confirm
+   conversation and tool-result content. The kilo.db reader, the parser contract `4` bump and
+   the folder-import route are fixture-verified only.
 
 ## Sources
 
@@ -705,6 +778,7 @@ per-server schema bands.
 - [Codex configuration reference](https://developers.openai.com/codex/config-reference)
 - [Cursor — OpenTelemetry Export](https://cursor.com/docs/enterprise/opentelemetry-export)
 - [Kilo Code — settings](https://kilo.ai/docs/getting-started/settings)
+- [Kilo Code upstream (`Kilo-Org/kilocode`) at `42530c80`, read 2026-10-21 — OTLP export trigger, resource attributes, AI SDK span recording off](https://github.com/Kilo-Org/kilocode/tree/42530c80)
 - [opentelemetry-hooks (agent hook → OTLP runner)](https://github.com/o11y-dev/opentelemetry-hooks)
 - [Aider — prompt caching documentation](https://aider.chat/docs/usage/caching.html)
 - [Cline — architecture and session data storage](https://github.com/cline/cline)

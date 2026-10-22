@@ -98,6 +98,7 @@ const codexPath = (home: string) => join(home, '.codex', 'config.toml')
 const piSettingsPath = (home: string) => join(home, '.pi', 'agent', 'settings.json')
 const piObservMePath = (home: string) => join(home, '.pi', 'agent', 'observme.yaml')
 const antigravityPath = (home: string) => join(home, '.gemini', 'antigravity-cli', 'settings.json')
+const kiloConfigPath = (home: string) => join(home, '.config', 'kilo', 'kilo.jsonc')
 
 /**
  * A Claude settings document whose telemetry block sits exactly at the managed values,
@@ -279,6 +280,7 @@ describe('GET /api/kyber/capture', () => {
     writeConfig(copilotStablePath(home), copilotPartialConfig())
     writeConfig(opencodePath(home), '{\n  // synthetic opencode fixture\n}\n')
     writeConfig(codexPath(home), '# synthetic codex config\n')
+    writeConfig(kiloConfigPath(home), '{}\n')
     writeConfig(piSettingsPath(home), `${JSON.stringify({ packages: ['@dpalfery/pi-statusline'] }, null, 2)}\n`)
     writeConfig(piObservMePath(home), '# synthetic ObservMe fixture\nendpoint: http://127.0.0.1:4318/v1/traces\n')
     const bridgeScript = join(home, 'bin', 'antigravity-statusline-bridge.sh')
@@ -324,10 +326,12 @@ describe('GET /api/kyber/capture', () => {
       'opencode',
       'pi',
       'antigravity',
+      'kilo',
     ])
 
     const fixtureHarnesses = (loadFixture('status-mixed') as CaptureBodyView).harnesses ?? []
     const fixtureById = new Map(fixtureHarnesses.map((harness) => [String(harness.id), harness]))
+    // The shared fixture predates kilo; its six rows are still compared field by field.
     for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity']) {
       const harness = harnessById(body, id)
       const fixtureHarness = fixtureById.get(id)
@@ -435,6 +439,16 @@ describe('GET /api/kyber/capture', () => {
         warnings: [],
       })
     }
+
+    // Kilo is a managed file plugin: switchable, off until installed, with the one step the
+    // user owns and no environment variable to set.
+    const kilo = harnessById(body, 'kilo')
+    expect(kilo).toMatchObject({ mode: 'managed', state: 'off', installed: 'detected', receipt: 'absent' })
+    expect(kilo.displayName).toBe('Kilo Code')
+    expect((kilo.statusLines as unknown[]).length).toBeGreaterThan(0)
+    expect(kilo.manualSteps).toHaveLength(1)
+    expect(kilo.manualSteps[0]).toMatchObject({ id: 'kilo-folder-import' })
+    expect(kilo.manualSteps[0]!['env']).toBeUndefined()
   })
 
   it('reports drift for a receipted file the owner changed since enable', async () => {
@@ -506,7 +520,7 @@ describe('GET /api/kyber/capture', () => {
 
     const { status, body } = await callRoute('GET', PATH, { deps })
     expect(status).toBe(200)
-    for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity']) {
+    for (const id of ['copilot', 'claude-code', 'codex', 'opencode', 'pi', 'antigravity', 'kilo']) {
       const harness = harnessById(body, id)
       expect(harness.installed).toBe(id === 'claude-code' ? 'unknown' : 'not-detected')
       expect(harness.installEvidence).toEqual([`synthetic ${id} evidence`])
@@ -675,24 +689,43 @@ describe('POST /api/kyber/capture', () => {
     expect(existsSync(receiptPathForHome(home))).toBe(false)
   })
 
-  it.each(['codex', 'pi', 'antigravity'])(
-    'rejects a status-only harness (%s) with 400 and writes nothing',
-    async (harness) => {
-      const home = makeHome()
-      const configPath = codexPath(home)
-      writeConfig(configPath, '# synthetic codex config\n')
-      const deps = makeCaptureDeps(captureSettings(home))
+  it.each([
+    ['codex', codexPath],
+    ['pi', piSettingsPath],
+    ['antigravity', antigravityPath],
+  ])('rejects a status-only harness (%s) with 400 and writes nothing', async (harness, pathFor) => {
+    const home = makeHome()
+    const configPath = pathFor(home)
+    writeConfig(configPath, '# synthetic status-only config\n')
+    const deps = makeCaptureDeps(captureSettings(home))
 
-      const { status, body } = await callRoute('POST', PATH, {
-        deps,
-        payload: { action: 'enable', harness, dryRun: false },
-      })
-      expect(status).toBe(400)
-      expect(ownKeys(body)).toEqual(['error'])
-      expect(readFileSync(configPath, 'utf8')).toBe('# synthetic codex config\n')
-      expect(existsSync(receiptPathForHome(home))).toBe(false)
-    },
-  )
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'enable', harness, dryRun: false },
+    })
+    expect(status).toBe(400)
+    expect(ownKeys(body)).toEqual(['error'])
+    expect(readFileSync(configPath, 'utf8')).toBe('# synthetic status-only config\n')
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
+
+  it('rejects a status-only harness as a dry run too: a pending writer is never managed', async () => {
+    // `dryRun: true` is the drawer's preview path. A pending harness has no managed key to
+    // preview, so the request is malformed rather than an empty preview.
+    const home = makeHome()
+    const configPath = codexPath(home)
+    writeConfig(configPath, '# synthetic codex config\n')
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'enable', harness: 'codex', dryRun: true },
+    })
+    expect(status).toBe(400)
+    expect(ownKeys(body)).toEqual(['error'])
+    expect(readFileSync(configPath, 'utf8')).toBe('# synthetic codex config\n')
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
 
   it('rejects a confirm whose echo carries more changes than the client keeps with 400', async () => {
     // The client caps each event at 64 changes (CAPTURE_MAX_CHANGES). A larger bound here
@@ -1240,3 +1273,90 @@ describe('POST /api/kyber/capture', () => {
 function copilotStableBeforeSeed(): string {
   return `${JSON.stringify({ 'github.copilot.chat.otel': { enabled: false } }, null, 2)}\n`
 }
+
+describe('POST /api/kyber/capture: the Kilo plugin', () => {
+  const kiloPlugin = (home: string) => join(home, '.config', 'kilo', 'plugin', 'kyberdash-capture.js')
+  const post = (home: string, deps: ReturnType<typeof makeCaptureDeps>, action: 'enable' | 'disable', dryRun: boolean) =>
+    callRoute('POST', PATH, { deps, payload: { action, harness: 'kilo', dryRun } })
+
+  it('previews an enable without writing, then installs the plugin on confirm', async () => {
+    const home = makeHome()
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const preview = await post(home, deps, 'enable', true)
+    expect(preview.status).toBe(200)
+    expect(preview.body).toMatchObject({ outcome: 'previewed', dryRun: true })
+    // The preview must not promise to turn the receiver on: the plugin needs none.
+    expect((preview.body as { receiver: { willEnable: boolean } }).receiver.willEnable).toBe(false)
+    expect(existsSync(kiloPlugin(home))).toBe(false)
+
+    const enable = await post(home, deps, 'enable', false)
+    expect(enable.status).toBe(200)
+    expect(enable.body).toMatchObject({ outcome: 'wrote', harness: 'kilo' })
+    expect((enable.body as { harnessState: { state: string; mode: string } }).harnessState).toMatchObject({
+      mode: 'managed',
+      state: 'on',
+    })
+    expect(existsSync(kiloPlugin(home))).toBe(true)
+  })
+
+  it('does not switch the OTLP receiver on: the plugin writes files and needs no receiver', async () => {
+    const home = makeHome()
+    const deps = makeCaptureDeps(captureSettings(home))
+    const enable = await post(home, deps, 'enable', false)
+    expect((enable.body as { receiver: { enabled: boolean } }).receiver.enabled).toBe(false)
+    expect(readSetting(deps.store, SETTING_KEYS.receiverHosted)).not.toBe('on')
+  })
+
+  it('removes the plugin on disable and keeps captured data', async () => {
+    const home = makeHome()
+    const deps = makeCaptureDeps(captureSettings(home))
+    await post(home, deps, 'enable', false)
+    const store = join(home, '.kyberdash', 'capture', 'kilo')
+    mkdirSync(store, { recursive: true })
+    writeFileSync(join(store, 'index.jsonl'), '{}\n')
+
+    const preview = await post(home, deps, 'disable', true)
+    expect(preview.body).toMatchObject({ outcome: 'previewed' })
+    expect(existsSync(kiloPlugin(home))).toBe(true)
+
+    const disable = await post(home, deps, 'disable', false)
+    expect(disable.status).toBe(200)
+    expect(disable.body).toMatchObject({ outcome: 'wrote' })
+    expect(existsSync(kiloPlugin(home))).toBe(false)
+    expect(existsSync(join(store, 'index.jsonl'))).toBe(true)
+  })
+
+  it('answers 409 and leaves the file when the owner edited the plugin', async () => {
+    const home = makeHome()
+    const deps = makeCaptureDeps(captureSettings(home))
+    await post(home, deps, 'enable', false)
+    writeFileSync(kiloPlugin(home), `${readFileSync(kiloPlugin(home), 'utf8')}// owner edit\n`)
+    const disable = await post(home, deps, 'disable', false)
+    expect(disable.status).toBe(409)
+    expect(existsSync(kiloPlugin(home))).toBe(true)
+  })
+
+  it('answers 409 and overwrites nothing when the file is not KyberDash\'s', async () => {
+    const home = makeHome()
+    writeConfig(kiloPlugin(home), 'export default {}\n')
+    const deps = makeCaptureDeps(captureSettings(home))
+    const enable = await post(home, deps, 'enable', false)
+    expect(enable.status).toBe(409)
+    expect(readFileSync(kiloPlugin(home), 'utf8')).toBe('export default {}\n')
+  })
+
+  it('never reports the last managed harness as disabled because of the plugin', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), '{}\n')
+    const deps = makeCaptureDeps(captureSettings(home))
+    writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
+    await post(home, deps, 'enable', false)
+    await callRoute('POST', PATH, { deps, payload: { action: 'enable', harness: 'claude-code', dryRun: false } })
+    const disable = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'disable', harness: 'claude-code', dryRun: false },
+    })
+    expect((disable.body as { receiver: { lastManagedHarnessDisabled: boolean } }).receiver.lastManagedHarnessDisabled).toBe(true)
+  })
+})
