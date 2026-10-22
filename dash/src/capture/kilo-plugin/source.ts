@@ -60,10 +60,11 @@ function tighten(path, mode) {
 function blob(text) {
   const hash = createHash('sha256').update(text).digest('hex')
   const path = join(BLOBS, hash)
+  // Directories first and unconditionally: a dedup hit must still scrub wider bits.
+  tighten(ROOT, 0o700)
+  tighten(BLOBS, 0o700)
   if (!existsSync(path)) {
     mkdirSync(BLOBS, { recursive: true, mode: 0o700 })
-    tighten(ROOT, 0o700)
-    tighten(BLOBS, 0o700)
     writeFileSync(path, text, { mode: 0o600 })
   }
   tighten(path, 0o600)

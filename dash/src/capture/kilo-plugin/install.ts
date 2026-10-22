@@ -52,11 +52,6 @@ function readSlot(path: string): Slot {
   }
 }
 
-function readIfPresent(path: string): string | undefined {
-  const slot = readSlot(path)
-  return slot.kind === 'file' ? slot.text : undefined
-}
-
 function unreadable(pluginFile: string): KiloPluginResult {
   return {
     exitCode: 1,
@@ -160,6 +155,8 @@ export type KiloPluginState = {
   state: 'on' | 'off' | 'partial' | 'unknown'
   exists: boolean
   receipt: boolean
+  /** True when the path exists but cannot be read as a file (a directory, a permission error). */
+  unreadable: boolean
 }
 
 /** What the Settings row reports. Reads two files and never throws. */
@@ -167,19 +164,23 @@ export function kiloPluginState(home: string, env?: PathEnv): KiloPluginState {
   const { pluginFile, receiptFile } = kiloPluginPaths(home, env)
   const receipt = readReceipt(receiptFile)
   const slot = readSlot(pluginFile)
-  if (slot.kind === 'unreadable') return { state: 'unknown', exists: true, receipt: receipt !== undefined }
-  if (slot.kind === 'absent') return { state: 'off', exists: false, receipt: receipt !== undefined }
+  if (slot.kind === 'unreadable') {
+    return { state: 'unknown', exists: true, receipt: receipt !== undefined, unreadable: true }
+  }
+  if (slot.kind === 'absent') {
+    return { state: 'off', exists: false, receipt: receipt !== undefined, unreadable: false }
+  }
   const installed = slot.text
   const ours = installed.startsWith('// kyberdash-capture-plugin')
   // With no receipt the marker is all that says the file is ours; with one, its digest must hold.
   const intact = receipt === undefined || sha256Hex(installed) === receipt.sha256
   const state = !ours || !intact ? 'unknown' : installed === KILO_PLUGIN_SOURCE ? 'on' : 'partial'
-  return { state, exists: true, receipt: receipt !== undefined }
+  return { state, exists: true, receipt: receipt !== undefined, unreadable: false }
 }
 
 /** Fixed-format status lines. Never echoes owner-written text. */
 export function describeKiloPluginStatus(home: string, env?: PathEnv): string[] {
-  const { pluginFile, storeDir } = kiloPluginPaths(home, env)
+  const { storeDir } = kiloPluginPaths(home, env)
   const lines: string[] = []
   const plugin = kiloPluginState(home, env)
   if (plugin.state === 'off') {
@@ -191,12 +192,18 @@ export function describeKiloPluginStatus(home: string, env?: PathEnv): string[] 
   } else {
     // unknown: not ours, edited since install, or not readable as a file. Never echo its text.
     lines.push(
-      readSlot(pluginFile).kind === 'unreadable'
+      plugin.unreadable
         ? 'plugin: unreadable (not a regular file or not permitted)'
         : 'plugin: modified since install',
     )
   }
-  const index = readIfPresent(join(storeDir, 'index.jsonl'))
+  const indexSlot = readSlot(join(storeDir, 'index.jsonl'))
+  if (indexSlot.kind === 'unreadable') {
+    // Unusable is not empty: say so, so nobody hunts for calls that were never missing.
+    lines.push('captured calls: unreadable (not a regular file or not permitted)')
+    return lines
+  }
+  const index = indexSlot.kind === 'file' ? indexSlot.text : undefined
   const rows = (index ?? '').split('\n').flatMap((line) => {
     try {
       const row = JSON.parse(line) as { ts?: unknown; sessionID?: unknown }

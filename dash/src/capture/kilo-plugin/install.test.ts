@@ -208,6 +208,15 @@ describe('describeKiloPluginStatus', () => {
     expect(lines).toMatch(/plugin: unreadable/)
   })
 
+  it('reports an unreadable index as unreadable, not as no calls', () => {
+    const home = makeHome()
+    installKiloPlugin(home)
+    mkdirSync(join(kiloPluginPaths(home).storeDir, 'index.jsonl'), { recursive: true })
+    const lines = describeKiloPluginStatus(home).join('\n')
+    expect(lines).toMatch(/captured calls: unreadable/)
+    expect(lines).not.toMatch(/none yet/)
+  })
+
   it('never throws on a corrupt index', () => {
     const home = makeHome()
     installKiloPlugin(home)

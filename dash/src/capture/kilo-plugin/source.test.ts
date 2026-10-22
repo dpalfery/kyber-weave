@@ -132,6 +132,18 @@ describe('kilo capture plugin source', () => {
     chmodSync(store, 0o700)
   })
 
+  it.skipIf(process.platform === 'win32')('tightens the blobs directory even when every blob is already stored', async () => {
+    const { hooks } = await loadPlugin()
+    await oneCall(hooks, 'ses_1', ['same prompt'])
+    chmodSync(store, 0o755)
+    chmodSync(join(store, 'blobs'), 0o755)
+    // A fresh process, whose second call finds the blob already on disk (a dedup hit).
+    const second = await loadPlugin()
+    await oneCall(second.hooks, 'ses_1', ['same prompt'])
+    expect(statSync(store).mode & 0o077).toBe(0)
+    expect(statSync(join(store, 'blobs')).mode & 0o077).toBe(0)
+  })
+
   it.skipIf(process.platform === 'win32')('tightens a store that already exists with wider permissions', async () => {
     mkdirSync(join(store, 'blobs'), { recursive: true, mode: 0o755 })
     chmodSync(store, 0o755)
