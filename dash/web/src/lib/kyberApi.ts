@@ -55,8 +55,106 @@ export function fetchKyberComparison(): Promise<KyberComparisonTable> {
 export function fetchKyberQuarantine(): Promise<{ entries: KyberQuarantineEntry[] }> {
   return fetchJson<{ entries: KyberQuarantineEntry[] }>('/api/kyber/quarantine')
 }
+
+/**
+ * Quarantine list scoped to one harness. `all`/`unknown` are UI sentinels,
+ * not harness ids: `all` omits the filter, `unknown` asks for rows the
+ * server cannot attribute (and the panel client-filters the same way when
+ * the server predates the filter). The server may ignore the param — the
+ * panel always applies the same predicate locally, so the list is truthful
+ * either way.
+ */
+export function fetchKyberQuarantineScoped(harness?: string | null): Promise<{ entries: KyberQuarantineEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberQuarantine()
+  }
+  return fetchJson<{ entries: KyberQuarantineEntry[] }>(
+    `/api/kyber/quarantine?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One quarantined span with whatever stored evidence the server holds.
+ *
+ * The envelope is deliberately wide: the detail route
+ * (`GET /api/kyber/quarantine/:spanId`) does not exist on servers predating
+ * this surface, and its exact shape is owned by the engine worktree. The
+ * panel reads the row it already has first and layers any of these keys on
+ * top — never inventing a payload, a message, or a stack.
+ */
+export interface KyberQuarantineDetail {
+  spanId?: string
+  span_id?: string
+  source?: string | null
+  harness?: string | null
+  name?: string | null
+  namespaces?: unknown
+  reason?: string | null
+  seen_at?: unknown
+  timestamp?: string | null
+  payload?: unknown
+  attributes?: unknown
+  message?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchQuarantineDetail(spanId: string): Promise<KyberQuarantineDetail> {
+  return fetchJson<KyberQuarantineDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
+}
 export function fetchKyberProblems(): Promise<{ problems: KyberProblemEntry[] }> {
   return fetchJson<{ problems: KyberProblemEntry[] }>('/api/kyber/problems')
+}
+
+/**
+ * Problems list scoped to one harness. Same sentinel contract as the
+ * quarantine list: `all` omits the filter, `unknown` asks for unattributed
+ * rows, and the panel client-filters identically for servers that predate
+ * the query param.
+ */
+export function fetchKyberProblemsScoped(harness?: string | null): Promise<{ problems: KyberProblemEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberProblems()
+  }
+  return fetchJson<{ problems: KyberProblemEntry[] }>(
+    `/api/kyber/problems?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One problem row with whatever stored evidence the server holds.
+ * Same unknown-envelope rule as the quarantine detail: the panel shows the
+ * list row's code/message plus any of these keys the server returns, and
+ * states plainly when the message, payload, or stack was never stored.
+ */
+export interface KyberProblemDetail {
+  id?: string | number
+  severity?: string
+  code?: string | null
+  message?: unknown
+  location?: unknown
+  at?: unknown
+  timestamp?: string | null
+  harness?: string | null
+  session_id?: string | null
+  span_id?: string | null
+  spanId?: string | null
+  payload?: unknown
+  stack?: unknown
+  stackTrace?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail> {
+  return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
+}
+
+export interface SessionRollup {
+  turn_count?: number | null
+  request_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  tokens?: number | null
+  cost_usd?: number | null
 }
 
 export interface KyberSessionSummary {
@@ -85,33 +183,88 @@ export interface KyberSessionSummary {
   cost?: { basis: string; status: string; value?: number; currency?: string }
   models?: string[]
   problems?: number
+  subagents?: KyberSessionSummary[]
+  rollup?: SessionRollup
 }
 
 /**
- * The session payload fields ancestry needs. `runId` is optional because the
- * served document does not yet carry it — resolveAncestry reads it when present
- * rather than inventing a run by scanning other endpoints (R7.5).
+ * The bounded session summary `GET /api/kyber/session/:id/summary` serves:
+ * ten identity-and-summary keys, no payload, no lineage.
+ *
+ * WHY a second document for the same session: the detail route serves the
+ * whole session blob — up to 15.3 MB and a multi-second cold page-in for a
+ * session with 10,933 turns — while a consumer that needs a handful of
+ * identity fields pays for all of it. The bounded route answers the same
+ * question for a fraction of the cost.
+ *
+ * Every key but `harness` is read defensively (optional): the client resolves
+ * an id and a harness, and must not break on a key the body omits. `harness`
+ * is the one it cannot do without — without it there is no spine.
  */
-export type KyberSessionAncestry = {
-  id?: string
+export type KyberSessionSummaryDetail = {
+  /** The session's id, the spine's execution level. */
   session_id?: string
+  /** The harness that produced the session — the spine's harness level. */
   harness: string
+  /** The stored label, verbatim. The sessions list applies its own title fallback. */
+  label?: string | null
+  is_subagent?: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  started?: string | null
+  ended?: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary?: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count?: number
+}
+
+/**
+ * What the ancestry consumer reads off the bounded summary.
+ *
+ * The lineage keys (`runId`, `run_id`, `executionId`, `execution_id`) are NOT
+ * part of the served shape: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured — and an invented link would push a run level
+ * into the resolved spine that today's client never produces. They stay on
+ * the type because the resolver probes them defensively and must keep reading
+ * `undefined`, the same value it reads today, rather than having its
+ * resolution logic rewritten around a lineage it cannot verify (R7.5).
+ */
+export type KyberSessionAncestry = KyberSessionSummaryDetail & {
+  /**
+   * The detail route's legacy id key. The bounded route never serves it, so
+   * the resolver's `id ?? session_id` chain falls through to `session_id` and
+   * resolves the same identity it resolves today.
+   */
+  id?: string
   runId?: string
   run_id?: string
   executionId?: string
   execution_id?: string
 }
 
+/**
+ * One session's identity fields, from the bounded summary route.
+ *
+ * WHY this route and not the detail route: the detail route serves the entire
+ * session payload, and this consumer needs the identity fields only. The
+ * turns consumer (`fetchKyberSessionTurns`) reads the bounded per-turn route
+ * for one turn, and the detail route for a session's whole list of them.
+ */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
-  return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  return fetchJson<KyberSessionAncestry>(
+    `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`,
+  )
 }
 
 /**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text. The rows
- * themselves come from the full session payload (`GET /api/kyber/session/:id`),
- * which the inspector header reads for measured counters only.
+ * measured and state absence plainly — never estimate from text. A single
+ * turn's row comes from the bounded per-turn route, which the turn page
+ * reads; the whole list of a session's rows still comes from the full session
+ * payload (`GET /api/kyber/session/:id`).
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -120,7 +273,46 @@ export interface TurnTokenFigures {
   cacheRead?: number | null
 }
 
-export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]> {
+/**
+ * One turn's row, from the bounded per-turn route.
+ *
+ * <remarks>
+ * The same row shape the detail route serves for one turn, so a consumer that
+ * already reads the detail route's rows reads this one unchanged — but from
+ * `GET /api/kyber/session/:id/turn/:index`, which answers one turn instead of
+ * the session's whole payload.
+ */
+export type KyberSessionTurn = KyberSessionTurnRow & {
+  /** The session the turn belongs to. */
+  session_id: string
+  /** The turn's index in that session. */
+  turn_index: number
+}
+
+/**
+ * A session's turn rows, or one turn's row.
+ *
+ * <remarks>
+ * With a turn index, the read is the bounded per-turn route: one row, never
+ * the session's whole payload — which is what a single turn's counters cost
+ * before (up to 10,933 turn rows to read four numbers). Without one, the read
+ * is still the detail route's turns array, the shape a list-style consumer
+ * expects.
+ */
+export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberSessionTurn>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex?: number,
+): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
+  if (turnIndex !== undefined) {
+    return fetchJson<KyberSessionTurn>(
+      `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`,
+    )
+  }
   const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
   return Array.isArray(body.turns) ? body.turns : []
 }
@@ -300,10 +492,38 @@ export interface KyberSessionTurnRow {
   [key: string]: unknown
 }
 
+/**
+ * The server's verdict on a session's cost bases, decided in the engine where
+ * `sumCosts` already refuses to blend (rule R1 — the web dashboard renders this
+ * field, it never re-derives it).
+ *
+ * `null` when the cost blocks agree, or when nothing was priced at all; the
+ * object when they do not, carrying the problem text, every basis found, and
+ * the per-basis totals a display layer must keep apart.
+ *
+ * Optional on the served payload because a session row stored before this
+ * field existed does not carry it. `undefined` means the store has not been
+ * re-projected since — unknown, not "no mismatch".
+ */
+export interface KyberCostBasisMismatch {
+  code: string
+  message: string
+  bases: string[]
+  totalsByBasis: Record<string, number | null>
+}
+
 /** The tool-definition rows legacy turn content carried under `tool_definitions`. */
 export interface KyberToolDefinitionShadow {
   name?: string
   function?: { name?: string }
+  /**
+   * False when the definition is an MCP catalogue entry the session offered
+   * without keeping it resident in the model's context. Absent or true means
+   * the definition was resident.
+   */
+  resident?: boolean
+  /** Whether the session offered this definition to the model. */
+  offered?: boolean
   [key: string]: unknown
 }
 
@@ -350,6 +570,11 @@ export interface KyberSessionContentPart {
   server?: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident; the drawer labels only the `false` case.
+   */
+  resident?: false
 }
 
 export interface KyberSessionContentResult {
@@ -360,11 +585,12 @@ export interface KyberSessionContentResult {
 
 export function fetchKyberSessionContent(
   sessionId: string,
-  opts?: { span?: string; part?: string },
+  opts?: { span?: string; part?: string; full?: boolean },
 ): Promise<KyberSessionContentResult> {
   const params = new URLSearchParams()
   if (opts?.span) params.set('span', opts.span)
   if (opts?.part) params.set('part', opts.part)
+  if (opts?.full) params.set('full', 'true')
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberSessionContentResult>(path)
@@ -381,6 +607,17 @@ export interface KyberTurnContentPart {
   truncated?: boolean
   totalLength?: number
   order?: number
+  /**
+   * False when a `tool_definitions` part is an MCP catalogue entry the session
+   * offered without keeping it resident in the model's context. Absent or true
+   * means the definition was resident.
+   */
+  resident?: boolean
+  /**
+   * Exact-match recurrence against earlier captured turns of this session
+   * (same part kind, whole source text). Capture-only — never a cache claim.
+   */
+  recurrence?: { seenBefore: boolean }
 }
 
 export interface KyberTurnContentBlock {
@@ -392,12 +629,20 @@ export interface KyberTurnContentBlock {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  /**
+   * Block aggregate: `newThisTurn` when any member part is new,
+   * `seenBefore` when any member part exactly matches an earlier same-kind
+   * part. Both may hold at once for mixed blocks.
+   */
+  recurrence?: { newThisTurn: boolean; seenBefore: boolean }
 }
 
 export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: KyberTurnContentBlock[]
   parts: KyberTurnContentPart[]
@@ -406,18 +651,63 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always; the quarantined parent's packet only when that row
+   * kept a payload.
+   */
+  rawPacket?: { spanAttributesPath: string; interactionPath?: string }
+  /**
+   * Session-level shared context: every captured `system_prompt` part in
+   * session scope, in capture order, with section-level earlier-turn
+   * recurrence. Null when none was captured. The view hides exact
+   * duplicates of the turn's own parts.
+   */
+  sharedContext?: {
+    parts: Array<{
+      text: string
+      spanId?: string
+      turnIndex?: number
+      truncated?: boolean
+      totalLength?: number
+      /** Display only: source turns folded into this entry (volatile per-request header lines). */
+      collapsedTurns?: number[]
+    }>
+    seenBefore: boolean
+  } | null
+  /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
+  skills?: KyberTurnSkillsEntry
 }
 
 export function fetchTurnContent(
   sessionId: string,
   turnIndex: number,
-  opts?: { budget?: number },
+  opts?: { budget?: number; full?: boolean },
 ): Promise<KyberTurnContentResult> {
   const params = new URLSearchParams()
-  if (opts?.budget) params.set('budget', String(opts.budget))
+  // Explicit lossless path: `full` bypasses the server's default budget so
+  // the full source text returns intact. A large-number `budget` is not a
+  // substitute — it still truncates past its value.
+  if (opts?.full) {
+    params.set('full', 'true')
+  } else if (opts?.budget) {
+    params.set('budget', String(opts.budget))
+  }
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberTurnContentResult>(path)
+}
+
+/**
+ * Lossless whole-turn fetch: every available byte of the turn's blocks and
+ * parts, with no budget truncation. Use for the turn inspector — never rely
+ * on the default budget or a large-number sentinel for complete content.
+ */
+export function fetchTurnContentFull(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberTurnContentResult> {
+  return fetchTurnContent(sessionId, turnIndex, { full: true })
 }
 
 export const assembleTurnContent = fetchTurnContent
@@ -436,6 +726,37 @@ export interface KyberSpanAttributes {
  */
 export function fetchSpanAttributes(spanId: string): Promise<KyberSpanAttributes> {
   return fetchJson<KyberSpanAttributes>(`/api/kyber/span/${encodeURIComponent(spanId)}/attributes`)
+}
+
+/**
+ * One quarantine row in the detail shape the route serves (B7). Unlike the
+ * light `KyberQuarantineEntry` list row every field is always present — absent
+ * values are explicit null, because a dropped key would read as "field unknown"
+ * rather than "this row kept no evidence". `evidenceAvailable` is the honest
+ * answer to "did this row keep a packet", never inferred from an empty payload.
+ */
+export interface KyberQuarantineEntryDetail {
+  spanId: string
+  source: string | null
+  name: string | null
+  reason: string
+  timestamp: string | null
+  namespaces: string[]
+  harness: string | null
+  rawPayload: string | null
+  evidenceAvailable: boolean
+}
+
+/**
+ * One quarantined span's audit row plus the packet it kept (B7).
+ *
+ * This is the fetch behind the turn view's raw-packet disclosure, and the only
+ * route that returns a stored payload: the turn's parent span was quarantined
+ * out of the canonical store, so its evidence lives here or nowhere. Takes a
+ * span id — passing the served path would nest a second `/api/kyber/` prefix.
+ */
+export function fetchQuarantineEntry(spanId: string): Promise<KyberQuarantineEntryDetail> {
+  return fetchJson<KyberQuarantineEntryDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
 }
 
 // ===========================================================================
@@ -980,8 +1301,106 @@ export async function requestContextReview(
   return res.json() as Promise<KyberReviewResult>
 }
 
+/**
+ * Bounded catalog refresh. Vendor names and counts only — `error` strings
+ * from the server are dropped here so a remote body cannot reach the page.
+ */
+export interface ModelCatalogRefreshResult {
+  rowCount: number
+  lastRefreshAt: string | null
+  vendorsUpdated: string[]
+  vendorsFailed: { vendor: string }[]
+  derivedRebuildCount: number
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+}
+
+export async function refreshModelWindows(): Promise<ModelCatalogRefreshResult> {
+  const path = '/api/kyber/model-catalog/refresh'
+  const res = await fetch(path, { method: 'POST' })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const failed = Array.isArray(body.vendorsFailed) ? body.vendorsFailed : []
+  return {
+    rowCount: typeof body.rowCount === 'number' ? body.rowCount : 0,
+    lastRefreshAt: typeof body.lastRefreshAt === 'string' ? body.lastRefreshAt : null,
+    vendorsUpdated: stringList(body.vendorsUpdated),
+    vendorsFailed: failed.flatMap((entry) => {
+      if (entry === null || typeof entry !== 'object') return []
+      const vendor = (entry as { vendor?: unknown }).vendor
+      return typeof vendor === 'string' && vendor.length > 0 ? [{ vendor }] : []
+    }),
+    derivedRebuildCount: typeof body.derivedRebuildCount === 'number' ? body.derivedRebuildCount : 0,
+  }
+}
+
 export async function fetchReviewStatus(): Promise<{ provider: string; isConfigured: boolean }> {
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
+}
+
+/**
+ * Database clean request. `confirm` is the browser's explicit consent to the
+ * irreversible wipe. `reingestWeeks` is OPT-IN (issue #319): omit the key
+ * entirely and no folder history is imported at all — the dashboard no longer
+ * promises an automatic 7-day re-ingest the operator never asked for.
+ */
+export interface CleanDatabaseRequest {
+  all?: boolean
+  harnesses?: string[]
+  /** Sent only when the operator ticked "import folder history"; 1..52. */
+  reingestWeeks?: number
+  confirm: true
+}
+
+/** Bounded clean summary. Counts only — never a remote error string. */
+export interface CleanDatabaseResult {
+  harnesses: string[]
+  records: number
+  reingested: boolean
+  historyWeeks: number | null
+}
+
+function cleanCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+/**
+ * Bounded database clean. The scope and counts are echoed from the server;
+ * `error` strings are dropped here so a remote body cannot reach the page —
+ * callers distinguish outcomes by `KyberApiError.status` (400 usage, 409
+ * busy) instead.
+ */
+export async function cleanDatabase(request: CleanDatabaseRequest): Promise<CleanDatabaseResult> {
+  const path = '/api/kyber/clean'
+  // WHY the key is spread conditionally: `reingestWeeks: undefined` still
+  // serialises as a JSON key, and a key the server cannot distinguish from a
+  // decision would turn "no import" back into an implicit one.
+  const { reingestWeeks, ...scope } = request
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      reingestWeeks === undefined ? scope : { ...scope, reingestWeeks },
+    ),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const wipe = body.wipe !== null && typeof body.wipe === 'object'
+    ? (body.wipe as Record<string, unknown>)
+    : {}
+  return {
+    harnesses: stringList(body.harnesses),
+    records: cleanCount(wipe.records),
+    reingested: body.reingested === true,
+    historyWeeks: typeof body.historyWeeks === 'number' && Number.isFinite(body.historyWeeks)
+      ? body.historyWeeks
+      : null,
+  }
 }
 
 // ===========================================================================
@@ -1057,9 +1476,661 @@ export interface KyberCoverage {
   quarantineByReason: KyberCoverageQuarantine[]
   /** Null when the checkpoint read is unobservable; [] means zero units. */
   checkpoints: KyberCoverageCheckpoint[] | null
+  /**
+   * Live OTLP receiver health as the engine reports it.
+   *
+   * Optional because servers predating the receiver probe serve no such key:
+   * absent means unknown, never healthy. When present, `healthy` is the
+   * authoritative saber state — the display layer renders it and never
+   * re-derives liveness from counts.
+   */
+  receiver?: KyberReceiverHealth | null
+}
+
+/**
+ * Live OTLP receiver health (`GET /api/kyber/coverage` → `receiver`).
+ *
+ * Every field is read defensively: an older engine serves no `receiver` key
+ * at all, and a newer one may add keys. `healthy` is authoritative; the rest
+ * is supporting detail for the Status panel (endpoint, listener/paused
+ * state, last accepted batch, recent errors). Health probes are excluded
+ * from the server error count — that exclusion is engine behaviour, not
+ * something a surface recomputes.
+ */
+export interface KyberReceiverHealth {
+  enabled?: boolean | null
+  status?: string | null
+  listening?: boolean | null
+  hostedByUs?: boolean | null
+  paused?: boolean | null
+  healthy?: boolean | null
+  endpoint?: string | null
+  checkedAt?: string | null
+  lastAcceptedAt?: string | null
+  failures5m?: number | null
+  lastError?: string | null
+  lastCode?: string | null
+  lastErrorAt?: string | null
 }
 
 export async function fetchCoverage(): Promise<KyberCoverage> {
   return fetchJson<KyberCoverage>('/api/kyber/coverage')
 }
 
+
+// ===========================================================================
+// Maintenance surface (issue #319, architecture rule R1): the web dashboard
+// schedules nothing and imports nothing. It reads the host's status, reads the
+// shared settings, and asks the server to run a bounded job. Every type below
+// mirrors a route the `kyberdash web` server serves; none is computed here.
+// ===========================================================================
+
+/** The refresh job's own state as the host reports it (`JobState` server-side). */
+export type KyberJobState = 'idle' | 'running' | 'running-elsewhere' | 'failed'
+
+/** `GET /api/kyber/jobs`: the flat host status mapped to the nested wire shape. */
+export interface KyberJobStatus {
+  refresh: {
+    state: KyberJobState
+    lastSuccessAt: string | null
+    lastFailure: string | null
+    nextDueAt: string | null
+  }
+  /** Whether SCHEDULED jobs are paused. The pause button and label read this. */
+  paused: boolean
+  /**
+   * Monotonic marker for the store's contents. It moves when a clean or a
+   * rebuild rewrites the data underneath an open tab, which is what the
+   * dashboard polls for (see `lib/storeGeneration.ts`).
+   */
+  storeGeneration: number
+  /** Another process holds the jobs lease, so this host runs nothing. */
+  hostedElsewhere: boolean
+}
+
+/**
+ * The shared settings both display layers read and write over one API.
+ * `dashboardPort` is the persisted `settings.dashboard.port` (default 4747): it applies
+ * on the next engine restart, never to the running server.
+ */
+export interface KyberSettings {
+  folderImportScheduled: boolean
+  jobsPaused: boolean
+  refreshCadenceMinutes: number
+  receiverHosted: boolean
+  dashboardPort: number
+}
+
+/** A partial `PUT /api/kyber/settings` body — every key is optional. */
+export type KyberSettingsUpdate = Partial<KyberSettings>
+
+export function fetchKyberJobs(): Promise<KyberJobStatus> {
+  return fetchJson<KyberJobStatus>('/api/kyber/jobs')
+}
+
+export function fetchKyberSettings(): Promise<KyberSettings> {
+  return fetchJson<KyberSettings>('/api/kyber/settings')
+}
+
+/**
+ * Applies a partial settings change and returns the full settings as the server
+ * now holds them, so the panel renders what was persisted rather than what was
+ * asked for.
+ */
+export async function updateKyberSettings(update: KyberSettingsUpdate): Promise<KyberSettings> {
+  const path = '/api/kyber/settings'
+  const res = await fetch(path, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  return res.json() as Promise<KyberSettings>
+}
+
+/** Which surface asked for a refresh; `scheduled` is reserved for the host. */
+export type KyberRefreshSurface = 'web' | 'tray'
+
+/**
+ * Requests a manual refresh. WHY `surface`: the host records which surface
+ * triggered the run, and the dashboard must never ask for the scheduled one —
+ * that decision belongs to the host's own cadence. A 409 arrives as a
+ * `KyberApiError` for the caller to render as "already running".
+ */
+export async function requestKyberRefresh(surface: KyberRefreshSurface = 'web'): Promise<void> {
+  const path = '/api/kyber/refresh'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ surface }),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+}
+
+/**
+ * One-off folder-history import (issue #319). It NEVER touches the scheduled
+ * folder-import setting: "import this once" and "keep importing" are different
+ * decisions, and conflating them made a single import look like a standing
+ * preference.
+ */
+export async function importKyberHistory(request: {
+  weeks: number
+  harnesses?: readonly string[]
+}): Promise<void> {
+  const path = '/api/kyber/import-history'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      weeks: request.weeks,
+      // Omitted rather than sent empty: an empty array is a claim about scope
+      // the operator never made, and the server's "all harnesses" is its own.
+      ...(request.harnesses && request.harnesses.length > 0
+        ? { harnesses: [...request.harnesses] }
+        : {}),
+    }),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+}
+
+// ===========================================================================
+// Harness OpenTelemetry collection (`/api/kyber/capture`). Like the
+// maintenance surface above, this is a display client: the server decides what
+// is installed, what is on and what a write would change; the browser parses
+// the answer into bounded, vocabulary-checked values and shows them. Every
+// reader below drops unknown fields (a response must never smuggle a config
+// value into the DOM), caps strings, bounds arrays, and maps an
+// out-of-vocabulary enum to the value that grants nothing (`unknown`,
+// `status-only`) rather than trusting it.
+// ===========================================================================
+
+const CAPTURE_PATH = '/api/kyber/capture'
+
+/** Wire strings are capped so a hostile or broken answer cannot flood the DOM. */
+const CAPTURE_TEXT_MAX = 4096
+const CAPTURE_VALUE_MAX = 512
+const CAPTURE_MAX_HARNESSES = 64
+const CAPTURE_MAX_FILES = 16
+const CAPTURE_MAX_KEYS = 64
+const CAPTURE_MAX_EVIDENCE = 32
+const CAPTURE_MAX_LINES = 32
+const CAPTURE_MAX_WARNINGS = 16
+const CAPTURE_MAX_STEPS = 16
+const CAPTURE_MAX_EVENTS = 64
+const CAPTURE_MAX_CHANGES = 64
+const CAPTURE_MAX_ISSUES = 32
+
+export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
+export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
+export type KyberCaptureMode = 'managed' | 'status-only'
+export type KyberCaptureInstalled = 'detected' | 'not-detected' | 'unknown'
+export type KyberCaptureState = 'on' | 'off' | 'partial' | 'unknown' | 'not-applicable'
+export type KyberCaptureAction = 'enable' | 'disable'
+/** The server's delivery verdict; `attention` renders yellow. */
+export type KyberCaptureHealth = 'ok' | 'attention' | 'off' | 'read-only'
+
+export interface KyberCaptureIssue {
+  code: string
+  severity: 'blocking' | 'warning'
+  text: string
+  path?: string
+  remedy?: string
+}
+
+/** The check's one-line summary. Absent from an older server. */
+export interface KyberCaptureCheck {
+  checkedAt: string
+  health: 'ok' | 'attention' | 'off'
+  enabled: number
+  attention: number
+  issueCount: number
+}
+
+/** A value the server reports for one managed key: a JSON scalar, never an object. */
+export type KyberCaptureValue = string | number | boolean | null
+
+export interface KyberCaptureDriftEntry {
+  key: string
+  written: KyberCaptureValue
+  /** `null` when the key is absent now. */
+  current: KyberCaptureValue
+}
+
+export interface KyberCaptureFile {
+  id: string
+  path: string
+  applicable: boolean
+  /** `null` is "could not be inspected" — not "absent". */
+  exists: boolean | null
+  expectedKeys: string[]
+  presentKeys: string[]
+  missingKeys: string[]
+  mismatchedKeys: string[]
+  drift: KyberCaptureDriftEntry[] | null
+}
+
+export interface KyberCaptureManualStep {
+  id: string
+  text: string
+  env?: { name: string; value: string }
+}
+
+export interface KyberCaptureHarness {
+  id: string
+  displayName: string
+  mode: KyberCaptureMode
+  installed: KyberCaptureInstalled
+  installEvidence: string[]
+  state: KyberCaptureState
+  receipt: 'recorded' | 'absent'
+  files: KyberCaptureFile[]
+  warnings: Array<{ code: string; text: string }>
+  manualSteps: KyberCaptureManualStep[]
+  statusLines: string[]
+  /**
+   * `null` when the server sent no verdict (an older server): the row then
+   * falls back to `state` alone rather than claiming a health it was not told.
+   */
+  health: KyberCaptureHealth | null
+  issues: KyberCaptureIssue[]
+}
+
+export interface KyberCaptureStatus {
+  platform: KyberCapturePlatform
+  receiver: { hosted: boolean; liveness: KyberCaptureLiveness; detail: string }
+  harnesses: KyberCaptureHarness[]
+  check: KyberCaptureCheck | null
+}
+
+export type KyberCaptureEventKind =
+  | 'would-write'
+  | 'wrote'
+  | 'noop'
+  | 'would-restore'
+  | 'restored'
+  | 'refused'
+  | 'error'
+
+export interface KyberCaptureChange {
+  key: string
+  /** Omitted (not `undefined`-valued) when the key was absent before. */
+  before?: KyberCaptureValue
+  after?: KyberCaptureValue
+}
+
+export interface KyberCaptureEvent {
+  kind: KyberCaptureEventKind
+  harness: string
+  fileId: string
+  path: string
+  changes?: KyberCaptureChange[]
+  reason?: string
+  drift?: KyberCaptureDriftEntry[]
+  code?: string
+}
+
+export interface KyberCaptureReceiverNote {
+  hosted: boolean
+  willEnable: boolean
+  enabled: boolean
+  enableFailed: boolean
+  lastManagedHarnessDisabled: boolean
+}
+
+/** A 200 answer to `POST /api/kyber/capture`. */
+export interface KyberCaptureResult {
+  action: KyberCaptureAction
+  harness: string
+  dryRun: boolean
+  outcome: 'previewed' | 'wrote' | 'noop'
+  events: KyberCaptureEvent[]
+  harnessState: KyberCaptureHarness
+  receiver: KyberCaptureReceiverNote
+}
+
+export type KyberCaptureRefusalReason =
+  | 'drift'
+  | 'conflict'
+  | 'unparseable'
+  | 'unreadable'
+  | 'busy'
+  | 'unknown'
+
+/** A 409 answer: the server declined and changed nothing. Shown, not thrown. */
+export interface KyberCaptureRefusal {
+  outcome: 'refused'
+  error: string
+  reason: KyberCaptureRefusalReason
+  events: KyberCaptureEvent[]
+}
+
+/** Exactly the documented keys the route accepts. */
+export interface KyberCaptureRequest {
+  action: KyberCaptureAction
+  harness: string
+  dryRun: boolean
+  /**
+   * Settings-only opt-in: on Disable with no receipt, remove only this
+   * harness's declared OTEL keys that are present (user-authorized in the
+   * Settings drawer, previewed before writing). Defaults to false: omitted
+   * or false keeps the receipt-only behavior for the CLI and all callers.
+   */
+  removeUnreceiptedKeys?: boolean
+  /** Exact Settings preview echoed on confirmed manual-key removal. */
+  expectedPreviewEvents?: KyberCaptureEvent[]
+}
+
+type Raw = Record<string, unknown>
+
+function isRaw(value: unknown): value is Raw {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function capText(value: unknown, max = CAPTURE_TEXT_MAX): string {
+  return typeof value === 'string' ? value.slice(0, max) : ''
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+function captureStrings(value: unknown, maxItems: number, maxLength = CAPTURE_TEXT_MAX): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item === 'string') out.push(item.slice(0, maxLength))
+    if (out.length >= maxItems) break
+  }
+  return out
+}
+
+function captureValue(value: unknown): KyberCaptureValue {
+  if (typeof value === 'string') return value.slice(0, CAPTURE_VALUE_MAX)
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  // A nested object or array is a config value the display never needs; do not
+  // render it, and do not pretend the key is absent either.
+  return value === null || value === undefined ? null : '[structured value]'
+}
+
+function readDrift(value: unknown): KyberCaptureDriftEntry[] | null {
+  if (!Array.isArray(value)) return null
+  const out: KyberCaptureDriftEntry[] = []
+  for (const item of value) {
+    if (!isRaw(item) || typeof item.key !== 'string') continue
+    out.push({ key: item.key.slice(0, CAPTURE_VALUE_MAX), written: captureValue(item.written), current: captureValue(item.current) })
+    if (out.length >= CAPTURE_MAX_KEYS) break
+  }
+  return out
+}
+
+function readFile(raw: unknown): KyberCaptureFile | null {
+  if (!isRaw(raw)) return null
+  return {
+    id: capText(raw.id, CAPTURE_VALUE_MAX),
+    path: capText(raw.path),
+    applicable: raw.applicable === true,
+    exists: typeof raw.exists === 'boolean' ? raw.exists : null,
+    expectedKeys: captureStrings(raw.expectedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    presentKeys: captureStrings(raw.presentKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    missingKeys: captureStrings(raw.missingKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    mismatchedKeys: captureStrings(raw.mismatchedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    drift: readDrift(raw.drift),
+  }
+}
+
+function readManualStep(raw: unknown): KyberCaptureManualStep | null {
+  if (!isRaw(raw)) return null
+  const step: KyberCaptureManualStep = { id: capText(raw.id, CAPTURE_VALUE_MAX), text: capText(raw.text) }
+  if (isRaw(raw.env) && typeof raw.env.name === 'string' && typeof raw.env.value === 'string') {
+    step.env = { name: raw.env.name.slice(0, CAPTURE_VALUE_MAX), value: raw.env.value.slice(0, CAPTURE_VALUE_MAX) }
+  }
+  return step
+}
+
+function mapBounded<T>(value: unknown, max: number, read: (item: unknown) => T | null): T[] {
+  if (!Array.isArray(value)) return []
+  const out: T[] = []
+  for (const item of value) {
+    const parsed = read(item)
+    if (parsed !== null) out.push(parsed)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+function readHarness(raw: unknown): KyberCaptureHarness | null {
+  if (!isRaw(raw) || typeof raw.id !== 'string') return null
+  return {
+    id: raw.id.slice(0, CAPTURE_VALUE_MAX),
+    displayName: capText(raw.displayName, CAPTURE_VALUE_MAX) || raw.id.slice(0, CAPTURE_VALUE_MAX),
+    // An unrecognised mode degrades to read-only: it must never create a toggle.
+    mode: oneOf(raw.mode, ['managed', 'status-only'], 'status-only'),
+    installed: oneOf(raw.installed, ['detected', 'not-detected', 'unknown'], 'unknown'),
+    installEvidence: captureStrings(raw.installEvidence, CAPTURE_MAX_EVIDENCE),
+    state: oneOf(raw.state, ['on', 'off', 'partial', 'unknown', 'not-applicable'], 'unknown'),
+    receipt: oneOf(raw.receipt, ['recorded', 'absent'], 'absent'),
+    files: mapBounded(raw.files, CAPTURE_MAX_FILES, readFile),
+    warnings: mapBounded(raw.warnings, CAPTURE_MAX_WARNINGS, (item) =>
+      isRaw(item) ? { code: capText(item.code, CAPTURE_VALUE_MAX), text: capText(item.text) } : null,
+    ),
+    manualSteps: mapBounded(raw.manualSteps, CAPTURE_MAX_STEPS, readManualStep),
+    statusLines: captureStrings(raw.statusLines, CAPTURE_MAX_LINES),
+    // An unrecognised verdict is shown as needing attention, never as healthy.
+    health:
+      raw.health === undefined
+        ? null
+        : oneOf<KyberCaptureHealth>(raw.health, ['ok', 'attention', 'off', 'read-only'], 'attention'),
+    issues: mapBounded(raw.issues, CAPTURE_MAX_ISSUES, readIssue),
+  }
+}
+
+function readIssue(raw: unknown): KyberCaptureIssue | null {
+  if (!isRaw(raw) || typeof raw.text !== 'string') return null
+  const issue: KyberCaptureIssue = {
+    code: capText(raw.code, CAPTURE_VALUE_MAX),
+    // An unrecognised severity is the stricter one.
+    severity: oneOf(raw.severity, ['blocking', 'warning'], 'blocking'),
+    text: capText(raw.text),
+  }
+  if (typeof raw.path === 'string') issue.path = capText(raw.path)
+  if (typeof raw.remedy === 'string') issue.remedy = capText(raw.remedy)
+  return issue
+}
+
+function readCheck(raw: unknown): KyberCaptureCheck | null {
+  if (!isRaw(raw) || typeof raw.checkedAt !== 'string') return null
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? Math.min(value, 9999) : 0
+  return {
+    checkedAt: raw.checkedAt.slice(0, 64),
+    health: oneOf(raw.health, ['ok', 'attention', 'off'], 'attention'),
+    enabled: count(raw.enabled),
+    attention: count(raw.attention),
+    issueCount: count(raw.issueCount),
+  }
+}
+
+const EVENT_KINDS = ['would-write', 'wrote', 'noop', 'would-restore', 'restored', 'refused', 'error'] as const
+
+function readChange(raw: unknown): KyberCaptureChange | null {
+  if (!isRaw(raw) || typeof raw.key !== 'string') return null
+  const change: KyberCaptureChange = { key: raw.key.slice(0, CAPTURE_VALUE_MAX) }
+  if ('before' in raw) change.before = captureValue(raw.before)
+  if ('after' in raw) change.after = captureValue(raw.after)
+  return change
+}
+
+function readEvent(raw: unknown): KyberCaptureEvent | null {
+  if (!isRaw(raw) || typeof raw.kind !== 'string' || !(EVENT_KINDS as readonly string[]).includes(raw.kind)) return null
+  const event: KyberCaptureEvent = {
+    kind: raw.kind as KyberCaptureEventKind,
+    harness: capText(raw.harness, CAPTURE_VALUE_MAX),
+    fileId: capText(raw.fileId, CAPTURE_VALUE_MAX),
+    path: capText(raw.path),
+  }
+  if (Array.isArray(raw.changes)) event.changes = mapBounded(raw.changes, CAPTURE_MAX_CHANGES, readChange)
+  if (typeof raw.reason === 'string') event.reason = raw.reason.slice(0, CAPTURE_VALUE_MAX)
+  if (Array.isArray(raw.drift)) event.drift = readDrift(raw.drift) ?? []
+  if (typeof raw.code === 'string') event.code = raw.code.slice(0, CAPTURE_VALUE_MAX)
+  return event
+}
+
+function readEvents(value: unknown): KyberCaptureEvent[] {
+  return mapBounded(value, CAPTURE_MAX_EVENTS, readEvent)
+}
+
+/** A 2xx answer whose body is not the documented shape is a broken server, not data. */
+function malformed(status: number): KyberApiError {
+  return new KyberApiError(status, CAPTURE_PATH)
+}
+
+function parseCaptureStatus(raw: unknown, status: number): KyberCaptureStatus {
+  if (!isRaw(raw) || !isRaw(raw.receiver) || !Array.isArray(raw.harnesses)) throw malformed(status)
+  return {
+    platform: oneOf(raw.platform, ['darwin', 'linux', 'win32'], 'unknown'),
+    receiver: {
+      hosted: raw.receiver.hosted === true,
+      liveness: oneOf(raw.receiver.liveness, ['kyberdash', 'foreign', 'none', 'unknown'], 'unknown'),
+      detail: capText(raw.receiver.detail),
+    },
+    harnesses: mapBounded(raw.harnesses, CAPTURE_MAX_HARNESSES, readHarness),
+    check: readCheck(raw.check),
+  }
+}
+
+/** `GET /api/kyber/capture`: the structured per-harness collection status. */
+export async function fetchKyberCaptureStatus(): Promise<KyberCaptureStatus> {
+  const res = await fetch(CAPTURE_PATH)
+  if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
+  return parseCaptureStatus(await res.json().catch(() => null), res.status)
+}
+
+function parseCaptureResult(raw: unknown, status: number): KyberCaptureResult {
+  if (!isRaw(raw) || !isRaw(raw.receiver)) throw malformed(status)
+  const outcome = oneOf(raw.outcome, ['previewed', 'wrote', 'noop'], 'previewed')
+  if (raw.outcome !== outcome) throw malformed(status)
+  const harnessState = readHarness(raw.harnessState)
+  if (harnessState === null) throw malformed(status)
+  return {
+    action: oneOf(raw.action, ['enable', 'disable'], 'enable'),
+    harness: capText(raw.harness, CAPTURE_VALUE_MAX),
+    dryRun: raw.dryRun === true,
+    outcome,
+    events: readEvents(raw.events),
+    harnessState,
+    receiver: {
+      hosted: raw.receiver.hosted === true,
+      willEnable: raw.receiver.willEnable === true,
+      enabled: raw.receiver.enabled === true,
+      enableFailed: raw.receiver.enableFailed === true,
+      lastManagedHarnessDisabled: raw.receiver.lastManagedHarnessDisabled === true,
+    },
+  }
+}
+
+function parseCaptureRefusal(raw: unknown): KyberCaptureRefusal {
+  const body = isRaw(raw) ? raw : {}
+  return {
+    outcome: 'refused',
+    error: capText(body.error),
+    reason: oneOf(body.reason, ['drift', 'conflict', 'unparseable', 'unreadable', 'busy'], 'unknown'),
+    events: readEvents(body.events),
+  }
+}
+
+/**
+ * `POST /api/kyber/capture`. A dry run previews; a real request writes. The
+ * body is built from exactly the documented keys, so nothing a caller
+ * adds can reach the route. A 409 is the server declining (drift, conflict, an
+ * unreadable file) and is RETURNED as a refusal for the UI to show; every other
+ * non-2xx throws `KyberApiError`.
+ */
+export async function postKyberCapture(
+  request: KyberCaptureRequest,
+): Promise<KyberCaptureResult | KyberCaptureRefusal> {
+  const res = await fetch(CAPTURE_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      request.removeUnreceiptedKeys === true
+        ? {
+            action: request.action,
+            harness: request.harness,
+            dryRun: request.dryRun,
+            removeUnreceiptedKeys: true,
+            ...(request.expectedPreviewEvents === undefined ? {} : { expectedPreviewEvents: request.expectedPreviewEvents }),
+          }
+        : { action: request.action, harness: request.harness, dryRun: request.dryRun },
+    ),
+  })
+  if (res.status === 409) return parseCaptureRefusal(await res.json().catch(() => null))
+  if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
+  return parseCaptureResult(await res.json().catch(() => null), res.status)
+}
+
+// ---------------------------------------------------------------------------
+// Skills (session payload section "4 · Skills")
+// ---------------------------------------------------------------------------
+
+/**
+ * A value the harness did not export. The reason is the harness's own
+ * explanation, shown verbatim; a panel never turns it into a 0 or an empty list.
+ */
+export type KyberSkillAvailability = {
+  availability: 'not_measurable'
+  reason: string
+}
+
+/** One skill from the session's `skills.rows`. `turns_listed` is 0-based transport indices. */
+export type KyberSkillRow = {
+  name: string
+  listed: boolean | KyberSkillAvailability
+  invocations: number | KyberSkillAvailability
+  turns_listed: number[]
+  /** Engine-derived token estimate; labelled as derived wherever it is shown. */
+  derived_tokens?: number
+  /** The skill description: from the listing, or the skill file for names-only harnesses. */
+  description?: string
+}
+
+/** The session payload's `skills` block: measured rows, or a whole-block not-measurable verdict. */
+export type KyberSkillsBlock =
+  | {
+      measurable: true
+      /** Harness-reported aggregate for skill listings; absent when the harness did not report one. */
+      reported_skill_tokens?: number
+      /** Served count of skills listed to the agent; absent when not measured. The browser never counts rows. */
+      listed_count?: number
+      /** Served count of listed skills with no observed invocation; absent when not measured. */
+      listed_uninvoked_count?: number
+      /** Turns on which invocations were measured, out of the session's turns; absent when the server states no coverage. */
+      invocationsCoverage?: { measuredTurns: number; totalTurns: number }
+      rows: KyberSkillRow[]
+    }
+  | KyberSkillAvailability
+
+/**
+ * The skills fields the session summary carries. Each array is absent when
+ * that fact was not measured, and absence is never read as an empty list.
+ */
+export type KyberSkillsSummary = {
+  skills_listed?: string[] | null
+  skills_invoked?: string[] | null
+}
+
+/** One skill listed in a turn, with the listing text the harness exported (absent when not recorded). */
+export type KyberTurnSkillListing = {
+  name: string
+  text?: string
+}
+
+/**
+ * A turn's `skills` entry on the turn-content route. Either side may be a
+ * not-measurable verdict, and the whole entry may be one.
+ */
+export type KyberTurnSkillsEntry =
+  | {
+      listed: KyberTurnSkillListing[] | KyberSkillAvailability
+      invoked: string[] | KyberSkillAvailability
+    }
+  | KyberSkillAvailability

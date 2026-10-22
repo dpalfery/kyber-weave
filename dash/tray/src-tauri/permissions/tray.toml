@@ -5,7 +5,7 @@ commands.allow = ["get_view_state"]
 
 [[permission]]
 identifier = "allow-refresh-now"
-description = "Start one validated KyberDash refresh when none is in flight."
+description = "Ask the KyberDash server to refresh; the tray runs no refresh itself."
 commands.allow = ["refresh_now"]
 
 [[permission]]
@@ -15,7 +15,7 @@ commands.allow = ["open_view"]
 
 [[permission]]
 identifier = "allow-set-settings"
-description = "Persist a validated partial tray-settings document."
+description = "Persist validated tray display preferences. Sends nothing to the server."
 commands.allow = ["set_settings"]
 
 [[permission]]
@@ -27,3 +27,18 @@ commands.allow = ["quit"]
 identifier = "allow-hide-popover"
 description = "Hide the popover window (Escape / 6.4)."
 commands.allow = ["hide_popover"]
+
+[[permission]]
+identifier = "allow-clean-database"
+description = "Ask the KyberDash server to wipe a validated harness scope (or all). The tray holds no clean logic."
+commands.allow = ["clean_database"]
+
+[[permission]]
+identifier = "allow-import-folder-history"
+description = "Ask the KyberDash server to import 1-52 weeks of folder history, for one validated harness or all."
+commands.allow = ["import_folder_history"]
+
+[[permission]]
+identifier = "allow-set-shared-settings"
+description = "Relay a settings patch to the KyberDash server, which owns and validates those settings."
+commands.allow = ["set_shared_settings"]

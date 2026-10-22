@@ -1,5 +1,6 @@
-using KyberWeave.Cli.Commands.Squad;
+using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -28,7 +29,10 @@ public sealed class SquadGlobalRootTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     // ---------------------------------------------------------------------------------------
     // Criterion 1: SquadGlobalRoots unit tests, a fake env dictionary, a temp home.
@@ -194,8 +198,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     [Fact]
     public void Constructor_RelativeHomeDirectory_ThrowsArgumentException()
     {
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => new SquadGlobalRoots(_ => null, "relative-home"));
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => new SquadGlobalRoots(_ => null, "relative-home"));
 
         Assert.Equal("homeDirectory", exception.ParamName);
         Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
@@ -212,8 +216,8 @@ public sealed class SquadGlobalRootTests : IDisposable
                 : null,
             tempHome);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => resolver.ResolveGlobalRoot(SquadTarget.Claude));
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.Claude));
 
         Assert.Equal("CLAUDE_CONFIG_DIR", exception.ParamName);
         Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
@@ -230,8 +234,8 @@ public sealed class SquadGlobalRootTests : IDisposable
                 : null,
             tempHome);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => resolver.ResolveGlobalRoot(SquadTarget.Kilo));
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.Kilo));
 
         Assert.Equal("XDG_CONFIG_HOME", exception.ParamName);
         Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
@@ -333,8 +337,8 @@ public sealed class SquadGlobalRootTests : IDisposable
             tempHome,
             isWindows: true);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => resolver.ResolveGlobalRoot(SquadTarget.Devin));
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.Devin));
         Assert.Equal("APPDATA", exception.ParamName);
     }
 
@@ -407,7 +411,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         { "no-dir", "{\"storage\":{}}" },
         { "blank-dir", "{\"storage\":{\"dir\":\"\"}}" },
         { "numeric-dir", "{\"storage\":{\"dir\":42}}" },
-        { "storage-not-object", "{\"storage\":\"not-an-object\"}" },
+        { "storage-not-object", "{\"storage\":\"not-an-object\"}" }
     };
 
     [Theory]
@@ -458,14 +462,18 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(Path.Combine(tempHome, ".zcode"), resolver.ResolveGlobalRoot(SquadTarget.ZCode));
     }
 
-    private static string StorageDirConfig(string directory) =>
-        $"{{\"storage\":{{\"dir\":{JsonSerializer.Serialize(directory)}}}}}";
+    private static string StorageDirConfig(string directory)
+    {
+        return $"{{\"storage\":{{\"dir\":{JsonSerializer.Serialize(directory)}}}}}";
+    }
 
-    private static bool IsZCodeCliConfig(string path, string homeDirectory) =>
-        string.Equals(
+    private static bool IsZCodeCliConfig(string path, string homeDirectory)
+    {
+        return string.Equals(
             path,
             Path.Combine(homeDirectory, ".zcode", "cli", "config.json"),
             StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData(SquadTarget.Claude)]
@@ -497,9 +505,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [target],
+            projectRoot,
+            SquadDeploymentScope.Global,
+            [target],
             Version: "1.2.3",
             DryRun: true);
 
@@ -522,12 +530,11 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
-            Assert.Equal("conductor", primaryAgent.Name);
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
-            // The conductor carries plan-path, spec-path, intake-path, and
-            // execution-and-review references; the entry-point skill projects all four.
-            Assert.Equal(4, primaryAgent.Resources.Count);
+            // The conductor carries plan-path, spec-path, intake-path,
+            // execution-and-review, and autonomy references; the entry-point skill projects all five.
+            Assert.Equal(5, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
@@ -552,6 +559,37 @@ public sealed class SquadGlobalRootTests : IDisposable
             }
         }
 
+        if (target == SquadTarget.Codex)
+        {
+            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+            SquadSource source = SquadSourceLoader.Load(productRoot);
+            SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+
+            string[] conductorEntryPointPaths =
+            [
+                $"skills/{primaryAgent.Name}/SKILL.md",
+                .. primaryAgent.Resources.Select(resource =>
+                    $"skills/{primaryAgent.Name}/{resource.RelativePath}")
+            ];
+            Assert.Equal(1 + primaryAgent.Resources.Count, conductorEntryPointPaths.Length);
+            foreach (string path in conductorEntryPointPaths)
+            {
+                Assert.Single(result.Receipt.Files, file => file.RelativePath == path);
+            }
+
+            SquadOwnedFile nativeAgent = Assert.Single(
+                result.Receipt.Files,
+                file => file.RelativePath == $"agents/{primaryAgent.Name}.toml");
+            Assert.Equal("codex", nativeAgent.Target);
+
+            foreach (SquadResource resource in primaryAgent.Resources)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    file => file.RelativePath == $"agents/{resource.RelativePath}");
+            }
+        }
+
         bool sawAgentFile = false;
         bool sawSkillFile = false;
         bool sawCommandFile = false;
@@ -560,6 +598,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             Assert.False(
                 file.RelativePath.StartsWith('.'),
                 $"Global-scope path '{file.RelativePath}' for {target} still carries a project-scope dot-prefix.");
+            Assert.False(
+                Path.IsPathRooted(file.RelativePath),
+                $"Global-scope path '{file.RelativePath}' for {target} must remain relative.");
 
             if (file.RelativePath.StartsWith("agents/", StringComparison.Ordinal))
             {
@@ -630,9 +671,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             globalRoots: globalRoots);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Claude, SquadTarget.Pi],
+            projectRoot,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Claude, SquadTarget.Pi],
             Version: "1.2.3",
             DryRun: true));
 
@@ -672,20 +713,22 @@ public sealed class SquadGlobalRootTests : IDisposable
             ".",
             DateTimeOffset.UtcNow,
             [],
-            [new SquadOwnedFile(
-                "agents/architect.md",
-                Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content)),
-                "pi",
-                false)]);
+            [
+                new SquadOwnedFile(
+                    "agents/architect.md",
+                    Convert.ToHexStringLower(SHA256.HashData(content)),
+                    "pi",
+                    false)
+            ]);
 
-        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(
-            () => SquadDeploymentPlan.CreateInstall(
+        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
+            SquadDeploymentPlan.CreateInstall(
                 projectRoot,
                 SquadDeploymentScope.Global,
                 GlobalLock(["pi"]),
                 [new SquadDeploymentFile("agents/architect.md", content, "pi")],
                 [],
-                adopt: true,
+                true,
                 TimeProvider.System,
                 globalRoots,
                 [sibling]));
@@ -704,7 +747,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
 
         byte[] content = "shared-global-bytes"u8.ToArray();
-        string digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        string digest = Convert.ToHexStringLower(SHA256.HashData(content));
         string physical = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), "agents", "architect.md");
         Directory.CreateDirectory(Path.GetDirectoryName(physical)!);
         File.WriteAllBytes(physical, content);
@@ -752,9 +795,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Factory],
+            projectRoot,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Factory],
             Version: "1.2.3",
             DryRun: true));
 
@@ -820,9 +863,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Factory],
+            projectRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Factory],
             Version: "1.2.3",
             DryRun: true));
 
@@ -866,9 +909,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [target],
+            projectRoot,
+            SquadDeploymentScope.Project,
+            [target],
             Version: "1.2.3",
             DryRun: true);
 
@@ -924,9 +967,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
 
         SquadInstallRequest request = new(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [target],
+            projectRoot,
+            SquadDeploymentScope.Global,
+            [target],
             Version: "1.2.3");
 
         string expectedRoot = globalRoots.ResolveGlobalRoot(target);
@@ -948,12 +991,11 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
-            Assert.Equal("conductor", primaryAgent.Name);
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
-            // The conductor carries plan-path, spec-path, intake-path, and
-            // execution-and-review references; the entry-point skill projects all four.
-            Assert.Equal(4, primaryAgent.Resources.Count);
+            // The conductor carries plan-path, spec-path, intake-path,
+            // execution-and-review, and autonomy references; the entry-point skill projects all five.
+            Assert.Equal(5, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
@@ -1017,19 +1059,24 @@ public sealed class SquadGlobalRootTests : IDisposable
             { SquadTarget.Devin, ".devin/" }
         };
 
+        string tempHome = Path.Combine(_temp.Path, "home-guard");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
             SquadRenderResult result = await renderer.RenderAsync(
                 new SquadRenderRequest(
-                    SourceDirectory: productRoot,
-                    Targets: [target],
-                    Scope: SquadDeploymentScope.Global));
+                    productRoot,
+                    [target],
+                    SquadDeploymentScope.Global,
+                    GlobalRoots: globalRoots));
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
             {
-                foreach (var file in result.Files)
+                foreach (SquadDeploymentFile file in result.Files)
                 {
                     Assert.False(
                         file.RelativePath.StartsWith(prefix, StringComparison.Ordinal),
@@ -1040,12 +1087,54 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
+    /// The receipt assertions name one primary agent by name. That only says the conductor
+    /// exists; it does not say it is the only non-shared primary. Pin the whole set, so a
+    /// fourth primary agent added later is caught here rather than silently changing what
+    /// the per-target receipt and file-count expectations mean.
+    /// </summary>
+    [Fact]
+    public void ThePrimarySetIsExactlyTheThreeDeclaredPrimaryAgents()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        SquadSource source = SquadSourceLoader.Load(productRoot);
+
+        string[] primaries =
+        [
+            .. source.Agents
+                .Where(agent => agent.Invocation == SquadInvocation.Primary)
+                .Select(agent => agent.Name)
+                .Order(StringComparer.Ordinal)
+        ];
+
+        Assert.Equal(["bug-crusher", "conductor", "product-owner"], primaries);
+
+        // The two root wrappers are declared shared identities, so they reuse their canonical
+        // skill and emit no agent principal of their own; the conductor is the only primary that
+        // is not. The receipt assertions select on the conductor's name, so this is what keeps
+        // that selection meaning "the only non-shared primary".
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] nonSharedPrimaries =
+        [
+            .. source.Agents
+                .Where(agent => agent.Invocation == SquadInvocation.Primary
+                                && !sharedIdentities.Contains(agent.Name))
+                .Select(agent => agent.Name)
+                .Order(StringComparer.Ordinal)
+        ];
+
+        Assert.Equal(["conductor"], nonSharedPrimaries);
+    }
+
+    /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Claude adds a principal (an entry-point skill beside its
-    /// subagent); Cursor is count-neutral under the skill-only Pi precedent (the agent
-    /// principal plus its refs out, <c>SKILL.md</c> plus its refs in), so only the
-    /// receipt paths differ there.
+    /// hardcoded literal. Claude and Factory keep the primary agent's native principal and
+    /// add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
+    /// precedent (the agent principal plus its refs out, <c>SKILL.md</c> plus its refs in),
+    /// so only the receipt paths differ there. Codex, Claude, and Factory retain the native
+    /// principal and add a skill entry point for the conductor.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -1054,42 +1143,60 @@ public sealed class SquadGlobalRootTests : IDisposable
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+
+        // A subagent shared identity suppresses its canonical skill; a primary shared identity
+        // reuses it as the entry point and emits it, so nothing is suppressed here.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         int baseCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+                                            + source.Skills.Count - suppressedSkillCount
+                        + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
+                            .Sum(skill => skill.Resources.Count);
 
-        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
-        // replaces the agent principal with the entry-point skill (Pi precedent), so
-        // its total is unchanged and only the receipt paths differ (asserted above).
-        if (target is SquadTarget.Claude or SquadTarget.Cursor)
+        // A primary shared identity emits no agent principal of its own: its canonical skill is the
+        // entry point and is already counted in baseCount. That subtracts one principal per shared
+        // identity on a target that lowers primaries, and adds nothing on a target that keeps the
+        // agent file.
+        int sharedPrimaryCount = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
+
+        // Codex, Claude, and Factory keep the native principal and add an entry-point skill beside
+        // it, but only for a non-shared primary: a primary shared identity already has its
+        // canonical skill as the entry point. The lowering targets (Cursor, Pi, ZCode, Devin, Warp)
+        // replace a non-shared primary's agent principal with an entry point, and emit nothing at all
+        // for a shared one.
+        if (target is SquadTarget.Codex or SquadTarget.Claude or SquadTarget.Factory)
         {
-            if (target == SquadTarget.Cursor)
-            {
-                return baseCount;
-            }
-
-            int claudeAddition = 0;
-            foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
+            int entryPointAddition = 0;
+            foreach (SquadAgent agent in source.Agents.Where(a =>
+                         a.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(a.Name)))
             {
                 string fallbackProfileId = agent.Fallback;
                 SquadFallbackProfile profile = source.FallbackProfiles.Profiles[fallbackProfileId];
                 if (profile.NoPrimaryAgent == "skill")
                 {
                     // Add 1 for the SKILL.md and agent.Resources.Count for the resources
-                    claudeAddition += 1 + agent.Resources.Count;
+                    entryPointAddition += 1 + agent.Resources.Count;
                 }
             }
-            return baseCount + claudeAddition;
+
+            return baseCount + entryPointAddition;
+        }
+
+        if (target is SquadTarget.Cursor or SquadTarget.Pi or SquadTarget.ZCode
+            or SquadTarget.Devin or SquadTarget.Warp)
+        {
+            return baseCount - sharedPrimaryCount;
         }
 
         return baseCount;
     }
 
-    private static SquadLock GlobalLock(IReadOnlyList<string> targets) =>
-        new(
+    private static SquadLock GlobalLock(IReadOnlyList<string> targets)
+    {
+        return new SquadLock(
             "kyber-squad.lock/v1",
             "1.2.3",
             "1.2.3",
@@ -1101,4 +1208,5 @@ public sealed class SquadGlobalRootTests : IDisposable
             "a".PadRight(64, '0'),
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+    }
 }

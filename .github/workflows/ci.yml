@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: test-results
           path: TestResults/
@@ -108,11 +108,89 @@ jobs:
           -o ./artifacts/nupkg
 
       - name: Upload pack artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nupkg-artifacts
           path: artifacts/nupkg/
           retention-days: 14
+
+  sbom:
+    # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
+    # job proves the generator works and that its output is schema-valid, without
+    # needing a real release: it runs the same script the release job runs, the
+    # same validator, and the same ecosystem expectations.
+    #
+    # The .NET SDK is set up because the .NET cataloger needs a *.deps.json, which
+    # only a publish produces. With the SDK the nuget ecosystem is checked
+    # strictly; without it the check degrades to a warning, because the fallback
+    # to the checked-in packages.lock.json files is knowingly partial.
+    name: SBOM (CycloneDX 1.6)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The generator caches the pinned Syft tarball under the documented cache root
+      # and re-verifies its SHA-256 on every run, so a restored cache is checked
+      # before it is used rather than trusted.
+      - name: Cache the pinned Syft tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kyber-weave
+          key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Generate the SBOM
+        env:
+          SBOM_VERSION: "0.0.0-ci"
+        run: |
+          set -euo pipefail
+          mkdir -p sbom-out
+          bash scripts/generate-sbom.sh sbom-out "${SBOM_VERSION}"
+
+      - name: Validate the SBOM against the CycloneDX schema
+        env:
+          SBOM_VERSION: "0.0.0-ci"
+        run: |
+          set -euo pipefail
+          # The generator validates its own output, but the check is repeated here
+          # so that a schema violation shows up as its own step in the workflow log
+          # rather than only as a generator failure.
+          python3 scripts/validate-sbom.py \
+            "sbom-out/kyber-weave-sbom-${SBOM_VERSION}.cdx.json" \
+            --require-ecosystems npm,cargo,nuget
+
+      - name: Summarise the SBOM
+        env:
+          SBOM_VERSION: "0.0.0-ci"
+        run: |
+          set -euo pipefail
+          SBOM="sbom-out/kyber-weave-sbom-${SBOM_VERSION}.cdx.json"
+          echo "Component counts by ecosystem:"
+          jq -r '[.components[] | (.purl // "(no purl)") | split("/")[0]]
+                 | group_by(.) | map({type: .[0], count: length})
+                 | sort_by(-.count) | .[]
+                 | "  \(.count)\t\(.type)"' "${SBOM}"
+          {
+            echo "### SBOM (CycloneDX 1.6)"
+            echo
+            jq -r '[.components[] | (.purl // "(no purl)") | split("/")[0]]
+                   | group_by(.) | map({type: .[0], count: length})
+                   | sort_by(-.count) | .[]
+                   | "- \(.type): \(.count)"' "${SBOM}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sbom-ci
+          path: sbom-out/kyber-weave-sbom-*.cdx.json
+          retention-days: 14
+          if-no-files-found: error
 
   squad-filesystem-contract:
     name: Squad filesystem contract (${{ matrix.os }})
@@ -181,7 +259,7 @@ jobs:
 
       - name: Upload RID smoke artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: rid-smoke-linux-x64
           path: |
@@ -220,7 +298,7 @@ jobs:
       # downloads from nodejs.org at the version in dash/.nvmrc; this setup only has to
       # run npm and tsup, so it reads the same file.
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -253,7 +331,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin (v4.38.1)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -275,7 +353,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin (v4.38.1)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -334,7 +412,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always() && hashFiles('trivy.sarif') != ''
         with:
           sarif_file: trivy.sarif
@@ -389,7 +467,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always() && hashFiles('semgrep.sarif') != ''
         with:
           sarif_file: semgrep.sarif
@@ -400,6 +478,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      security-events: write
     continue-on-error: true
     steps:
       - name: Checkout
@@ -418,7 +497,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always() && hashFiles('results.sarif') != ''
         with:
           sarif_file: results.sarif
@@ -453,21 +532,50 @@ jobs:
           set -euo pipefail
           EXIT_CODE=0
           mkdir -p kyber-weave-sarif
-          skills_dir=".apm/skills/kyber-weave-docs"
+          # Every skill directory is gated under the same three verbs. Add a path here
+          # AND a matching upload step below when a new skill lands, or the suite covers it
+          # zero times / its SARIF never reaches code scanning.
+          skills_dirs=(.apm/skills/kyber-weave-docs .apm/skills/kyber-weave-cli)
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
-          $CLI skill validate "${skills_dir}" --format table || EXIT_CODE=1
-          $CLI skill lint "${skills_dir}" --min-desc-score 70 --format table || EXIT_CODE=1
-          $CLI skill scan "${skills_dir}" --fail-on critical --format sarif \
-            > "kyber-weave-sarif/skills-kyber-weave-docs.sarif" || EXIT_CODE=1
+          for skills_dir in "${skills_dirs[@]}"; do
+            # Path-derived, not basename: two skills whose leaf directories share a name
+            # would otherwise collide on one file name. Matches the skill-gate template.
+            safe_name="$(echo "${skills_dir}" | tr '/.' '__')"
+            $CLI skill validate "${skills_dir}" --format table || EXIT_CODE=1
+            $CLI skill lint "${skills_dir}" --min-desc-score 70 --format table || EXIT_CODE=1
+            # One run per file. Each upload step below owns one file and gives it one
+            # `category`, so no two runs share a category — the CodeQL action rejects a
+            # single upload that carries two runs in the same category.
+            $CLI skill scan "${skills_dir}" --fail-on critical --format sarif \
+              > "kyber-weave-sarif/skills-${safe_name}.sarif" || EXIT_CODE=1
+          done
           exit "${EXIT_CODE}"
 
+      # Code scanning identifies a configuration by (workflow, category) and diffs the set
+      # between main and a PR head to decide which alerts the PR introduces. main produced
+      # the docs analysis under exactly `kyber-weave-skills`, so this upload must keep that
+      # name: renaming it reads as a removed configuration and raises "Code scanning cannot
+      # determine the alerts introduced by this pull request". Do not "tidy" it to match the
+      # file name or the cli category below.
       # Intentional github/codeql-action v4 pin
-      - name: Upload skill scan SARIF
+      - name: Upload skill scan SARIF (kyber-weave-docs, legacy category)
         if: always()
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          sarif_file: kyber-weave-sarif
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-docs.sarif
           category: kyber-weave-skills
+
+      # The cli skill is new on this branch, so it has no prior configuration to preserve
+      # and takes a path-derived category. A separate upload step, not one directory upload:
+      # the action applies a single `category` to every run that has no automationDetails of
+      # its own, and refuses two runs that share a category.
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-weave-cli)
+        if: always()
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-weave-cli
 
       # --merge-ready adds KW-DOC-LIFECYCLE-003: a plan or specification still open fails
       # the build. Open work is correct on a branch while it is built, never in a merge.
@@ -504,7 +612,7 @@ jobs:
       # ~350 MB built-in cache keyed on dash/package-lock.json so a cold
       # runner is the only cold one.
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -564,6 +672,41 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
+  # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
+  # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture
+  # tests run here; the full suite stays on ts-gates. Equivalent local command:
+  #   cd dash && npx vitest run src/capture
+  # This job covers the engine only; the route contract (src/server/capture-route.test.ts) is
+  # POSIX-only and runs in ts-gates.
+  # If `npm ci` fails on Windows for an unrelated native dependency, the fallback is the
+  # owner gate recorded in the plan (a real Windows round trip), not widening this job.
+  capture-windows:
+    name: Capture tests (windows-latest)
+    runs-on: windows-latest
+    needs: build-test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/package-lock.json
+
+      - name: Install dash dependencies
+        working-directory: dash
+        run: npm ci --no-audit --no-fund
+
+      # The route test (src/server/capture-route.test.ts) injects platform 'darwin' and
+      # compares host-joined paths, so it is POSIX-only; the engine tests are host-neutral.
+      - name: Capture engine tests
+        working-directory: dash
+        run: npx vitest run src/capture
+
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -585,7 +728,7 @@ jobs:
 
       - name: Setup Node for Linux tray build
         if: runner.os == 'Linux'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -602,7 +745,7 @@ jobs:
       # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
       # version unless toolchain is set explicitly.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -655,11 +798,13 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-test
+      - sbom
       - publish-smoke
       - update-loop
       - codeql
       - skill-docs-gate
       - ts-gates
+      - capture-windows
       - tray-rust
     if: always()
     steps:
@@ -671,11 +816,13 @@ jobs:
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
+          echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Capture tests (Windows) | ${{ needs.capture-windows.result }} |" >> results.md
           echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
           echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
@@ -686,11 +833,13 @@ jobs:
           FAILED=false
           for result in \
             "${{ needs.build-test.result }}" \
+            "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \
             "${{ needs.update-loop.result }}" \
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
             "${{ needs.ts-gates.result }}" \
+            "${{ needs.capture-windows.result }}" \
             "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               FAILED=true
@@ -712,7 +861,7 @@ jobs:
           cat results.md
 
       - name: Upload gate results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: ci-results

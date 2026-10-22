@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -72,6 +73,77 @@ public sealed class CopilotRenderer : ISquadRenderer
             : baseDirectory;
     }
 
+    /// <summary>
+    /// Returns the absolute <c>&lt;copilot-root&gt;/agents</c> directory (forward slashes) that
+    /// agent resource links resolve under at global scope, or null at project scope.
+    /// </summary>
+    /// <exception cref="SquadRenderValidationException">
+    /// Global scope without <see cref="SquadRenderRequest.GlobalRoots"/>: rendering relative
+    /// links anyway would ship the defect this rewrite exists to fix.
+    /// </exception>
+    private static string? ResolveGlobalAgentsRoot(SquadRenderRequest request)
+    {
+        if (request.Scope != SquadDeploymentScope.Global)
+        {
+            return null;
+        }
+
+        if (request.GlobalRoots is null)
+        {
+            throw new SquadRenderValidationException(
+                "Rendering Copilot at global scope requires SquadRenderRequest.GlobalRoots: " +
+                "agent resource links are rewritten to absolute paths under the resolved " +
+                "Copilot global root, and without a resolver they would stay relative and " +
+                "fail to resolve from a foreign working directory.");
+        }
+
+        string root = request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot)
+            .Replace('\\', '/')
+            .TrimEnd('/');
+        return $"{root}/{ResolvePrefixedDirectory(AgentsDirectory, SquadDeploymentScope.Global)}";
+    }
+
+    /// <summary>
+    /// Rewrites the agent's authored links to its declared resources into absolute paths and
+    /// records the deviation.
+    /// </summary>
+    private static string RewriteResourceLinks(
+        SquadAgent agent,
+        string globalAgentsRoot,
+        List<SquadDegradationRecord> degradations)
+    {
+        if (agent.Resources.Count == 0)
+        {
+            return agent.InstructionBody;
+        }
+
+        HashSet<string> resourcePaths = agent.Resources
+            .Select(resource => resource.RelativePath)
+            .ToHashSet(StringComparer.Ordinal);
+
+        string body = SquadResourceLinkRewriter.Rewrite(
+            agent.InstructionBody,
+            resourcePaths,
+            pathPart => $"{globalAgentsRoot}/{pathPart}",
+            out bool changed);
+
+        degradations.Add(new SquadDegradationRecord(
+            Target: "copilot",
+            CanonicalIdentity: agent.Name,
+            OutputIdentity: agent.Name,
+            Code: "resource-links-rewritten",
+            InstructionDigest: agent.BodyDigest,
+            Details: "Copilot does not reliably anchor a relative link in a user-level agent to " +
+                "the agent file, so the agent's " +
+                $"{agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} resource file(s) " +
+                "stay beside their principal and " +
+                (changed
+                    ? "the agent's authored links were rewritten to absolute paths under the resolved Copilot global root."
+                    : "no authored link required rewriting.")));
+
+        return body;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
 
@@ -100,6 +172,14 @@ public sealed class CopilotRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
+        string? globalAgentsRoot = ResolveGlobalAgentsRoot(request);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
         List<SquadRenderWarning> warnings = [];
@@ -110,7 +190,9 @@ public sealed class CopilotRenderer : ISquadRenderer
                 agent,
                 source.ModelProfiles.Profiles,
                 warnings,
-                request.Scope);
+                request.Scope,
+                globalAgentsRoot,
+                degradations);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -125,8 +207,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -143,7 +226,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         List<SquadRenderWarning> warnings,
-        SquadDeploymentScope scope)
+        SquadDeploymentScope scope,
+        string? globalAgentsRoot,
+        List<SquadDegradationRecord> degradations)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -159,17 +244,18 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         frontmatter["tools"] = new CopilotToolsFlowSequence(CopilotToolCatalog.Normalize(agent.CopilotTools));
 
+        // Every agent that delegates names its permitted roster in frontmatter:
+        // the "agent" tool grants the mechanism, "agents" names who it may reach.
+        // GitHub Copilot does not grant a primary agent (conductor, invocation
+        // primary) the full roster automatically, so a delegating primary declares
+        // one exactly like a subagent does.
+        if (agent.DelegatesTo.Count > 0)
+        {
+            frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
+        }
+
         if (agent.Invocation == SquadInvocation.Subagent)
         {
-            // A subagent that delegates needs its permitted roster named in frontmatter:
-            // the "agent" tool grants the mechanism, "agents" names who it may reach. A
-            // primary agent is dispatched from the top-level session and receives the
-            // full roster from the harness, so declaring one there would only narrow it.
-            if (agent.DelegatesTo.Count > 0)
-            {
-                frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
-            }
-
             // Subagents are dispatched by the conductor, not chosen directly by a human —
             // "user-invocable: false" is Copilot's closest equivalent. Primary agents
             // (conductor) leave this at its default (true, omitted).
@@ -208,7 +294,10 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         builder.Append("---\n");
 
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string authoredBody = globalAgentsRoot is null
+            ? agent.InstructionBody
+            : RewriteResourceLinks(agent, globalAgentsRoot, degradations);
+        string normalizedBody = authoredBody.Replace("\r\n", "\n", StringComparison.Ordinal);
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {
@@ -335,7 +424,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     private sealed class CopilotAgentsFlowSequence(IEnumerable<string> agents) : List<string>(agents);
 
     /// <summary>
-    /// Keeps each subagent restricted to its declared delegation roster in emitted
+    /// Keeps each delegating agent restricted to its declared delegation roster in emitted
     /// Copilot frontmatter by serializing as an inline single-quoted flow sequence
     /// rather than YamlDotNet's default block list.
     /// </summary>

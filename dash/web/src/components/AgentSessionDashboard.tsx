@@ -7,6 +7,7 @@ import { Skeleton } from './ui/skeleton.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
+import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
@@ -15,6 +16,8 @@ import type {
   KyberContextTurn,
   KyberSessionContext,
   KyberSessionTurnRow,
+  KyberSkillsBlock,
+  KyberSkillRow,
   KyberToolDefinitionShadow,
   KyberTurnContentShadow,
 } from '../lib/kyberApi.js'
@@ -66,6 +69,10 @@ export interface SessionSummaryPayload {
   tool_calls?: number | null
   tools_invoked?: string[] | number | null
   tools_offered?: string[] | number | null
+  /** Skill names listed to the agent; absent when not measured. */
+  skills_listed?: string[] | null
+  /** Skill names invoked at least once; absent when not measured. */
+  skills_invoked?: string[] | null
   error_count?: number | null
   median_ttft_ms?: number | null
   aux_chat_calls?: number | null
@@ -104,6 +111,10 @@ export interface ToolRow {
   result_tokens?: number | null
   in_definitions?: boolean
   results_not_recorded?: number | null
+  /** The invocation's arguments, as the engine previewed them. Absent when not carried. */
+  arguments_preview?: string | null
+  /** The invocation's result, as the engine previewed it. Absent when not carried. */
+  result_preview?: string | null
 }
 
 export interface ServerRow {
@@ -165,6 +176,8 @@ export interface AgentSessionPayload {
   span_count?: number
   summary?: SessionSummaryPayload
   turns?: KyberSessionTurnRow[]
+  /** Absent on a payload that predates the skills projection. */
+  skills?: KyberSkillsBlock | null
   tools?: ToolRow[]
   servers?: ServerRow[]
   context?: KyberSessionContext
@@ -200,8 +213,9 @@ export type DrawerContent =
   | {
       tool: ToolRow
       definition: KyberToolDefinitionShadow | null
-      contentRequest: { span?: string; part: string }
+      contentRequest: { span?: string; part: string; toolName?: string }
     }
+  | { skill: KyberSkillRow }
   | string
   | {
       turnIndex: number
@@ -214,6 +228,10 @@ export type DrawerContent =
       content: unknown
       turn: KyberSessionTurnRow
       context: KyberSessionContext
+    }
+  | {
+      turnIndex: number
+      turn: KyberSessionTurnRow
     }
   // Anything else InspectorContent's shape dispatch can render — tests hand
   // the drawer bare records, and the runtime dispatch is the contract.
@@ -241,6 +259,34 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   execute_hook: '#ec4899', // pink
   hook: '#ec4899',
   embeddings: '#8b5cf6', // purple
+}
+
+/** Drawer-content key carrying the "definitions not exported" notice; never rendered as data. */
+const TOOL_DEFINITION_UNAVAILABLE_KEY = 'definitionUnavailableNotice'
+
+/**
+ * Copilot CLI journals carry no tool schemas at all. Its system prompt's
+ * `<tools>` section is usage guidance, so the notice says so rather than
+ * presenting that section as the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+function toolDefinitionsUnavailableReason(harness: string | undefined): string {
+  if (harness === 'copilot' || harness === 'copilot-cli') return COPILOT_TOOL_DEFINITIONS_REASON
+  return `${harness || 'This harness'} does not export tool definitions for this session, so only the invocation row is shown.`
+}
+
+function drawerNoticeOf(content: unknown): string | undefined {
+  if (content === null || typeof content !== 'object') return undefined
+  const notice = (content as Record<string, unknown>)[TOOL_DEFINITION_UNAVAILABLE_KEY]
+  return typeof notice === 'string' ? notice : undefined
+}
+
+function stripNotice<T>(content: T): T {
+  if (content === null || typeof content !== 'object') return content
+  const { [TOOL_DEFINITION_UNAVAILABLE_KEY]: _notice, ...rest } = content as Record<string, unknown>
+  return rest as T
 }
 
 function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = null): TimelineNode {
@@ -536,12 +582,16 @@ export function AgentSessionContent({
           context: ctx as KyberSessionContext,
         })
       } else {
+        // Whole-turn view: a plain turn selection opens the complete
+        // available context for that turn via the turn-content endpoint
+        // (lossless `full` path), not just the payload row or one bucket.
+        // The drawer resolves the exact zero-based `turnIndex` below.
         // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
-        setDrawerTitle(`Turn ${turnIndex + 1}`)
+        setDrawerTitle(`Turn ${turnIndex + 1} · Full context`)
         setDrawerSubtitle(
           `${turn.model ? `Model: ${formatModelLabel(turn.model)} · ` : ''}${formatDuration(turn.durationMs)}`
         )
-        setDrawerContent(turn)
+        setDrawerContent({ turnIndex, turn })
       }
       setDrawerOpen(true)
     },
@@ -588,7 +638,23 @@ export function AgentSessionContent({
           ? (turnWithDefs.content as KyberTurnContentShadow)
           : undefined
       const defs = contentObj?.tool_definitions ?? []
-      const def = defs.find((d) => (d.name || d.function?.name) === tool.name)
+      // Nameless rows cannot be matched to a definition; show the full blob instead.
+      const def = tool.name
+        ? defs.find((d) => (d.name || d.function?.name) === tool.name)
+        : undefined
+
+      // No turn carries definitions and the session lists no offered tools:
+      // the harness exported none. Say so instead of issuing a content request
+      // that can only come back empty and read as a load failure.
+      if (!turnWithDefs && !Array.isArray(session?.summary?.tools_offered)) {
+        setDrawerContent({
+          tool,
+          definition: null,
+          [TOOL_DEFINITION_UNAVAILABLE_KEY]: toolDefinitionsUnavailableReason(session?.harness),
+        })
+        setDrawerOpen(true)
+        return
+      }
 
       setDrawerContent({
         tool,
@@ -596,12 +662,27 @@ export function AgentSessionContent({
         contentRequest: {
           span: typeof turnWithDefs?.spanId === 'string' ? turnWithDefs.spanId : undefined,
           part: 'tool_definitions',
+          toolName: tool.name,
         },
       })
       setDrawerOpen(true)
     },
     [session]
   )
+
+  // Skill rows open the same drawer as tools. Content is set after the title and
+  // subtitle so the drawer's pane sees the complete selection.
+  const openDrawerForSkill = useCallback((skill: KyberSkillRow) => {
+    setSelectedSpanId(undefined)
+    setDrawerTitle(`Skill: ${skill.name}`)
+    setDrawerSubtitle(
+      `Listed turns: ${skill.turns_listed.length} · Invocations: ${
+        typeof skill.invocations === 'number' ? skill.invocations : 'not measurable'
+      }`
+    )
+    setDrawerContent({ skill })
+    setDrawerOpen(true)
+  }, [])
 
   // -------------------------------------------------------------------------
   // Render: Empty State
@@ -646,18 +727,44 @@ export function AgentSessionContent({
 
   // Tool definitions grouping
   const toolRows = session.tools || []
-  const schemaOffered = toolRows.filter((t) => t.in_definitions)
-  const isSchemaMeasurable = schemaOffered.length > 0
+  // The server serialises resident cost on every offered row and does not emit
+  // `in_definitions`, so a priced row is as good a signal as the legacy flag.
+  const schemaPayload = (session as { schema?: SchemaCostAnalysis }).schema
+  const isSchemaMeasurable =
+    schemaPayload?.measurable === true ||
+    toolRows.some((t) => t.in_definitions || (typeof t.total_schema_cost === 'number' && Number.isFinite(t.total_schema_cost)))
 
   // Which content-route request the drawer should issue for what it is
-  // showing: an explicit span selection, the tool-definition drawer, a bucket
-  // drill-down onto its turn's span, or the span the drawer is inspecting.
+  // showing: a whole-turn lossless request, an explicit span selection, the
+  // tool-definition drawer, a bucket drill-down onto its turn's span, or the
+  // span the drawer is inspecting.
+  const drawerNotice = drawerNoticeOf(drawerContent)
   const drawerContentRequest = (() => {
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
     if (selectedSpanId) return { sessionId: String(sessionId), span: selectedSpanId }
+    if (drawerContent && typeof drawerContent === 'object' && 'skill' in drawerContent) {
+      // Skill drawer: the listing text comes from the first turn that listed the
+      // skill (the served 0-based index). A skill no turn lists has no request.
+      const firstListedTurn = (drawerContent as { skill: KyberSkillRow }).skill.turns_listed[0]
+      return typeof firstListedTurn === 'number'
+        ? { sessionId: String(sessionId), turnIndex: firstListedTurn, full: true as const }
+        : undefined
+    }
+    if (
+      drawerContent &&
+      typeof drawerContent === 'object' &&
+      'turnIndex' in drawerContent &&
+      !('bucket' in drawerContent) &&
+      typeof (drawerContent as { turnIndex?: unknown }).turnIndex === 'number'
+    ) {
+      // Whole-turn lossless view: the exact zero-based transport index the
+      // turn-content route resolves (issue #184), with the explicit `full`
+      // path instead of the default budget.
+      return { sessionId: String(sessionId), turnIndex: (drawerContent as { turnIndex: number }).turnIndex, full: true as const }
+    }
     if (drawerContent && typeof drawerContent === 'object' && 'contentRequest' in drawerContent) {
-      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string }) }
+      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string; toolName?: string }) }
     }
     if (
       drawerContent &&
@@ -666,6 +773,16 @@ export function AgentSessionContent({
       typeof (drawerContent as { bucket?: unknown }).bucket === 'string'
     ) {
       const bucketItem = drawerContent as { bucket: string; turn?: { spanId?: string } }
+      // The session-level system prompt lives on the session content route,
+      // not on any single turn span (the first turn span carries none, so a
+      // span-scoped request 404s). Omit the span so the request reads
+      // `/content?part=system_prompt`; every other bucket keeps its turn span.
+      if (bucketItem.bucket === 'system_prompt') {
+        return {
+          sessionId: String(sessionId),
+          part: bucketItem.bucket,
+        }
+      }
       return {
         sessionId: String(sessionId),
         span: bucketItem.turn?.spanId,
@@ -1149,13 +1266,32 @@ export function AgentSessionContent({
       </div>
 
       {/* ---------------------------------------------------------------------
-          Section 4: Execution Timeline / Call Tree
+          Section 4: Skills (listed to the agent vs. invoked)
+      --------------------------------------------------------------------- */}
+      <div className="space-y-3" data-testid="skills-section">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-heading">
+            4 · Skills
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Skills the harness listed to the agent, and which of them were invoked. Select a skill for its listing detail.
+          </p>
+        </div>
+        <SkillsPanel
+          skills={session.skills}
+          summary={u}
+          onSelectSkill={openDrawerForSkill}
+        />
+      </div>
+
+      {/* ---------------------------------------------------------------------
+          Section 5: Execution Timeline / Call Tree
       --------------------------------------------------------------------- */}
       <div className="space-y-3" data-testid="execution-timeline-section">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wider text-heading">
-              4 · Execution Timeline & Call Tree
+              5 · Execution Timeline & Call Tree
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Hierarchical span execution tree. Click any span node or timeline bar to inspect its full attributes and content.
@@ -1301,9 +1437,18 @@ export function AgentSessionContent({
         onClose={() => setDrawerOpen(false)}
         title={drawerTitle}
         subtitle={drawerSubtitle}
-        rawContent={drawerContent}
+        rawContent={drawerNotice === undefined ? drawerContent : stripNotice(drawerContent)}
         contentRequest={drawerContentRequest}
-      />
+      >
+        {drawerNotice !== undefined && (
+          <p
+            className="rounded border border-border bg-card px-3 py-2 text-xs text-tertiary-foreground"
+            data-testid="tool-definition-unavailable"
+          >
+            {drawerNotice}
+          </p>
+        )}
+      </SessionInspectorDrawer>
     </div>
   )
 }

@@ -27,7 +27,7 @@ public sealed class PackSettings : CommandSettings
 public sealed class PackCommand : Command<PackSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
         string skillFile = Path.Combine(settings.Path, "SKILL.md");
         if (!File.Exists(skillFile))

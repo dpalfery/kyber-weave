@@ -26,7 +26,10 @@ export default defineConfig({
     // Runs once per worker before any test. Scrubs the developer's shell so
     // session-discovery env vars (CLAUDE_CONFIG_DIRS, HOME, XDG_*, every
     // provider-specific *_HOME) don't bleed real local data into fixtures.
-    setupFiles: [resolve(__dirname, './tests/setup/env-isolation.ts')],
+    setupFiles: [
+      resolve(__dirname, './tests/setup/env-isolation.ts'),
+      resolve(__dirname, './web/vitest.setup.ts'),
+    ],
     // Real-I/O tests (session parses, sqlite fixtures, worker pools) exceed the
     // 5s default under CI runner load; a hung test still fails at 30s.
     testTimeout: 30_000,

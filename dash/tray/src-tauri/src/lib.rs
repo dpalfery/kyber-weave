@@ -6,10 +6,7 @@ pub mod ipc;
 #[cfg(target_os = "macos")]
 pub mod login_item_macos;
 pub mod position;
-pub mod receiver;
 pub mod runtime;
-mod runtime_adapters;
-pub mod scheduler;
 pub mod settings;
 pub mod status_item;
 pub mod supervisor;
@@ -25,11 +22,9 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
-use crate::runtime::{EventSink, Opener, Runtime, RuntimeDependencies};
-use crate::runtime_adapters::{
-    SystemHealthProbe, SystemReceiverSpawner, SystemRefreshRunner, SystemReportFetcher,
-    SystemServerSpawner, ThreadClock,
-};
+use crate::api::LoopbackFetcher;
+use crate::runtime::{CleanScope, EventSink, Opener, Runtime, RuntimeDependencies};
+use crate::supervisor::{SystemServerSpawner, ThreadClock};
 
 pub use args::wants_quit;
 
@@ -175,6 +170,62 @@ async fn quit(
     Ok(())
 }
 
+/// IPC contract: `clean_database({ scope: "all" | { harness: string }, importWeeks?: number }) -> null`.
+///
+/// The tray holds no clean logic (issue #312): it relays the confirmed scope to
+/// the server's clean endpoint. `importWeeks` (1..=52) asks the server to
+/// re-import that much history afterwards; omitted, the server decides.
+/// Multi-harness selection stays web-only.
+#[tauri::command]
+async fn clean_database(
+    state: State<'_, ManagedRuntime>,
+    scope: serde_json::Value,
+    import_weeks: Option<u32>,
+) -> std::result::Result<(), CommandError> {
+    let scope =
+        CleanScope::from_ipc(&scope).map_err(|error| command_error("clean_database", error))?;
+    with_runtime("clean_database", Arc::clone(&state.0), move |runtime| {
+        runtime.clean_database(scope, import_weeks)
+    })
+    .await
+}
+
+/// IPC contract: `import_folder_history({ weeks: number, harness?: string }) -> null`.
+///
+/// `weeks` is 1..=52. The server runs the import; a busy server answers with
+/// the same "already running" error as a clean.
+#[tauri::command]
+async fn import_folder_history(
+    state: State<'_, ManagedRuntime>,
+    weeks: u32,
+    harness: Option<String>,
+) -> std::result::Result<(), CommandError> {
+    with_runtime(
+        "import_folder_history",
+        Arc::clone(&state.0),
+        move |runtime| runtime.import_folder_history(weeks, harness.as_deref()),
+    )
+    .await
+}
+
+/// IPC contract: `set_shared_settings({ patch: object }) -> null`.
+///
+/// The patch is relayed to the server, which owns, validates and persists
+/// these settings; the next `view-state-changed` carries them as
+/// `sharedSettings`.
+#[tauri::command]
+async fn set_shared_settings(
+    state: State<'_, ManagedRuntime>,
+    patch: serde_json::Value,
+) -> std::result::Result<(), CommandError> {
+    with_runtime(
+        "set_shared_settings",
+        Arc::clone(&state.0),
+        move |runtime| runtime.set_shared_settings(patch),
+    )
+    .await
+}
+
 /// IPC contract: `hide_popover() -> null`.
 #[tauri::command]
 fn hide_popover(app: AppHandle) {
@@ -247,49 +298,38 @@ impl Opener for TauriOpener {
     }
 }
 
-fn template_icon() -> tauri::Result<tauri::image::Image<'static>> {
-    tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))
-}
-
 fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
     let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
-    let item = status_item::status_item(
+    // The saber is green/red from the shared coverage API only — no local
+    // receiver heuristic. Unavailable or stale coverage renders red. The
+    // pressure title/tooltip below are preserved; only the icon colour
+    // follows the collector.
+    let stale = matches!(state.phase, ipc::Phase::Stale);
+    let item = status_item::status_item_with_coverage(
         state.report.as_ref(),
+        state.coverage.as_ref(),
         &state.settings.thresholds(),
-        matches!(state.phase, ipc::Phase::Stale),
+        stale,
         SystemTime::now(),
     );
     let _ = tray.set_title(item.title.as_deref());
     let _ = tray.set_tooltip(Some(&item.tooltip));
+    let live = item.collector == status_item::CollectorState::Live;
 
-    #[cfg(target_os = "windows")]
-    {
-        let badge = item.title.as_deref().unwrap_or("—");
-        let _ = tray.set_icon(Some(tray_badge::render(
-            badge,
-            tray_badge::small_icon_size(),
-            false,
-        )));
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    if let Ok(icon) = template_icon() {
-        // macOS switches the monochrome asset between menu-bar appearances.
-        // The coloured bundle icon remains the app/package icon.
-        let _ = tray.set_icon_with_as_template(Some(icon), true);
-    }
+    // Both platforms use the same status glyph. Windows retains pressure in the
+    // tooltip/popover; replacing the saber with a number would hide collector health.
+    // Template treatment must stay off so macOS preserves the red/green blade.
+    let icon = tray_badge::render_lightsaber(live, tray_badge::small_icon_size());
+    let _ = tray.set_icon_with_as_template(Some(icon), false);
 }
 
 fn runtime_dependencies(app: AppHandle, leading_args: Vec<String>) -> Result<RuntimeDependencies> {
     Ok(RuntimeDependencies {
-        server_spawner: Box::new(SystemServerSpawner::new(leading_args.clone())),
-        refresh_runner: Box::new(SystemRefreshRunner::new(leading_args.clone())),
-        fetcher: Box::new(SystemReportFetcher::new()?),
+        server_spawner: Box::new(SystemServerSpawner::new(leading_args)),
+        fetcher: Box::new(LoopbackFetcher::new().context("creating the loopback client")?),
         clock: Box::new(ThreadClock),
-        receiver_probe: Box::new(SystemHealthProbe::new()?),
-        receiver_spawner: Box::new(SystemReceiverSpawner::new(leading_args)),
         event_sink: Box::new(TauriEventSink { app: app.clone() }),
         opener: Box::new(TauriOpener { app }),
     })
@@ -396,8 +436,15 @@ pub fn run() {
                 .map(|cli| cli.extra_args().to_vec())
                 .unwrap_or_default();
             let settings_dir = app.path().app_config_dir()?;
+            // The server records itself beside the rest of KyberDash's state
+            // (where `kyberdash menubar` keeps tray.json), not in the tray's
+            // private config directory.
+            let server_dir = dirs::home_dir()
+                .ok_or_else(|| anyhow!("no home directory to find the KyberDash server in"))?
+                .join(".kyberdash");
             let runtime = Runtime::from_resolution(
                 settings_dir,
+                server_dir,
                 resolution,
                 runtime_dependencies(app.handle().clone(), leading_args)?,
             );
@@ -417,10 +464,12 @@ pub fn run() {
                 }
             });
 
-            let icon = template_icon()?;
+            // No shared health response yet: start red rather than briefly showing
+            // a monochrome or healthy icon before the first status update.
+            let icon = tray_badge::render_lightsaber(false, tray_badge::small_icon_size());
             TrayIconBuilder::with_id("tray")
                 .icon(icon)
-                .icon_as_template(true)
+                .icon_as_template(false)
                 .tooltip("KyberDash")
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -432,7 +481,7 @@ pub fn run() {
                     {
                         toggle_popover(
                             tray.app_handle(),
-                            Some((position.x as i32, position.y as i32)),
+                            position::tray_click_anchor(tray, position),
                         );
                     }
                 })
@@ -447,7 +496,10 @@ pub fn run() {
             open_view,
             set_settings,
             quit,
-            hide_popover
+            hide_popover,
+            clean_database,
+            import_folder_history,
+            set_shared_settings
         ])
         .build(tauri::generate_context!())
         .expect("error while building KyberDash tray");

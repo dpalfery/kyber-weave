@@ -5,9 +5,31 @@ using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Text;
 using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Squad;
+
+/// <summary>Which projects a <c>--projects</c> value selects.</summary>
+internal enum SquadProjectSelectionKind
+{
+    /// <summary>No <c>--projects</c> was given.</summary>
+    Absent,
+
+    /// <summary>Nothing is updated beyond the global run.</summary>
+    None,
+
+    /// <summary>Every registered project that is not stale.</summary>
+    All,
+
+    /// <summary>The named project paths.</summary>
+    Paths,
+}
+
+/// <summary>The parsed <c>--projects</c> selection.</summary>
+/// <param name="Kind">Which selection the operator asked for.</param>
+/// <param name="Paths">The named project paths, populated only for <see cref="SquadProjectSelectionKind.Paths"/>.</param>
+internal sealed record SquadProjectSelection(SquadProjectSelectionKind Kind, IReadOnlyList<string> Paths);
 
 /// <summary>
 /// CLI composition root for Squad commands: provides factory and resolution methods
@@ -15,6 +37,11 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 internal static class SquadCommandComposition
 {
+    private const string ProjectKeywordAll = "all";
+    private const string ProjectKeywordNone = "none";
+    private const string InRepoStateDirectoryName = ".kyber-weave";
+    private const string ReceiptFileName = "squad.receipt.json";
+
     /// <summary>Indicates whether the console environment supports interactive input.</summary>
     public static bool IsInteractiveConsole() =>
         !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
@@ -79,9 +106,12 @@ internal static class SquadCommandComposition
     /// after it remains the step that reports an unresolvable root as a failure.
     /// </remarks>
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveGlobalTargetRoots(
-        IReadOnlyList<SquadTarget> targets)
+        IReadOnlyList<SquadTarget> targets,
+        ISquadGlobalRootResolver? injectedGlobalRoots = null)
     {
-        ISquadGlobalRootResolver globalRoots = ResolveGlobalRoots();
+        // The injected resolver is the one the lifecycle plans with, so the confirmation must name the
+        // same roots. Only an unseamed run falls through to the environment and the real profile.
+        ISquadGlobalRootResolver globalRoots = injectedGlobalRoots ?? ResolveGlobalRoots();
         List<(SquadTarget Target, string GlobalRoot)> resolved = [];
         foreach (SquadTarget target in targets)
         {
@@ -120,7 +150,8 @@ internal static class SquadCommandComposition
     /// </remarks>
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveUninstallGlobalTargetRoots(
         SquadStateStore stateStore,
-        string targetRoot)
+        string targetRoot,
+        ISquadGlobalRootResolver? injectedGlobalRoots = null)
     {
         SquadReceipt? receipt;
         try
@@ -152,7 +183,7 @@ internal static class SquadCommandComposition
             return [.. targets.Select(target => (target, targetRoot))];
         }
 
-        return ResolveGlobalTargetRoots(targets);
+        return ResolveGlobalTargetRoots(targets, injectedGlobalRoots);
     }
 
     /// <summary>
@@ -182,7 +213,7 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, and Antigravity are native;
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, Command Code, and Antigravity are native;
     /// Warp is fallback role-skill lowering (to <c>.warp/skills/</c>). Antigravity is native via
     /// per-agent directories at <c>.agents/agents/{name}/agent.md</c> with canonical skills at
     /// <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
@@ -209,6 +240,7 @@ internal static class SquadCommandComposition
             new WarpRenderer(),
             new ZCodeRenderer(),
             new DevinRenderer(),
+            new CommandCodeRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
@@ -364,6 +396,333 @@ internal static class SquadCommandComposition
                 "each at least one character long (X.Y.Z+build.metadata). " +
                 $"Got '{version}'.");
         }
+    }
+
+    /// <summary>Writes one line of console output without folding, so a path in it stays copy-pastable.</summary>
+    public static void WriteLine(string markup) => WriteUnfolded(() => AnsiConsole.MarkupLine(markup));
+
+    /// <summary>
+    /// Surfaces the warnings a committed transaction raised after its commit point. The deployment itself
+    /// succeeded, so the command still exits 0, but the operator must learn that the registry is behind.
+    /// </summary>
+    /// <remarks>
+    /// Each warning already names the command that rebuilds the registry, so it is printed as written rather
+    /// than with a second instruction appended to it.
+    /// </remarks>
+    public static void WriteTransactionWarnings(IReadOnlyList<string>? warnings)
+    {
+        foreach (string warning in warnings ?? [])
+        {
+            WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
+        }
+    }
+
+    /// <summary>
+    /// Anchors a <c>--global</c> run. Global state is one home-level record, so where the operator launched
+    /// from does not change where it lives; a path supplied with the run is named and ignored rather than
+    /// silently honoured. A pre-#91 legacy single-root receipt is the exception: its files live beneath the
+    /// one root it was bound to, so that recorded root is the anchor.
+    /// </summary>
+    /// <remarks>
+    /// The anchor reads the home receipt, so it must be chosen after <see cref="EnsureStateMigrated"/>. Before the
+    /// migration a legacy receipt is not yet in the home, and the home would be chosen for it, which is the wrong
+    /// root. Once the migration has copied the receipt, its target root is the absolute binding root the copy
+    /// recorded. Every later run then anchors on that same root, whatever directory it starts from. Anchoring on
+    /// the launch directory instead would verify, and could remove, files beneath the wrong root.
+    /// </remarks>
+    /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
+    /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
+    /// <param name="dryRun">Whether the run only plans, so the home directory is not created.</param>
+    public static string ResolveGlobalAnchorRoot(SquadStateStore stateStore, string? suppliedPath, bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(stateStore);
+
+        string home = Path.GetFullPath(stateStore.UserPaths.HomeDirectory);
+        SquadReceipt? legacy = TryReadLegacySingleRootHomeReceipt(stateStore, home);
+        if (legacy is not null)
+        {
+            if (Path.IsPathFullyQualified(legacy.TargetRoot))
+            {
+                if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
+                {
+                    WriteLine(
+                        $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
+                        $"this legacy single-root deployment is anchored at its recorded root '{Markup.Escape(legacy.TargetRoot)}'.");
+                }
+
+                return legacy.TargetRoot;
+            }
+
+            // A legacy receipt that records no absolute root names no root of its own, so the operator's path, or
+            // the process directory when none is given, stays the anchor, as it was before the migration recorded one.
+            return ResolveTargetRoot(suppliedPath);
+        }
+
+        // The home directory exists on every real profile; creating it here only matters for a fake home,
+        // and a dry run writes nothing, so it is left alone there.
+        if (!dryRun && !Directory.Exists(home))
+        {
+            Directory.CreateDirectory(home);
+        }
+
+        if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
+        {
+            WriteLine(
+                $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
+                $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
+        }
+
+        return home;
+    }
+
+    /// <summary>
+    /// The home global receipt when it is a pre-#91 single-root receipt, whose files resolve beneath the one
+    /// root it records rather than beneath each target's own global root. Null when there is no such receipt.
+    /// </summary>
+    private static SquadReceipt? TryReadLegacySingleRootHomeReceipt(SquadStateStore stateStore, string home)
+    {
+        try
+        {
+            SquadReceipt? receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+            return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) ? receipt : null;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // A corrupt or blank receipt is reported by the command that reads it; it does not pick an anchor here.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Brings legacy Squad state into the home-level layout before a verb reads it: the single legacy
+    /// global receipt and, when a project root is given, that project's in-repo state.
+    /// </summary>
+    /// <remarks>
+    /// Shared by every squad verb so no read ever sees the pre-home layout. Under a dry run the migration
+    /// writes nothing and only reports what the next non-dry-run invocation will move. The project root is
+    /// optional because global verbs have no project to import.
+    /// </remarks>
+    public static SquadMigrationReport EnsureStateMigrated(
+        SquadStateStore stateStore,
+        string? invokingCwd,
+        string? projectRoot,
+        bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(stateStore);
+
+        SquadStateMigration migration = new(stateStore, stateStore.UserPaths);
+        SquadMigrationReport global = migration.MigrateGlobal(invokingCwd, dryRun);
+
+        List<string> imported = [];
+        List<string> warnings = [.. global.Warnings];
+        if (projectRoot is not null && Directory.Exists(projectRoot))
+        {
+            SquadMigrationReport project = migration.ImportProject(projectRoot, dryRun);
+            imported.AddRange(project.ImportedProjects);
+            // Both steps read the migration ledger, so an unreadable ledger would otherwise be reported twice.
+            foreach (string warning in project.Warnings)
+            {
+                if (!warnings.Contains(warning))
+                {
+                    warnings.Add(warning);
+                }
+            }
+        }
+
+        return new SquadMigrationReport(global.MigratedItems, global.UnmigratedLegacyRoots, imported, warnings);
+    }
+
+    /// <summary>
+    /// True when a dry run found legacy state that a real run would migrate. The verb reports that and
+    /// stops, so it never reads a deployment the migration has not yet moved.
+    /// </summary>
+    public static bool IsPendingDryRunMigration(SquadMigrationReport report, bool dryRun) =>
+        dryRun && (report.MigratedItems.Count > 0 || report.ImportedProjects.Count > 0);
+
+    /// <summary>
+    /// Prints what the migration did and warns about, each line unfolded. Legacy roots that remain on disk
+    /// are printed only when <paramref name="includeRetainedLegacyRoots"/> is set: after every successful
+    /// migration they remain, so printing them from each verb would warn on every run. Doctor, which reports
+    /// what was left behind, is the one caller that asks for them.
+    /// </summary>
+    public static void WriteMigrationNotes(SquadMigrationReport report, bool includeRetainedLegacyRoots = false)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        foreach (string item in report.MigratedItems)
+        {
+            WriteLine($"[grey]info[/] {Markup.Escape(item)}");
+        }
+
+        foreach (string item in report.ImportedProjects)
+        {
+            WriteLine($"[grey]info[/] {Markup.Escape(item)}");
+        }
+
+        foreach (string warning in report.Warnings)
+        {
+            WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
+        }
+
+        if (!includeRetainedLegacyRoots)
+        {
+            return;
+        }
+
+        foreach (SquadUnmigratedLegacyRoot root in report.UnmigratedLegacyRoots)
+        {
+            WriteLine(
+                $"[yellow]warning:[/] legacy global root '{Markup.Escape(root.Root)}' was not migrated: " +
+                $"{Markup.Escape(root.Reason)} {Markup.Escape(root.Guidance)}");
+        }
+    }
+
+    /// <summary>
+    /// Imports one project's in-repo state into the home registry when its home state is absent. A project
+    /// whose home receipt already exists is left alone, because the home receipt is the authority.
+    /// </summary>
+    /// <param name="stateStore">The home state store whose registry the import updates.</param>
+    /// <param name="root">The project root whose in-repo state may be imported.</param>
+    /// <param name="dryRun">Whether the run only plans. A dry run writes nothing and reports the import it would make.</param>
+    public static SquadMigrationReport ImportProjectIfHomeStateAbsent(SquadStateStore stateStore, string root, bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(stateStore);
+
+        if (stateStore.ReadReceipt(root, SquadDeploymentScope.Project) is not null)
+        {
+            return new SquadMigrationReport([], [], [], []);
+        }
+
+        return new SquadStateMigration(stateStore, stateStore.UserPaths).ImportProject(root, dryRun);
+    }
+
+    /// <summary>
+    /// Parses the repeatable <c>--projects</c> values into one selection. <c>all</c> and <c>none</c> are
+    /// keywords; any other value is a project path.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <c>none</c> is combined with another value, <c>all</c> is combined with a path, or a value is empty.
+    /// Each is client input, so the caller reports it as exit 2.
+    /// </exception>
+    internal static SquadProjectSelection ParseProjectSelection(IReadOnlyList<string>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return new SquadProjectSelection(SquadProjectSelectionKind.Absent, []);
+        }
+
+        List<string> tokens = [];
+        foreach (string value in values)
+        {
+            string trimmed = value.Trim();
+            if (trimmed.Length == 0)
+            {
+                throw new ArgumentException("--projects needs all, none, or a project path, and an empty value was given.");
+            }
+
+            tokens.Add(trimmed);
+        }
+
+        bool hasNone = tokens.Any(token => string.Equals(token, ProjectKeywordNone, StringComparison.OrdinalIgnoreCase));
+        bool hasAll = tokens.Any(token => string.Equals(token, ProjectKeywordAll, StringComparison.OrdinalIgnoreCase));
+        bool hasPath = tokens.Any(token =>
+            !string.Equals(token, ProjectKeywordNone, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(token, ProjectKeywordAll, StringComparison.OrdinalIgnoreCase));
+
+        if (hasNone && (hasAll || hasPath))
+        {
+            throw new ArgumentException(
+                "--projects none selects no project, so it cannot be combined with another --projects value. " +
+                "Give none on its own, or give all or project path(s).");
+        }
+
+        if (hasAll && hasPath)
+        {
+            throw new ArgumentException(
+                "--projects all selects every registered project, so it cannot be combined with a project path. " +
+                "Give all on its own, or give project path(s).");
+        }
+
+        if (hasNone)
+        {
+            return new SquadProjectSelection(SquadProjectSelectionKind.None, []);
+        }
+
+        if (hasAll)
+        {
+            return new SquadProjectSelection(SquadProjectSelectionKind.All, []);
+        }
+
+        return new SquadProjectSelection(
+            SquadProjectSelectionKind.Paths,
+            tokens.Distinct(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// Resolves each named project path to a registered project, or to an unregistered path that holds
+    /// in-repo state to import. Any other path is refused with the nearest registered path as a hint.
+    /// </summary>
+    /// <remarks>
+    /// Runs before any global work, so a typo fails the run with nothing written. The registry is matched
+    /// by canonical identity, so the operator can name a project through an alias or a link.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A path is neither registered nor importable.</exception>
+    internal static IReadOnlyList<string> ResolveNamedProjects(IReadOnlyList<string> paths, SquadStateStore stateStore)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(stateStore);
+
+        List<string> resolved = [];
+        foreach (string path in paths)
+        {
+            string full = Path.GetFullPath(path);
+            SquadProjectRegistryEntry? entry = stateStore.FindProject(full);
+            string chosen;
+            if (entry is not null)
+            {
+                chosen = entry.Path;
+            }
+            else if (Directory.Exists(full) &&
+                     File.Exists(Path.Combine(full, InRepoStateDirectoryName, ReceiptFileName)))
+            {
+                chosen = full;
+            }
+            else
+            {
+                throw new ArgumentException(UnknownProjectMessage(full, stateStore.ListProjects()));
+            }
+
+            if (!resolved.Contains(chosen, StringComparer.Ordinal))
+            {
+                resolved.Add(chosen);
+            }
+        }
+
+        return resolved;
+    }
+
+    /// <summary>Offers the operator a project to pick, through the injected picker or the Spectre picker.</summary>
+    public static IReadOnlyList<string> RunProjectPicker(
+        ISquadProjectPicker? picker,
+        IReadOnlyList<SquadProjectRegistryEntry> projects) =>
+        (picker ?? new SpectreSquadProjectPicker()).Pick(projects);
+
+    /// <summary>
+    /// The refusal for an unknown project path. Names the nearest registered path so a typo is one
+    /// copy-paste from being fixed, and says plainly when nothing is registered at all.
+    /// </summary>
+    private static string UnknownProjectMessage(string full, IReadOnlyList<SquadProjectRegistryEntry> registered)
+    {
+        string message =
+            $"'{full}' is not a registered Squad project, and it holds no in-repo Squad state to import.";
+        if (registered.Count == 0)
+        {
+            return message + " No projects are registered.";
+        }
+
+        SquadProjectRegistryEntry nearest = registered.MinBy(entry =>
+            StringDistance.Levenshtein(full, entry.Path, ignoreCase: true))!;
+        return message + $" Did you mean '{nearest.Path}'?";
     }
 
     /// <summary>Resolves the target root directory path.</summary>

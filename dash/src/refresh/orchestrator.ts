@@ -313,6 +313,17 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     const activeCoveredFromUtc = repaired.coveredFromUtc
 
     row.problems += unit.problems.length
+    // Stale source warnings must not survive a clean re-read (#243): the set
+    // of source-problem rows for this harness + sourceKey becomes exactly the
+    // codes reported this pass, so a fixed FUTURE_DATED timestamp stops
+    // surfacing after the next import. Runs before the recordProblem loop so
+    // the kept codes are rewritten as today; unchanged units return above and
+    // never reach here, keeping their standing warnings.
+    store.reconcileSourceProblems(
+      descriptor.harnessId,
+      unit.sourceKey,
+      unit.problems.map((problem) => problem.code),
+    )
     for (const problem of unit.problems) {
       store.recordProblem({
         spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}:${problem.code}`,

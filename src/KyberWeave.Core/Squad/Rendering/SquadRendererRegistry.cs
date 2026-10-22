@@ -164,7 +164,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
                             SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
                             SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
-                            SquadTarget.Antigravity or SquadTarget.Devin;
+                            SquadTarget.Antigravity or SquadTarget.Devin or SquadTarget.CommandCode;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -288,6 +288,11 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+        // A primary shared identity's canonical skill is emitted (it is the entry point), so it
+        // claims an output path like any other skill. Only a suppressed subagent shared identity
+        // claims nothing, because its agent file is the sole projection.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
 
         foreach (SquadTarget target in targets)
         {
@@ -308,7 +313,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
 
             foreach (SquadSkill skill in source.Skills)
             {
-                string? outputPath = SkillOutputPath(target, skill.Name, sharedIdentities);
+                string? outputPath = SkillOutputPath(target, skill.Name, suppressedSkillIdentities);
                 if (outputPath is not null)
                 {
                     principalOutputs.Add(skill.SourcePath, outputPath);
@@ -391,6 +396,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
             SquadTarget.ZCode => ResolveZCodeAgentOutputPath(agent, fallbackProfiles),
             SquadTarget.Devin => ResolveDevinAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.CommandCode => $".commandcode/agents/{agent.Name}.md",
             _ => null
         };
 
@@ -463,20 +469,21 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     private static string? SkillOutputPath(
         SquadTarget target,
         string name,
-        IReadOnlySet<string> sharedIdentities) => target switch
+        IReadOnlySet<string> suppressedSkillIdentities) => target switch
         {
-            SquadTarget.Copilot when !sharedIdentities.Contains(name) => $".github/skills/{name}/SKILL.md",
-            SquadTarget.Cursor when !sharedIdentities.Contains(name) => $".cursor/skills/{name}/SKILL.md",
-            SquadTarget.Claude when !sharedIdentities.Contains(name) => $".claude/skills/{name}/SKILL.md",
-            SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
-            SquadTarget.OpenCode when !sharedIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
-            SquadTarget.Kilo when !sharedIdentities.Contains(name) => $".kilo/skills/{name}/SKILL.md",
-            SquadTarget.Factory when !sharedIdentities.Contains(name) => $".factory/skills/{name}/SKILL.md",
+            SquadTarget.Copilot when !suppressedSkillIdentities.Contains(name) => $".github/skills/{name}/SKILL.md",
+            SquadTarget.Cursor when !suppressedSkillIdentities.Contains(name) => $".cursor/skills/{name}/SKILL.md",
+            SquadTarget.Claude when !suppressedSkillIdentities.Contains(name) => $".claude/skills/{name}/SKILL.md",
+            SquadTarget.Codex when !suppressedSkillIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
+            SquadTarget.OpenCode when !suppressedSkillIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
+            SquadTarget.Kilo when !suppressedSkillIdentities.Contains(name) => $".kilo/skills/{name}/SKILL.md",
+            SquadTarget.Factory when !suppressedSkillIdentities.Contains(name) => $".factory/skills/{name}/SKILL.md",
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
             SquadTarget.Warp => $".warp/skills/{name}/SKILL.md",
-            SquadTarget.Pi when !sharedIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
-            SquadTarget.ZCode when !sharedIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
-            SquadTarget.Devin when !sharedIdentities.Contains(name) => $".devin/skills/{name}/SKILL.md",
+            SquadTarget.Pi when !suppressedSkillIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
+            SquadTarget.ZCode when !suppressedSkillIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
+            SquadTarget.Devin when !suppressedSkillIdentities.Contains(name) => $".devin/skills/{name}/SKILL.md",
+            SquadTarget.CommandCode when !suppressedSkillIdentities.Contains(name) => $".commandcode/skills/{name}/SKILL.md",
             _ => null
         };
 

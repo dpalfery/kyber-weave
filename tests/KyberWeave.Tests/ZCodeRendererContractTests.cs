@@ -113,6 +113,14 @@ public sealed class ZCodeRendererContractTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
+    /// A primary shared identity reuses its canonical skill as the entry point, so it is
+    /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
+    /// <summary>
     /// The pure-orchestrator profile, excluded from the MCP grant on ZCode exactly as it is on
     /// Claude: a role that routes work has no use for documentation or code-graph lookups.
     /// </summary>
@@ -337,18 +345,23 @@ public sealed class ZCodeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> shared = SharedIdentities(source);
+        HashSet<string> suppressed = SuppressedSkillIdentities(source);
 
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // Every agent contributes exactly one principal — an agent file or, for the lowered
-        // primary, a command — plus its resource closure under the skills tree. Every
-        // non-suppressed skill contributes its SKILL.md plus its own closure beside it.
-        int suppressedSkills = source.Skills.Count(skill => shared.Contains(skill.Name));
+        // Every non-shared agent contributes exactly one principal — an agent file or, for the
+        // lowered primary, a command — plus its resource closure under the skills tree. A primary
+        // shared identity contributes no agent principal: its canonical skill is the entry point
+        // and is counted with the skills. Every non-suppressed skill contributes its SKILL.md
+        // plus its own closure beside it.
+        int sharedPrimaries = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && shared.Contains(agent.Name));
+        int suppressedSkills = source.Skills.Count(skill => suppressed.Contains(skill.Name));
         int expected =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkills
-            + source.Skills.Where(skill => !shared.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressed.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expected, result.Files.Count);
@@ -362,7 +375,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
             Assert.Single(result.Files, f => f.RelativePath == $".zcode/agents/{agent.Name}.md");
         }
 
-        foreach (SquadSkill skill in source.Skills.Where(s => !shared.Contains(s.Name)))
+        foreach (SquadSkill skill in source.Skills.Where(s => !suppressed.Contains(s.Name)))
         {
             Assert.Single(result.Files, f => f.RelativePath == $".zcode/skills/{skill.Name}/SKILL.md");
         }
@@ -372,9 +385,11 @@ public sealed class ZCodeRendererContractTests : IDisposable
     public async Task RenderAsync_ZCode_LowersThePrimaryAgentToASlashCommand()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        // The conductor is the primary agent that is NOT a declared shared identity, so it is the
+        // one lowered to a slash command; the two root wrappers reuse their canonical skills.
         SquadAgent primary = Assert.Single(
             source.Agents,
-            agent => agent.Invocation == SquadInvocation.Primary);
+            agent => agent.Name == "conductor");
 
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 

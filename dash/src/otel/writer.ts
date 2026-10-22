@@ -62,6 +62,14 @@ export type IngestWriterOptions = {
    * persistence failure is never swallowed.
    */
   onError?: (error: unknown) => void
+  /**
+   * Called after each batch the sink commits, with the committed sizes. The collector
+   * service uses this to move the receiver's `lastAcceptedAt`: receipt (the receiver's
+   * 200) and persistence (this hook) are different moments, and only the second proves
+   * telemetry landed. Never called for a failed or empty flush. A throwing hook is
+   * fenced — persistence already happened, so a hook failure must not fail the flush.
+   */
+  onPersisted?: (info: { spans: number; logs: number }) => void
 }
 
 export const DEFAULT_BATCH_SIZE = 512
@@ -99,6 +107,7 @@ export class IngestWriter implements OtlpSpanStore {
   private flushInFlight: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private stopped = false
+  private onPersisted: ((info: { spans: number; logs: number }) => void) | undefined
 
   constructor(sink: IngestSink, opts: IngestWriterOptions = {}) {
     this.batchSink = isBatchSink(sink) ? sink : null
@@ -113,6 +122,7 @@ export class IngestWriter implements OtlpSpanStore {
       this.batchSize,
       Math.floor(opts.highWaterMark ?? DEFAULT_HIGH_WATER_MARK),
     )
+    this.onPersisted = opts.onPersisted
     const onError = opts.onError
     this.report = (error: unknown) => {
       if (onError !== undefined) {
@@ -130,6 +140,15 @@ export class IngestWriter implements OtlpSpanStore {
   /** Spans queued but not yet handed to the sink — the backpressure gauge. */
   get pending(): number {
     return this.queue.length
+  }
+
+  /**
+   * Replace the persisted hook after construction. The collector service sets this once
+   * the receiver exists (the receiver needs the writer as its store, so the writer is
+   * always built first) — one hook at a time, latest wins.
+   */
+  setPersistedHook(hook: ((info: { spans: number; logs: number }) => void) | undefined): void {
+    this.onPersisted = hook
   }
 
   /**
@@ -243,6 +262,9 @@ export class IngestWriter implements OtlpSpanStore {
           }
         }
         if (isThenable(result)) await result
+        // The sink committed: receipt and persistence are different moments, and this is
+        // the second one. A batch the sink refused never reaches here (it re-queues below).
+        if (batch.length > 0 || logs.length > 0) this.notifyPersisted(batch.length, logs.length)
       } catch (err) {
         // The store refused the batch: put it back at the head, in order,
         // so no span is dropped (R2.5), and let the caller see the failure.
@@ -250,6 +272,18 @@ export class IngestWriter implements OtlpSpanStore {
         this.logQueue.unshift(...logs)
         throw err
       }
+    }
+  }
+
+  private notifyPersisted(spans: number, logs: number): void {
+    const hook = this.onPersisted
+    if (hook === undefined) return
+    try {
+      hook({ spans, logs })
+    } catch (err) {
+      // The batch is committed; a hook failure must not fail the flush or re-queue it,
+      // but it is logged so a broken hook is not invisible.
+      console.warn('[ingest] onPersisted hook failed (batch already committed):', err)
     }
   }
 }

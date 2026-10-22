@@ -15,6 +15,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     private readonly SquadLifecycleService? _lifecycleService;
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
 
     /// <summary>Creates a new uninstall command using default user paths.</summary>
     public SquadUninstallCommand()
@@ -33,17 +34,19 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadStateStore? stateStore = null,
         SquadLifecycleService? lifecycleService = null,
         bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null)
+        Func<string, bool>? readAnswer = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _lifecycleService = lifecycleService;
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
+        _globalRoots = globalRoots;
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -62,12 +65,33 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             return 2;
         }
 
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+
+        // Legacy state is migrated before the uninstall reads the receipt it removes.
+        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+            stateStore,
+            Environment.CurrentDirectory,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
+            dryRun: settings.DryRun);
+        SquadCommandComposition.WriteMigrationNotes(migration);
+        if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
+        {
+            return 0;
+        }
+
+        // A --global uninstall touches the home-level global deployment only: it is anchored at the home directory
+        // whatever the working directory is, or at the recorded root of a legacy single-root receipt. It never reads
+        // or changes a project or the registry. Chosen after the migration, so the receipt it removes is the migrated one.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            : projectRoot;
 
         SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,
-            stateStore: stateStore);
+            stateStore: stateStore,
+            globalRoots: _globalRoots);
 
         SquadUninstallRequest uninstallRequest = new(
             TargetRoot: targetRoot,
@@ -80,7 +104,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         // derived from the same receipt and named in the confirmation.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot)
+                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot, _globalRoots)
                 : null;
 
         // The confirmation is the last gate before the lifecycle call — the only
@@ -127,7 +151,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                     return 0;
                 }
 
-                AnsiConsole.MarkupLine($"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                SquadCommandComposition.WriteLine($"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
                 return 0;
             }
 

@@ -38,7 +38,17 @@ export type PartData = {
   type: string
   text?: string
   tool?: string
-  state?: { input?: { command?: string; name?: string; subagent_type?: string } }
+  // Kilo/opencode-style stores key a tool part to its call by `callID`; the
+  // state fills in as the call runs (`status`, `input`, then `output`/`error`
+  // on completion) and may carry `time` bounds for duration.
+  callID?: string
+  state?: {
+    input?: { command?: string; name?: string; subagent_type?: string } & Record<string, unknown>
+    output?: unknown
+    error?: unknown
+    status?: string
+    time?: { start?: number; end?: number }
+  }
 }
 
 const toolNameMap: Record<string, string> = {

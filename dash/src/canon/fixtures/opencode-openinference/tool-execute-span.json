@@ -1,0 +1,10 @@
+{
+  "openinference.span.kind": "TOOL",
+  "session.id": "ses_eb9e8b987ffeoHdwdgtd63Tn5Z",
+  "agent.name": "build",
+  "tool.name": "bash",
+  "input.value": "{\"command\":\"sqlite3 app.db 'select 1'\"}",
+  "input.mime_type": "application/json",
+  "output.value": "1",
+  "output.mime_type": "text/plain"
+}

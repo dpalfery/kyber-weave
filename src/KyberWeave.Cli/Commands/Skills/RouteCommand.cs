@@ -47,7 +47,7 @@ public sealed class RouteSettings : CommandSettings
 public sealed class RouteCommand : Command<RouteSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
     {
         SkillSet set = SkillLoader.LoadSet(settings.SkillsPath);
         if (set.Count == 0)

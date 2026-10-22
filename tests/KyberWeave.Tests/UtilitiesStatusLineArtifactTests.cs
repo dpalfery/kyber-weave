@@ -65,6 +65,9 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     private const string ClaudeArtifactRelativePath = StatusLineRootRelativePath + "/claude/statusline.sh";
     private const string AgyArtifactRelativePath = StatusLineRootRelativePath + "/antigravity/statusline.py";
     private const string PiArtifactRelativePath = StatusLineRootRelativePath + "/pi/statusbar.ts";
+    private const string CommandCodeArtifactRelativePath =
+        StatusLineRootRelativePath + "/commandcode/statusbar.ts";
+    private const string CommandCodeHarnessFileName = "commandcode-harness.mjs";
 
     private const string FixtureRootRelativePath = "tests/KyberWeave.Tests/Fixtures/statusline";
     private const string ClaudeFixture = "claude-statusline.json";
@@ -74,6 +77,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     private const string AgyWithoutUsageFixture = "agy-statusline-without-usage.json";
     private const string AgyWithoutModelFixture = "agy-statusline-without-model.json";
     private const string PiFixture = "pi-statusline.json";
+    private const string CommandCodeFixture = "commandcode-statusline.json";
 
     private const string SyntheticUser = "kyber-synthetic-user";
     private const string SyntheticHost = "kyber-synthetic-host";
@@ -94,6 +98,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
     private const string PiModelDisplayName = "Kyber Synthetic Pi Model";
     private const string PiWorkspaceName = "kyber-pi-workspace";
+    private const string CommandCodeModelDisplayName = "Kyber Synthetic CommandCode Model";
+    private const string CommandCodeWorkspaceName = "kyber-commandcode-workspace";
 
     private static readonly string[] ExpectedKyberdashArguments = ["kyber", "antigravity-statusline"];
     private static readonly string[] NetworkCommands = ["curl", "wget", "nc"];
@@ -349,25 +355,65 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             "the agy variant");
     }
 
+    /// <summary>
+    /// The agy variant must open no socket at all, observed on its own process through
+    /// the audit probe. A previous revision bound host-global port 4318 and blamed any
+    /// loopback connection on the artifact (red reproduction: synthetic empty connects
+    /// false-failed it in ~256ms while the artifact opened nothing).
+    /// </summary>
     [Fact]
-    public void AgyVariantNeverConnectsToTheLocalCollectorPort()
+    public async Task AgyVariantNeverConnectsToTheLocalCollectorPort()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
-        using TcpListener listener = new(IPAddress.Loopback, 4318);
-        if (!TryStartCollectorListener(listener))
+
+        // Unrelated host-side traffic on a private listener, concurrent with the run.
+        // Only that task dials it, so it can never be mistaken for the artifact — and
+        // the artifact's audit log can never observe it.
+        Task<int> unrelated = Task.Run(EmitAndAcceptUnrelatedConnections);
+
+        ProcessResult result;
+        int completed;
+        try
         {
-            Assert.Skip("TCP port 4318 is already in use on this host, so the listener check cannot run.");
-            return;
+            result = RunWithSocketAudit(sandbox, python, artifact, FixtureText(AgyFixture));
+        }
+        finally
+        {
+            // Joined on every path, so no background task survives a failure either.
+            completed = await unrelated.WaitAsync(TimeSpan.FromSeconds(30));
         }
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
-
         AssertSucceeded(result, "agy");
-        Assert.False(
-            listener.Pending(),
-            "The agy variant opened a connection to localhost:4318; the OTLP post is replaced by the KyberDash hand-off (D10).");
+        Assert.True(
+            completed > 0,
+            "The unrelated-traffic fixture completed no loopback connection, so it proved nothing.");
+        AssertNoSocketConnects(sandbox.SocketAuditLogFile, "the agy variant");
+    }
+
+    /// <summary>
+    /// Negative control: a script that deliberately attempts the collector port must be
+    /// recorded, whether the port refuses or a real collector accepts. No payload is sent.
+    /// </summary>
+    [Fact]
+    public void SocketAuditProbeRecordsADeliberateCollectorConnectionAttempt()
+    {
+        string python = RequireRuntime("python3");
+        Sandbox sandbox = new(_temp);
+        string fixture = Path.Combine(sandbox.WorkDirectory, "deliberate-collector-connect.py");
+        File.WriteAllText(fixture, DeliberateCollectorConnectScript);
+
+        ProcessResult result = RunWithSocketAudit(sandbox, python, fixture, string.Empty);
+
+        AssertSucceeded(result, "audit probe");
+        string audit = File.Exists(sandbox.SocketAuditLogFile)
+            ? File.ReadAllText(sandbox.SocketAuditLogFile)
+            : string.Empty;
+        Assert.Contains(
+            "4318",
+            audit,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -573,6 +619,160 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // CommandCode: the mod, run through a node --test harness with a stub ModApi.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void CommandCodeModRendersEverySegmentTheInventoryDeclaresInTuiMode()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-tui.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+
+        AssertSucceeded(result, "CommandCode");
+        string report = File.ReadAllText(reportPath);
+        string[] status = ReportStrings(report, "setStatus");
+        string rendered = string.Join("\n", status);
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
+        AssertRendersValue(rendered, "CC", "CC badge");
+        AssertRendersValue(rendered, "📁", "repository name");
+        AssertRendersValue(rendered, CommandCodeWorkspaceName, "repository name");
+        AssertRendersValue(rendered, "🌿", "git branch");
+        AssertRendersValue(rendered, SyntheticBranch, "git branch");
+        AssertRendersValue(rendered, "🤖", "model");
+        AssertRendersValue(rendered, CommandCodeModelDisplayName, "model");
+        AssertRendersValue(rendered, "⚡", "token section");
+        AssertRendersLabel(rendered, "in:", "token breakdown");
+        AssertRendersLabel(rendered, "out:", "token breakdown");
+        AssertRendersValue(rendered, "742", "token total");
+        AssertRendersValue(rendered, "⏳", "turn count");
+        AssertRendersValue(rendered, "3", "turn count");
+        AssertRendersValue(rendered, "│", "compact footer separators");
+    }
+
+    [Fact]
+    public void CommandCodeModClearsItsSegmentOutsideTuiMode()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-plain.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "plain");
+
+        AssertSucceeded(result, "CommandCode");
+        string report = File.ReadAllText(reportPath);
+        string[] status = ReportStrings(report, "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call outside TUI mode.");
+        Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
+            "The CommandCode mod must clear its status segment outside TUI mode, so a stale bar never " +
+            "survives a headless run:\n" + string.Join("\n", status));
+    }
+
+    [Fact]
+    public void CommandCodeModOmitsTheCostSegmentBecauseNoCostApiExists()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string source = File.ReadAllText(artifact);
+        Assert.DoesNotContain("💰", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("costUsd", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("totalCost", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandCodeModMakesNoNetworkCallAndWritesNoFile()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        foreach (string marker in ForbiddenNetworkMarkers)
+        {
+            Assert.False(
+                File.ReadAllText(artifact).Contains(marker, StringComparison.OrdinalIgnoreCase),
+                $"The CommandCode mod contains a network call marker ('{marker}'); the import opens no socket (C8).");
+        }
+
+        string[] modules = [artifact];
+        Assert.True(modules.Length > 0, "The CommandCode mod has no TypeScript module.");
+        foreach (string module in modules)
+        {
+            Assert.False(
+                File.ReadAllText(module).Contains("fs.write", StringComparison.OrdinalIgnoreCase),
+                $"The mod writes through the fs module; the status line must write no file.");
+        }
+    }
+
+    [Fact]
+    public void CommandCodeModDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-canary.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+
+        AssertSucceeded(result, "CommandCode");
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "setStatus"));
+        Assert.DoesNotContain(CanaryValue, rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryValue, result.StandardError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CommandCodeModRendersNonFiniteNumbersAsAbsentAndKeepsTheLastGoodTurn()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-poison.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_POISON_TURN=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
+        string rendered = string.Join("\n", status);
+        Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("Infinity", rendered, StringComparison.Ordinal);
+        AssertRendersValue(rendered, "⏳", "turn count");
+        AssertRendersValue(rendered, "turn #3", "the last good turn survives a non-finite turn number");
+    }
+
+    [Fact]
+    public void CommandCodeModClearsItsSegmentWhenTheHostOmitsCapabilities()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-nocaps.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_NO_CAPS=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call without capabilities.");
+        Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
+            "The CommandCode mod must clear its segment when the host omits capabilities, so a stale bar " +
+            "never survives:\n" + string.Join("\n", status));
+    }
+
+    [Fact]
+    public void CommandCodeModSurvivesHookRegistrationFailure()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-hooks-throw.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_HOOKS_THROW=1");
+
+        // A host that rejects hook registration must not take the session down: the node test
+        // asserting registration would throw on a factory failure, so a zero exit is the evidence.
+        AssertSucceeded(result, "CommandCode");
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Portability and privacy: the static rules every artifact must satisfy (C6).
     // -----------------------------------------------------------------------------------------
 
@@ -583,7 +783,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         [
             RequireArtifact(ClaudeArtifactRelativePath),
             RequireArtifact(AgyArtifactRelativePath),
-            RequireArtifact(PiArtifactRelativePath)
+            RequireArtifact(PiArtifactRelativePath),
+            RequireArtifact(CommandCodeArtifactRelativePath)
         ];
         foreach (string artifact in artifacts)
         {
@@ -688,6 +889,16 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         bool withKyberdash,
         TimeSpan? timeout = null)
     {
+        ProcessStartInfo startInfo = VariantStartInfo(sandbox, interpreter, artifactPath, withKyberdash);
+        return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
+    }
+
+    private static ProcessStartInfo VariantStartInfo(
+        Sandbox sandbox,
+        string interpreter,
+        string artifactPath,
+        bool withKyberdash)
+    {
         ProcessStartInfo startInfo = new(interpreter)
         {
             WorkingDirectory = sandbox.WorkDirectory,
@@ -699,7 +910,79 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         };
         startInfo.ArgumentList.Add(artifactPath);
         sandbox.ConfigureEnvironment(startInfo, withKyberdash);
-        return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
+        return startInfo;
+    }
+
+    /// <summary>
+    /// Runs a Python script with the child-scoped socket-connect audit installed: a
+    /// <c>sitecustomize</c> probe, found through a <c>PYTHONPATH</c> that exists only in
+    /// the child's environment, records every <c>socket.connect</c> attempt to the audit
+    /// log. Fails the run when the probe itself did not initialize — an empty log must
+    /// mean no connects, never a broken hook.
+    /// </summary>
+    private static ProcessResult RunWithSocketAudit(
+        Sandbox sandbox,
+        string python,
+        string scriptPath,
+        string standardInput)
+    {
+        string probeDirectory = Path.Combine(sandbox.RecordDirectory, "socket-audit");
+        Directory.CreateDirectory(probeDirectory);
+        File.WriteAllText(Path.Combine(probeDirectory, "sitecustomize.py"), SocketAuditProbeScript);
+        if (File.Exists(sandbox.SocketAuditLogFile))
+            File.Delete(sandbox.SocketAuditLogFile);
+
+        ProcessStartInfo startInfo = VariantStartInfo(sandbox, python, scriptPath, false);
+        // Child-only: ProcessRunner copies exactly this environment, so the host and
+        // every other test keep their own PYTHONPATH.
+        startInfo.Environment["PYTHONPATH"] = probeDirectory;
+        startInfo.Environment["KYBER_SOCKET_AUDIT_LOG"] = sandbox.SocketAuditLogFile;
+        startInfo.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
+        ProcessResult result = ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(30));
+        AssertProbeInitialized(sandbox.SocketAuditLogFile, result);
+        return result;
+    }
+
+    /// <summary>
+    /// The probe writes a READY sentinel at import and reports recording failures on
+    /// stderr instead of swallowing them. Either missing here means the observation is
+    /// broken, so the run fails rather than passing on an empty log.
+    /// </summary>
+    private static void AssertProbeInitialized(string auditLogFile, ProcessResult result)
+    {
+        Assert.DoesNotContain(
+            "kyber-socket-audit:",
+            result.StandardError,
+            StringComparison.Ordinal);
+        string? first = File.Exists(auditLogFile)
+            ? File.ReadAllLines(auditLogFile).FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))
+            : null;
+        Assert.True(
+            string.Equals(first, SocketAuditReadyLine, StringComparison.Ordinal),
+            "The socket-audit probe did not initialize (no READY sentinel); an empty log proves nothing, so this run fails.");
+    }
+
+    /// <summary>
+    /// Bounded loopback connects to a private listener this task owns, each paired with
+    /// its accept — never the artifact's process, never the user's real 4318. The
+    /// returned count proves the connections really completed. No sleeps, no hangs: each
+    /// accept pairs a connect that already returned.
+    /// </summary>
+    private static int EmitAndAcceptUnrelatedConnections()
+    {
+        using TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        int accepted = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            using TcpClient connector = new();
+            connector.Connect(IPAddress.Loopback, port);
+            using TcpClient server = listener.AcceptTcpClient();
+            accepted++;
+        }
+
+        return accepted;
     }
 
     private static ProcessResult RunPiHarness(
@@ -728,6 +1011,40 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
+    private static ProcessResult RunCommandCodeHarness(
+        Sandbox sandbox,
+        string node,
+        string artifactPath,
+        string reportPath,
+        string mode,
+        string? extraEnvironment = null)
+    {
+        ProcessStartInfo startInfo = new(node)
+        {
+            WorkingDirectory = sandbox.WorkDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--test");
+        startInfo.ArgumentList.Add(sandbox.CommandCodeHarnessPath);
+        sandbox.ConfigureEnvironment(startInfo, false);
+        startInfo.Environment["CC_ARTIFACT"] = artifactPath;
+        startInfo.Environment["CC_FIXTURE"] = FixturePath(CommandCodeFixture);
+        startInfo.Environment["CC_REPORT"] = reportPath;
+        startInfo.Environment["CC_MODE"] = mode;
+        if (extraEnvironment is not null)
+            foreach (string pair in extraEnvironment.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = pair.Split('=', 2);
+                if (parts.Length == 2)
+                    startInfo.Environment[parts[0]] = parts[1];
+            }
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+    }
+
     // -----------------------------------------------------------------------------------------
     // Helpers: assertions.
     // -----------------------------------------------------------------------------------------
@@ -738,6 +1055,25 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             result.ExitCode == 0,
             $"The {variant} artifact exited {result.ExitCode} instead of 0.\n" +
             $"stdout:\n{result.StandardOutput}\nstderr:\n{result.StandardError}");
+    }
+
+    /// <summary>
+    /// Any socket counts, not just the collector port: the contract is that the artifact
+    /// opens no socket at all. The probe's READY sentinel is not a connection.
+    /// </summary>
+    private static void AssertNoSocketConnects(string auditLogFile, string subject)
+    {
+        string[] attempts = File.Exists(auditLogFile)
+            ?
+            [
+                .. File.ReadAllLines(auditLogFile)
+                    .Where(line => !string.IsNullOrWhiteSpace(line) &&
+                                   !string.Equals(line, SocketAuditReadyLine, StringComparison.Ordinal))
+            ]
+            : [];
+        Assert.True(
+            attempts.Length == 0,
+            $"{subject} opened a socket connection ({string.Join("; ", attempts)}); the OTLP post is replaced by the KyberDash hand-off (D10).");
     }
 
     private static void AssertRendersValue(string output, string value, string segment)
@@ -830,33 +1166,21 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         }
     }
 
+    // Polls rather than watching. A FileSystemWatcher created after the existence check misses a
+    // file that appears while the watcher is still starting (slow on macOS), so the wait then ran
+    // out its whole timeout and passed on the final check: a 30 second stall in a passing test.
     private static bool WaitForFile(string path, TimeSpan timeout)
     {
-        if (File.Exists(path))
-            return true;
-
-        string directory = Path.GetDirectoryName(path) ?? string.Empty;
-        if (directory.Length == 0 || !Directory.Exists(directory))
-            return false;
-
-        using FileSystemWatcher watcher = new(directory, Path.GetFileName(path));
-        using ManualResetEventSlim signal = new(false);
-        watcher.Created += (_, _) => signal.Set();
-        watcher.EnableRaisingEvents = true;
-        return signal.Wait(timeout) || File.Exists(path);
-    }
-
-    private static bool TryStartCollectorListener(TcpListener listener)
-    {
-        try
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!File.Exists(path))
         {
-            listener.Start();
-            return true;
+            if (clock.Elapsed >= timeout)
+                return false;
+
+            Thread.Sleep(20);
         }
-        catch (SocketException)
-        {
-            return false;
-        }
+
+        return true;
     }
 
     private static string ToNative(string relativePath)
@@ -901,11 +1225,14 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             KyberdashStartedFile = Path.Combine(RecordDirectory, "kyberdash-started");
             KyberdashFinishedFile = Path.Combine(RecordDirectory, "kyberdash-finished");
             KyberdashReleaseFile = Path.Combine(RecordDirectory, "kyberdash-release");
+            SocketAuditLogFile = Path.Combine(RecordDirectory, "socket-audit.log");
             HarnessPath = Path.Combine(temp.Path, "pi-harness.mjs");
 
             File.WriteAllText(GitBranchFile, SyntheticBranch + "\n");
             File.WriteAllText(GitPorcelainFile, SyntheticPorcelainDirty);
             File.WriteAllText(HarnessPath, PiHarnessScript);
+            CommandCodeHarnessPath = Path.Combine(temp.Path, CommandCodeHarnessFileName);
+            File.WriteAllText(CommandCodeHarnessPath, CommandCodeHarnessScript);
 
             WriteStub(Path.Combine(StubDirectory, "git"), GitStubScript);
             WriteStub(Path.Combine(StubDirectory, "hostname"), HostnameStubScript);
@@ -944,7 +1271,11 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
         public string KyberdashReleaseFile { get; }
 
+        public string SocketAuditLogFile { get; }
+
         public string HarnessPath { get; }
+
+        public string CommandCodeHarnessPath { get; }
 
         public IReadOnlyList<string> RuntimeDirectories { get; }
 
@@ -1047,6 +1378,51 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              exit 1
                                              """;
 
+    /// <summary>Sentinel the probe writes at import; its absence means the hook never loaded.</summary>
+    private const string SocketAuditReadyLine = "READY";
+
+    /// <summary>
+    /// Child-scoped audit, loaded as <c>sitecustomize</c> through a child-only
+    /// <c>PYTHONPATH</c>. The hook fires before the attempt, so refused and swallowed
+    /// connects are still recorded; only endpoints are logged, never payloads. Import
+    /// writes READY (a missing log or sentinel fails the run), and a recording failure
+    /// is reported on stderr instead of swallowed. Stdlib only.
+    /// </summary>
+    private const string SocketAuditProbeScript = """
+                                                  import os
+                                                  import sys
+                                                  _LOG = os.environ.get("KYBER_SOCKET_AUDIT_LOG", "")
+                                                  if not _LOG:
+                                                      raise RuntimeError("KYBER_SOCKET_AUDIT_LOG is not set; socket audit cannot record")
+                                                  with open(_LOG, "w", encoding="utf-8") as handle:
+                                                      handle.write("READY\n")
+                                                  def _hook(event, args):
+                                                      if event != "socket.connect":
+                                                          return
+                                                      try:
+                                                          with open(_LOG, "a", encoding="utf-8") as handle:
+                                                              handle.write(repr(args[1]) + "\n")
+                                                      except OSError as exc:
+                                                          os.write(2, ("kyber-socket-audit: RECORD-FAILED %r\n" % (exc,)).encode("utf-8", "replace"))
+                                                  sys.addaudithook(_hook)
+                                                  """;
+
+    /// <summary>
+    /// Negative-control fixture: one bounded connect attempt at the collector port,
+    /// recorded refused or accepted alike, with nothing sent.
+    /// </summary>
+    private const string DeliberateCollectorConnectScript = """
+                                                            import socket
+                                                            sock = socket.socket()
+                                                            sock.settimeout(5)
+                                                            try:
+                                                                sock.connect(("127.0.0.1", 4318))
+                                                            except OSError:
+                                                                pass
+                                                            finally:
+                                                                sock.close()
+                                                            """;
+
     private const string HostnameStubScript = """
                                               #!/bin/sh
                                               printf '%s\n' "$KYBER_STUB_HOST"
@@ -1133,4 +1509,83 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              await activate(context)
                                            })
                                            """;
+
+    /// <summary>
+    /// The stub ModApi the CommandCode mod is driven through. It records
+    /// <c>cmd.ui.setStatus</c> calls, captures the registered hooks, answers identity getters from
+    /// the fixture, and fires <c>onSessionStart</c> then <c>onTurnEnd</c> with the fixture payload.
+    /// </summary>
+    private const string CommandCodeHarnessScript = """
+                                                      import { after, test } from 'node:test'
+                                                      import assert from 'node:assert/strict'
+                                                      import { readFileSync, writeFileSync } from 'node:fs'
+                                                      import { pathToFileURL } from 'node:url'
+
+                                                      const report = { setStatus: [], error: null }
+
+                                                      const fixture = JSON.parse(readFileSync(process.env.CC_FIXTURE, 'utf8'))
+                                                      const tuiMode = process.env.CC_MODE === 'tui'
+                                                      const noCaps = process.env.CC_NO_CAPS === '1'
+                                                      const hooksThrow = process.env.CC_HOOKS_THROW === '1'
+                                                      const poisonTurn = process.env.CC_POISON_TURN === '1'
+
+                                                      const hooks = {}
+                                                      const state = new Map()
+                                                      const uiBase = {
+                                                        setStatus: (text) => { report.setStatus.push(text === null ? '' : String(text)) },
+                                                        notify: () => {},
+                                                      }
+                                                      const cmd = {
+                                                        cwd: fixture.cwd,
+                                                        getSessionName: () => undefined,
+                                                        getModel: () => fixture.model,
+                                                        getContextUsage: () => ({
+                                                          tokens: fixture.usage?.totalTokens ?? null,
+                                                          contextWindow: fixture.contextWindow ?? null,
+                                                          percent: null,
+                                                        }),
+                                                        state: {
+                                                          get: (key) => (state.has(key) ? state.get(key) : undefined),
+                                                          set: (key, value) => { state.set(key, value) },
+                                                          subscribe: () => ({ dispose() {} }),
+                                                        },
+                                                        exec: async () => ({ stdout: 'kyber/synthetic-branch\\n', code: 0 }),
+                                                        ui: noCaps ? uiBase : { ...uiBase, capabilities: { status: tuiMode } },
+                                                        hooks: (registered) => {
+                                                          if (hooksThrow) throw new Error('synthetic hooks rejection')
+                                                          Object.assign(hooks, registered)
+                                                        },
+                                                        on: () => ({ dispose() {} }),
+                                                      }
+
+                                                      after(() => {
+                                                        writeFileSync(process.env.CC_REPORT, JSON.stringify(report))
+                                                      })
+
+                                                      test('the mod registers and renders against the stub ModApi', async () => {
+                                                        const module = await import(pathToFileURL(process.env.CC_ARTIFACT).href)
+                                                        const factory = module.default
+                                                        assert.equal(typeof factory, 'function', 'the mod must default-export a factory function')
+                                                        factory(cmd)
+                                                        if (hooksThrow) return
+                                                        assert.equal(typeof hooks.onSessionStart, 'function', 'the mod must register onSessionStart')
+                                                        assert.equal(typeof hooks.onTurnEnd, 'function', 'the mod must register onTurnEnd')
+                                                        await hooks.onSessionStart({ source: 'startup' })
+                                                        const next = await hooks.onTurnEnd({
+                                                          turnNumber: fixture.turnNumber,
+                                                          hadToolCalls: true,
+                                                          usage: fixture.usage,
+                                                        })
+                                                        if (next && typeof next === 'object') {
+                                                          for (const [key, value] of Object.entries(next)) state.set(key, value)
+                                                        }
+                                                        if (poisonTurn) {
+                                                          await hooks.onTurnEnd({
+                                                            turnNumber: NaN,
+                                                            hadToolCalls: true,
+                                                            usage: { inputTokens: NaN, outputTokens: Infinity, cachedTokens: -5, totalTokens: 1e21 },
+                                                          })
+                                                        }
+                                                      })
+                                                      """;
 }

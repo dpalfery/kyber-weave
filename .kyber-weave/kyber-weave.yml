@@ -37,31 +37,56 @@ review:
     - id: format-style
       run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
       blocking: true
+    # `--no-incremental` because coverlet.MTP instruments `bin/Release` in place: an
+    # interrupted coverage run leaves the test assembly and the libraries it loads rewritten
+    # with the instrumenting session's temp path baked in, and an incremental build cannot
+    # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
+    # test gate that follows it from running against binaries no longer executable.
     - id: build
-      run: [dotnet, build, KyberWeave.sln, -c, Release]
+      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
     # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
+    # `--no-build` because the `build` gate above already produced these binaries in
+    # Release. Without it every run re-links the test project, and the gate evidence
+    # would come from binaries the suite did not actually gate.
     - id: test
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       blocking: true
+    # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
+    # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite
+    # and invisible in the report, which records one line per gate regardless. The build
+    # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-docs]
       blocking: true
     - id: skill-lint
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
       blocking: true
     # `--fail-on critical` is the documented local check. Binding it here means a
     # later change to the CLI default cannot silently loosen what the gate enforces.
     - id: skill-scan
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      blocking: true
+    # The entry-point skill is a second skill directory, and `skill validate` / `lint` /
+    # `scan` each take one path. The declared suite covers it the same way it covers the
+    # authoring skill — three more gates, one per verb, or the new skill is discoverable
+    # to an agent but never gated.
+    - id: skill-validate-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
+      blocking: true
+    - id: skill-lint-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-cli, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-cli, --fail-on, critical]
       blocking: true
     - id: docs-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, validate, .]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
       blocking: true
     - id: docs-drift
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, drift, .]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
       blocking: true
     # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
     # `static-analysis-triage` lens reads the report at the --output path below and
@@ -80,7 +105,7 @@ review:
     # which clusters this change is responsible for. Like the analyzer gate it exits 0
     # whether or not it finds anything, so "blocking" means it must have *run*.
     - id: duplicates
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, review, duplicates, ., --out, artifacts/duplicates.json]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
     # TypeScript gates for KyberDash under dash/. They are the counterpart to
@@ -124,6 +149,121 @@ review:
       run: [npm, run, --prefix, dash, "check:reachable"]
       blocking: true
 
+  # Developer task gates. `kyber-weave review gates . --agent <name> --paths ... --task <slug>`
+  # runs one developer agent's list against the change that agent just made, so the agent finds a
+  # broken gate before a reviewer does. Keyed by agent slug; gates run in declaration order.
+  #
+  # Each gate is written once with a YAML anchor and aliased by every agent that runs it. A YAML
+  # sequence cannot be concatenated, so an agent's list names each gate it runs, one alias apiece.
+  # `include` decides whether a gate runs at all: a gate whose globs match no changed file is
+  # reported as skipped, not run. Globs are quoted because a bare `*` opens a YAML alias in a
+  # flow sequence, and `{` would be read as a flow mapping.
+  #
+  # A gate whose argv has no `{changed}` is a whole-project check: it checks the entire working
+  # tree, not only the files this task changed. dash-typecheck, dash-lint, tray-ui-typecheck,
+  # cargo-fmt, cargo-clippy, and dotnet-build are of that kind. Another worker's concurrent edit
+  # can therefore fail one of them on a file this task never touched. The task-gate skill re-runs
+  # such a failure once after the other change settles, before it counts as rework.
+  task-gates:
+    # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
+    # is the form `--fix` applies first; the verify form then decides, so a fix that does not
+    # converge still fails the gate. The build is Release and writes under a per-task artifacts
+    # directory, so two agents building at once do not share one obj/ tree.
+    csharp-dev:
+      - &fmt-whitespace
+        id: format-whitespace
+        include: &net-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
+        run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}"]
+        fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}"]
+      - &fmt-style
+        id: format-style
+        include: *net-paths
+        run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, --include, "{changed}"]
+        fix: [dotnet, format, KyberWeave.sln, style, --severity, warn, --include, "{changed}"]
+      - &fmt-analyzers
+        id: format-analyzers
+        include: *net-paths
+        run: [dotnet, format, KyberWeave.sln, analyzers, --verify-no-changes, --severity, warn, --include, "{changed}"]
+        fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}"]
+      - &dotnet-build
+        id: dotnet-build
+        # The build is the one gate a solution-only change must reach: a .sln, NuGet.config, or
+        # .editorconfig changes what compiles and how analyzers read it. The format gates keep the
+        # source-only *net-paths, because `dotnet format` given a solution in --include checks
+        # nothing and exits 0.
+        include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
+        run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+    dal-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    maui-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    pulumi-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    sql-database-architect:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    github-devops:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+
+    # TypeScript and the tray UI. The dash include lists directories instead of `dash/**`,
+    # because the tray is a separate project under dash/tray with its own gates below, and an
+    # include list has no exclusion to subtract it. A tray change therefore runs only the tray
+    # gates, not the dash suite.
+    react-dev:
+      - &dash-typecheck
+        id: dash-typecheck
+        include: &dash-paths ["dash/src/**", "dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
+        run: [npm, run, --prefix, dash, typecheck]
+      - &dash-lint
+        id: dash-lint
+        include: *dash-paths
+        run: [npm, run, --prefix, dash, lint]
+      - &tray-ui-typecheck
+        id: tray-ui-typecheck
+        include: ["dash/tray/ui/**"]
+        run: [npm, run, --prefix, dash/tray/ui, typecheck]
+
+    # Tauri shell. The Rust gates are the tray's own; the dash and tray-ui gates are the ones
+    # react-dev runs, aliased here because a Tauri change reaches the same TypeScript the UI does.
+    # `cargo fmt --check` verifies and the fix form rewrites; clippy is verify-only, with warnings
+    # promoted to errors, because a warning it prints and a reviewer skims is not a gate.
+    tauri-dev:
+      - &cargo-fmt
+        id: cargo-fmt
+        include: &tray-rust-paths ["dash/tray/src-tauri/**"]
+        run: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml, --check]
+        fix: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml]
+      - &cargo-clippy
+        id: cargo-clippy
+        include: *tray-rust-paths
+        run: [cargo, clippy, --manifest-path, dash/tray/src-tauri/Cargo.toml, --, -D, warnings]
+      - *dash-typecheck
+      - *dash-lint
+      - *tray-ui-typecheck
+
+    # Tests are .NET (tests/) and TypeScript (dash/tests, dash/web), so test-dev runs both sets.
+    test-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+      - *dash-typecheck
+      - *dash-lint
+
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —
   # braces, blank lines, whole-line comments, and the signature are already gone — so a
@@ -143,6 +283,24 @@ review:
       - ".kyber-weave/kyber-weave.yml"
       - "**/*secret*"
       - "**/*credential*"
-    max-reviewable-lines: 10000
+    # Raised from 10000 to 20000 because one delivery — the KyberDash sessions-list payload
+    # independence (schema v21 and v22 with the session-turn split, the covering index, the
+    # bounded read routes, the engine's maintenance-pass fix, the CLI's vacuum command, and
+    # their tests and documentation) — reached roughly 17,400 changed lines. The owner
+    # reviewed that single unit and approved it rather than splitting it (PR 397), which is
+    # the remedy this ceiling's own documentation names: "Split the change or have a human
+    # review it." A change to this file is human-only by the policy above, and that approval
+    # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
+    # stamp for whatever comes next.
+    max-reviewable-lines: 20000
     major-count-blocks: 3
     min-confidence: 7
+
+# Rendered into the Config Reg block of AGENTS.md as <autonomy>, the only place a portable
+# agent can read it. This repository is built by agent teams working test-first through the
+# gates, so the conductor proceeds without stopping at each checkpoint.
+autonomy: autonomous
+
+# Paths agents resolve by property name instead of a relative link.
+config-reg:
+  review-guidance: REVIEW.md

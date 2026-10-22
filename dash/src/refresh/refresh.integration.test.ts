@@ -265,7 +265,7 @@ describe('dash refresh deterministic CLI acceptance', () => {
       ])
       expect(records.some((record) => record.sessionId === 'pi-cross' && isoTimestamp(record.timestamp).startsWith('2026-08-20'))).toBe(false)
       expect(records.some((record) => record.sessionId === 'pi-cross' && isoTimestamp(record.timestamp).startsWith('2026-08-10'))).toBe(false)
-      expect(world.store.listSessions('pi')).toHaveLength(1)
+      expect(world.store.countSessionsByHarness()['pi'] ?? 0).toBe(1)
       expect(world.store.listRuns('pi')).toHaveLength(1)
       expect(world.store.getHarnessRollup('pi')?.sampleCount).toBe(1)
       expect(world.store.getHarnessRollup('antigravity')?.harness).toBe('antigravity')
@@ -496,8 +496,12 @@ describe('dash refresh deterministic CLI acceptance', () => {
       expect(world.store.getHarnessRollup('gemini')).toBeUndefined()
       expect(world.store.getHarnessRollup('antigravity')?.harness).toBe('antigravity')
       expect(world.store.getHarnessRollup('antigravity-cli')?.harness).toBe('antigravity-cli')
-      expect(world.store.listSessions('antigravity').every((session) => session.harness === 'antigravity')).toBe(true)
-      expect(world.store.listSessions('antigravity-cli').every((session) => session.harness === 'antigravity-cli')).toBe(true)
+      // Each split identity keeps its own rows: the store attributes the
+      // antigravity and antigravity-cli sessions separately, so neither
+      // harness borrows the other's.
+      const sessionCounts = world.store.countSessionsByHarness()
+      expect(sessionCounts['antigravity'] ?? 0).toBeGreaterThan(0)
+      expect(sessionCounts['antigravity-cli'] ?? 0).toBeGreaterThan(0)
       expect(world.store.listRuns('antigravity').every((run) => run.harness === 'antigravity')).toBe(true)
       expect(world.store.listRuns('antigravity-cli').every((run) => run.harness === 'antigravity-cli')).toBe(true)
     } finally {

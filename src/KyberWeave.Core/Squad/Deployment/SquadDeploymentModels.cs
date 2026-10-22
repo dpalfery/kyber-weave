@@ -104,11 +104,49 @@ public sealed record SquadDeploymentFile
     public string Target { get; }
 }
 
-/// <summary>Supplies the per-user location used by global Squad state.</summary>
+/// <summary>Supplies the per-user locations used by Squad state.</summary>
 public interface ISquadUserPaths
 {
+    /// <summary>The per-user application data directory that holds legacy global Squad state.</summary>
     string ApplicationDataDirectory { get; }
+
+    /// <summary>
+    /// The user's home directory. Home-level Squad state lives beneath it at
+    /// <c>.kyber-weave/squad</c>, so it does not depend on the platform application data folder.
+    /// </summary>
+    string HomeDirectory { get; }
 }
+
+/// <summary>One project that has registered itself in the home-level Squad registry.</summary>
+/// <remarks>
+/// <see cref="Stale"/> records that the registered root no longer carries a deployment, or no
+/// longer exists. A stale entry is reported rather than silently dropped, so an operator can
+/// see what was registered before deciding to unregister it.
+/// </remarks>
+public sealed record SquadProjectRegistryEntry(
+    string RootKey,
+    string Path,
+    DateTimeOffset LastUpdatedUtc,
+    IReadOnlyList<string> Targets,
+    bool Stale,
+    string? StaleReason);
+
+/// <summary>A legacy Squad state root that the migration did not move, and why.</summary>
+/// <param name="Root">The legacy root as found on disk.</param>
+/// <param name="Reason">Why it was left in place.</param>
+/// <param name="Guidance">What the operator should do next.</param>
+public sealed record SquadUnmigratedLegacyRoot(string Root, string Reason, string Guidance);
+
+/// <summary>The outcome of moving legacy Squad state into the home-level layout.</summary>
+/// <remarks>
+/// Immutable so a caller can render it, log it, or assert on it without the migration still
+/// being able to change it afterwards.
+/// </remarks>
+public sealed record SquadMigrationReport(
+    IReadOnlyList<string> MigratedItems,
+    IReadOnlyList<SquadUnmigratedLegacyRoot> UnmigratedLegacyRoots,
+    IReadOnlyList<string> ImportedProjects,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>Raised when a deployment would overwrite a path outside its receipt authority.</summary>
 public sealed class SquadDeploymentConflictException : InvalidOperationException

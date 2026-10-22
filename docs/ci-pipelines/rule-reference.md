@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-10-16
 ---
 
 # Rule reference
@@ -87,7 +87,7 @@ details.
 | `KW-SKILL-LINT-008` | Routing | Description contains excessive filler phrases or unrouted verbosity (Warning) |
 | `KW-SKILL-LINT-010` | Routing | **Name collision** — the only error in this tier |
 | `KW-SKILL-LINT-011` | Routing | Description overlap between two skills |
-| `KW-SKILL-REVIEW-001` | Review | Skill/agent review verdict payload is malformed or invalid (Error) |
+| `KW-SKILL-REVIEW-001` | Review | Skill/agent review verdict payload is malformed or invalid (Error). Emitted by the review exchange; no CLI verb invokes it today. |
 
 ### Skill security — `skill scan`
 
@@ -174,6 +174,10 @@ number, and a missing report is the same class of signal rather than a failed ga
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
+| `KW-REVIEW-026` | Info | A task gate was skipped: its `os` does not match the host, or no changed file matches its `include` (`--agent`) |
+| `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran (`--agent`) |
+| `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 
 ### Duplicates — `review duplicates`
 

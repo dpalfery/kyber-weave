@@ -1,0 +1,28 @@
+[
+  {
+    "spanId": "oc-sql-execute",
+    "name": "sql.execute",
+    "kind": "internal",
+    "attributes": {
+      "db.system.name": "sqlite",
+      "db.operation.name": "execute"
+    }
+  },
+  {
+    "spanId": "oc-http-server-get",
+    "name": "http.server GET",
+    "kind": "server",
+    "attributes": {
+      "http.request.method": "GET",
+      "url.path": "/synthetic/opencode/health"
+    }
+  },
+  {
+    "spanId": "oc-session-lifecycle",
+    "name": "Session.load",
+    "kind": "internal",
+    "attributes": {
+      "opencode.session.id": "synthetic-session-load-id"
+    }
+  }
+]

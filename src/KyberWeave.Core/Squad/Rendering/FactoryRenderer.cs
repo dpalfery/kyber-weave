@@ -44,6 +44,19 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Under <see cref="SquadDeploymentScope.Global"/> the physical root is <c>~/.factory</c>,
 /// so relative paths strip the <c>.factory/</c> prefix.
 /// </para>
+/// <para>
+/// <strong>Primary-agent entry point:</strong> the Factory app dispatches custom droids as
+/// subagents and offers no session-parent selector to start a conversation as one, so a
+/// primary agent with a fallback profile declaring <c>no-primary-agent: skill</c> renders as
+/// both a droid at <c>.factory/droids/&lt;name&gt;.md</c> (kept for Task dispatch) and an
+/// entry-point skill at <c>.factory/skills/&lt;name&gt;/SKILL.md</c> the user can invoke in
+/// the main session. The skill body matches the canonical agent body verbatim and its
+/// resource closure is projected beside it; the skill runs under the session's permissions,
+/// so the droid's explicit <c>tools</c> allow-list and <c>mcpServers: []</c> do not apply to
+/// it. A canonical skill occupying the entry-point identity fails closed rather than
+/// renaming either projection. Under <c>no-primary-agent: omit</c> no entry-point skill is
+/// emitted.
+/// </para>
 /// </remarks>
 public sealed class FactoryRenderer : ISquadRenderer
 {
@@ -139,6 +152,18 @@ public sealed class FactoryRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Read skill identities upfront so the primary-agent collision check can see whether
+        // a canonical skill already occupies the entry-point identity before any file is built.
+        HashSet<string> skillIdentities = source.Skills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -152,15 +177,77 @@ public sealed class FactoryRenderer : ISquadRenderer
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
-            degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+            if (agent.Invocation == SquadInvocation.Primary)
+            {
+                SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
+                if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
+                {
+                    if (skillIdentities.Contains(agent.Name))
+                    {
+                        // A declared shared identity already has its canonical skill as the entry
+                        // point at .factory/skills/<name>/SKILL.md, so emitting the entry-point
+                        // skill too would project one identity twice. The canonical skill is the
+                        // entry point; skip the duplicate rather than failing closed.
+                        if (sharedIdentities.Contains(agent.Name))
+                        {
+                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                                agent,
+                                fallbackProfile,
+                                source.CapabilityProfiles.Profiles,
+                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
+                                reusedCanonicalSkill: true));
+                        }
+                        else
+                        {
+                            // Not a declared shared identity: Factory renders both a droid and an
+                            // entry-point skill for the identity, and a native target has no
+                            // role-prefixed escape hatch, so this is a real collision.
+                            throw new SquadRenderValidationException(
+                                $"Cannot render primary agent '{agent.Name}' as a Factory entry-point " +
+                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+                                "identity. Factory renders both a droid and an entry-point skill, " +
+                                "so this is a fail-closed condition rather than a naming collision " +
+                                "this renderer can resolve on its own.");
+                        }
+                    }
+                    else
+                    {
+                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
+                        files.Add(skillPrincipal);
+                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
+
+                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            skillPrincipal.RelativePath));
+                    }
+                }
+                else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
+                {
+                    // Omit mode: the droid renders exactly as before, with no entry-point skill.
+                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                }
+                else
+                {
+                    throw new SquadRenderValidationException(
+                        $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
+                        $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
+                }
+            }
+            else
+            {
+                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+            }
         }
 
         foreach (SquadSkill skill in source.Skills)
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -188,7 +275,12 @@ public sealed class FactoryRenderer : ISquadRenderer
         string? model = ResolveFactoryModel(agent, modelProfiles);
         if (model is not null)
         {
-            frontmatter["model"] = model;
+            (string bareModel, string? reasoningEffort) = ParseReasoningEffortSuffix(model);
+            frontmatter["model"] = bareModel;
+            if (reasoningEffort is not null)
+            {
+                frontmatter["reasoningEffort"] = reasoningEffort;
+            }
         }
 
         // Always emit tools: omitting the key allows every Factory tool (widening).
@@ -234,6 +326,80 @@ public sealed class FactoryRenderer : ISquadRenderer
             $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             SquadTargetCatalog.GetToken(SquadTarget.Factory));
+    }
+
+    /// <summary>
+    /// Renders a primary agent's entry-point skill: the canonical agent body verbatim under
+    /// the canonical skill frontmatter shape, so the user can invoke the role in the main
+    /// session where no session-parent selector exists.
+    /// </summary>
+    private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
+        SquadAgent agent,
+        SquadDeploymentScope scope)
+    {
+        string singleLineDescription = string.Join(" ", agent.Description.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["name"] = agent.Name,
+            ["description"] = singleLineDescription
+        };
+
+        string content;
+        lock (SerializerLock)
+        {
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
+        }
+
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
+        return new SquadDeploymentFile(
+            $"{skillsDir}/{agent.Name}/SKILL.md",
+            Encoding.UTF8.GetBytes(content),
+            SquadTargetCatalog.GetToken(SquadTarget.Factory));
+    }
+
+    private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
+
+    /// <summary>
+    /// Splits an optional trailing <c>[reasoningEffort=&lt;level&gt;]</c> suffix off a model value.
+    /// Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.ai,
+    /// subagents), so any other level throws <see cref="SquadRenderValidationException"/>.
+    /// </summary>
+    internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue)
+    {
+        const string suffixPrefix = "[reasoningEffort=";
+        int start = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return (modelValue, null);
+        }
+
+        if (start == 0 || !modelValue.EndsWith(']'))
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed reasoningEffort suffix in model value '{modelValue}': expected '<model>[reasoningEffort=<level>]'.");
+        }
+
+        string level = modelValue[(start + suffixPrefix.Length)..^1];
+        if (Array.IndexOf(AllowedReasoningEfforts, level) < 0)
+        {
+            throw new SquadRenderValidationException(
+                $"Invalid reasoningEffort '{level}' in model value '{modelValue}': Factory accepts low, medium, or high.");
+        }
+
+        string bareModel = modelValue[..start];
+        if (string.IsNullOrWhiteSpace(bareModel) ||
+            bareModel.Any(char.IsWhiteSpace) ||
+            bareModel.Contains('[', StringComparison.Ordinal) ||
+            bareModel.Contains(']', StringComparison.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
+        }
+
+        return (bareModel, level);
     }
 
     private static string? ResolveFactoryModel(
@@ -288,9 +454,57 @@ public sealed class FactoryRenderer : ISquadRenderer
         return ToolOrder.Where(granted.Contains).ToArray();
     }
 
+    /// <summary>
+    /// Builds the degradation records for a primary agent that also renders as an
+    /// entry-point skill: the fallback record naming the additional projection, then the
+    /// agent's own records with the entry-point caveat folded into the shared
+    /// permission-not-expressible record. The path is the scope-resolved deployment path the
+    /// skill actually renders at, so a global install's records point at
+    /// <c>skills/&lt;name&gt;/SKILL.md</c>, not the project-scope form.
+    /// </summary>
+    private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradationRecords(
+        SquadAgent agent,
+        SquadFallbackProfile fallbackProfile,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        string entryPointSkillPath,
+        bool reusedCanonicalSkill = false)
+    {
+        string entryPointDetails = reusedCanonicalSkill
+            ? $"The same-name canonical skill at {entryPointSkillPath} is the entry point and " +
+                "carries the role; no duplicate entry-point skill is emitted, because the " +
+                "canonical skill already occupies that identity."
+            : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
+                $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
+                $"skill at {entryPointSkillPath}.";
+
+        yield return new SquadDegradationRecord(
+            Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            CanonicalIdentity: agent.Name,
+            OutputIdentity: agent.Name,
+            Code: "role-skill-fallback",
+            InstructionDigest: agent.BodyDigest,
+            Details: "The Factory app dispatches custom droids as subagents and exposes no " +
+                "session-parent selector to start a conversation as one. " + entryPointDetails +
+                " The entry point runs in the main session under the session's permissions — " +
+                "the droid's explicit tools allow-list does not apply to it. The droid file is " +
+                "kept for Task dispatch.");
+
+        foreach (SquadDegradationRecord record in BuildDegradationRecords(
+            agent,
+            capabilityProfiles,
+            entryPointSkillNote:
+                $"The same-name entry point at {entryPointSkillPath} runs under the " +
+                "session's permissions; the droid's explicit tools allow-list and " +
+                "mcpServers: [] do not apply to it."))
+        {
+            yield return record;
+        }
+    }
+
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -334,6 +548,11 @@ public sealed class FactoryRenderer : ISquadRenderer
 
         notExpressibleDetails.Add(
             "mcpServers: [] excludes every MCP server so parent MCP was not inherited.");
+
+        if (entryPointSkillNote is not null)
+        {
+            notExpressibleDetails.Add(entryPointSkillNote);
+        }
 
         yield return new SquadDegradationRecord(
             Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),

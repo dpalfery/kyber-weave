@@ -14,6 +14,7 @@
 // `exclusiveConvention` in copilot.ts, where the shared task-5.3 core
 // lives).
 
+import { contentFromParts, type ContentPart } from '../types.js'
 import type { HarnessAdapter } from './base.js'
 import { resolveRootByParentage, traceGroup } from './base.js'
 import {
@@ -34,6 +35,40 @@ export type { RequestReconciliation } from './copilot.js'
 
 /** Vendor namespaces pi telemetry is emitted under (its OTLP export stamps `pi.*`). */
 const PI_VENDOR_NAMESPACES = ['pi']
+
+/**
+ * Collector content keys (@dpalfery/pi-statusline). Selected tools and their
+ * snippets are the definition text; skills and context files are the
+ * instruction text. `pi.llm.request.payload` is deliberately absent: it is
+ * the raw request body and stays on `raw`, not a content bucket.
+ */
+const PI_TOOL_DEFINITION_KEYS = ['pi.tools.selected', 'pi.tools.snippets'] as const
+const PI_INSTRUCTION_CONTEXT_KEYS = ['pi.skills', 'pi.context_files'] as const
+
+/** Attribute text as exported. Objects are serialized; empty values are absent. */
+function attributeText(value: unknown): string | undefined {
+  if (typeof value === 'string' && value !== '') return value
+  if (value !== null && value !== undefined && typeof value === 'object') return JSON.stringify(value)
+  return undefined
+}
+
+/**
+ * Map collector-shaped attributes onto canonical parts. A span that does not
+ * carry these keys contributes nothing, so the standing "definitions not
+ * exported" record stays empty.
+ */
+function collectorContentParts(attributes: Record<string, unknown>, startOrder: number): ContentPart[] {
+  const parts: ContentPart[] = []
+  let order = startOrder
+  const take = (key: string, part: ContentPart['part']): void => {
+    const text = attributeText(attributes[key])
+    if (text === undefined) return
+    parts.push({ part, text, order: order++ })
+  }
+  for (const key of PI_TOOL_DEFINITION_KEYS) take(key, 'tool_definitions')
+  for (const key of PI_INSTRUCTION_CONTEXT_KEYS) take(key, 'instruction_context')
+  return parts
+}
 
 /**
  * The pi adapter. Detection is vendor-namespace driven: `pi.*` attributes
@@ -73,6 +108,12 @@ export const piAdapter: HarnessAdapter = {
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
+    const extra = collectorContentParts(raw.attributes, record.parts?.length ?? 0)
+    if (extra.length > 0) {
+      const parts = [...(record.parts ?? []), ...extra]
+      record.parts = parts
+      record.content = contentFromParts(parts)
+    }
     const counters = readUsageCounters(raw.attributes)
     record.tokens = exclusiveConvention({
       input: counters.input,
@@ -89,13 +130,16 @@ export const piAdapter: HarnessAdapter = {
   validate: validateRecordTokens,
 
   /**
-   * pi invokes tools without exporting their definitions — measured at 14
-   * tools across 368 calls with none exported (design.md, "Normalization
-   * layer") — so `tool_definitions` is declared unexported and every record
-   * is stamped `not_measurable` for it: absent is not zero (R7.6, R8.5,
-   * R10.2).
+   * Nothing is unexported. Pi's collector does export the tool inventory —
+   * `pi.tools.selected` and `pi.tools.snippets`, the very keys this adapter
+   * maps into `tool_definitions` content (`PI_TOOL_DEFINITION_KEYS` above) —
+   * so the earlier claim that pi exported no tool definitions was stale: it
+   * stamped every record `not_measurable` while the parts sat in that same
+   * record. What pi genuinely does not export is per-call tool timing and the
+   * calls past the collector's 262144-character content cap; both are stated on
+   * the derived tool records themselves (adapters/pi-tools.ts), not here.
    */
   unexportedMetrics() {
-    return ['tool_definitions']
+    return []
   },
 }

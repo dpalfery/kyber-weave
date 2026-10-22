@@ -400,7 +400,11 @@ export const PROVIDER_PARSE_VERSIONS: Record<string, string> = {
   'kilo-code': 'worktree-project-grouping-v1-session-model-v1',
   'roo-code': 'worktree-project-grouping-v1',
   warp: 'worktree-project-grouping-v1-est-cost',
-  antigravity: 'worktree-project-grouping-v5',
+  // agy-step-segments-v1: gen_metadata calls carry the agy-step pairing id, so
+  // tool and skill attribution is segmented per step. Cached sessions store
+  // tools and skills verbatim, so the label must move or they would keep the
+  // pre-segment attribution and never reach the new lsi-segment records.
+  antigravity: 'worktree-project-grouping-v5-agy-step-segments-v1',
 }
 
 function getLegacyCachePath(): string {

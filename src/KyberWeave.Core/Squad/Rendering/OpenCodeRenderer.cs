@@ -50,6 +50,23 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Profile-declared shared identities suppress their skill projections per the native
 /// single-projection rule.
 /// </para>
+/// <para>
+/// <b>Agent resources are projected beside their principal with a discovery-guard
+/// extension.</b> OpenCode's agent loader scans every config root recursively for
+/// <c>{agent,agents}/**/*.md</c> files, dotfiles included, and derives an agent name from
+/// each match's path (verified against <c>anomalyco/opencode</c>,
+/// <c>packages/core/src/config/plugin/agent.ts</c>, on 2026-10-19), so projecting an
+/// agent's resource closure beside its principal with a <c>.md</c> extension would
+/// register every reference file as a phantom agent. Agent-owned <c>.md</c> resources
+/// therefore deploy with a <c>.markdown</c> extension — invisible to the
+/// <c>*.md</c>-only glob while staying co-located with, and readable beside, their owning
+/// agent — and the owner's authored links are rewritten <c>.md</c> to <c>.markdown</c>
+/// via the shared closure-driven rewriter. The deviation from the repository's "authored
+/// links resolve verbatim" rule is recorded as <c>resource-links-rewritten</c> so it is
+/// visible in the receipt. Skill resources keep the ordinary
+/// <see cref="SquadResourceProjection"/> treatment: skill discovery only admits
+/// <c>SKILL.md</c> one level deep and never mistakes them for agents.
+/// </para>
 /// </remarks>
 public sealed class OpenCodeRenderer : ISquadRenderer
 {
@@ -159,6 +176,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point. Only a suppressed identity withholds the KyberWeave MCP permission: the primary
+        // wrappers edit files and run commands, so withholding it would strip the tools their
+        // role exists to use.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -168,10 +193,17 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
-                sharedIdentities,
+                suppressedSkillIdentities,
                 request.Scope);
             files.Add(principal);
-            SquadResourceProjection.Append(files, principal, agent.Resources);
+            SquadAgentResourceDiscoveryGuard.Append(
+                files,
+                agent,
+                principal,
+                agent.Resources,
+                degradations,
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                "{agent,agents}/**/*.md");
 
             degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
         }
@@ -180,8 +212,9 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -198,7 +231,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> sharedIdentities,
+        IReadOnlySet<string> suppressedSkillIdentities,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -215,12 +248,17 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         }
 
         // Always emit permission map: omitting it inherits ambient tool access (widening).
-        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, sharedIdentities);
+        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, suppressedSkillIdentities);
+
+        // The composed agent file carries discovery-guarded links: an in-closure .md link
+        // is rewritten to .markdown so it still resolves after the guard renames the
+        // projection. Frontmatter is unchanged.
+        string body = SquadAgentResourceDiscoveryGuard.RewriteBody(agent);
 
         string content;
         lock (SerializerLock)
         {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, body);
         }
 
         string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
@@ -286,7 +324,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     private static Dictionary<string, object> ResolvePermissions(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> sharedIdentities)
+        IReadOnlySet<string> suppressedSkillIdentities)
     {
         HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
         object? taskPermissionValue = null;
@@ -313,7 +351,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 StringComparison.Ordinal);
 
             if (!isPureOrchestrator &&
-                !sharedIdentities.Contains(agent.Name) &&
+                !suppressedSkillIdentities.Contains(agent.Name) &&
                 profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                 readDecision == SquadPermissionDecision.Allow)
             {

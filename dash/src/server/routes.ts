@@ -1,4 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'http'
+import type { CanonStore } from '../canon/store.js'
+import type { JobHost, JobOutcome } from '../jobs/host.js'
+import { storeGeneration } from './store-generation.js'
+import { applyPartialSettings, parseSettingsPatch, readSettings } from './settings-view.js'
 import type { KyberBridge } from './bridge.js'
 import { sumSessionFigures } from './bridge.js'
 import { runContextReview, type ReviewRequest } from '../analysis/review.js'
@@ -15,8 +19,14 @@ import {
   type ReportSection,
 } from '../analysis/report/types.js'
 import { createRequire } from 'node:module'
-import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName, parseHarnessFilter } from '../canon/measurability.js'
+import type { ReceiverState } from '../jobs/receiver-host.js'
+import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
+import { resolveHarnessScope } from '../refresh/registry.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
+import type { CleanRequest } from '../clean/clean.js'
+import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
+import { handleCaptureRequest, type CaptureRouteSettings } from './capture-routes.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -89,6 +99,29 @@ function parseSessionContentPath(pathname: string): string | null {
 }
 
 /**
+ * `/api/kyber/session/:id/summary` — the bounded session summary.
+ *
+ * <remarks>
+ * Everything between the prefix and the `/summary` suffix is the session id,
+ * so an encoded id stays intact. `null` means this is not the summary route,
+ * so the detail route below can still claim the path.
+ *
+ * The id comes back raw, not decoded: the caller decodes it with
+ * {@link decodePathId}, which reports a malformed percent-encoding as a client
+ * error instead of letting a `URIError` escape as a 500. The quarantine and
+ * problem routes decode their id the same way, for the same reason.
+ * </remarks>
+ */
+function parseSessionSummaryPath(pathname: string): string | null {
+  const prefix = '/api/kyber/session/'
+  const suffix = '/summary'
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null
+  const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
+  if (!middle || middle.endsWith('/')) return null
+  return middle
+}
+
+/**
  * `/api/kyber/span/:spanId/attributes` — the harness-emitted attribute map for
  * one span (R9.2). Session payloads no longer carry these inline; see
  * `CanonStore.spanAttributes`.
@@ -103,9 +136,44 @@ function parseSpanAttributesPath(pathname: string): string | null {
 }
 
 /**
+ * Decode and trim one percent-encoded path segment, or `null` when it is malformed
+ * (a stray `%` makes `decodeURIComponent` throw a `URIError`, which would otherwise
+ * surface as a 500 instead of the client error it is).
+ */
+function decodePathId(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch (err) {
+    if (err instanceof URIError) return null
+    throw err
+  }
+}
+
+/**
+ * A `?budget=` value usable as a character budget: a finite, non-negative integer.
+ * Anything else (blank, NaN, negative, infinite) is ignored, so the default budget
+ * applies. A negative budget must never reach `slice(0, -n)`, which would return
+ * nearly the whole text while the flags claim a budget was honored.
+ */
+function parseContentBudget(param: string | null): number | undefined {
+  if (!param) return undefined
+  const budget = parseInt(param, 10)
+  return Number.isFinite(budget) && budget >= 0 ? budget : undefined
+}
+
+/**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
+ *
+ * Explicit lossless path: `?full=true` (or `?full=1`) bypasses
+ * `CONTENT_RESPONSE_BUDGET` so the full source text returns intact. A
+ * large-number `budget` is not a substitute — it still truncates past its
+ * value and is undocumented for lossless use.
  */
+function isFullContentRequest(params: URLSearchParams): boolean {
+  const full = params.get('full')
+  return full === 'true' || full === '1'
+}
 function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex: number } | null {
   const prefix = '/api/kyber/session/'
   const suffix = '/content'
@@ -123,6 +191,36 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
     sessionId: decodeURIComponent(sessionIdRaw).trim(),
     turnIndex,
   }
+}
+
+/**
+ * `/api/kyber/session/:id/turn/:index` — one turn's measured counters.
+ *
+ * <remarks>
+ * The sibling of the turn-content route: that route answers
+ * `/turn/:index/content`, this one answers the turn's figures. The two
+ * suffixes are disjoint — the content route only claims paths ending in
+ * `/content` — so neither route shadows the other, in either direction.
+ *
+ * The id comes back raw, like the summary route's: the caller decodes it
+ * with {@link decodePathId}, so a malformed percent-encoding is the client
+ * error it is and never a 500.
+ * </remarks>
+ */
+function parseSessionTurnPath(pathname: string): { sessionId: string; turnIndex: number } | null {
+  const prefix = '/api/kyber/session/'
+  const turnMarker = '/turn/'
+  if (!pathname.startsWith(prefix)) return null
+  const rest = pathname.slice(prefix.length)
+  const turnIdx = rest.lastIndexOf(turnMarker)
+  if (turnIdx === -1) return null
+  const sessionIdRaw = rest.slice(0, turnIdx)
+  const turnIndexRaw = rest.slice(turnIdx + turnMarker.length)
+  if (!sessionIdRaw || !turnIndexRaw) return null
+  // A turn index is a number: anything else is not this route, and the
+  // detail route below answers it as the session id it cannot find.
+  if (!/^\d+$/.test(turnIndexRaw)) return null
+  return { sessionId: sessionIdRaw, turnIndex: parseInt(turnIndexRaw, 10) }
 }
 
 interface PaginationParams {
@@ -334,7 +432,12 @@ function groupCheckpointsByHarness(statuses: readonly SourceCheckpoint[]): Map<s
   return byHarness
 }
 
-function sendKyberJson(res: ServerResponse, status: number, body: unknown): void {
+function sendKyberJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): void {
   let serialized: string
   try {
     serialized = JSON.stringify(body)
@@ -343,12 +446,13 @@ function sendKyberJson(res: ServerResponse, status: number, body: unknown): void
     // detail to the client. Log it server-side and return a generic error.
     console.error('[KyberRoutes] Failed to serialize response:', err instanceof Error ? err.message : String(err))
     res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-    res.end(JSON.stringify({ error: 'Internal server error' }))
+    res.end(JSON.stringify({ error: ERR_INTERNAL }))
     return
   }
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    ...headers,
   })
   res.end(serialized)
 }
@@ -359,11 +463,379 @@ type SessionViewPayload = {
   timeline?: unknown
 }
 
+/**
+ * Bound on a `POST /api/kyber/clean` body. The payload is a tiny
+ * scope/confirm/window document, so anything past 64KB is an oversized POST
+ * in front of a wipe endpoint — reject it before the accumulator can grow
+ * without bound (F2), matching the receiver's `readBody` discipline.
+ */
+const MAX_CLEAN_BODY_BYTES = 64 * 1024
+
+/**
+ * Validate a `POST /api/kyber/clean` body: exactly one scope (`all` or a
+ * non-empty `harnesses` list), explicit `confirm: true`, and — when present —
+ * a `reingestWeeks` between 1 and MAX_CLEAN_REINGEST_WEEKS (one year) or
+ * explicit null to skip re-ingestion. Anything else answers 400 with nothing
+ * wiped.
+ */
+function parseCleanBody(bodyText: string): CleanRequest | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bodyText || '{}')
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const body = parsed as Record<string, unknown>
+  if (body['confirm'] !== true) return undefined
+  const all = body['all']
+  const harnesses = body['harnesses']
+  const hasAll = all === true
+  const hasHarnesses =
+    Array.isArray(harnesses) &&
+    harnesses.length > 0 &&
+    harnesses.every((h) => typeof h === 'string' && h.trim() !== '')
+  if ((hasAll && hasHarnesses) || (!hasAll && !hasHarnesses)) return undefined
+  const request: CleanRequest = { confirm: true }
+  if (hasAll) request.all = true
+  else request.harnesses = (harnesses as string[]).map((h) => h.trim())
+  if ('reingestWeeks' in body) {
+    const weeks = body['reingestWeeks']
+    if (weeks === null) {
+      request.reingestWeeks = null
+    } else if (typeof weeks === 'number' && Number.isSafeInteger(weeks) && weeks >= 1 && weeks <= MAX_CLEAN_REINGEST_WEEKS) {
+      request.reingestWeeks = weeks
+    } else {
+      return undefined
+    }
+  }
+  return request
+}
+
+/**
+ * The clean route reaches its parser through this one-method object rather than calling
+ * `parseCleanBody` directly, so the hardening test can force the parser to throw. A
+ * malformed payload is answered 400 from inside `parseCleanBody`'s own JSON guard, so
+ * nothing a client can send reaches that throw - which is the point: the route has to
+ * survive the defect becoming reachable, and the only honest way to test that is to
+ * inject it. Everything here still validates exactly as `parseCleanBody` does.
+ */
+export const cleanBodyParser: { parse(bodyText: string): CleanRequest | undefined } = {
+  parse: parseCleanBody,
+}
+
+/**
+ * The collaborators the shared settings, jobs and job-triggering routes need (rule R1):
+ * the same store the bridge serves, and the JobHost that owns every background job. The
+ * `web` server always passes them; `deps` is optional only so a caller that reaches the
+ * route without a host still gets a bounded answer instead of a crash.
+ */
+export type KyberRouteDeps = {
+  readonly store: CanonStore
+  /**
+   * Absent only while the host pair is still coming up. The store is resolved before the
+   * socket binds (the settings routes work from the first accepted connection), the
+   * JobHost is not: `JobHost.start()` awaits its first tick, whose maintenance pass can
+   * outlast a client. The job routes answer 503 in that window rather than reporting a
+   * server that is right there as one that does not exist.
+   */
+  readonly jobHost?: Pick<JobHost, 'getStatus' | 'runNow' | 'runJob'>
+  /**
+   * Where the capture route reads and writes harness configs (T5). Absent means the real
+   * home directory; the web server and the tests inject a temporary one.
+   */
+  readonly capture?: CaptureRouteSettings
+  /**
+   * The receiver host the coverage route reads fresh receiver state from. Absent in
+   * tests that drive the routes without a host pair — coverage then reports the
+   * receiver as unknown (never fabricated) with the enabled flag read off the store.
+   */
+  readonly receiverHost?: Pick<import('../jobs/receiver-host.js').ReceiverHost, 'getStatus' | 'getReceiverState'>
+}
+
+/** Fixed error strings: a failure body must never carry a key, a path or a host error. */
+const ERR_INVALID_BODY = 'Invalid request payload'
+const ERR_NOT_FOUND = 'Not found'
+const ERR_JOB_RUNNING = 'A job is already running'
+const ERR_INTERNAL = 'Internal server error'
+/** The bounded answer while the JobHost is still starting; shared with the `web` server. */
+export const ERR_SERVICES_STARTING = 'Background services are still starting'
+
+/** Bound on a job-triggering request body, matching the clean route's 64KB cap (F2). */
+const MAX_JSON_BODY_BYTES = 64 * 1024
+
+/**
+ * How long a started job gets to answer before the route commits to 202.
+ *
+ * The host answers synchronously for the cases the client must hear about (declined,
+ * busy, hosted elsewhere), and stays pending for the case it must not wait for (the job
+ * is running). The window only has to outlive that synchronous answer — the lease check
+ * and the spawn decision — never the job itself, which takes minutes.
+ *
+ * It was 5ms, which the lease round trip can outlast, so a declined run answered 202. It
+ * is now 25ms: comfortably above a local lease check, and still far below anything a
+ * client could call a wait for a route that has already started the job.
+ */
+const JOB_OUTCOME_GRACE_MS = 25
+
+function requireJsonContentType(req: IncomingMessage): boolean {
+  const contentType = req.headers['content-type']
+  return typeof contentType === 'string' && contentType.toLowerCase().startsWith('application/json')
+}
+
+/**
+ * Close a request whose body is oversized, once the 413 has actually left.
+ *
+ * <remarks>
+ * Destroying the socket in the same tick as `res.end()` is what made the client see
+ * ECONNRESET instead of the 413: the response was still queued behind the rest of the
+ * body. So the socket is destroyed on the response's own `finish`, after the bytes are
+ * flushed, and `Connection: close` tells the peer the socket is finished with. Reading
+ * stops first so an oversized upload is not pulled down the wire after the answer is
+ * already decided.
+ *
+ * The `close` fallback covers a response that never finishes (client gone mid-answer):
+ * without it the request would sit half-read. Both are skipped when the response object
+ * has no emitter interface, which is how the route unit tests drive it; there the destroy
+ * happens immediately, after `end`.
+ * </remarks>
+ */
+function destroyAfterResponse(req: IncomingMessage, res: ServerResponse): void {
+  const emitter = res as unknown as { on?: (event: string, listener: () => void) => unknown }
+  if (typeof emitter.on !== 'function') {
+    req.destroy()
+    return
+  }
+  req.pause()
+  res.on('finish', () => {
+    req.destroy()
+  })
+  res.on('close', () => {
+    if (!res.writableFinished) req.destroy()
+  })
+}
+
+/**
+ * Run a `req.on('end')` body handler under the guard that keeps it from escaping the
+ * listener. `run` may throw synchronously or return a promise that rejects later - and
+ * `answerFailure` decides what that answers, because the failure is route-specific (a
+ * settings write and a database clean report different things).
+ *
+ * Both failure paths check the response before answering, and the check is the point: a
+ * handler that answered 202 and *then* rejected would otherwise call `answerFailure` on a
+ * finished response, and the `ERR_STREAM_WRITE_AFTER_END` thrown by that second write
+ * escapes as an unhandled rejection - the process-level failure this whole guard exists
+ * to prevent, reintroduced through its own error path. Nothing is owed to a client that
+ * already has an answer, so a late rejection is logged and swallowed; a rejection before
+ * any answer is still a real 5xx.
+ *
+ * Exported because no route can reach the late-rejection branch on its own - every current
+ * body handler is synchronous or hands its promise to a helper that owns it - which is
+ * exactly why the missing guard stayed latent.
+ */
+export function runGuardedBodyHandler(
+  res: ServerResponse,
+  run: () => void | Promise<void>,
+  answerFailure: (err: unknown) => void,
+): void {
+  const answerable = (): boolean => !res.headersSent && !res.writableEnded
+  try {
+    const started = run()
+    if (started instanceof Promise) {
+      void started.then(undefined, (err: unknown) => {
+        console.error('[KyberRoutes] request body handler failed:', err)
+        if (!answerable()) return
+        answerFailure(err)
+      })
+    }
+  } catch (err) {
+    console.error('[KyberRoutes] request body handler failed:', err)
+    // The answer may already be out if the handler answered and then threw; see above.
+    if (!answerable()) return
+    answerFailure(err)
+  }
+}
+
+/**
+ * Read a small JSON object body and hand it to `onBody`. Answers 415 for a non-JSON
+ * content type, 413 (destroying the request once the answer has flushed) above the size
+ * cap, and 400 for malformed or non-object JSON — all before any engine call, so a
+ * rejected request changes nothing.
+ *
+ * `onBody` runs from the `req.on('end')` listener, which is outside `createServer`'s
+ * try/catch, so both a synchronous throw and a rejection from it are caught here. The
+ * settings handler is synchronous all the way down to `store.setMetadata`, so a sqlite
+ * failure (SQLITE_BUSY, a closed handle, a full disk) would otherwise become an uncaught
+ * exception and take the web server down. The body is a fixed string for the same reason
+ * every other failure body is: the underlying message names a path on this machine.
+ */
+function serveJsonObjectBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  onBody: (body: Record<string, unknown>) => void | Promise<void>,
+): void {
+  let bodyText = ''
+  let received = 0
+  let settled = false
+  const fail = (status: number, error: string): void => {
+    if (settled) return
+    settled = true
+    sendKyberJson(res, status, { error })
+  }
+  const failOversize = (): void => {
+    if (settled) return
+    settled = true
+    sendKyberJson(
+      res,
+      413,
+      { error: `Request body exceeds the ${MAX_JSON_BODY_BYTES}-byte limit` },
+      { connection: 'close' },
+    )
+    destroyAfterResponse(req, res)
+  }
+  const invoke = (body: Record<string, unknown>): void => {
+    // A fixed string, like every other failure body here: a sqlite or job-host message
+    // names a path on this machine.
+    runGuardedBodyHandler(res, () => onBody(body), () => {
+      sendKyberJson(res, 500, { error: ERR_INTERNAL })
+    })
+  }
+  req.on('data', (chunk) => {
+    if (settled) return
+    received += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+    if (received > MAX_JSON_BODY_BYTES) {
+      failOversize()
+      return
+    }
+    bodyText += chunk
+  })
+  req.on('error', () => {
+    fail(400, ERR_INVALID_BODY)
+  })
+  req.on('end', () => {
+    if (settled) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(bodyText === '' ? '{}' : bodyText)
+    } catch {
+      fail(400, ERR_INVALID_BODY)
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      fail(400, ERR_INVALID_BODY)
+      return
+    }
+    settled = true
+    invoke(parsed as Record<string, unknown>)
+  })
+}
+
+/**
+ * Answer a job trigger. `declined`, `busy` and `hosted-elsewhere` mean this server did not
+ * start anything, and the client can act on that; a started job answers 202 and reports
+ * its own outcome through `GET /api/kyber/jobs`.
+ */
+function sendJobStarted(res: ServerResponse, started: Promise<JobOutcome>, failure: string): void {
+  let answered = false
+  let grace: NodeJS.Timeout | undefined
+  const answer = (status: number, body: unknown): void => {
+    if (answered) return
+    answered = true
+    // The grace timer exists to bound a request that settles late, so it belongs to this
+    // request and nothing longer: once the real answer is out, leaving it armed keeps a
+    // live handle per answered request for the rest of the process. `answered` already
+    // stops it writing; clearing it stops it existing.
+    if (grace !== undefined) {
+      clearTimeout(grace)
+      grace = undefined
+    }
+    sendKyberJson(res, status, body)
+  }
+  // The rejection is answered with a fixed string: a spawn failure names real paths on
+  // this machine and has no business crossing the wire.
+  void started.then(
+    (outcome) => {
+      if (outcome.outcome === 'declined' || outcome.outcome === 'busy' || outcome.outcome === 'hosted-elsewhere') {
+        answer(409, { error: ERR_JOB_RUNNING })
+      }
+    },
+    () => {
+      answer(500, { error: failure })
+    },
+  )
+  const timer = setTimeout(() => answer(202, { accepted: true }), JOB_OUTCOME_GRACE_MS)
+  // Never hold the event loop open for an answer the client is waiting on.
+  if (typeof timer.unref === 'function') timer.unref()
+  grace = timer
+}
+
+/**
+ * A harness the import job could actually read: either a canonical harness id with a
+ * source descriptor, or a family label (`codex`, what the native tray sends) that expands
+ * to its member descriptors. The name is forwarded as sent, so the id the child resolves
+ * never differs from the one the caller asked for — and the expansion itself is the
+ * registry's, so a family label that reaches the import does not become a throw inside
+ * the child after this route has already answered 202.
+ */
+function isImportableHarness(name: string): boolean {
+  return resolveHarnessScope([name]).descriptors.length > 0
+}
+
+/** `POST /api/kyber/refresh`: only a real UI surface may ask; the host owns `scheduled`. */
+function parseRefreshBody(body: Record<string, unknown>): 'tray' | 'web' | undefined {
+  const surface = body['surface']
+  return surface === 'tray' || surface === 'web' ? surface : undefined
+}
+
+/** A folder-history import window of 1..52 weeks; a year is the widest anyone has asked for. */
+const MAX_IMPORT_HISTORY_WEEKS = 52
+
+/**
+ * `POST /api/kyber/import-history`: one-off history import, never the scheduled setting.
+ * The singular `harness` (what the native tray sends) and the plural `harnesses` (the web
+ * UI) are both accepted, and together they are ambiguous, so both is a 400.
+ */
+function parseImportHistoryBody(
+  body: Record<string, unknown>,
+): { weeks: number; harnesses: string[] } | undefined {
+  const rawWeeks = body['weeks']
+  let weeks = 1
+  if (rawWeeks !== undefined) {
+    if (
+      typeof rawWeeks !== 'number' ||
+      !Number.isSafeInteger(rawWeeks) ||
+      rawWeeks < 1 ||
+      rawWeeks > MAX_IMPORT_HISTORY_WEEKS
+    ) {
+      return undefined
+    }
+    weeks = rawWeeks
+  }
+  const hasSingular = 'harness' in body
+  const hasPlural = 'harnesses' in body
+  if (hasSingular && hasPlural) return undefined
+  if (!hasSingular && !hasPlural) return { weeks, harnesses: [] }
+
+  const asked: unknown[] = hasSingular ? [body['harness']] : body['harnesses'] as unknown[]
+  if (!Array.isArray(asked) || asked.length === 0) return undefined
+  const harnesses: string[] = []
+  for (const entry of asked) {
+    // descriptorFor is the registry's own resolver, so a harness the import could not read
+    // is rejected here rather than failing inside the child job after a 202.
+    if (typeof entry !== 'string' || !isImportableHarness(entry.trim())) {
+      return undefined
+    }
+    harnesses.push(entry.trim())
+  }
+  return { weeks, harnesses }
+}
+
 export function handleKyberRequest(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   bridge: KyberBridge,
+  deps?: KyberRouteDeps,
 ): boolean {
   if (!url.pathname.startsWith('/api/kyber/') && url.pathname !== '/api/kyber') {
     return false
@@ -418,14 +890,58 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing session id' })
       return true
     }
-    const budgetParam = url.searchParams.get('budget')
-    const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-    const body = bridge.assembleTurnContent(sessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+    const budget = parseContentBudget(url.searchParams.get('budget'))
+    // Explicit lossless path first: `?full=true` maps to an unbounded
+    // budget so over-budget source text returns intact with no truncation
+    // flags. A plain `budget` number still truncates past its value.
+    const full = isFullContentRequest(url.searchParams)
+    let effectiveBudget: number | undefined
+    if (full) {
+      effectiveBudget = Number.POSITIVE_INFINITY
+    } else if (budget !== undefined) {
+      effectiveBudget = budget
+    }
+    const body = bridge.assembleTurnContent(sessionId, turnIndex, effectiveBudget)
     if (!body) {
       sendKyberJson(res, 404, { error: 'Turn content not found' })
       return true
     }
     sendKyberJson(res, 200, body)
+    return true
+  }
+
+  // One turn's measured counters. Must run before the /session/:id detail
+  // route below, which would otherwise treat ".../turn/1" as part of the
+  // session id and 404 it. Additive: the turn-content route above and the
+  // detail route below are untouched.
+  const turnFiguresRoute = parseSessionTurnPath(url.pathname)
+  if (turnFiguresRoute !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const sessionId = decodePathId(turnFiguresRoute.sessionId)
+    if (sessionId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed session id' })
+      return true
+    }
+    if (!sessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    const figures = bridge.getSessionTurnFigures(sessionId, turnFiguresRoute.turnIndex)
+    if (!figures) {
+      // The one not-found body the sibling turn-content route answers: an
+      // unknown session and an unknown turn are one shape here, so the turn
+      // surface keeps one not-found body.
+      sendKyberJson(res, 404, { error: 'Turn content not found' })
+      return true
+    }
+    sendKyberJson(res, 200, {
+      session_id: sessionId,
+      turn_index: turnFiguresRoute.turnIndex,
+      ...figures,
+    })
     return true
   }
 
@@ -445,9 +961,15 @@ export function handleKyberRequest(
     if (turnParam !== null && turnParam.trim() !== '') {
       const turnIndex = parseInt(turnParam, 10)
       if (!isNaN(turnIndex)) {
-        const budgetParam = url.searchParams.get('budget')
-        const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+        const budget = parseContentBudget(url.searchParams.get('budget'))
+        const full = isFullContentRequest(url.searchParams)
+        let effectiveBudget: number | undefined
+        if (full) {
+          effectiveBudget = Number.POSITIVE_INFINITY
+        } else if (budget !== undefined) {
+          effectiveBudget = budget
+        }
+        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, effectiveBudget)
         if (!turnBody) {
           sendKyberJson(res, 404, { error: 'Turn content not found' })
           return true
@@ -458,12 +980,52 @@ export function handleKyberRequest(
     }
     const span = (url.searchParams.get('span') ?? '').trim() || undefined
     const part = (url.searchParams.get('part') ?? '').trim() || undefined
-    const body = bridge.getSessionContent(contentSessionId, { spanId: span, part })
+    // Explicit lossless path (`?full=true`) for over-budget session content
+    // on this route. The whole-turn shared-context reader is served by the
+    // turn-content endpoint above (`/api/kyber/session/:id/turn/:index/content`),
+    // not here — this flag only widens this session-content response.
+    // Existing callers without `full` keep the capped behavior unchanged.
+    const full = isFullContentRequest(url.searchParams)
+    const body = bridge.getSessionContent(contentSessionId, { spanId: span, part, ...(full ? { full: true as const } : {}) })
     if (!body) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
     sendKyberJson(res, 200, body)
+    return true
+  }
+
+  // The bounded session summary. Must run before the /session/:id detail route
+  // below, which would otherwise treat ".../summary" as part of the session id
+  // and 404 it. Additive: the detail route itself is untouched.
+  const summarySessionId = parseSessionSummaryPath(url.pathname)
+  if (summarySessionId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    // Decoded with the shared helper, so a malformed percent-encoding is the
+    // client error it is — the 400 shape the quarantine and problem routes
+    // give for the same fault — and never the 500 an uncaught URIError
+    // surfaces as.
+    const sessionId = decodePathId(summarySessionId)
+    if (sessionId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed session id' })
+      return true
+    }
+    if (!sessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    // No run or execution linkage is served: neither the `session` table nor
+    // the session payload holds such a field, so a link here would be invented
+    // rather than measured.
+    const summary = bridge.getSessionSummary(sessionId)
+    if (!summary) {
+      sendKyberJson(res, 404, { error: 'Session not found' })
+      return true
+    }
+    sendKyberJson(res, 200, summary)
     return true
   }
 
@@ -535,14 +1097,28 @@ export function handleKyberRequest(
     return true
   }
 
+  // Quarantine and problems share one harness-filter contract (measurability.ts): absent
+  // or `all` is the backwards-compatible unfiltered list; `unknown` keeps unattributed
+  // rows only; a concrete id keeps its scope; anything else is a 400, never silently
+  // unfiltered (a typo scoping to everything would hide the rows being looked for).
+  // Lists stay metadata-only and bounded; the stored raw payload / exception stack ride
+  // on the detail routes below.
   if (url.pathname === '/api/kyber/quarantine') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
+    const filter = parseHarnessFilter(url.searchParams.get('harness'))
+    if (filter.kind === 'invalid') {
+      sendKyberJson(res, 400, {
+        error: `invalid harness filter ${JSON.stringify(filter.raw)}: expected all, unknown, or a known harness id`,
+      })
+      return true
+    }
+    const scope = filter.kind === 'all' ? undefined : filter.kind === 'unknown' ? 'unknown' : filter.id
     const { limit, offset, page } = parsePaginationParams(url, 200)
-    const entries = bridge.getQuarantine(limit, offset)
-    const total = bridge.getQuarantineCount()
+    const entries = bridge.getQuarantine(limit, offset, scope)
+    const total = bridge.getQuarantineCount(scope)
     sendKyberJson(res, 200, {
       entries,
       data: entries,
@@ -553,14 +1129,47 @@ export function handleKyberRequest(
     return true
   }
 
+  // One quarantined span with its incoming evidence (v18+ rows). Older rows read
+  // `rawPayload: null, evidenceAvailable: false` — explicitly unavailable, never invented.
+  if (url.pathname.startsWith('/api/kyber/quarantine/')) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const spanId = decodePathId(url.pathname.slice('/api/kyber/quarantine/'.length))
+    if (spanId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed quarantine span id' })
+      return true
+    }
+    if (!spanId) {
+      sendKyberJson(res, 400, { error: 'Missing quarantine span id' })
+      return true
+    }
+    const entry = bridge.getQuarantineEntry(spanId)
+    if (!entry) {
+      sendKyberJson(res, 404, { error: 'Quarantine entry not found' })
+      return true
+    }
+    sendKyberJson(res, 200, entry)
+    return true
+  }
+
   if (url.pathname === '/api/kyber/problems') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
+    const filter = parseHarnessFilter(url.searchParams.get('harness'))
+    if (filter.kind === 'invalid') {
+      sendKyberJson(res, 400, {
+        error: `invalid harness filter ${JSON.stringify(filter.raw)}: expected all, unknown, or a known harness id`,
+      })
+      return true
+    }
+    const scope = filter.kind === 'all' ? undefined : filter.kind === 'unknown' ? 'unknown' : filter.id
     const { limit, offset, page } = parsePaginationParams(url, 200)
-    const problems = bridge.getProblems(limit, offset)
-    const total = bridge.getProblemCount()
+    const problems = bridge.getProblems(limit, offset, scope)
+    const total = bridge.getProblemCount(scope)
     sendKyberJson(res, 200, {
       problems,
       data: problems,
@@ -568,6 +1177,32 @@ export function handleKyberRequest(
       page,
       limit,
     })
+    return true
+  }
+
+  // One recorded problem with its exception evidence. `message` is the exact stored
+  // message; `stack` is null unless the problem came from a throw. Singular `problem`
+  // so the detail route cannot swallow the plural list route.
+  if (url.pathname.startsWith('/api/kyber/problem/')) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const rawId = decodePathId(url.pathname.slice('/api/kyber/problem/'.length))
+    if (rawId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed problem id' })
+      return true
+    }
+    if (!rawId) {
+      sendKyberJson(res, 400, { error: 'Missing problem id' })
+      return true
+    }
+    const problem = bridge.getProblemEntry(rawId)
+    if (!problem) {
+      sendKyberJson(res, 404, { error: 'Problem not found' })
+      return true
+    }
+    sendKyberJson(res, 200, problem)
     return true
   }
 
@@ -589,8 +1224,15 @@ export function handleKyberRequest(
 
   // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T5,
   // issues #189/#198/#199). Refresh window, receiver activity, quarantine
-  // reasons, and checkpoint statuses in one read-only payload — every count
-  // comes from a row that exists, and anything unrecorded reads as unknown.
+  // reasons, checkpoint statuses, and fresh receiver state in one read-only payload —
+  // every count comes from a row that exists, and anything unrecorded reads as unknown.
+  //
+  // `ingest` separates transport from corpus on purpose: `ingestedCount` is received
+  // OTLP span/log volume as the collector tallied it on arrival (quarantined spans
+  // included), while `recordCount` is canonical records stored. `ingestedCount > 0`
+  // beside every `recordCount === 0` is quarantine, not silence — and `receiver`
+  // (below) says whether the collector is even accepting. Nothing here lets
+  // quarantined data read as accepted canonical records.
   if (url.pathname === '/api/kyber/coverage') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
@@ -607,7 +1249,26 @@ export function handleKyberRequest(
     // the checkpoint status is not observable from this page, [] means the
     // read succeeded and zero units exist (genuine zero).
     const checkpoints = bridge.getSourceCheckpointStatuses()
-    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints })
+    // Fresh receiver state from the host's 10-second poll (the receiver is a separate
+    // process; this is its propagated `/healthz`, never a guess). Without a host —
+    // tests driving the routes bare — the receiver reads as unknown with the enabled
+    // flag off the store, and `healthy: false`: unobserved is never green.
+    const receiver: ReceiverState = deps?.receiverHost?.getReceiverState() ?? {
+      enabled: deps?.store !== undefined && readSetting(deps.store, SETTING_KEYS.receiverHosted) === 'on',
+      endpoint: null,
+      status: 'unknown',
+      listening: null,
+      hostedByUs: null,
+      paused: null,
+      checkedAt: null,
+      lastAcceptedAt: null,
+      failures5m: null,
+      lastError: null,
+      lastCode: null,
+      lastErrorAt: null,
+      healthy: false,
+    }
+    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints, receiver })
     return true
   }
 
@@ -957,53 +1618,7 @@ export function handleKyberRequest(
     return true
   }
 
-  // Backward-compatible endpoints for older/legacy callers
-  if (url.pathname === '/api/kyber/context') {
-    if (req.method !== 'GET') {
-      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    }
-    let id = (url.searchParams.get('id') ?? '').trim()
-    if (!id) {
-      const list = bridge.listSessions(1)
-      if (list.length === 0) {
-        sendKyberJson(res, 404, { error: 'No sessions available' })
-        return true
-      }
-      id = list[0].session_id
-    }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
-      sendKyberJson(res, 404, { error: 'Session not found' })
-      return true
-    }
-    sendKyberJson(res, 200, payload.context ?? {})
-    return true
-  }
-
-  if (url.pathname === '/api/kyber/schema') {
-    if (req.method !== 'GET') {
-      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    }
-    let id = (url.searchParams.get('id') ?? '').trim()
-    if (!id) {
-      const list = bridge.listSessions(1)
-      if (list.length === 0) {
-        sendKyberJson(res, 404, { error: 'No sessions available' })
-        return true
-      }
-      id = list[0].session_id
-    }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
-      sendKyberJson(res, 404, { error: 'Session not found' })
-      return true
-    }
-    sendKyberJson(res, 200, payload.schema ?? null)
-    return true
-  }
-
+  // Backward-compatible endpoint for older/legacy callers.
   if (url.pathname === '/api/kyber/timeline') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
@@ -1018,12 +1633,15 @@ export function handleKyberRequest(
       }
       id = list[0].session_id
     }
-    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
-    if (!payload) {
+    // The timeline is session metadata, so it is read as one narrow fragment
+    // of the payload rather than as the whole session blob the route used to
+    // page in for it.
+    const timeline = bridge.getSessionTimeline(id)
+    if (!timeline) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
-    sendKyberJson(res, 200, payload.timeline ?? [])
+    sendKyberJson(res, 200, timeline.timeline ?? [])
     return true
   }
 
@@ -1068,6 +1686,263 @@ export function handleKyberRequest(
     sendKyberJson(res, 200, {
       provider: provider.name,
       isConfigured: provider.isConfigured,
+    })
+    return true
+  }
+
+  // Model-window catalog (D15). Refresh is matched first so a snapshot
+  // prefix cannot swallow it. Neither route reads a caller-supplied URL.
+  if (url.pathname === '/api/kyber/model-catalog/refresh') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    void bridge.refreshModelCatalog().then(
+      (body) => sendKyberJson(res, 200, body),
+      () => sendKyberJson(res, 500, { error: 'Model catalog refresh failed' }),
+    )
+    return true
+  }
+
+  if (url.pathname === '/api/kyber/model-catalog') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    sendKyberJson(res, 200, bridge.getModelCatalog())
+    return true
+  }
+
+  // Harness OTel capture (ADR 0031): the Settings drawer's status and enable/disable. The
+  // module owns the route; this hands it the body helpers every mutating route shares.
+  if (url.pathname === '/api/kyber/capture') {
+    return handleCaptureRequest(req, res, url, deps, {
+      sendJson: sendKyberJson,
+      requireJsonContentType,
+      serveJsonObjectBody,
+    })
+  }
+
+  // Shared settings (rule R1): the tray and the web UI read and write the same shared
+  // settings, so both go through this one route. Storage and the value encoding stay in
+  // shared-settings.ts; this is only the JSON view over it.
+  if (url.pathname === '/api/kyber/settings') {
+    // No store means this process does not host the shared settings (see KyberRouteDeps):
+    // the route is simply not mounted here, and the JSON 404 catch-all owns the answer.
+    const store = deps?.store
+    if (store === undefined) {
+      sendKyberJson(res, 404, { error: ERR_NOT_FOUND })
+      return true
+    }
+    if (req.method !== 'GET' && req.method !== 'PUT') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (req.method === 'GET') {
+      sendKyberJson(res, 200, readSettings(store))
+      return true
+    }
+    if (!requireJsonContentType(req)) {
+      sendKyberJson(res, 415, { error: 'Content-Type must be application/json' })
+      return true
+    }
+    serveJsonObjectBody(req, res, (body) => {
+      // Validate the whole patch first: a body with one bad key writes none of them.
+      const patch = parseSettingsPatch(body)
+      if (patch === undefined) {
+        sendKyberJson(res, 400, { error: 'Invalid settings payload' })
+        return
+      }
+      sendKyberJson(res, 200, applyPartialSettings(store, body, patch))
+    })
+    return true
+  }
+
+  // Job status for the tray and the web UI. The host status is flat; the tray UI expects
+  // the refresh facts nested, so the mapping happens here once and both surfaces see the
+  // same shape.
+  if (url.pathname === '/api/kyber/jobs') {
+    // No JobHost yet means the host pair is still coming up (see KyberRouteDeps), which
+    // is "not yet", not "not here": a 404 would report a server that is right there as
+    // one that does not exist.
+    const jobHost = deps?.jobHost
+    if (jobHost === undefined) {
+      sendKyberJson(res, deps === undefined ? 404 : 503, {
+        error: deps === undefined ? ERR_NOT_FOUND : ERR_SERVICES_STARTING,
+      })
+      return true
+    }
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const status = jobHost.getStatus()
+    sendKyberJson(res, 200, {
+      refresh: {
+        state: status.state,
+        lastSuccessAt: status.lastSuccessAt,
+        lastFailure: status.lastFailure,
+        nextDueAt: status.nextDueAt,
+      },
+      paused: status.paused,
+      storeGeneration: storeGeneration(deps!.store),
+      hostedElsewhere: status.hostedElsewhere,
+    })
+    return true
+  }
+
+  // Manual refresh. `scheduled` and `cli` are deliberately not accepted here: the host
+  // owns the schedule, and a client-triggered run must say which surface asked for it.
+  if (url.pathname === '/api/kyber/refresh') {
+    // Still coming up rather than not here; see the jobs route and KyberRouteDeps.
+    const jobHost = deps?.jobHost
+    if (jobHost === undefined) {
+      sendKyberJson(res, deps === undefined ? 404 : 503, {
+        error: deps === undefined ? ERR_NOT_FOUND : ERR_SERVICES_STARTING,
+      })
+      return true
+    }
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (!requireJsonContentType(req)) {
+      sendKyberJson(res, 415, { error: 'Content-Type must be application/json' })
+      return true
+    }
+    serveJsonObjectBody(req, res, (body) => {
+      const surface = parseRefreshBody(body)
+      if (surface === undefined) {
+        sendKyberJson(res, 400, { error: 'Invalid refresh request payload' })
+        return
+      }
+      const status = jobHost.getStatus()
+      // A job already running here means nothing was started, so the host is not called.
+      if (status.state === 'running') {
+        sendKyberJson(res, 409, { error: ERR_JOB_RUNNING })
+        return
+      }
+      // Another process holds the jobs lease, so this host will decline the run only
+      // after its own lease attempt completes — which can outlast the grace window and
+      // turn "nothing started anywhere" into a 202 saying the opposite. The status
+      // already knows, so ask it first and start nothing.
+      if (status.hostedElsewhere) {
+        sendKyberJson(res, 409, { error: ERR_JOB_RUNNING })
+        return
+      }
+      sendJobStarted(res, jobHost.runNow(surface), 'Refresh failed to start')
+    })
+    return true
+  }
+
+  // One-off folder-history import, requested explicitly by a surface. It never touches
+  // the scheduled folder-import setting: "import this once" and "keep importing" are
+  // different decisions.
+  if (url.pathname === '/api/kyber/import-history') {
+    // Unmounted without the collaborators: see KyberRouteDeps.
+    if (deps === undefined) {
+      sendKyberJson(res, 404, { error: ERR_NOT_FOUND })
+      return true
+    }
+    const jobHost = deps?.jobHost
+    if (jobHost === undefined) {
+      sendKyberJson(res, deps === undefined ? 404 : 503, {
+        error: deps === undefined ? ERR_NOT_FOUND : ERR_SERVICES_STARTING,
+      })
+      return true
+    }
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (!requireJsonContentType(req)) {
+      sendKyberJson(res, 415, { error: 'Content-Type must be application/json' })
+      return true
+    }
+    serveJsonObjectBody(req, res, (body) => {
+      const request = parseImportHistoryBody(body)
+      if (request === undefined) {
+        sendKyberJson(res, 400, { error: 'Invalid import-history request payload' })
+        return
+      }
+      const status = jobHost.getStatus()
+      if (status.state === 'running' || status.hostedElsewhere) {
+        sendKyberJson(res, 409, { error: ERR_JOB_RUNNING })
+        return
+      }
+      const args = ['--weeks', String(request.weeks)]
+      for (const harness of request.harnesses) args.push('--harness', harness)
+      sendJobStarted(res, jobHost.runJob('import', args), 'Import failed to start')
+    })
+    return true
+  }
+
+  // Database clean (issue #312). The web dash reaches the central
+  // `cleanDatabase` module over this route; the request body carries the
+  // scope, the confirmation, and the optional re-ingest window. Matched
+  // before the JSON-404 catch-all like every other /api/kyber/* route.
+  if (url.pathname === '/api/kyber/clean') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    let bodyText = ''
+    let received = 0
+    let settled = false
+    // Only the malformed-answer path uses this; the oversize answer is sent inline below
+    // because it also has to close the connection (destroyAfterResponse).
+    const rejectCleanBody = (status: number, error: string): void => {
+      if (settled) return
+      settled = true
+      sendKyberJson(res, status, { error })
+    }
+    req.on('data', (chunk) => {
+      if (settled) return
+      received += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+      if (received > MAX_CLEAN_BODY_BYTES) {
+        settled = true
+        sendKyberJson(
+          res,
+          413,
+          { error: `Clean request body exceeds the ${MAX_CLEAN_BODY_BYTES}-byte limit` },
+          { connection: 'close' },
+        )
+        destroyAfterResponse(req, res)
+        return
+      }
+      bodyText += chunk
+    })
+    req.on('error', () => {
+      rejectCleanBody(400, 'Invalid clean request payload')
+    })
+    req.on('end', () => {
+      if (settled) return
+      settled = true
+      // The parse and the clean both belong inside the guard: this listener is an
+      // `async` callback on the request stream, outside `createServer`'s try/catch, so a
+      // throw here would reject a promise nobody awaits and take the web server with it.
+      // The answers are unchanged - 400 for a body the parser rejects, 409 when a clean
+      // is already running, 500 'Clean failed' for anything else.
+      runGuardedBodyHandler(
+        res,
+        () => {
+          const parsed = cleanBodyParser.parse(bodyText)
+          if (parsed === undefined) {
+            sendKyberJson(res, 400, { error: 'Invalid clean request payload' })
+            return
+          }
+          return bridge.cleanDatabase(parsed).then((report) => {
+            sendKyberJson(res, 200, report)
+          })
+        },
+        (err) => {
+          if (err instanceof Error && (err as { code?: string }).code === 'CLEAN_BUSY') {
+            sendKyberJson(res, 409, { error: 'A refresh or clean is already running' })
+            return
+          }
+          sendKyberJson(res, 500, { error: 'Clean failed' })
+        },
+      )
     })
     return true
   }

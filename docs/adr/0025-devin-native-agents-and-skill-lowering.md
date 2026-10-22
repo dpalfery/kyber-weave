@@ -103,7 +103,7 @@ today". Cloud also offers fewer models than Desktop.
    in-process; `architect` gathers its own sweeps and returns a live Azure question as
    `STATUS: BLOCKED`, which the conductor's plan path now puts to `azure-reader` and answers.
    `product-owner` already delegated research only "when available". Both body edits are
-   harness-neutral, so they are reviewed evolutions of the Hotshot golden rather than
+   harness-neutral, so they are reviewed evolutions of the canonical source rather than
    Devin-only text.
 
 5. **Every subagent pins an exact Devin model id.** Leaving `model` out would put planners and

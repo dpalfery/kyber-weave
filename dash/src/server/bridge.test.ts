@@ -5,11 +5,13 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore } from '../canon/store.js'
+import type { CanonicalRecord, ContentPart } from '../canon/types.js'
 import {
   KyberBridge,
   SHARE_DROP_WARN_LIMIT,
   type ProblemRow,
   type QuarantineRow,
+  type TurnContentPart,
 } from './bridge.js'
 
 type QuarantineRowWithTimestamp = QuarantineRow & { timestamp?: string | null }
@@ -699,3 +701,90 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
   })
 })
 
+
+// T10b (D7): a tool definition the turn offered without keeping resident is
+// still a fact about the turn, so the turn's content must carry the flag onto
+// the part the reader sees. It must also add no resident tokens to the Tools
+// block, which is the turn's resident-tool figure.
+describe('turn content parts carry tool-definition residency (T10b, D7)', () => {
+  const SESSION_ID = 'sess-resident-parts-001'
+  const SPAN_ID = 'span-resident-turn-0'
+
+  function turnRecord(parts: ContentPart[]): CanonicalRecord {
+    return {
+      spanId: SPAN_ID,
+      traceId: 'trace-resident-parts-001',
+      parentSpanId: null,
+      source: 'claude-code',
+      harness: 'claude-code',
+      sessionId: SESSION_ID,
+      name: 'llm_request',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-03T17:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: { freshInput: 100, cacheRead: 0, cacheCreation: 0, output: 10, reportedInput: 100, reportedOutput: 10 },
+      content: {},
+      parts,
+      cost: { basis: 'unknown', status: 'no_rate' },
+    }
+  }
+
+  function assembleWith(parts: ContentPart[]) {
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([turnRecord(parts)])
+      store.upsertSession({
+        sessionId: SESSION_ID,
+        harness: 'claude-code',
+        label: 'Resident parts',
+        payload: {
+          id: SESSION_ID,
+          harness: 'claude-code',
+          turns: [{ index: 0, spanId: SPAN_ID, model: 'm' }],
+        },
+      })
+      const bridge = new KyberBridge({ store })
+      const body = bridge.assembleTurnContent(SESSION_ID, 0, Number.POSITIVE_INFINITY)
+      expect(body).not.toBeNull()
+      return body!
+    } finally {
+      store.close()
+    }
+  }
+
+  function partWithText(parts: TurnContentPart[], text: string): TurnContentPart & { resident?: false } {
+    const found = parts.find((part) => part.text === text)
+    expect(found, `a part carrying ${text} is returned`).toBeDefined()
+    return found as TurnContentPart & { resident?: false }
+  }
+
+  it('carries resident:false from a stored non-resident tool definition onto the returned part', () => {
+    const body = assembleWith([
+      { part: 'tool_definitions', text: 'NONRES_SCHEMA_DEFERRED', tokens: 900, server: 'github', resident: false },
+      { part: 'tool_definitions', text: 'RES_SCHEMA_LOADED', tokens: 300, server: 'context7' },
+    ])
+
+    expect(partWithText(body.parts, 'NONRES_SCHEMA_DEFERRED').resident).toBe(false)
+  })
+
+  it('leaves an unflagged tool definition unflagged, so it still reads as resident', () => {
+    const body = assembleWith([
+      { part: 'tool_definitions', text: 'NONRES_SCHEMA_DEFERRED', tokens: 900, server: 'github', resident: false },
+      { part: 'tool_definitions', text: 'RES_SCHEMA_LOADED', tokens: 300, server: 'context7' },
+    ])
+
+    expect(partWithText(body.parts, 'RES_SCHEMA_LOADED').resident).toBeUndefined()
+  })
+
+  it('adds no resident tokens to the Tools block for a non-resident definition', () => {
+    const body = assembleWith([
+      { part: 'tool_definitions', text: 'NONRES_SCHEMA_DEFERRED', tokens: 900, server: 'github', resident: false },
+      { part: 'tool_definitions', text: 'RES_SCHEMA_LOADED', tokens: 300, server: 'context7' },
+    ])
+
+    const tools = body.blocks.find((block) => block.key === 'tool_definitions')
+    expect(tools?.tokens).toBe(300)
+  })
+})

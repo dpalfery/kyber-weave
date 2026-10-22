@@ -525,3 +525,75 @@ describe('analyzeContext — no message structure (R7.6)', () => {
     expect(result.turns[1].buckets.system_prompt).toBe(50)
   })
 })
+
+// ---------------------------------------------------------------------------
+// D7 — a tool definition offered but not resident adds no context tokens
+// ---------------------------------------------------------------------------
+
+describe('analyzeContext — non-resident tool definitions (D7)', () => {
+  it('adds no tokens to any bucket, the bucketed total, or the residual for a definition marked resident:false', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [
+          turn({
+            parts: [
+              part('system_prompt', 1_000),
+              part('tool_definitions', 2_000, { resident: false }),
+            ],
+            inputTokens: 1_000,
+            freshInput: 1_000,
+          }),
+        ],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect(result.turns[0].buckets.tool_definitions).toBe(0)
+    expect(result.turns[0].bucketedTokens).toBe(1_000)
+    expect(result.turns[0].residual.tokens).toBe(0)
+  })
+
+  it('drops a non-resident definition from its MCP server group and from the built-in total', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [
+          turn({
+            parts: [
+              part('tool_definitions', 300, { server: 'github', resident: false }),
+              part('tool_definitions', 400, { server: undefined, resident: false }),
+            ],
+            inputTokens: 0,
+            freshInput: 0,
+          }),
+        ],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect(result.turns[0].toolDefinitionsByServer.has('github')).toBe(false)
+    expect(result.turns[0].builtinToolDefinitionTokens).toBe(0)
+    expect(result.turns[0].buckets.tool_definitions).toBe(0)
+  })
+
+  it('still counts a definition that carries no resident flag, beside a non-resident one', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [
+          turn({
+            parts: [
+              part('tool_definitions', 300, { server: 'github' }),
+              part('tool_definitions', 900, { server: 'github', resident: false }),
+            ],
+            inputTokens: 300,
+            freshInput: 300,
+          }),
+        ],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect(result.turns[0].toolDefinitionsByServer.get('github')).toBe(300)
+    expect(result.turns[0].buckets.tool_definitions).toBe(300)
+    expect(result.turns[0].residual.tokens).toBe(0)
+  })
+})

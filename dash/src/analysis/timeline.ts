@@ -84,7 +84,7 @@ export type SubagentSession = {
  * activity such as title generation says so the same way (R9.3, R9.4).
  */
 const SUBAGENT_MARKERS = ['subagent', 'sub-agent', 'sub_agent']
-const AUXILIARY_MARKERS = ['title']
+const AUXILIARY_MARKERS = ['title', 'xtabprovider']
 
 /**
  * The attributes a record preserved in `raw` (adapters store the harness

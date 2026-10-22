@@ -51,6 +51,8 @@ export type { ParsedProviderCall } from '../providers/types.js'
 import {
   contentFromParts,
   notMeasurable,
+  SKILLS_INVOKED_KEY,
+  SKILLS_LISTED_KEY,
   type CanonicalRecord,
   type ContentPart,
   type CostBlock,
@@ -63,7 +65,8 @@ import { billableOutputTokens } from '../pricing/models.js'
 // same canonical form so both identities agree by construction. Acyclic:
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
-import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
+import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
+import { FILE_SOURCE_PREFIX, measurabilityForChild, measurabilityForRecord, surveyFamily } from '../canon/measurability.js'
 import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
   ReaderToolCall,
@@ -219,6 +222,8 @@ export type TokenConvention = 'exclusive' | 'inclusive'
  *   * pi / omp — `usage.input` excludes cache; `usage.cacheRead` /
  *     `usage.cacheWrite` are separate counters (the same shape the pi
  *     adapter's GenAI evidence records).
+ *   * commandcode — the session's AI SDK `inputTokens` includes both
+ *     cache classes; dash/src/providers/commandcode.ts subtracts them.
  *   * every other provider funnels through the same Anthropic-semantics
  *     normalization before yielding a call.
  */
@@ -232,6 +237,7 @@ export const PROVIDER_CONVENTIONS: ReadonlyMap<string, TokenConvention> = new Ma
       'codebuff',
       'codewhale',
       'codex',
+      'commandcode',
       'copilot',
       // Upstream's three Copilot surface filters. They are the same harness
       // reached through different front ends, so they share Copilot's
@@ -383,6 +389,99 @@ export function costBlockFor(call: ParsedProviderCall): CostBlock {
  * session trace — a parsed call carries no parent evidence, and no parent is
  * invented (R4.3's rule, applied on the way in rather than at the end).
  */
+/**
+ * True when the call is a Copilot shutdown rollup leg (dash/src/providers/copilot.ts:
+ * dedup key `copilot:<sid>:shutdown:<model>:<n>`).
+ *
+ * Output tokens are intentionally excluded (0) from shutdown rollups to avoid
+ * double-counting with per-turn assistant.message events. Honest unobservability
+ * declares output as not measurable rather than a measured zero so reasoning
+ * can be surfaced without violating the subset invariant (issue #241).
+ */
+export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.includes(':shutdown:')
+  )
+}
+
+/**
+ * True when the call is a Copilot row whose output is absent by design rather
+ * than a measured zero: the shutdown rollup legs above, plus `copilot-store:`
+ * rows whose initiator is anything but 'compaction', which omit output
+ * because per-turn assistant messages already own it. A compaction store row
+ * is the CLI summarizing its own context with no assistant.message to pair
+ * with, so its output 0 stays a measured zero. Both absent cases keep output
+ * at 0 (folding reasoning would manufacture output) and declare it not
+ * measurable so the subset invariant still validates (issue #240).
+ */
+const COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON =
+  'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'
+
+const COPILOT_STORE_OUTPUT_ABSENT_REASON =
+  'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
+
+function copilotStoreOutputOmitted(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.startsWith('copilot-store:') &&
+    call.initiator !== 'compaction'
+  )
+}
+
+/**
+ * The not-measurable reason when Copilot left output off the row on purpose.
+ * Shutdown rollups and non-compaction store rows share this predicate with
+ * the reason text so the two cannot drift apart.
+ */
+export function copilotAbsentOutputReason(call: ParsedProviderCall): string | undefined {
+  if (isCopilotShutdownRollup(call)) return COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON
+  if (copilotStoreOutputOmitted(call)) return COPILOT_STORE_OUTPUT_ABSENT_REASON
+  return undefined
+}
+
+export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
+  return copilotAbsentOutputReason(call) !== undefined
+}
+
+/**
+ * The skill names a parsed call invoked, in first-seen order with repeats
+ * collapsed. Undefined when there are none, so the caller omits the key rather
+ * than storing an empty list. Names are only ever the parser's own reports.
+ *
+ * Antigravity is the exception (D6, D30): its parser sets `skills` only on a call
+ * a transcript covers, so an array there, `[]` included, is a measured statement
+ * ("none invoked") and is kept whatever reader turn paired the call. An absent
+ * list there is not measured. Every other provider drops an empty list, since
+ * for them an empty list is an absence.
+ */
+export function invokedSkillsOf(call: ParsedProviderCall): string[] | undefined {
+  if (surveyFamily(call.provider) === 'antigravity') {
+    return Array.isArray(call.skills) ? Array.from(new Set(call.skills)) : undefined
+  }
+  if (call.skills === undefined || call.skills.length === 0) return undefined
+  return Array.from(new Set(call.skills))
+}
+
+/**
+ * The skill listing the call carried from the transcript's `skill_listing`
+ * attachment, copied with `description` present only where the parser gave one.
+ * Undefined when the call carried no listing, so the caller omits the key.
+ */
+export function listedSkillsOf(
+  call: ParsedProviderCall,
+): { isInitial: boolean; skills: { name: string; description?: string }[] } | undefined {
+  const listed = call.skillsListed
+  if (listed === undefined || listed.skills.length === 0) return undefined
+  return {
+    isInitial: listed.isInitial,
+    skills: listed.skills.map(({ name, description }) =>
+      description === undefined ? { name } : { name, description }),
+  }
+}
+
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
@@ -417,10 +516,26 @@ export function synthesizeCall(
     : {
         ...call,
         ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
+        // A declared window rides under the dedicated declared key alone:
+        // filing it under `contextWindow` would promote configured
+        // provenance to reported, and `contextLimitOf` reads the declared
+        // key only when no record reports one.
+        ...(readerTurn.declaredContextWindow !== undefined
+          ? { [DECLARED_CONTEXT_LIMIT_KEY]: readerTurn.declaredContextWindow }
+          : {}),
         ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
         ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
+
+  const invokedSkills = invokedSkillsOf(call)
+  const listedSkills = listedSkillsOf(call)
+  const absentOutputReason = copilotAbsentOutputReason(call)
+  const carriedKeys = new Set((readerTurn?.parts ?? []).map((part) => part.part))
+  const measurability = {
+    ...measurabilityForRecord(call.provider, harness, carriedKeys),
+    ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
+  }
 
   return {
     spanId: spanIdFor(call, envelope, ordinal),
@@ -448,8 +563,13 @@ export function synthesizeCall(
     content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
-    measurability: measurabilityFor(call.provider),
-    raw: { ...rawCall, provenance },
+    measurability,
+    raw: {
+      ...rawCall,
+      provenance,
+      ...(invokedSkills !== undefined ? { [SKILLS_INVOKED_KEY]: invokedSkills } : {}),
+      ...(listedSkills !== undefined ? { [SKILLS_LISTED_KEY]: listedSkills } : {}),
+    },
   }
 }
 
@@ -700,7 +820,12 @@ export function synthesizeToolCall(
     parts,
     cost: { basis: 'unknown', status: 'no_rate' },
     measurability: {
-      ...parentRecord.measurability,
+      ...measurabilityForChild(
+        parentRecord.measurability ?? {},
+        provider,
+        parentRecord.harness,
+        new Set(toolResult?.content !== undefined ? ['tool_result_content'] : []),
+      ),
       duration: durationAvailability,
     },
     attributes,
@@ -840,12 +965,19 @@ function mergeParsedCalls(keeper: ParsedProviderCall, donor: ParsedProviderCall)
   const tools = Array.from(new Set([...(keeper.tools ?? []), ...(donor.tools ?? [])]))
   const bashCommands = Array.from(new Set([...(keeper.bashCommands ?? []), ...(donor.bashCommands ?? [])]))
   const toolSequence = [...(keeper.toolSequence ?? []), ...(donor.toolSequence ?? [])]
+  // A twin collapse keeps the donor's invoked skills too, so the merged turn
+  // does not lose a skill only one of the two sessions files recorded.
+  const skills = Array.from(new Set([...(keeper.skills ?? []), ...(donor.skills ?? [])]))
+  // The listing is kept whole: the keeper's when it has one, else the donor's.
+  const skillsListed = keeper.skillsListed ?? donor.skillsListed
 
   return {
     ...keeper,
     tools,
     bashCommands,
     ...(toolSequence.length > 0 ? { toolSequence } : {}),
+    ...(skills.length > 0 ? { skills } : {}),
+    ...(skillsListed !== undefined ? { skillsListed } : {}),
     webSearchRequests: Math.max(keeper.webSearchRequests ?? 0, donor.webSearchRequests ?? 0),
     activeDurationMs: Math.max(keeper.activeDurationMs ?? 0, donor.activeDurationMs ?? 0),
   }

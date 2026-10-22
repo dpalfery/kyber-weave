@@ -6,7 +6,9 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  buildTransportIndex,
   dedupedRunSessions,
+  lookupTransport,
   sumSessionFigures,
   type SessionSummaryFigures,
   _clip,
@@ -95,11 +97,13 @@ describe('KyberBridge: Missing / Empty Database Fallbacks', () => {
         branch TEXT,
         started TEXT,
         ended TEXT,
-        payload TEXT
+        payload TEXT,
+        summary_json TEXT,
+        problems_count INTEGER
       );
     `)
     legacyDb
-      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         'legacy-only-session',
         'legacy',
@@ -202,7 +206,9 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         branch TEXT,
         started TEXT,
         ended TEXT,
-        payload TEXT
+        payload TEXT,
+        summary_json TEXT,
+        problems_count INTEGER
       );
       CREATE TABLE records (
         span_id TEXT PRIMARY KEY,
@@ -247,7 +253,9 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         branch TEXT,
         started TEXT,
         ended TEXT,
-        payload TEXT
+        payload TEXT,
+        summary_json TEXT,
+        problems_count INTEGER
       );
       CREATE TABLE quarantine (
         span_id TEXT PRIMARY KEY,
@@ -302,7 +310,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
 
     canonDb
       .prepare(
-        'INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         'sess-canon-new',
@@ -320,7 +328,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
 
     canonDb
       .prepare(
-        'INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         'sess-shared',
@@ -399,7 +407,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
 
     sessionsDb
       .prepare(
-        'INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         'sess-sessions-older',
@@ -417,7 +425,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
 
     sessionsDb
       .prepare(
-        'INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       )
       .run(
         'sess-shared',
@@ -1386,11 +1394,12 @@ describe('KyberBridge run figures review follow-ups', () => {
       CREATE TABLE session (
         session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
         is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
-        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
       );
     `)
     canonDb
-      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         'sess-nocur',
         'copilot',
@@ -1520,7 +1529,7 @@ describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
   const insert = (id: string, started: string, cost: Record<string, unknown> | undefined) => {
     const summary: Record<string, unknown> = { turn_count: 1, request_count: 1, models: ['m'] }
     if (cost) summary.cost = cost
-    db.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
       id, 'claude-code', id, 0, null, 'agent', 'repo', 'main', started, started,
       JSON.stringify({ id, harness: 'claude-code', summary }),
     )
@@ -1532,7 +1541,8 @@ describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
       CREATE TABLE session (
         session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
         is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
-        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
       );
       CREATE TABLE records (
         span_id TEXT PRIMARY KEY, trace_id TEXT, parent_span_id TEXT, harness TEXT,
@@ -1589,6 +1599,508 @@ describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
     const row = find('s-none')
     expect(row.cost_usd).toBeNull()
     expect(row.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+  })
+})
+
+describe('KyberBridge.listSessions column-only read path (sessions-list conversion)', () => {
+  // RED contract for the sessions-list read-path conversion. The primary list
+  // statement must be column-only (no `payload` blob, no `json_extract(payload`);
+  // a `WHERE summary_json IS NULL OR problems_count IS NULL` fallback covers
+  // rows missing a materialized value only; the observable list is identical
+  // across the materialized, legacy-fallback, and no-JSON-function paths;
+  // payload turns/problems regions never affect the list; and `limit` still
+  // slices after nesting and rollup.
+  const SUMMARY: Record<string, unknown> = {
+    turn_count: 4,
+    request_count: 4,
+    total_input: 800,
+    total_output: 400,
+    cost: { basis: 'published', status: 'priced', value: 0.04, currency: 'USD' },
+    models: ['gpt-4o'],
+  }
+  const SUMMARY_JSON = JSON.stringify(SUMMARY)
+
+  const payloadWith = (
+    id: string,
+    problems: unknown[] = [],
+    turns: unknown[] = [],
+    summary: Record<string, unknown> = SUMMARY,
+  ): string => JSON.stringify({ id, harness: 'copilot', summary, problems, turns })
+
+  const createListDb = (): import('node:sqlite').DatabaseSync => {
+    const db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
+      );
+    `)
+    return db
+  }
+
+  const insertListRow = (
+    db: import('node:sqlite').DatabaseSync,
+    row: {
+      id: string
+      started: string
+      payload: string
+      summaryJson?: string | null
+      problemsCount?: number | null
+      parentSession?: string | null
+      isSubagent?: number
+    },
+  ): void => {
+    db.prepare(
+      `INSERT INTO session (session_id, harness, label, is_subagent, parent_session,
+        agent_name, repo, branch, started, ended, payload, summary_json, problems_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id,
+      'copilot',
+      `${row.id} label`,
+      row.isSubagent ?? 0,
+      row.parentSession ?? null,
+      'agent',
+      'repo',
+      'main',
+      row.started,
+      row.started,
+      row.payload,
+      row.summaryJson ?? null,
+      row.problemsCount ?? null,
+    )
+  }
+
+  // Interception reuses the file's established "unexpected query" mechanism: a
+  // `prepare` wrapper that records the SQL the bridge actually issues instead
+  // of retyping it, so a change to the bridge's own statement text flips these
+  // assertions.
+  const tapSessionStatements = (db: import('node:sqlite').DatabaseSync): string[] => {
+    const statements: string[] = []
+    const originalPrepare = db.prepare.bind(db)
+    db.prepare = ((sql: string) => {
+      statements.push(sql)
+      return (originalPrepare as (sql: string) => unknown)(sql)
+    }) as typeof db.prepare
+    return statements
+  }
+
+  const sessionStatements = (statements: string[]): string[] =>
+    statements.filter((sql) => sql.includes('FROM session'))
+
+  const readSessions = (db: import('node:sqlite').DatabaseSync) => {
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      return bridge.listSessions()
+    } finally {
+      bridge.close()
+    }
+  }
+
+  it('issues a primary list statement that never touches the payload blob', () => {
+    const db = createListDb()
+    insertListRow(db, {
+      id: 'sess-a',
+      started: '2026-09-04T12:00:00.000Z',
+      payload: payloadWith('sess-a', ['p1', 'p2']),
+      summaryJson: SUMMARY_JSON,
+      problemsCount: 2,
+    })
+    insertListRow(db, {
+      id: 'sess-b',
+      started: '2026-09-04T11:00:00.000Z',
+      payload: payloadWith('sess-b'),
+      summaryJson: SUMMARY_JSON,
+      problemsCount: 0,
+    })
+    const statements = tapSessionStatements(db)
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      expect(bridge.listSessions()).toHaveLength(2)
+      const lists = sessionStatements(statements)
+      expect(lists.length).toBeGreaterThan(0)
+      const primary = lists[0]!
+      expect(primary).not.toContain('payload')
+      expect(primary).not.toContain('json_extract(payload')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('issues exactly one payload-free statement when every row is materialized', () => {
+    const db = createListDb()
+    insertListRow(db, {
+      id: 'sess-a',
+      started: '2026-09-04T12:00:00.000Z',
+      payload: payloadWith('sess-a', ['p1', 'p2']),
+      summaryJson: SUMMARY_JSON,
+      problemsCount: 2,
+    })
+    const statements = tapSessionStatements(db)
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      expect(bridge.listSessions()).toHaveLength(1)
+      const lists = sessionStatements(statements)
+      expect(lists).toHaveLength(1)
+      expect(lists[0]).not.toContain('payload')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('issues the legacy fallback only for rows missing a materialized value', () => {
+    const db = createListDb()
+    insertListRow(db, {
+      id: 'sess-new',
+      started: '2026-09-04T12:00:00.000Z',
+      payload: payloadWith('sess-new', ['p1']),
+      summaryJson: SUMMARY_JSON,
+      problemsCount: 1,
+    })
+    insertListRow(db, {
+      id: 'sess-legacy',
+      started: '2026-09-04T11:00:00.000Z',
+      payload: payloadWith('sess-legacy', ['p1', 'p2', 'p3']),
+      summaryJson: null,
+      problemsCount: null,
+    })
+    const statements = tapSessionStatements(db)
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const sessions = bridge.listSessions()
+      expect(sessions.map((session) => session.session_id).sort()).toEqual(['sess-legacy', 'sess-new'])
+      const lists = sessionStatements(statements)
+      expect(lists).toHaveLength(2)
+      const fallback = lists[1]!
+      // The fallback legitimately reads payload-derived JSON, but only for
+      // the rows missing a materialized value — a row whose summary_json or
+      // problems_count is NULL — that the primary could not serve.
+      expect(fallback).toContain('payload')
+      expect(fallback).toContain('summary_json IS NULL')
+      expect(fallback).toContain('problems_count IS NULL')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns byte-identical lists for materialized, legacy-fallback, and no-JSON-function reads', () => {
+    const seed = (legacyId: string | null, noJsonFunctions: boolean): import('node:sqlite').DatabaseSync => {
+      const db = createListDb()
+      const rows = [
+        { id: 'sess-a', problems: ['p1', 'p2'] as unknown[], count: 2 as number | null, started: '2026-09-04T12:00:00.000Z', hasSummary: true, hasProblems: true },
+        { id: 'sess-b', problems: [] as unknown[], count: 0 as number | null, started: '2026-09-04T11:00:00.000Z', hasSummary: true, hasProblems: true },
+        // A payload with a problems array and no summary. The writer stores a
+        // NULL summary beside a real count for it, so the count is a fact of
+        // its own and must not be gated on the summary's presence.
+        { id: 'sess-c', problems: ['p3', 'p4', 'p5'] as unknown[], count: 3 as number | null, started: '2026-09-04T10:00:00.000Z', hasSummary: false, hasProblems: true },
+        // A payload with a summary and no problems array. The writer stores a
+        // NULL count beside a real summary for it, and the count is not
+        // measured.
+        { id: 'sess-d', problems: [] as unknown[], count: null as number | null, started: '2026-09-04T09:00:00.000Z', hasSummary: true, hasProblems: false },
+      ]
+      for (const row of rows) {
+        const legacy = legacyId === row.id
+        insertListRow(db, {
+          id: row.id,
+          started: row.started,
+          payload: JSON.stringify({
+            id: row.id,
+            harness: 'copilot',
+            ...(row.hasSummary ? { summary: SUMMARY } : {}),
+            ...(row.hasProblems ? { problems: row.problems } : {}),
+            turns: [],
+          }),
+          summaryJson: legacy || !row.hasSummary ? null : SUMMARY_JSON,
+          problemsCount: legacy ? null : row.count,
+        })
+      }
+      if (noJsonFunctions) {
+        const originalPrepare = db.prepare.bind(db)
+        db.prepare = ((sql: string) => {
+          if (sql.includes('json_extract')) throw new Error('no such function: json_extract')
+          return (originalPrepare as (sql: string) => unknown)(sql)
+        }) as typeof db.prepare
+      }
+      return db
+    }
+    const materialized = readSessions(seed(null, false))
+    const viaFallback = readSessions(seed('sess-b', false))
+    const lastResort = readSessions(seed(null, true))
+    expect(JSON.stringify(viaFallback)).toBe(JSON.stringify(materialized))
+    expect(JSON.stringify(lastResort)).toBe(JSON.stringify(materialized))
+
+    // The problems count is a fact of its own: a session whose payload carries
+    // a problems array and no summary still reports its count, in every read
+    // path. A count that only reaches the reader alongside a summary is a
+    // count the list drops.
+    for (const list of [materialized, viaFallback, lastResort]) {
+      expect(list.find((session) => session.session_id === 'sess-c')?.problems).toBe(3)
+    }
+    // A payload with no problems array carries no measured count, and the
+    // reader has always reported none for it; the materialized column's NULL
+    // does not change that answer.
+    for (const list of [materialized, viaFallback, lastResort]) {
+      expect(list.find((session) => session.session_id === 'sess-d')?.problems).toBe(0)
+    }
+
+    // The audit gap: a legacy row (NULL summary_json) on a SQLite build with
+    // no JSON functions. The primary reads, the legacy fallback throws, and
+    // the payload read serves both rows — observably identical to the
+    // materialized list.
+    const legacyDb = seed('sess-b', true)
+    const legacyStatements = tapSessionStatements(legacyDb)
+    const legacyLastResort = readSessions(legacyDb)
+    expect(JSON.stringify(legacyLastResort)).toBe(JSON.stringify(materialized))
+    const legacyPaths = sessionStatements(legacyStatements)
+    expect(legacyPaths).toHaveLength(3)
+    expect(legacyPaths[1]!).toContain('json_extract')
+  })
+
+  it('ignores hostile payload turns and problems regions the list no longer reads', () => {
+    // The turns array is already ignored by every read path, and the problems
+    // array must stop mattering once the count comes from `problems_count`:
+    // both variants carry identical materialized columns, so only a reader
+    // that still derives output from the payload can tell them apart.
+    const hostileTurns = Array.from({ length: 2000 }, (_, index) => ({
+      index,
+      blob: 'x'.repeat(500),
+      nested: { depth: [index, { marker: `hostile-${index}` }] },
+    }))
+    const hostileProblems = Array.from({ length: 500 }, (_, index) => ({
+      code: `HOSTILE_${index}`,
+      message: 'y'.repeat(200),
+    }))
+    const openVariant = (hostile: boolean): import('node:sqlite').DatabaseSync => {
+      const db = createListDb()
+      insertListRow(db, {
+        id: 'sess-v',
+        started: '2026-09-04T12:00:00.000Z',
+        payload: payloadWith('sess-v', hostile ? hostileProblems : [], hostile ? hostileTurns : []),
+        summaryJson: SUMMARY_JSON,
+        problemsCount: 3,
+      })
+      return db
+    }
+    const calm = readSessions(openVariant(false))
+    const hostile = readSessions(openVariant(true))
+    expect(JSON.stringify(hostile)).toBe(JSON.stringify(calm))
+  })
+
+  it('still applies limit after nesting and rollup instead of pushing it into SQL', () => {
+    // The newest *rows* are subagents of sess-p; a SQL-side LIMIT 1 would
+    // return sess-c2 alone. The observable contract is the opposite: the
+    // newest *root* with its children and their rolled-up counters.
+    const summaryFor = (turns: number): Record<string, unknown> => ({
+      ...SUMMARY,
+      turn_count: turns,
+      request_count: turns,
+    })
+    const db = createListDb()
+    const rows = [
+      { id: 'sess-p', started: '2026-09-04T10:00:00.000Z', turns: 1 },
+      { id: 'sess-c1', started: '2026-09-04T12:00:00.000Z', turns: 2, parentSession: 'sess-p', isSubagent: 1 },
+      { id: 'sess-c2', started: '2026-09-04T13:00:00.000Z', turns: 3, parentSession: 'sess-p', isSubagent: 1 },
+      { id: 'sess-q', started: '2026-09-04T09:00:00.000Z', turns: 5 },
+    ]
+    for (const row of rows) {
+      const summary = summaryFor(row.turns)
+      insertListRow(db, {
+        id: row.id,
+        started: row.started,
+        payload: payloadWith(row.id, [], [], summary),
+        summaryJson: JSON.stringify(summary),
+        problemsCount: 0,
+        parentSession: row.parentSession,
+        isSubagent: row.isSubagent,
+      })
+    }
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const all = bridge.listSessions()
+      expect(all.map((session) => session.session_id)).toEqual(['sess-p', 'sess-q'])
+      expect(all[0]!.subagents).toHaveLength(2)
+      const top1 = bridge.listSessions(1)
+      expect(top1).toHaveLength(1)
+      expect(top1[0]!.session_id).toBe('sess-p')
+      expect(top1[0]!.subagents).toHaveLength(2)
+      expect(top1[0]!.rollup?.turn_count).toBe(6)
+    } finally {
+      bridge.close()
+    }
+  })
+})
+
+describe('KyberBridge.listSessions covering index (session_denorm_idx contract)', () => {
+  // RED-phase contract for the covering index and its planner statistics
+  // (GREEN lands in store.ts: MIGRATIONS[20] and SCHEMA_SQL gain
+  // `session_denorm_idx`, and both creation paths run `ANALYZE session`).
+  // The primary list statement the bridge actually issues — intercepted from
+  // the bridge, never retyped — must be servable as an index-only scan over
+  // that index, and dropping the index must change performance, never output.
+  // Until GREEN lands, the EXPLAIN assertion below fails with a plain table
+  // scan (the index does not exist yet and there are no `sqlite_stat1` rows);
+  // the byte-identical parity assertion already passes, trivially, with no
+  // index in play. Neither test touches application code.
+
+  /**
+   * The covering index GREEN must create, in the exact column order the
+   * migration ships: `started DESC` first so the scan answers
+   * `ORDER BY started DESC` with no sort step, then the reader's select list
+   * in reader order. Kept here only to build the index-present fixture for
+   * the parity test; the definition itself is pinned in
+   * `migration-v21.test.ts` against `sqlite_master`.
+   */
+  const COVERING_INDEX_DDL = `
+    CREATE INDEX IF NOT EXISTS session_denorm_idx
+      ON session (started DESC, session_id, harness, label, is_subagent,
+                  parent_session, agent_name, repo, branch, ended,
+                  summary_json, problems_count);
+  `
+
+  const tapStatements = (db: import('node:sqlite').DatabaseSync): string[] => {
+    const statements: string[] = []
+    const originalPrepare = db.prepare.bind(db)
+    db.prepare = ((sql: string) => {
+      statements.push(sql)
+      return (originalPrepare as (sql: string) => unknown)(sql)
+    }) as typeof db.prepare
+    return statements
+  }
+
+  const sessionStatements = (statements: string[]): string[] =>
+    statements.filter((sql) => sql.includes('FROM session'))
+
+  it('serves the intercepted primary list statement from the covering index', () => {
+    // A fresh store takes the GREEN shape from SCHEMA_SQL plus the
+    // fresh-create `ANALYZE session`, so the planner must choose an
+    // index-only scan for the bridge's own primary statement. RED now: no
+    // index exists and `sqlite_stat1` carries no session row, so the plan is
+    // a plain scan and the pinned index name is absent.
+    const store = new CanonStore(':memory:')
+    try {
+      const summary = {
+        turn_count: 4,
+        request_count: 4,
+        total_input: 800,
+        total_output: 400,
+        cost: { basis: 'published', status: 'priced', value: 0.04, currency: 'USD' },
+        models: ['gpt-4o'],
+      }
+      for (const [id, started] of [
+        ['sess-cover-new', '2026-09-04T12:00:00.000Z'],
+        ['sess-cover-old', '2026-09-04T11:00:00.000Z'],
+      ] as const) {
+        store.upsertSession({
+          sessionId: id,
+          harness: 'copilot',
+          label: `${id} label`,
+          agentName: 'agent',
+          repo: 'repo',
+          branch: 'main',
+          started,
+          ended: started,
+          payload: { id, harness: 'copilot', summary, problems: [{ code: 'p1' }] },
+        })
+      }
+      const db = store.getDatabase()
+      const statements = tapStatements(db)
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        // Fully materialized rows, so the bridge issues the primary alone.
+        expect(bridge.listSessions()).toHaveLength(2)
+        const lists = sessionStatements(statements)
+        expect(lists.length).toBeGreaterThan(0)
+        const primary = lists[0]!
+
+        const plan = db
+          .prepare(`EXPLAIN QUERY PLAN ${primary}`)
+          .all() as Array<{ detail: string }>
+        const text = plan.map((row) => row.detail).join('\n')
+        // The index name is pinned, so a silently different plan fails.
+        expect(text).toContain('USING COVERING INDEX session_denorm_idx')
+        expect(text).not.toContain('payload')
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('returns byte-identical lists with the covering index present, dropped, and re-created', () => {
+    // The index changes performance, never output: the same bridge over the
+    // same rows serializes identically whether or not the planner can use
+    // the index. Self-contained fixture — the index is created here, not by
+    // the store — so this pins the invariant rather than the landing, and
+    // passes before GREEN too.
+    const db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
+      );
+    `)
+    const summaryJson = JSON.stringify({ turn_count: 1, models: ['m'] })
+    const insert = (
+      id: string,
+      started: string,
+      summary: string | null,
+      count: number | null,
+      problems: unknown,
+    ): void => {
+      db.prepare(
+        `INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name,
+          repo, branch, started, ended, payload, summary_json, problems_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        'copilot',
+        `${id} label`,
+        0,
+        null,
+        'agent',
+        'repo',
+        'main',
+        started,
+        started,
+        JSON.stringify({
+          id,
+          harness: 'copilot',
+          ...(summary === null ? {} : { summary: JSON.parse(summary) }),
+          problems,
+        }),
+        summary,
+        count,
+      )
+    }
+    insert('sess-p1', '2026-09-04T12:00:00.000Z', summaryJson, 2, [{ code: 'a' }, { code: 'b' }])
+    insert('sess-p2', '2026-09-04T11:00:00.000Z', summaryJson, 0, [])
+    // A legacy row (no materialized values) exercises the fallback under
+    // every index state below.
+    insert('sess-legacy', '2026-09-04T10:00:00.000Z', null, null, [{ code: 'c' }])
+    db.exec(COVERING_INDEX_DDL)
+    db.exec('ANALYZE session')
+    const created = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'session_denorm_idx'")
+      .get() as { name: string } | undefined
+    expect(created?.name).toBe('session_denorm_idx')
+
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const withIndex = JSON.stringify(bridge.listSessions())
+      db.exec('DROP INDEX IF EXISTS session_denorm_idx')
+      const withoutIndex = JSON.stringify(bridge.listSessions())
+      db.exec(COVERING_INDEX_DDL)
+      const recreated = JSON.stringify(bridge.listSessions())
+      expect(withoutIndex).toBe(withIndex)
+      expect(recreated).toBe(withIndex)
+    } finally {
+      bridge.close()
+    }
   })
 })
 
@@ -1794,6 +2306,8 @@ describe('KyberBridge: unknown-window session owner semantics (thread-4)', () =>
         prepare: (sql: string) => {
           if (sql.includes('sqlite_master')) return { get: () => ({ '1': 1 }) }
           if (sql.includes('SELECT harness')) throw new Error('harness column unreadable')
+          if (sql.includes('json_remove')) throw new Error('no such function: json_remove')
+          if (sql.includes('FROM session_turn')) return { all: () => [] }
           if (sql.includes('SELECT payload')) {
             return { get: () => ({ payload: JSON.stringify(payloadWithSource(source)) }) }
           }
@@ -2056,5 +2570,55 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       bridge.close()
       store.close()
     }
+  })
+})
+
+describe('KyberBridge: transport index lookup (single-pass identity map)', () => {
+  type Row = { span: string; index?: number; turn?: number }
+
+  const identityOf = (r: Row): number | undefined => {
+    if (typeof r.index === 'number' && Number.isFinite(r.index)) return r.index
+    if (typeof r.turn === 'number' && Number.isFinite(r.turn)) return r.turn - 1
+    return undefined
+  }
+
+  it('prefers explicit identity over array position', () => {
+    // Payload order is [{turn: 2}, {turn: 1}]: transport 0 is the second row.
+    const rows: Row[] = [
+      { span: 'span-pa', turn: 2 },
+      { span: 'span-pb', turn: 1 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-pb')
+    expect(lookupTransport(rows, byIdentity, identityOf, 1)?.span).toBe('span-pa')
+  })
+
+  it('falls back to array position only for identity-free rows', () => {
+    const rows: Row[] = [{ span: 'span-q0' }, { span: 'span-q1' }]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(byIdentity.size).toBe(0)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-q0')
+    expect(lookupTransport(rows, byIdentity, identityOf, 1)?.span).toBe('span-q1')
+    expect(lookupTransport(rows, byIdentity, identityOf, 2)).toBeUndefined()
+  })
+
+  it('never resolves a neighbor when identities disagree with position', () => {
+    const rows: Row[] = [
+      { span: 'span-x0', index: 0 },
+      { span: 'span-x1', index: 1 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    // Transport 2 matches no identity and row 2 does not exist.
+    expect(lookupTransport(rows, byIdentity, identityOf, 2)).toBeUndefined()
+    expect(lookupTransport(rows, byIdentity, identityOf, -1)).toBeUndefined()
+  })
+
+  it('keeps the first row on duplicate identities, matching find order', () => {
+    const rows: Row[] = [
+      { span: 'span-first', index: 0 },
+      { span: 'span-second', index: 0 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-first')
   })
 })

@@ -111,6 +111,11 @@ export const UNKNOWN_TIMESTAMP = '1970-01-01T00:00:00.000Z'
  */
 export function canonicalOp(attributes: Record<string, unknown>): string {
   if ('gen_ai.tool.name' in attributes) return 'tool.invoke'
+  // Copilot's `invoke_agent` span carries the SUM of its child `chat` calls'
+  // counters. It is a roll-up of turns, not a turn: counting it as one charts
+  // a bar of the whole agent loop's input ahead of the real, growing calls and
+  // double-counts every total. Its usage attributes stay on the record.
+  if (attributes['gen_ai.operation.name'] === 'invoke_agent') return 'agent.invoke'
   if (
     INPUT_TOKEN_KEYS.some((key) => key in attributes) ||
     OUTPUT_TOKEN_KEYS.some((key) => key in attributes)
@@ -219,6 +224,29 @@ function readText(
     }
   }
   return undefined
+}
+
+/**
+ * The system prompt as prose. Copilot sends `gen_ai.system_instructions` as a
+ * JSON array of `{type, content|text}` parts; stored verbatim that is JSON
+ * syntax around the prompt, which renders as a scrolling blob and is counted
+ * as JSON tokens. Text parts are extracted and joined; any other shape is kept
+ * as the harness sent it.
+ */
+function systemPromptText(attributes: Record<string, unknown>): string | undefined {
+  const raw = readText(attributes, SYSTEM_INSTRUCTION_KEYS)
+  if (raw === undefined) return undefined
+  const parsed = parseStructured(raw)
+  if (!Array.isArray(parsed) || parsed.length === 0) return raw
+  const texts: string[] = []
+  for (const piece of parsed) {
+    if (piece === null || typeof piece !== 'object') return raw
+    const { text, content } = piece as { text?: unknown; content?: unknown }
+    const value = typeof text === 'string' ? text : typeof content === 'string' ? content : undefined
+    if (value === undefined) return raw
+    if (value !== '') texts.push(value)
+  }
+  return texts.length > 0 ? texts.join('\n\n') : raw
 }
 
 /**
@@ -375,7 +403,7 @@ export function canonicalParts(attributes: Record<string, unknown>): ContentPart
   const nextOrder = () => order++
   const parts: ContentPart[] = []
 
-  const system = readText(attributes, SYSTEM_INSTRUCTION_KEYS)
+  const system = systemPromptText(attributes)
   if (system !== undefined) {
     const reported = readOptionalCounter(attributes, SYSTEM_TOKEN_KEYS)
     parts.push({
@@ -543,7 +571,7 @@ export function convertInclusiveCounts(counts: {
  * caller stores instead of the record.
  */
 export function validateRecordTokens(record: CanonicalRecord) {
-  return validateTokens(record.tokens, record.spanId).problem
+  return validateTokens(record.tokens, record.spanId, record.measurability).problem
 }
 
 /** Read the raw counters every GenAI-emitting harness shares. */
@@ -677,18 +705,19 @@ export const USAGE_EVIDENCE = 0.4
  * `gen_ai.usage.*` keys alone score every GenAI harness identically (0.4,
  * below the registry's threshold — the alone-in-its-trace case R6.1
  * quarantines), while a Copilot vendor attribute (`github.copilot.chat.turn.id`,
- * `copilot.*`, `codeburn.provider`) carries the vote. The source name is
- * never consulted (R6.2).
+ * `copilot.*`, `codeburn.provider`) carries the vote. Neither the source
+ * name nor the span name is consulted (R6.2).
  */
 export const copilotAdapter: HarnessAdapter = {
   name: 'copilot',
   namespaces: ['gen_ai', ...COPILOT_VENDOR_NAMESPACES],
 
   detect(span) {
-    const isCopilotEvidence =
-      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
-      span.name.startsWith('copilot_chat') ||
-      span.name.startsWith('copilot')
+    // Vendor attributes are the only admissible Copilot evidence (R6.2):
+    // neither the source name nor the span name may vote, so a span named
+    // `copilot_chat/...` with only shared `gen_ai.usage.*` counters scores
+    // 0.4 and stays quarantined.
+    const isCopilotEvidence = hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot'])
     // An explicit Gemini system identity outranks a generic Copilot exporter
     // label that may be attached by the collector or wrapper process, unless
     // the span carries explicit copilot_chat or copilot evidence.
@@ -700,7 +729,7 @@ export const copilotAdapter: HarnessAdapter = {
       }
     }
     let score = 0
-    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
+    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) {
       score += VENDOR_EVIDENCE
     }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE

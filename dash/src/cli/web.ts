@@ -1,18 +1,32 @@
 import { createServer, type Server } from 'http'
+import { randomBytes } from 'crypto'
 import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
-import { existsSync } from 'fs'
+import { chmodSync, closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createRequire } from 'node:module'
 import { join, normalize, extname, dirname, sep, posix as posixPath } from 'path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'url'
 import { AddressInfo } from 'net'
 import { applyHtmlBrand, BRAND } from '../brand-overlay.js'
 import { REPORT_SCHEMA_VERSION } from '../analysis/report/types.js'
 import { KyberBridge } from '../server/bridge.js'
-import { handleKyberRequest } from '../server/routes.js'
+import {
+  handleKyberRequest,
+  ERR_SERVICES_STARTING as ROUTE_ERR_SERVICES_STARTING,
+} from '../server/routes.js'
+import { CanonStore, migrateCanonDatabase, type MigrationYield } from '../canon/store.js'
+import { resolveCanonDbPath } from '../canon/paths.js'
+import { readSetting, SETTING_KEYS } from '../settings/shared-settings.js'
+import { JobHost, type JobSpawner } from '../jobs/host.js'
+import { acquireEngine, queryEngine, requestEngineShutdown, type EngineAttached, type EngineOwner, type EngineRecord } from '../engine/instance.js'
+import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
+import { runMaintenancePass } from '../refresh/folder-import.js'
+import type { CaptureRouteSettings } from '../server/capture-routes.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
+import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
 
-const KYBERDASH_VERSION = String(
+export const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
 )
 
@@ -176,20 +190,120 @@ const SEA_NOT_BUILT_HINT_HTML =
 const DEV_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not built. Run: cd dash && npm install && npm run build'
 const SEA_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not embedded in this build. Install a release that includes it.'
 
-function openBrowser(url: string): void {
-  // execFile, not exec: the arguments go to the process as an argv array, so no
-  // shell parses them and there is no command string for a URL to break out of.
-  // This matters because the URL is no longer purely internal — `--view` puts a
-  // user-supplied path into it (runWebDashboard validates it against
-  // matchesViewPath first, but this must not depend on a check made elsewhere).
-  // On Windows `start` is a cmd builtin rather than an executable, so cmd is the
-  // program; the empty string is the window title `start` expects before a URL.
+/**
+ * Strictly validates and canonicalizes a URL targeting the local dashboard.
+ *
+ * Enforces loopback-only origins (`http://127.0.0.1:<1..65535>`), disallowing userinfo,
+ * fragments, path traversal (`..`), protocol-relative prefixes (`//`), and scheme injections (`://`),
+ * and requires the route to match the registered patterns in `view-paths.json`.
+ *
+ * Returns the canonical URL string (`http://127.0.0.1:<port>` or `http://127.0.0.1:<port>/<route>`),
+ * or `null` if validation fails.
+ */
+export function validateDashboardUrl(rawUrl: string): string | null {
+  if (typeof rawUrl !== 'string') return null
+  if (rawUrl.length === 0) return null
+  if (/\s|[\u0000-\u001f\u007f]/.test(rawUrl)) return null
+  if (rawUrl.includes('#') || rawUrl.includes('\\')) return null
+  if (!rawUrl.startsWith('http://')) return null
+
+  const afterScheme = rawUrl.slice(7)
+  const authorityEndRelative = afterScheme.search(/[/?]/)
+  const authority = authorityEndRelative === -1 ? afterScheme : afterScheme.slice(0, authorityEndRelative)
+  const rawTail = authorityEndRelative === -1 ? '' : afterScheme.slice(authorityEndRelative)
+
+  if (authority.includes('@') || authority.includes('\\') || authority.includes('%')) {
+    return null
+  }
+
+  const portMatch = /^127\.0\.0\.1:(\d+)$/.exec(authority)
+  if (!portMatch) return null
+
+  const portStr = portMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    return null
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.hostname !== '127.0.0.1' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.hash !== ''
+  ) {
+    return null
+  }
+
+  if (rawTail === '' || rawTail === '/') {
+    return `http://127.0.0.1:${port}`
+  }
+
+  if (!rawTail.startsWith('/') || rawTail.startsWith('//')) {
+    return null
+  }
+
+  if (rawTail.includes('://')) {
+    return null
+  }
+
+  const qIdx = rawTail.indexOf('?')
+  const rawPath = qIdx === -1 ? rawTail : rawTail.slice(0, qIdx)
+
+  if (rawPath.includes('//')) {
+    return null
+  }
+
+  if (rawPath.split('/').some((segment) => segment === '..' || segment === '.')) {
+    return null
+  }
+
+  const view = `${parsed.pathname}${parsed.search}`
+  if (!matchesViewPath(view)) {
+    return null
+  }
+
+  return `http://127.0.0.1:${port}${view}`
+}
+
+/**
+ * Opens a dashboard URL in the default browser.
+ *
+ * Before dispatching to any system opener, the URL is strictly validated using
+ * `validateDashboardUrl` to ensure it targets a loopback origin (127.0.0.1:<1..65535>)
+ * and a registered route from `view-paths.json`. Any off-route, traversal, non-loopback,
+ * or malformed URL is refused without spawning any process.
+ *
+ * Platform dispatch uses `execFile` directly with argv arguments, avoiding any shell
+ * command parsing sink:
+ * - On macOS: `open <url>`
+ * - On Linux: `xdg-open <url>`
+ * - On Windows: `rundll32.exe url.dll,FileProtocolHandler <url>` rather than `cmd /c start`.
+ *   This eliminates the `cmd.exe` shell interpretation sink (remediating CodeQL alert 273),
+ *   preserves `&` in query parameters (such as `/compare?a=:runId&b=:runId` which `cmd.exe`
+ *   would otherwise interpret as a command separator), and validates the loopback origin
+ *   and route first.
+ */
+export function openBrowser(url: string): void {
+  const safeUrl = validateDashboardUrl(url)
+  if (!safeUrl) {
+    console.warn(`${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`)
+    return
+  }
+
   const [program, args] =
     process.platform === 'darwin'
-      ? ['open', [url]]
+      ? ['open', [safeUrl]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
+        ? ['rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl]]
+        : ['xdg-open', [safeUrl]]
   try {
     execFile(program!, args as string[], () => {
       /* a browser that fails to launch is not an error the server should raise */
@@ -199,24 +313,718 @@ function openBrowser(url: string): void {
   }
 }
 
+/**
+ * A refused start on a configured dashboard port. The server never falls back to a
+ * random free port: the tray attaches by the configured URL, bookmarks point at it, and
+ * a server that quietly started elsewhere would leave both aimed at a refusal. Every
+ * subclass therefore names the port and the remedies in its message.
+ */
+export class DashboardPortRefusedError extends Error {
+  readonly port: number
+
+  constructor(port: number, detail: string) {
+    super(detail)
+    this.name = 'DashboardPortRefusedError'
+    this.port = port
+  }
+}
+
+/**
+ * A configured dashboard port that is already taken. The message names the port and the
+ * remedies — stop the occupant, pass an explicit `--port` for this run, or persist
+ * another `dashboard.port` and restart.
+ */
+export class DashboardPortOccupiedError extends DashboardPortRefusedError {
+  constructor(port: number) {
+    super(
+      port,
+      `port ${port} is already in use. ` +
+        `Stop the process holding it, start this run with --port <free port>, ` +
+        `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
+        `and restart. The dashboard did not start on a different port.`
+    )
+    this.name = 'DashboardPortOccupiedError'
+  }
+}
+
+/**
+ * A configured dashboard port the process is not permitted to bind, or that the socket
+ * layer rejects outright. The common case is a privileged port (< 1024) persisted as
+ * `dashboard.port` and restarted as a non-root user: without this the operator gets a
+ * raw EACCES traceback instead of the same actionable refusal an occupied port produces.
+ */
+export class DashboardPortUnavailableError extends DashboardPortRefusedError {
+  constructor(port: number, code: string) {
+    // The privilege hint applies only to low ports: a socket-layer rejection on a
+    // high port (e.g. ERR_SOCKET_BAD_PORT on 70000) lectured about sub-1024 privilege
+    // reads like the wrong remedy. Keep the same remedies in both wordings.
+    const reason =
+      port < 1024
+        ? `A port below 1024 needs privilege to bind; `
+        : `The socket layer rejected the port; `
+    super(
+      port,
+      `port ${port} could not be bound (${code}). ` +
+        reason +
+        `start this run with --port <free port>, ` +
+        `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
+        `and restart. The dashboard did not start on a different port.`
+    )
+    this.name = 'DashboardPortUnavailableError'
+  }
+}
+
+/**
+ * Which port the dashboard binds, in precedence order: an explicit CLI `--port` for
+ * this run, else the persisted `settings.dashboard.port` shared by every surface, else
+ * the 4747 default the codec reads for a store that never recorded a choice. An
+ * explicit 0 keeps its in-process meaning ("bind ephemeral", used by the suites that
+ * share one machine); 0 is never a storable choice, so the codec refuses it and this
+ * function never has to.
+ */
+export function resolveDashboardPort(explicitPort: number | undefined, store: CanonStore): number {
+  if (explicitPort !== undefined) return explicitPort
+  return readSetting(store, SETTING_KEYS.dashboardPort)
+}
+
+/**
+ * The refused-start error for a failed bind, or undefined when the caller should surface
+ * the raw socket error. `EADDRINUSE` and the permission/socket-layer codes are the two
+ * ways a configured port fails to bind; both must read like the feature rather than a
+ * traceback. An ephemeral bind (port 0) is never a configured choice, so it keeps the
+ * raw error. Extracted so the mapping is testable without forcing a real EACCES.
+ */
+export function portRefusalFor(port: number, code: string | undefined): Error | undefined {
+  if (port === 0) return undefined
+  if (code === 'EADDRINUSE') return new DashboardPortOccupiedError(port)
+  if (code === 'EACCES' || code === 'ERR_SOCKET_BAD_PORT') return new DashboardPortUnavailableError(port, code)
+  return undefined
+}
+
 export class UnknownViewError extends Error {
+  readonly view: string
   readonly validForms: string
 
   constructor(view: string, validForms: string) {
     super(`unknown view "${view}". Valid forms: ${validForms}`)
     this.name = 'UnknownViewError'
+    this.view = view
     this.validForms = validForms
   }
 }
 
-function joinViewUrl(origin: string, view: string | undefined): string {
-  if (view === undefined || view.trim() === '' || view.trim() === '/') return origin
-  return `${origin}/${view.trim().replace(/^\/+/, '')}`
+export function joinViewUrl(origin: string, view: string | undefined): string {
+  const originMatch = /^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(typeof origin === 'string' ? origin.trim() : '')
+  if (!originMatch) {
+    throw new UnknownViewError(origin, formatValidViewForms())
+  }
+  const portStr = originMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    throw new UnknownViewError(origin, formatValidViewForms())
+  }
+  const canonicalOrigin = `http://127.0.0.1:${port}`
+
+  if (view === undefined) return canonicalOrigin
+  const trimmedView = view.trim()
+  if (trimmedView === '' || trimmedView === '/') return canonicalOrigin
+
+  if (
+    view.includes('://') ||
+    view.startsWith('//') ||
+    view.includes('\\') ||
+    view.split('/').some((segment) => segment === '..' || segment === '.')
+  ) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+
+  const cleanPath = trimmedView.replace(/^\/+/, '')
+  const candidateUrl = `${canonicalOrigin}/${cleanPath}`
+  const validated = validateDashboardUrl(candidateUrl)
+  if (validated === null) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+  return validated
 }
 
-export async function runWebDashboard(opts: {
-  port: number
+/**
+ * How often the receiver host re-probes the OTLP port. Short enough that a receiver which
+ * dies is replaced promptly, long enough that a machine with no receiver is not probing
+ * every second for the whole day.
+ */
+const RECEIVER_POLL_MS = 10_000
+
+/** `server.json`: how the tray finds a running server without parsing its stdout. */
+const SERVER_FILE = 'server.json'
+
+/**
+ * Routes that cannot answer at all until the JobHost is up: they report or drive jobs.
+ * A fixed 503 during the (short) start-up window says "not yet", where the routes' own
+ * unmounted answer would say "does not exist" about a server that is right there.
+ */
+const HOSTED_ONLY_ROUTES: ReadonlySet<string> = new Set([
+  '/api/kyber/jobs',
+  '/api/kyber/refresh',
+  '/api/kyber/import-history',
+])
+
+/** Fixed body for that window — never a host or lease error string. Imported from the routes, so there is one wording. */
+const ERR_SERVICES_STARTING = ROUTE_ERR_SERVICES_STARTING
+
+/** The body of a published `server.json`, as far as ownership goes. */
+type ServerRecord = { pid: number; url?: string }
+
+/**
+ * What `server.json` currently says, or `null` when it is absent, unreadable, corrupt or
+ * of a shape this version does not recognise. Same failure handling as
+ * `readLockHolder`: a body nobody can parse is no evidence of an owner.
+ */
+function readServerRecord(path: string): ServerRecord | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<ServerRecord>
+    if (typeof parsed?.pid !== 'number' || !Number.isFinite(parsed.pid)) return null
+    return { pid: parsed.pid, ...(typeof parsed.url === 'string' ? { url: parsed.url } : {}) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The state dir, created if it is missing. `null` on success, the failing errno code on
+ * failure - a caller reports the code and carries on rather than refusing to serve.
+ *
+ * `recursive` because the parent may be missing too (`--state-dir` under a home that has
+ * no `.kyberdash`), and 0o700 because this directory holds the pid and loopback port of a
+ * running server plus the user's stored context.
+ */
+function ensureStateDir(dir: string): string | null {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code ?? 'EUNKNOWN'
+  }
+  tightenStateDir(dir)
+  return null
+}
+
+/**
+ * Drops group/other bits off a state dir that already existed. `mkdir`'s `mode` is a
+ * creation-time request subject to the umask and does nothing at all to a directory that
+ * was already there, so a dir left by an older version (or created by a `0o777` umask)
+ * keeps its permissions forever - and it holds the pid and loopback port of a running
+ * server plus the user's stored context.
+ *
+ * Tighten only: a stricter mode than 0o700 is left exactly as it is, because narrowing
+ * further is somebody's deliberate choice and this function exists to close a hole, not
+ * to overwrite a policy. Never throws - a dir owned by another user fails the chmod with
+ * EPERM, and the caller is already serving over it. Windows has no POSIX mode bits, so
+ * there is nothing to tighten and stat would report a synthetic 0o666 on every run.
+ */
+function tightenStateDir(dir: string): void {
+  if (process.platform === 'win32') return
+  try {
+    const mode = statSync(dir).mode & 0o777
+    if ((mode & 0o077) === 0) return
+    chmodSync(dir, mode & 0o700)
+  } catch {
+    /* not ours, or unreadable: the mode we could not tighten is reported by its owner */
+  }
+}
+
+/** The one line an operator sees when the attach point could not be published. */
+function publishWarning(code: string): string {
+  return `${BRAND.cliName}: could not publish ${SERVER_FILE} (${code}): the tray cannot attach to this server`
+}
+
+/**
+ * Publishes `server.json`, and NEVER throws.
+ *
+ * A missing attach point is worth one line of stderr; it is not worth a dead dashboard.
+ * The dashboard itself is reachable over the loopback URL the listening line carries - the
+ * tray launches a server by that line and can attach to a running one by it too - so an
+ * unwritable state dir degrades tray attach and nothing else. The earlier contract closed
+ * the socket on a publish failure, which turned "the tray cannot find me" into "the server
+ * is gone", and broke the self-update smoke run outright: its temp HOME has no
+ * `~/.kyberdash` until something creates it.
+ *
+ * Race-free by construction: the body goes to a fresh temp file in the SAME directory
+ * (so the swap is atomic and cannot cross a filesystem), and `rename` replaces the
+ * directory entry - it never follows a symlink, so even a link planted between the check
+ * below and the rename cannot redirect the write somewhere else. The `lstat` is therefore
+ * a courtesy, not the safety argument: it only decides whether to warn about a link.
+ *
+ * 0o600 at exclusive creation, and chmod'd on the handle rather than the path, so a
+ * leftover left world-readable is tightened and no path is re-resolved to do it.
+ */
+function publishServerRecord(path: string, body: string): void {
+  let linked = false
+  try {
+    linked = lstatSync(path).isSymbolicLink()
+  } catch {
+    /* absent, or unreadable - the write below is what decides */
+  }
+  if (linked) {
+    console.error(`${BRAND.cliName}: ${path} is a symbolic link; not publishing server.json through it`)
+    return
+  }
+  const temp = join(dirname(path), `.${SERVER_FILE}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`)
+  try {
+    const fd = openSync(temp, 'wx', 0o600)
+    try {
+      writeFileSync(fd, body)
+      fchmodSync(fd, 0o600)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+  } catch (err) {
+    rmSync(temp, { force: true })
+    console.error(publishWarning((err as NodeJS.ErrnoException).code ?? 'EUNKNOWN'))
+  }
+}
+
+/**
+ * Whether `pid` is a live process other than this one. Mirrors
+ * `refresh/lock.ts`'s `pidLooksAlive`, including the EPERM-means-already-alive case on
+ * POSIX and signal 0 as an existence test on Windows. Our own pid is deliberately not
+ * "alive" here: a file carrying it is this process's own, not a foreign server's.
+ */
+function pidLooksAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * The injectable seams of the hosted services (architecture rule R1). Every one is
+ * optional and every production default is the real thing, so the tests can run the whole
+ * lifecycle - spawn, publish, close - without a child process, a real port, or a real home
+ * directory.
+ */
+export type WebDashboardServices = {
+  /** The store the hosts read settings from. Defaults to a read-write canon.db. */
+  store?: CanonStore
+  /** Where server.json and jobs.lock live. Defaults to ~/.kyberdash. */
+  stateDir?: string
+  /**
+   * The executable the hosts spawn, used verbatim with no wrapper arguments. Defaults to
+   * this process's own CLI re-run in the way this process was launched - see
+   * `resolveJobSpawnTarget`.
+   */
+  program?: string
+  jobSpawner?: JobSpawner
+  receiverSpawner?: JobSpawner
+  receiverProber?: ReceiverProber
+  /**
+   * The periodic maintenance pass the JobHost runs on its first tick. Defaults to the
+   * central module's own; injectable so a test can hold the tick open and prove the
+   * listening line does not wait for it.
+   */
+  maintenance?: () => Promise<void>
+  /**
+   * How the jobs host is closed when the last share of a pair goes back. Injectable so a
+   * teardown that REJECTS can be exercised: the release path cannot await the close (a
+   * caller closing a server is not a caller that can be made to fail), and a rejected
+   * close there is an unhandled rejection. Nothing on the filesystem provokes it - the
+   * lease release retries and then swallows - so the seam is what makes it testable.
+   */
+  closeJobHost?: (jobHost: JobHost) => Promise<void>
+  /**
+   * Where the capture route reads and writes harness configs. Defaults to the real home
+   * directory; injectable so a test points the whole server at a temporary one.
+   */
+  capture?: CaptureRouteSettings
+  /**
+   * The seam the startup migration hands the event loop back through.
+   *
+   * <remarks>
+   * The startup path migrates the store before it opens it, and the migration
+   * hands the event loop back between sessions. The seam is injected so a
+   * test can COUNT those hand-backs: the count is the contract, not a timing
+   * threshold. The default is the migration's own event-loop turn.
+   */
+  migrationYield?: MigrationYield
+}
+
+/**
+ * The hosted background services for one state directory, shared by every server in this
+ * process that points at it.
+ *
+ * Two hosts over one state dir would be a bug even in principle - the jobs lease is meant
+ * to make the second one stand down - but in-process the lease serializes instead of
+ * standing down, so the second `JobHost.start()` would wait out the first one's entire
+ * lease lifetime and the server would never finish starting. Sharing one host pair per
+ * state dir states the rule directly: at most one host, per state dir, per process.
+ */
+type HostedServices = {
+  readonly store: CanonStore
+  readonly jobHost: JobHost
+  readonly receiverHost: ReceiverHost
+  /** The seams this pair was built from, so a caller that injects different ones cannot be handed another's hosts. */
+  readonly seams: HostedSeams
+  receiverTimer?: NodeJS.Timeout
+  receiverRetry?: NodeJS.Timeout
+  refs: number
+}
+
+/** Everything a host pair is built from, compared by identity to decide reuse. */
+type HostedSeams = {
+  readonly store: CanonStore
+  readonly program: string
+  readonly programArgs: readonly string[]
+  readonly jobSpawner: JobSpawner | undefined
+  readonly receiverSpawner: JobSpawner | undefined
+  readonly receiverProber: ReceiverProber | undefined
+  readonly maintenance: (() => Promise<void>) | undefined
+  readonly closeJobHost: (jobHost: JobHost) => Promise<void>
+}
+
+function sameSeams(a: HostedSeams, b: HostedSeams): boolean {
+  return a.store === b.store
+    && a.program === b.program
+    && a.programArgs.length === b.programArgs.length
+    && a.programArgs.every((arg, index) => arg === b.programArgs[index])
+    && a.jobSpawner === b.jobSpawner
+    && a.receiverSpawner === b.receiverSpawner
+    && a.receiverProber === b.receiverProber
+    && a.maintenance === b.maintenance
+    && a.closeJobHost === b.closeJobHost
+}
+
+const hostedServices = new Map<string, HostedServices>()
+
+/**
+ * Pairs still being started, keyed by state dir. A pair is published only once its hosts
+ * are up, so this - not the published map - is what two servers racing to start over one
+ * state dir join, and it is the only thing that stops a second host pair (a second poll
+ * timer, a second lease attempt) from being built underneath the first.
+ */
+const hostedServicesStarting = new Map<string, Promise<HostedServices>>()
+
+/**
+ * The default store is one handle per process, not one per server: a second handle on the
+ * same canon.db is a second SQLite connection to the same file for no benefit.
+ */
+let defaultStore: CanonStore | null = null
+
+/**
+ * The default store being opened, so two servers starting in this process at once
+ * share one migration and one handle rather than racing to migrate the same file.
+ *
+ * <remarks>
+ * The migration holds SQLite's write lock for the whole pass, so a second
+ * migration over the same file would wait for the first and then find the
+ * store already current -- and a second handle on the same file is a second
+ * connection for no benefit. The pair is published once it is up, exactly as
+ * a host pair is.
+ */
+let defaultStoreStarting: Promise<CanonStore> | null = null
+
+/**
+ * The engine's store, migrated and then opened.
+ *
+ * <remarks>
+ * The migration runs BEFORE the store is opened, and never while a store is
+ * open on the same file: the v21 -> v22 backfill holds SQLite's write lock
+ * for the whole pass, so a store opened beside it would wait on that lock.
+ * The store's own constructor migration is then a no-op -- the file is
+ * already at this build's schema version.
+ *
+ * The migration is the asynchronous one, so the event loop is handed back
+ * between sessions: the v21 -> v22 step parses and rewrites every session
+ * payload (339 sessions and 80 MB of payloads on the live corpus), and the
+ * constructor's one blocking pass froze the whole process for the duration
+ * of it -- no handler answered, and nothing could be cancelled.
+ *
+ * An injected store is used as it is. It is already open, and its own
+ * constructor already migrated it when it was opened; migrating its file now
+ * would run the write lock under a live handle.
+ */
+async function resolveHostStore(
+  injected: CanonStore | undefined,
+  options: { yield?: MigrationYield } = {},
+): Promise<CanonStore> {
+  if (injected !== undefined) return injected
+  if (defaultStore !== null) return defaultStore
+  defaultStoreStarting ??= openDefaultStore(options)
+  try {
+    const store = await defaultStoreStarting
+    defaultStore = store
+    return store
+  } finally {
+    defaultStoreStarting = null
+  }
+}
+
+/** The default store: migrated first, then opened. */
+async function openDefaultStore(options: { yield?: MigrationYield }): Promise<CanonStore> {
+  const path = resolveCanonDbPath()
+  await migrateCanonDatabase(path, options)
+  return new CanonStore(path)
+}
+
+/**
+ * Closes the process-singleton default store after a start that never bound, but only
+ * when it is provably unused: an injected store is never ours to close, and a
+ * singleton a live pair (published or still starting) may be reading is left to that
+ * pair's own release path, which closes it with the last share. A passive sqlite
+ * handle left open is reclaimed on process exit or reused by the next resolve, so the
+ * conservative branch leaks nothing that matters.
+ */
+function closeDefaultStoreIfUnused(injected: CanonStore | undefined): void {
+  if (injected !== undefined || defaultStore === null) return
+  if (hostedServicesStarting.size > 0) return
+  // A store being opened right now is about to be published: closing it
+  // here would take the handle out from under the start that is opening it.
+  if (defaultStoreStarting !== null) return
+  for (const services of hostedServices.values()) {
+    if (services.seams.store === defaultStore) return
+  }
+  const unused = defaultStore
+  defaultStore = null
+  unused.close()
+}
+
+/**
+ * A poll that reports a backoff delay schedules its own retry, so a receiver that keeps
+ * failing to start is not retried on every tick. Exactly one retry is ever pending.
+ */
+function startReceiverPolling(services: HostedServices): void {
+  const poll = (): void => {
+    void services.receiverHost.poll().then((delay) => {
+      if (services.receiverRetry !== undefined) {
+        clearTimeout(services.receiverRetry)
+        services.receiverRetry = undefined
+      }
+      if (delay === null || delay <= 0) return
+      services.receiverRetry = setTimeout(poll, delay)
+      // Never hold the event loop open for a retry; shutdown is the exit path.
+      services.receiverRetry.unref()
+    }, () => { /* a failed poll is not a reason to stop polling */ })
+  }
+  poll()
+  services.receiverTimer = setInterval(poll, RECEIVER_POLL_MS)
+  services.receiverTimer.unref()
+}
+
+/**
+ * The host pair for `stateDir`, built on first use and torn down when the last server
+ * using it closes. A caller that injects different seams for the same directory gets its
+ * own pair rather than another's: those seams belong to the caller that injected them.
+ */
+async function acquireHostedServices(
+  opts: WebDashboardServices,
+  isSea: boolean,
+): Promise<{
+  services: HostedServices
+  release: () => void
+}> {
+  const stateDir = opts.stateDir ?? join(homedir(), '.kyberdash')
+  const seams: HostedSeams = {
+    store: await resolveHostStore(opts.store, { yield: opts.migrationYield }),
+    // Default to re-running THIS process's own CLI, so a source checkout
+    // (`tsx src/launcher.ts web`) runs the same code rather than a `kyberdash` that may
+    // not be on PATH - and in a SEA, where process.argv[1] is the unexpanded argv0, to
+    // the binary itself. An injected program is taken at face value with no wrapper
+    // arguments: its argv is the caller's.
+    ...(opts.program === undefined
+      ? resolveJobSpawnTarget(currentSpawnRuntime(isSea))
+      : { program: opts.program, programArgs: [] as readonly string[] }),
+    jobSpawner: opts.jobSpawner,
+    receiverSpawner: opts.receiverSpawner,
+    receiverProber: opts.receiverProber,
+    maintenance: opts.maintenance,
+    closeJobHost: opts.closeJobHost ?? closeTheJobHost,
+  }
+
+  for (;;) {
+    const existing = hostedServices.get(stateDir)
+    if (existing !== undefined && sameSeams(existing.seams, seams)) return share(stateDir, existing)
+    const pending = hostedServicesStarting.get(stateDir)
+    if (pending === undefined) {
+      // We are the ones starting it, so its failure is ours to raise.
+      return share(stateDir, await startHostedPair(stateDir, seams))
+    }
+    // Another server in this process is already building a pair for this state dir. Wait
+    // for it rather than starting a second one: two poll timers and two leases over one
+    // state dir is the situation this sharing exists to prevent. Its failure is reported
+    // to whoever asked for that pair, not to us - we loop and try again, and the retry
+    // builds a fresh pair if it came up with different seams than ours.
+    await pending.catch(() => { /* not our failure to raise */ })
+  }
+}
+
+/**
+ * A teardown close, observed rather than awaited, and never thrown out of.
+ *
+ * The release path cannot await these: closing a server is not something a caller may be
+ * made to fail on, and the process is on its way out. What it must not do is FLOAT the
+ * promise - a rejected close with nothing attached is an unhandled rejection, which on
+ * Node's default policy takes the process down during shutdown. One line of stderr says
+ * what did not stop, and the server keeps going.
+ */
+function closeQuietly(closing: Promise<unknown>): void {
+  void closing.catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code
+    const detail = String(err instanceof Error ? err.message : err).split('\n')[0]
+    console.error(`${BRAND.cliName}: background services did not stop cleanly: ${code ?? detail}`)
+  })
+}
+
+/**
+ * The default teardown, one function for the process rather than one per server: seams
+ * are compared by identity to decide whether two servers over one state dir may share a
+ * host pair, so a default built fresh per call would hand every server its own pair.
+ */
+function closeTheJobHost(jobHost: JobHost): Promise<void> {
+  return jobHost.close()
+}
+
+/** Registers `services` as the shared pair for `stateDir` until the last server lets it go. */
+function share(stateDir: string, services: HostedServices): {
+  services: HostedServices
+  release: () => void
+} {
+  services.refs += 1
+  let released = false
+  return {
+    services,
+    release: () => {
+      if (released) return
+      released = true
+      services.refs -= 1
+      if (services.refs > 0) return
+      if (services.receiverTimer !== undefined) clearInterval(services.receiverTimer)
+      if (services.receiverRetry !== undefined) clearTimeout(services.receiverRetry)
+      if (hostedServices.get(stateDir) === services) hostedServices.delete(stateDir)
+      closeQuietly(services.seams.closeJobHost(services.jobHost))
+      closeQuietly(services.receiverHost.close())
+      // The process-singleton default store is closed with the last pair that used it.
+      // It is not one caller's store: a second server in this process sharing the same
+      // state dir still holds a reference, so this only fires when the final share goes
+      // back, and an injected store is never touched.
+      if (services.seams.store === defaultStore) {
+        defaultStore = null
+        services.store.close()
+      }
+    },
+  }
+}
+
+/**
+ * Builds a pair for `stateDir` and starts it. The pair is published to `hostedServices`
+ * only once both hosts are up: an entry that appears before `jobHost.start()` resolves is
+ * an entry a second caller would reuse, and a pair whose start rejected holds a jobs
+ * lease it never released while looking perfectly shareable. On rejection nothing is
+ * published, both hosts are closed (which releases any lease `start()` took and clears
+ * the tick interval it armed), and the caller sees the error.
+ */
+function startHostedPair(stateDir: string, seams: HostedSeams): Promise<HostedServices> {
+  const services = buildServices(stateDir, seams)
+  const pending = (async (): Promise<HostedServices> => {
+    try {
+      // The first tick launches the scheduled refresh (and the first maintenance pass), and
+      // the first receiver poll decides whether this process hosts `kyberdash otel`. Both
+      // belong to the pair, not to one server: a second server over the same state dir must
+      // not arm a second poll timer against the same host.
+      await services.jobHost.start()
+      startReceiverPolling(services)
+    } catch (err) {
+      await services.jobHost.close()
+      await services.receiverHost.close()
+      throw err
+    }
+    hostedServices.set(stateDir, services)
+    return services
+  })()
+  hostedServicesStarting.set(stateDir, pending)
+  const forget = (): void => { if (hostedServicesStarting.get(stateDir) === pending) hostedServicesStarting.delete(stateDir) }
+  void pending.then(forget, forget)
+  return pending
+}
+
+function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
+  const { store, program, programArgs } = seams
+  return {
+    store,
+    seams,
+    refs: 0,
+    jobHost: new JobHost({
+      store,
+      stateDir,
+      program,
+      programArgs,
+      ...(seams.jobSpawner === undefined ? {} : { spawner: seams.jobSpawner }),
+      // The maintenance pass is the central module's, not a copy of it: expiry purging and
+      // reprojection are engine work and must not be re-implemented at the call site.
+      maintenance: seams.maintenance ?? (() => runMaintenancePass(store, new Date())),
+    }),
+    receiverHost: new ReceiverHost({
+      store,
+      program,
+      programArgs,
+      ...(seams.receiverSpawner === undefined ? {} : { spawner: seams.receiverSpawner }),
+      ...(seams.receiverProber === undefined ? {} : { prober: seams.receiverProber }),
+    }),
+  }
+}
+
+/**
+ * A live engine already holds this state dir. The caller attaches to it instead of
+ * starting a second one - there is exactly one engine per user.
+ */
+export class EngineAlreadyRunningError extends Error {
+  readonly record: EngineRecord
+  constructor(record: EngineRecord) {
+    super(`KyberDash is already running (pid ${record.pid}, version ${record.version}${record.url === undefined ? '' : `, ${record.url}`})`)
+    this.name = 'EngineAlreadyRunningError'
+    this.record = record
+  }
+}
+
+/** How long a newer engine waits for an older one to let go of the endpoint. */
+const ENGINE_HANDOFF_TIMEOUT_MS = 10_000
+
+async function takeEngine(
+  stateDir: string,
+  onShutdownRequested: () => void,
+): Promise<EngineOwner> {
+  const take = (): Promise<EngineOwner | EngineAttached> =>
+    acquireEngine({ stateDir, version: KYBERDASH_VERSION, onShutdownRequested })
+  let taken = await take()
+  if (taken.kind === 'attached' && taken.record.version !== KYBERDASH_VERSION && taken.record.pid > 0) {
+    // An engine from another build outlives its install. Replace it: the newer binary wins.
+    if (await requestEngineShutdown(stateDir)) {
+      const deadline = Date.now() + ENGINE_HANDOFF_TIMEOUT_MS
+      while (Date.now() < deadline && (await queryEngine(stateDir)) !== null) {
+        await new Promise<void>((resolve) => { setTimeout(resolve, 100) })
+      }
+      taken = await take()
+    }
+  }
+  if (taken.kind === 'attached') throw new EngineAlreadyRunningError(taken.record)
+  return taken
+}
+
+export async function runWebDashboard(opts: WebDashboardServices & {
+  /**
+   * The port for this run. `undefined` resolves from the persisted
+   * `settings.dashboard.port` (default 4747); 0 binds an ephemeral loopback port for
+   * the in-process suites. Any other value is fixed: when it is taken the start
+   * rejects with a `DashboardPortOccupiedError` rather than moving elsewhere.
+   */
+  port?: number
   open: boolean
+  /**
+   * Enforce one engine per state dir: a live engine makes this start throw
+   * `EngineAlreadyRunningError`, and an older-version engine is replaced. Off for the
+   * in-process suites, which start several servers over temporary state dirs.
+   */
+  singleInstance?: boolean
   view?: string
   kyberBridge?: KyberBridge
   openUrl?: (url: string) => void
@@ -232,8 +1040,52 @@ export async function runWebDashboard(opts: {
   // Resolved once, at server start: the embedded-asset case parses `web.json` here
   // rather than per request (D1-A).
   const staticSource = resolveStaticSource(runningAsSea, embeddedTextAsset)
-  const bridge = opts.kyberBridge ?? new KyberBridge()
   const writeStdout = opts.writeStdout ?? ((text: string) => { process.stdout.write(text) })
+
+  // The hosted background services (rule R1). The server owns them: the tray and the web
+  // UI are display layers, so the schedule, the maintenance pass and every manual job run
+  // from here and nowhere else. One pair per state dir per process, shared by every server
+  // in this process that points at the same place.
+  //
+  // Started AFTER the socket is bound and the listening line is out (see below), so
+  // `hosted` is null while the pair is coming up. Routes that need the job host answer
+  // 503 in that window rather than reaching for a host that does not exist yet.
+  let hosted: HostedServices | null = null
+  let releaseHosted = (): void => {}
+  const stateDir = opts.stateDir ?? join(homedir(), '.kyberdash')
+  // The state dir is created here, not left to whichever writer gets there first. It is
+  // routinely absent on a fresh account - a test HOME, a CI smoke run, or a machine where
+  // the store lives elsewhere (KYBER_CANON_DB) - and every writer in this process then
+  // fails on ENOENT for a directory that should simply exist. 0o700: this directory holds
+  // the pid and port of a loopback server and the user's stored context.
+  //
+  // Best-effort: a directory we cannot create is reported once, and the server still runs
+  // (the lease takes the same directory and degrades to hosting no jobs if it cannot).
+  const stateDirProblem = ensureStateDir(stateDir)
+  // One engine per user, enforced by the OS (a bound local endpoint), before anything else
+  // binds or writes. `requestStop` is late-bound: a peer's shutdown request can only arrive
+  // after the server below exists.
+  // A request that lands before the server is listening is remembered and honoured the moment it is.
+  let stopRequestedEarly = false
+  let requestStop = (): void => { stopRequestedEarly = true }
+  const engine: EngineOwner | null = opts.singleInstance === true && stateDirProblem === null
+    ? await takeEngine(stateDir, () => { requestStop() })
+    : null
+  // Read-write: the hosts write settings, and the maintenance pass purges and reprojects.
+  // The store is resolved up front (it is one handle per process, shared by every server),
+  // so the settings routes work from the first accepted connection.
+  //
+  // Resolving the store MIGRATES the store first, and the migration runs before any
+  // handle on the canon file is open - which is why the bridge is opened below and not
+  // above. The v21 -> v22 backfill holds SQLite's write lock for the whole pass, so it
+  // must not run beside a handle on the same file; and the store's own constructor
+  // migration, which is one blocking pass over every session payload, becomes a no-op
+  // because the file is already at this build's schema version.
+  const store = await resolveHostStore(opts.store, { yield: opts.migrationYield })
+  // The bridge opens its own read-only handle on the canon file, so it is opened after
+  // the migration rather than before it: a handle that predates the migration is a
+  // handle onto a schema that is about to change underneath it.
+  const bridge = opts.kyberBridge ?? new KyberBridge()
 
   const serveIndexHtml = async (res: import('http').ServerResponse, filePath: string): Promise<void> => {
     const html = applyHtmlBrand(await readFile(filePath, 'utf8'))
@@ -281,7 +1133,27 @@ export async function runWebDashboard(opts: {
         return
       }
 
-      if (handleKyberRequest(req, res, url, bridge)) return
+      // The ONE shared API: both surfaces reach the same store and the same JobHost.
+      const current = hosted
+      if (current === null && HOSTED_ONLY_ROUTES.has(url.pathname)) {
+        res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ error: ERR_SERVICES_STARTING }))
+        return
+      }
+      // The store is always passed, so the settings routes answer from the first accepted
+      // connection; only the JobHost is absent while the pair is coming up, and the job
+      // routes answer 503 for that on their own account. The receiver host rides along so
+      // coverage reports the polled receiver state instead of unknown.
+      if (
+        handleKyberRequest(req, res, url, bridge, {
+          store,
+          jobHost: current?.jobHost,
+          receiverHost: current?.receiverHost,
+          ...(opts.capture === undefined ? {} : { capture: opts.capture }),
+        })
+      ) {
+        return
+      }
 
       if (!staticSource) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -327,22 +1199,105 @@ export async function runWebDashboard(opts: {
     }
   })
 
+  // Precedence is explicit `--port` > persisted `settings.dashboard.port` > 4747, and it
+  // is resolved here in the engine rather than in the CLI surface: the store behind it
+  // is the same handle the settings routes serve, so the number below is always the one
+  // the operator last persisted. Changing the setting later never rebinds this process;
+  // the new port applies on the next startup.
+  //
+  // Resolved inside its own cleanup: `readSetting` reaches sqlite through a bare
+  // `prepare().get()`, which throws on a locked or corrupt store. That throw must not
+  // leak the bridge and default store this start already opened, so it takes the same
+  // close path a bind failure takes below.
+  let requestedPort: number
+  try {
+    requestedPort = resolveDashboardPort(opts.port, store)
+  } catch (err) {
+    await engine?.release()
+    bridge.close()
+    closeDefaultStoreIfUnused(opts.store)
+    throw err
+  }
   const port = await new Promise<number>((resolve, reject) => {
     server.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+      // A configured port that fails to bind is a refused start, never a quiet move or a
+      // raw traceback: the tray attaches by the configured URL and a fallback would
+      // strand it, and an occupied port, a privileged port restarted as non-root, and a
+      // socket the layer rejects all deserve the same actionable refusal. Close the
+      // failed socket before rejecting so a retry can bind; nothing is published (the
+      // listening line and server.json below only happen after a bind) and no host pair
+      // is taken (that happens further below too).
+      const refusal = portRefusalFor(requestedPort, err.code)
+      if (refusal !== undefined) {
+        server.close(() => reject(refusal))
       } else {
         reject(err)
       }
     })
-    server.listen(opts.port, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+    server.listen(requestedPort, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+    // A server that never bound never served, so it must not keep a host pair alive: the
+    // share taken above goes back rather than leaving a lease held by a process with no
+    // dashboard.
+  }).catch(async (err: unknown) => {
+    // The engine endpoint was taken above; a server that never bound must give it back.
+    await engine?.release()
+    // Nothing was bound, so nothing was ever holding a host pair: there is no share to
+    // give back yet (the pair is taken below, after the bind). The bridge above still
+    // needs closing when the caller injected none: it opened its own sqlite handle, and
+    // a failed start must not leak it. close() only drops what the bridge opened itself —
+    // an injected store's handle is detached, never closed — so this is safe either way.
+    bridge.close()
+    closeDefaultStoreIfUnused(opts.store)
+    throw err
   })
   // Durable handler so a post-bind socket error never crashes the process.
   server.on('error', () => {})
 
+  // server.json is written once the server is listening, so the tray never reads a URL
+  // that is not yet accepting connections. It carries the same `apiVersion` the tray checks
+  // against `/meta`, so a tray can decide whether it understands this server before it
+  // renders anything.
   const url = `http://127.0.0.1:${port}`
-  // First, and machine-readable: the tray supervisor reads this line and
-  // nowhere else, so a human banner printed first would look like a hang (R5.7).
+  if (engine !== null) {
+    // A kill the process cannot intercept leaves a stale endpoint, which the next start
+    // clears. Everything the process can intercept (SIGTERM, exit) cleans up after itself.
+    process.once('exit', () => engine.releaseSync())
+    engine.update({ url })
+    requestStop = () => {
+      server.closeAllConnections?.()
+      server.close()
+      server.once('close', () => { setImmediate(() => process.exit(0)) })
+      setTimeout(() => process.exit(0), 5_000).unref()
+    }
+    // SIGTERM takes the same teardown as a peer's shutdown request: the server's close handler below
+    // gives back the hosts, server.json and the bridge before the process exits.
+    process.once('SIGTERM', () => requestStop())
+    if (stopRequestedEarly) requestStop()
+  }
+  // Publish the attach point. Only over a file that is not a live other server's: the
+  // jobs lease stands a second `kyberdash web` process down, but it does not stop that
+  // process reaching this line, and a blind overwrite would hand the tray the standing
+  // process's URL while destroying the pid that owns it. A dead holder's leftover is
+  // overwritten without comment - that is the normal recovery case.
+  const serverFilePath = join(stateDir, SERVER_FILE)
+  const existing = readServerRecord(serverFilePath)
+  const ownedByLiveOtherProcess = existing !== null && existing.pid !== process.pid && pidLooksAlive(existing.pid)
+  // Deliberately no log on the skip below: a second server over one state dir is a
+  // supported configuration, and a warning there would be noise on a normal day.
+  if (!ownedByLiveOtherProcess) {
+    if (stateDirProblem === null) {
+      publishServerRecord(serverFilePath, JSON.stringify({ pid: process.pid, url, apiVersion: REPORT_SCHEMA_VERSION }))
+    } else {
+      console.error(publishWarning(stateDirProblem))
+    }
+  }
+
+  // First, and machine-readable: the tray supervisor reads this line and nowhere else,
+  // and nowhere else than this line does it time out — the supervisor kills a server
+  // that has not announced itself. So it comes BEFORE the hosted services: `JobHost.
+  // start()` awaits its first tick, and that tick runs the maintenance pass, which on a
+  // large canon.db can take far longer than the supervisor's patience. Binding and
+  // announcing first is what keeps a slow first pass from reading as a hung server.
   writeStdout(
     `${JSON.stringify({
       event: 'kyberdash.web.listening',
@@ -352,23 +1307,50 @@ export async function runWebDashboard(opts: {
       apiVersion: REPORT_SCHEMA_VERSION,
     })}\n`,
   )
-  if (!staticSource) {
-    writeStdout(`\n  ${runningAsSea() ? SEA_NOT_BUILT_HINT_TEXT : DEV_NOT_BUILT_HINT_TEXT}\n`)
-  }
-  writeStdout(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
-  if (opts.open) (opts.openUrl ?? openBrowser)(joinViewUrl(url, opts.view))
 
   const onSigint = () => {
     bridge.close()
     process.exit(0)
   }
-  process.on('SIGINT', onSigint)
 
-  // Ensure bridge is cleanly closed and signal handler removed when server stops
+  // Shutdown, in one place: release this server's share of the hosted services (the last
+  // one out stops both hosts, which kill their children and release the jobs lease),
+  // remove OUR published server.json so no tray looks for a dead URL, and close the
+  // bridge. Removed by identity, not by path: a second process over the same state dir
+  // can have published and then stood down, and a path delete from either one would strip
+  // the other's attach point. An unreadable, missing or foreign body is left alone.
   server.on('close', () => {
     process.off('SIGINT', onSigint)
+    void engine?.release().catch(() => {})
+    const published = readServerRecord(serverFilePath)
+    if (published !== null && published.pid === process.pid && (published.url === undefined || published.url === url)) {
+      rmSync(serverFilePath, { force: true })
+    }
+    releaseHosted()
     bridge.close()
   })
+
+  // Only now, with the socket bound, the attach point published and the line out, are the
+  // hosts built. A failure here is a real failure to start: the socket is closed (which
+  // removes our server.json through the handler above), and the caller sees the error -
+  // which is what `web-registry.test.ts` pins. A pair publishes itself only once its
+  // hosts are up, so a rejected start leaves no shareable entry and no held lease.
+  try {
+    const acquired = await acquireHostedServices(opts, runningAsSea())
+    hosted = acquired.services
+    releaseHosted = acquired.release
+  } catch (err) {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    throw err
+  }
+
+  process.on('SIGINT', onSigint)
+
+  if (!staticSource) {
+    writeStdout(`\n  ${runningAsSea() ? SEA_NOT_BUILT_HINT_TEXT : DEV_NOT_BUILT_HINT_TEXT}\n`)
+  }
+  writeStdout(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
+  if (opts.open) (opts.openUrl ?? openBrowser)(joinViewUrl(url, opts.view))
 
   return server
 }

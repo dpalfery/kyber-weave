@@ -19,4 +19,10 @@ internal sealed class KyberWeaveYamlDocument
     /// a schema this type could enumerate.
     /// </summary>
     public Dictionary<string, string>? ConfigReg { get; set; }
+
+    /// <summary>
+    /// Raw <c>autonomy:</c> value. Kept a string so a value outside the two known settings
+    /// reaches the loader as a configuration error rather than a deserialization failure.
+    /// </summary>
+    public string? Autonomy { get; set; }
 }

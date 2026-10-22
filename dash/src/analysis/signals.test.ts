@@ -65,6 +65,7 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
     const res = contextReuseRatio({
       freshInput: 50,
       cacheRead: 50,
+      cacheCreation: 0,
     })
     expect(isSignalMeasurable(res)).toBe(true)
     if (isSignalMeasurable(res)) {
@@ -73,20 +74,62 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
   })
 
   it('handles 100% cache hit and 0% cache hit edge cases cleanly', () => {
-    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500 })
+    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500, cacheCreation: 0 })
     expect(isSignalMeasurable(fullHit)).toBe(true)
     if (isSignalMeasurable(fullHit)) expect(fullHit.value).toBe(1.0)
 
-    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0 })
+    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
     expect(isSignalMeasurable(zeroHit)).toBe(true)
     if (isSignalMeasurable(zeroHit)) expect(zeroHit.value).toBe(0.0)
+  })
+
+  it('emits not_measurable when cacheRead is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('emits not_measurable when any turn cacheRead is absent', () => {
+    const res = contextReuse({
+      freshInput: 100,
+      cacheRead: 50,
+      turns: [{ freshInput: 100, cacheRead: 50 }, { freshInput: 20 }],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('emits not_measurable when cacheCreation is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100, cacheRead: 50 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
+  it('emits not_measurable when any turn cacheCreation is absent', () => {
+    const res = contextReuse({
+      turns: [
+        { freshInput: 100, cacheRead: 50, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 10 },
+      ],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
+  it('treats numeric cacheRead 0 as a measured zero ratio with positive fresh input', () => {
+    const res = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
+    expect(isSignalMeasurable(res)).toBe(true)
+    if (isSignalMeasurable(res)) {
+      expect(res.status).toBe('measured')
+      expect(res.value).toBe(0)
+    }
   })
 
   it('aggregates across turns when turns are provided', () => {
     const res = contextReuse({
       turns: [
-        { freshInput: 100, cacheRead: 100 },
-        { freshInput: 20, cacheRead: 180 },
+        { freshInput: 100, cacheRead: 100, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 180, cacheCreation: 0 },
       ],
     })
     expect(isSignalMeasurable(res)).toBe(true)
@@ -469,6 +512,20 @@ describe('Signal 6: compactionPressure (Task F1 / Context Window & Risk)', () =>
     const res = compactionPressure({ peakInputTokens: 1000, contextLimit: 0 })
     expect(res.status).toBe('not_measurable')
   })
+
+  it('emits not_measurable when contextLimit is NaN, including a catalog window', () => {
+    const unnamed = compactionPressure({ peakInputTokens: 1000, contextLimit: Number.NaN })
+    expect(unnamed.status).toBe('not_measurable')
+    expect((unnamed as { reason: string }).reason).toMatch(/positive finite/i)
+
+    const catalog = compactionPressure({
+      peakInputTokens: 1000,
+      contextLimit: Number.NaN,
+      contextLimitSource: 'catalog',
+    })
+    expect(catalog.status).toBe('not_measurable')
+    expect((catalog as { reason: string }).reason).toMatch(/positive finite/i)
+  })
 })
 
 describe('Signal 7: delegationOverhead (Task F1 / Subagent Workflow Ratio)', () => {
@@ -547,19 +604,24 @@ describe('Signal 8: skillUtilisation (Task F1 / Decision D16 Compliance)', () =>
     }
   })
 
-  it('extracts skill references from prompt context using skill tags or prefixes', () => {
-    const contextContent = `
-      You have access to the following skills:
-      <skill name="git-sync">Sync git branch</skill>
-      <skill name="vitest-runner">Run vitest</skill>
-      skill: lint-fixer
-    `
-    const res = skillUtilisation({
-      contextContent,
-      executedSkills: ['git-sync'],
-    })
+  it('takes the listed set from raw kyber.skills.listed through computeSignals, not from prompt tags', () => {
+    const records = [
+      skillTurn('turn-1', {
+        raw: {
+          'kyber.skills.listed': {
+            isInitial: true,
+            skills: [{ name: 'git-sync' }, { name: 'vitest-runner' }, { name: 'lint-fixer' }],
+          },
+        },
+        // A prompt tag that names a skill the listing does not carry must not widen the set.
+        content: { system_prompt: '<skill name="ghost">Not listed</skill>' },
+      }),
+      skillToolCall('call-1', 'turn-1', { skill: 'git-sync' }),
+    ]
 
-    expect(isSignalMeasurable(res)).toBe(true)
+    const res = computeSignals({ harness: 'claude-code', records }).skillUtilisation
+
+    expect(res.status, 'the listing and the Skill call must yield a measured utilisation').toBe('derived')
     if (isSignalMeasurable(res)) {
       expect(res.numerator).toBe(1)
       expect(res.denominator).toBe(3)
@@ -705,15 +767,16 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     store.close()
   })
 
-  it('stamps DETECTOR_VERSION 3 so stale generations report outdated', () => {
+  it('stamps DETECTOR_VERSION 4 so stale generations report outdated', () => {
     // Generation 2 removed the duplicate-tool-call 250-token fallback;
     // Generation 3 (issues #181/#182/#191) added honest compaction windows
-    // and folded twin-harness identity. The literal below pins the current
-    // generation so an accidental bump or revert fails loudly; the
-    // behavioral contract is the lines after it: a store stamped below
-    // current reports outdated. (The stamp itself is informational —
-    // rebuilds are authoritative — see the DETECTOR_VERSION comment.)
-    expect(DETECTOR_VERSION).toBe(3)
+    // and folded twin-harness identity; Generation 4 reads skill listings and
+    // invocations from canon/skills.ts instead of prompt regexes and tool names.
+    // The literal below pins the current generation so an accidental bump or
+    // revert fails loudly; the behavioral contract is the lines after it: a
+    // store stamped below current reports outdated. (The stamp itself is
+    // informational — rebuilds are authoritative — see the DETECTOR_VERSION comment.)
+    expect(DETECTOR_VERSION).toBe(4)
     const path = tempStorePath()
     const store = new CanonStore(path)
     store.setDetectorVersion(1)
@@ -761,6 +824,163 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     expect(store.getMetadata('detector_version')).toBe(String(DETECTOR_VERSION))
     expect(store.getDetectorVersion()).toBe(DETECTOR_VERSION)
     expect(store.hasCurrentDetectorVersion()).toBe(true)
+    store.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T4 RED: skill utilisation takes its listed and invoked sets from canon/skills.ts.
+// Today it credits TOOL NAMES (executedSkills = every tool.invoke name) and reads
+// referenced skills from system-prompt regexes that no adapter writes.
+//
+// Inputs assumed (the minimal contract these tests pin):
+//   - listing: raw['kyber.skills.listed'] = { isInitial, skills: [{ name, description? }] }
+//     on an llm.invoke turn (claude-code), read per record by extractListedSkills.
+//   - invocation: a tool.invoke named `Skill` whose raw.arguments.skill names the
+//     loaded skill, with parentSpanId = the turn; and raw['kyber.skills.invoked'] string[].
+//   - entry point: computeSignals({ harness, records }).skillUtilisation, with no
+//     skillUtilisation override, so the wiring is exercised end to end.
+// ---------------------------------------------------------------------------
+
+const DOCS_AND_LINT_LISTING = {
+  isInitial: true,
+  skills: [
+    { name: 'docs', description: 'Project documentation conventions' },
+    { name: 'lint', description: 'Lint and format a changed file' },
+  ],
+}
+
+function skillTurn(spanId: string, overrides: Partial<CanonicalRecord> = {}): CanonicalRecord {
+  return {
+    spanId,
+    traceId: 'trace-skills',
+    parentSpanId: null,
+    source: 'claude-code',
+    harness: 'claude-code',
+    sessionId: 'session-skills',
+    name: 'turn',
+    op: 'llm.invoke',
+    kind: 'client',
+    timestamp: '2026-10-01T12:00:00.000Z',
+    durationMs: 100,
+    status: 'ok',
+    tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 5, reportedInput: 10, reportedOutput: 5 },
+    content: {},
+    cost: { basis: 'unknown', status: 'not_billed' },
+    ...overrides,
+  }
+}
+
+function skillToolCall(
+  spanId: string,
+  parentSpanId: string,
+  args: unknown,
+  overrides: Partial<CanonicalRecord> = {},
+): CanonicalRecord {
+  return skillTurn(spanId, {
+    parentSpanId,
+    name: 'Skill',
+    op: 'tool.invoke',
+    kind: 'internal',
+    timestamp: '2026-10-01T12:00:01.000Z',
+    raw: { arguments: args },
+    ...overrides,
+  })
+}
+
+describe('Signal 8 skillUtilisation from the listed and invoked sets (T4 RED)', () => {
+  it('credits the skill a Skill tool call loads, and does not credit a skill named Skill', () => {
+    const records = [
+      skillTurn('turn-1', { raw: { 'kyber.skills.listed': DOCS_AND_LINT_LISTING } }),
+      skillToolCall('call-1', 'turn-1', { skill: 'docs' }),
+    ]
+
+    const res = computeSignals({ harness: 'claude-code', records }).skillUtilisation
+
+    expect(res.status, 'a listing plus a Skill call must yield a measured utilisation').toBe('derived')
+    if (isSignalMeasurable(res)) {
+      expect(res.numerator).toBe(1)
+      expect(res.denominator).toBe(2)
+      expect(res.metadata?.executedSkills, 'executed must be the loaded skill, not the tool name Skill').toEqual(['docs'])
+      expect(res.metadata?.unexecutedSkills).toEqual(['lint'])
+    }
+  })
+
+  it('credits a skill named by the raw kyber.skills.invoked key', () => {
+    const records = [
+      skillTurn('turn-1', {
+        raw: { 'kyber.skills.listed': DOCS_AND_LINT_LISTING, 'kyber.skills.invoked': ['docs'] },
+      }),
+    ]
+
+    const res = computeSignals({ harness: 'claude-code', records }).skillUtilisation
+
+    expect(res.status, 'the invoked key must count as an invocation').toBe('derived')
+    if (isSignalMeasurable(res)) {
+      expect(res.metadata?.executedSkills).toEqual(['docs'])
+      expect(res.numerator).toBe(1)
+    }
+  })
+
+  it('counts a call reported by both a Skill tool call and the invoked key once', () => {
+    const records = [
+      skillTurn('turn-1', {
+        raw: { 'kyber.skills.listed': DOCS_AND_LINT_LISTING, 'kyber.skills.invoked': ['docs'] },
+      }),
+      skillToolCall('call-1', 'turn-1', { skill: 'docs' }),
+    ]
+
+    const res = computeSignals({ harness: 'claude-code', records }).skillUtilisation
+
+    expect(res.status, 'both sources report one call; the skill must still be measured').toBe('derived')
+    if (isSignalMeasurable(res)) {
+      expect(res.metadata?.executedSkills, 'one call, reported twice, is one execution').toEqual(['docs'])
+      expect(res.numerator).toBe(1)
+    }
+  })
+
+  it('does not credit a listed skill from an ordinary tool call that shares its name', () => {
+    const records = [
+      skillTurn('turn-1', { raw: { 'kyber.skills.listed': DOCS_AND_LINT_LISTING } }),
+      skillToolCall('call-1', 'turn-1', {}, { name: 'lint' }),
+    ]
+
+    const res = computeSignals({ harness: 'claude-code', records }).skillUtilisation
+
+    expect(res.status, 'the listing is measured, so utilisation must be derived').toBe('derived')
+    if (isSignalMeasurable(res)) {
+      expect(res.metadata?.executedSkills, 'a tool named lint does not load the lint skill').toEqual([])
+      expect(res.numerator).toBe(0)
+    }
+  })
+
+  it.each(['pi', 'opencode', 'unknown-harness'])(
+    'reports skill utilisation not measurable, never zero, for %s which has no skill listing',
+    (harness) => {
+      const records = [
+        skillTurn('turn-1', { harness, source: harness, content: { system_prompt: '<skill name="docs">Docs</skill>' } }),
+        skillToolCall('call-1', 'turn-1', { skill: 'docs' }, { harness, source: harness }),
+      ]
+
+      const res = computeSignals({ harness, records }).skillUtilisation
+
+      expect(res.status, `${harness} exports no skill listing, so utilisation must not be measured`).toBe('not_measurable')
+    },
+  )
+})
+
+describe('DETECTOR_VERSION bump for the skills source change (T4 RED)', () => {
+  it('moves DETECTOR_VERSION past the recorded generation 3', () => {
+    // Generation 3 is the last stamp recorded in this suite. Skill detection now
+    // reads canon/skills.ts, so stores built before it must be reported outdated.
+    expect(DETECTOR_VERSION, 'DETECTOR_VERSION must advance past generation 3').toBeGreaterThan(3)
+  })
+
+  it('reports a store stamped with generation 3 as outdated against this build', () => {
+    const store = new CanonStore(tempStorePath())
+    store.setDetectorVersion(3)
+
+    expect(store.isDetectorOutdated(), 'a generation-3 store predates the skills source change').toBe(true)
     store.close()
   })
 })

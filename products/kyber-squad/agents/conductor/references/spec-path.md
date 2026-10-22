@@ -12,13 +12,13 @@ Use this path when the user supplies a specification or selects one from the dir
 
 `product-owner` never prompts the user. It writes only specification artifacts and returns a structured digest. The conductor handles each result:
 
-- `STATUS: REQUIREMENTS_GAP` or `STATUS: DESIGN_GAP` — relay `GAPS` and `OPEN_QUESTIONS`, obtain the user's decision, and resume the named earlier phase.
-- `STATUS: READY_FOR_REVIEW` — present the artifact summary and its open questions. Ask for approval or concrete revision feedback, then send the answer back as a new phase invocation.
+- `STATUS: REQUIREMENTS_GAP` or `STATUS: DESIGN_GAP` — relay `GAPS` and `OPEN_QUESTIONS`, obtain the user's decision, and resume the named earlier phase. In autonomous mode apply the autonomy contract: accept recommended options and relay only impactful escalations.
+- `STATUS: READY_FOR_REVIEW` — present the artifact summary and its open questions. Ask for approval or concrete revision feedback, then send the answer back as a new phase invocation. In autonomous mode approve it by re-invoking `product-owner` with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input (provenance `autonomous: recommendation accepted`); `product-owner` records it, the conductor never writes the row.
 - `STATUS: PHASE_APPROVED` — advance to the next incomplete phase.
 - `STATUS: SPEC_READY` — verify all phases are approved, the task artifact persists `development-mode` and the matching Test or verification contract, and the specification index is synchronized as Draft awaiting final approval.
 - `STATUS: SPEC_WRITE_ERROR` or `STATUS: BLOCKED` — relay the exact failure and stop. If `product-owner` reports a write error on a nonexistent file because the host harness withholds file creation from subagents, pre-create the empty phase file before redispatching as a degradation fallback.
 
-After `SPEC_READY`, ask the final blocking question as **approve and execute**. On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence.
+After `SPEC_READY`, ask the final blocking question as **approve and execute** (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence.
 
 ## Revisions and mode changes
 

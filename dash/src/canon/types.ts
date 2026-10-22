@@ -130,8 +130,17 @@ export type ContentPart = {
   tokens?: number
   /** Ground-truth MCP server; `tool_definitions` parts only. */
   server?: string
+  /** Role of the request-body message this part came from; absent for top-level parts and role-less messages. */
+  role?: 'system' | 'user' | 'assistant'
   /** Position within the turn, so ordering survives a store round trip. */
   order?: number
+  /**
+   * `false` marks a tool definition the turn offered but did not keep resident
+   * in its context (deferred or loaded on demand). It is still a fact about the
+   * turn, so it stays on the record, but it adds no tokens to the context
+   * composition. Absent means resident, which is what every existing part means.
+   */
+  resident?: false
 }
 
 /**
@@ -194,6 +203,14 @@ export type CanonicalRecord = {
   raw?: unknown
 }
 
+/**
+ * The `raw` key a turn record carries the skills it invoked under: an array of
+ * skill names in first-seen order with repeats collapsed. Absent (never `[]`)
+ * when the turn invoked none. The synthesizer writes it; the skills module reads it.
+ */
+export const SKILLS_INVOKED_KEY = 'kyber.skills.invoked' as const
+export const SKILLS_LISTED_KEY = 'kyber.skills.listed' as const
+
 /** Problem codes emitted by `validateTokens`. */
 export const TOKEN_NEGATIVE_FRESH = 'TOKEN_NEGATIVE_FRESH'
 export const TOKEN_NEGATIVE_CLASS = 'TOKEN_NEGATIVE_CLASS'
@@ -216,7 +233,11 @@ export type TokenValidation =
  * applies identically to orphans with no resolvable parent. The caller rejects
  * the record and writes the returned problem rather than storing it.
  */
-export function validateTokens(tokens: TokenUsage, location?: string): TokenValidation {
+export function validateTokens(
+  tokens: TokenUsage,
+  location?: string,
+  measurability?: Measurability,
+): TokenValidation {
   if (tokens.freshInput < 0) {
     return {
       valid: false,
@@ -241,7 +262,11 @@ export function validateTokens(tokens: TokenUsage, location?: string): TokenVali
     }
   }
 
-  if (tokens.reasoning !== undefined && (tokens.reasoning < 0 || tokens.reasoning > tokens.output)) {
+  const outputAvailability = measurability?.output ?? measurability?.output_tokens
+  const outputUnmeasured =
+    typeof outputAvailability === 'object' && outputAvailability.availability === 'not_measurable'
+
+  if (tokens.reasoning !== undefined && (tokens.reasoning < 0 || (!outputUnmeasured && tokens.reasoning > tokens.output))) {
     return {
       valid: false,
       problem: {

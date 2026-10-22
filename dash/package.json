@@ -27,7 +27,8 @@
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
     "prepublishOnly": "npm run build:cli",
-    "report:fixtures": "tsx src/tools/report-fixtures.ts"
+    "report:fixtures": "tsx src/tools/report-fixtures.ts",
+    "memory:store": "tsx src/tools/store-memory.ts"
   },
   "keywords": [
     "claude-code",
@@ -61,11 +62,12 @@
   },
   "homepage": "https://github.com/dpalfery/kyber-weave#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "bonjour-service": "^1.4.1",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "js-tiktoken": "^1.0.21",
+    "jsonc-parser": "^3.3.1",
     "selfsigned": "^5.5.0",
     "strip-ansi": "^7.2.0",
     "undici": "^7.29.1",
@@ -80,7 +82,7 @@
     "eslint": "^9.18.0",
     "happy-dom": "^20.14.5",
     "playwright": "^1.61.1",
-    "tsup": "^8.4.0",
+    "tsup": "^9.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.20.0",

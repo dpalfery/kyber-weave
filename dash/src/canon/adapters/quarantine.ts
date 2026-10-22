@@ -75,7 +75,7 @@ export type RecordValidator = (record: CanonicalRecord) => Problem | undefined
  * their own `validate` through a custom {@link RecordValidator}.
  */
 export function tokenValidator(record: CanonicalRecord): Problem | undefined {
-  const result = validateTokens(record.tokens, record.spanId)
+  const result = validateTokens(record.tokens, record.spanId, record.measurability)
   return result.valid ? undefined : result.problem
 }
 

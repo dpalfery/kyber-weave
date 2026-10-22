@@ -1067,7 +1067,8 @@ function getComparableTurnTokens(turn: RunTurn | null): number | undefined {
   const cache = turn.tokens.cacheRead
   const cacheCreation = turn.tokens.cacheCreation
   if (typeof fresh === 'number' && typeof cache === 'number' && typeof output === 'number') {
-    return fresh + cache + (cacheCreation ?? 0) + output
+    if (cacheCreation === undefined) return undefined
+    return fresh + cache + cacheCreation + output
   }
   return undefined
 }

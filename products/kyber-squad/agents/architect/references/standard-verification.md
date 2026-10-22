@@ -7,7 +7,7 @@ Every implementation task has a verification-contract row:
 | Task | Automated test project or file | Runner command | Acceptance behavior | Additional current evidence |
 |---|---|---|---|---|
 
-Standard mode removes the requirement to demonstrate historical RED. It does not remove automated tests, current verification, task audit, or final council review.
+Standard mode removes the requirement to demonstrate historical RED. It does not remove automated tests, current verification, developer exit gate, or final council review.
 
 - Name the exact automated test surface and current command that proves the acceptance criteria.
 - Add build, analyzer, packaging, deployment, or read-only integration evidence when the task requires it.

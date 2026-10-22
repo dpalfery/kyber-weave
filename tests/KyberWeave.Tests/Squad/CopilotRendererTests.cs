@@ -22,30 +22,48 @@ public sealed class CopilotRendererTests
     private static readonly Regex ToolsFlowSequenceRegex =
         new(@"^tools:\s*\[(?<items>.*)\]$", RegexOptions.Compiled | RegexOptions.Multiline);
 
-    private static readonly string[] McpWildcardTrio =
-        ["'codegraph/*'", "'kyber-weave/*'", "'context7/*'"];
+    private static readonly string[] McpServerTools =
+        ["'codegraph/*'", "'kyber-weave/*'", "context7/resolve-library-id", "context7/query-docs"];
 
     [Fact]
     public void CopilotToolCatalogHasExactApprovedOrder()
     {
         Assert.Equal(
             [
-                "vscode",
-                "read",
+                "vscode/runCommand",
+                "vscode/toolSearch",
+                "vscode/askQuestions",
+                "read/problems",
+                "read/readFile",
+                "read/viewImage",
+                "read/terminalSelection",
+                "read/terminalLastCommand",
+                "read/getTaskOutput",
                 "todo",
                 "codegraph/*",
                 "kyber-weave/*",
-                "context7/*",
+                "context7/resolve-library-id",
+                "context7/query-docs",
                 "search",
-                "execute",
-                "web",
-                "edit",
-                "agent",
+                "execute/getTerminalOutput",
+                "execute/killTerminal",
+                "execute/sendToTerminal",
+                "execute/runTask",
+                "execute/createAndRunTask",
+                "execute/runInTerminal",
+                "execute/testFailure",
                 "edit/createDirectory",
                 "edit/createFile",
                 "edit/editFiles",
                 "edit/rename",
-                "vscodeGeneral/rename"
+                "web",
+                "agent",
+                "vscode",
+                "tool_search",
+                "read",
+                "context7/*",
+                "execute",
+                "edit"
             ],
             CopilotToolCatalog.OrderedTools);
     }
@@ -139,7 +157,7 @@ public sealed class CopilotRendererTests
         string architectFrontmatter = ExtractFrontmatterText(architectContent);
         string architectToolsLine = ExtractToolsLine(architectFrontmatter);
 
-        foreach (string wildcard in McpWildcardTrio)
+        foreach (string wildcard in McpServerTools)
         {
             Assert.Contains(wildcard, architectToolsLine, StringComparison.Ordinal);
         }
@@ -148,7 +166,9 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain("codegraph/*,", architectToolsLine.Replace("'codegraph/*'", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
         Assert.DoesNotContain("\"codegraph/*\"", architectToolsLine, StringComparison.Ordinal);
         Assert.DoesNotContain("\"kyber-weave/*\"", architectToolsLine, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"context7/*\"", architectToolsLine, StringComparison.Ordinal);
+
+        // context7 is granted as explicit tools; the coarse wildcard must never render alongside them.
+        Assert.DoesNotContain("context7/*", architectToolsLine, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -179,27 +199,30 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, vscodeGeneral/rename]")]
-    [InlineData("azure-reader", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("bug-crusher-investigator", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
-    [InlineData("code-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent]")]
-    [InlineData("conductor", "tools: [vscode, read, todo, agent]")]
-    [InlineData("csharp-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("dal-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("docs-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, edit]")]
-    [InlineData("github-devops", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]")]
-    [InlineData("maui-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("product-owner", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, edit, agent]")]
-    [InlineData("pulumi-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("python-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("react-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("research-agent", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("review-lens", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("review-triage", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("sql-database-architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("task-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
-    [InlineData("tauri-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("test-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("azure-reader", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("bug-crusher", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("bug-crusher-investigator", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]")]
+    [InlineData("code-reviewer", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
+    [InlineData("conductor", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]")]
+    [InlineData("csharp-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("dal-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("docs-dev", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("github-devops", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]")]
+    [InlineData("go-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("maui-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("product-owner", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
+    [InlineData("pulumi-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("python-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("react-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("research-agent", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-lens", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-triage", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("rust-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("sql-database-architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("tauri-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("test-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("typescript-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -249,7 +272,7 @@ public sealed class CopilotRendererTests
 
         // The reviewer profile's Copilot value is the expected model
         string expectedModel = source.ModelProfiles.Profiles["reviewer"].HarnessModels["copilot"];
-        Assert.Equal("Kimi K2.7 Code (copilot)", expectedModel);
+        Assert.Equal("Gemini 3.8 Flash (copilot)", expectedModel);
 
         // Verify the rendered file contains that model
         SquadDeploymentFile file = Assert.Single(
@@ -263,7 +286,7 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("task-reviewer", "reviewer", "Kimi K2.7 Code (copilot)")]
+    [InlineData("review-triage", "reviewer", "Gemini 3.8 Flash (copilot)")]
     [InlineData("test-dev", "fast", "MAI-Code-1.1-Flash (copilot)")]
     public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
         string agentName,
@@ -346,22 +369,22 @@ public sealed class CopilotRendererTests
 
         SquadDeploymentFile execAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/exec-bot.agent.md");
         Assert.Equal(
-            "tools: [vscode, todo, execute]",
+            "tools: [todo, vscode, execute]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(execAgent.Content.Span))));
 
         SquadDeploymentFile readAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/read-bot.agent.md");
         Assert.Equal(
-            "tools: [vscode, read, todo, 'context7/*']",
+            "tools: [todo, vscode, read, 'context7/*']",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(readAgent.Content.Span))));
 
         SquadDeploymentFile lockedAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/locked-bot.agent.md");
         Assert.Equal(
-            "tools: [vscode, todo]",
+            "tools: [todo, vscode]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(lockedAgent.Content.Span))));
 
         SquadDeploymentFile conductorAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/conductor.agent.md");
         Assert.Equal(
-            "tools: [vscode, read, todo]",
+            "tools: [todo, vscode, read]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(conductorAgent.Content.Span))));
     }
 
@@ -439,23 +462,124 @@ public sealed class CopilotRendererTests
         string root,
         string name,
         string capabilityProfile,
-        string copilotTools)
+        string copilotTools,
+        string invocation = "subagent",
+        string delegatesTo = "[]")
     {
         File.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
             ---
             schema: kyber-squad.agent/v1
             name: {name}
             description: Test agent {name}
-            invocation: subagent
+            invocation: {invocation}
             model-profile: default
             capability-profile: {capabilityProfile}
             copilot-tools: {copilotTools}
-            delegates-to: []
+            delegates-to: {delegatesTo}
             fallback: none
             aliases: []
             ---
             Instruction body for {name}.
             """);
+    }
+
+    private static void WritePrimaryDelegationSquad(string root)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "bundles"));
+        Directory.CreateDirectory(Path.Combine(root, "profiles"));
+        Directory.CreateDirectory(Path.Combine(root, "agents"));
+        Directory.CreateDirectory(Path.Combine(root, "schemas"));
+
+        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        {
+            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), overwrite: true);
+        }
+
+        File.WriteAllText(Path.Combine(root, "squad.yml"), """
+            schema: kyber-squad.squad/v1
+            name: test-squad
+            version-source: kyber-weave-assembly
+            default-bundle: full
+            bundles:
+              full: bundles/full.yml
+            profiles:
+              models: profiles/models.yml
+              capabilities: profiles/capabilities.yml
+              fallbacks: profiles/fallbacks.yml
+            toolchain: toolchain.yml
+            mcp: mcp.json
+            """);
+
+        File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+            schema: kyber-squad.toolchain/v1
+            required-features:
+              - agent-ir/v1
+            validated-release: null
+            """);
+
+        File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+
+        File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+            schema: kyber-squad.bundle/v1
+            name: full
+            agents:
+              - primary-boss
+              - primary-lonely
+              - delegating-sub
+              - worker-a
+            skills: []
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+            schema: kyber-squad.model-profiles/v1
+            profiles:
+              default:
+                default: inherit
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
+            schema: kyber-squad.capability-profiles/v1
+            capabilities:
+              - filesystem.read
+              - filesystem.search
+              - filesystem.write
+              - process.execute
+              - network.read
+              - network.publish
+              - delegate
+            profiles:
+              orchestrator:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: allow
+              plain:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: deny
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+            schema: kyber-squad.fallback-profiles/v1
+            profiles:
+              none:
+                no-primary-agent: skill
+                no-agent-primitive: skill
+            """);
+
+        WriteAgent(root, "primary-boss", "orchestrator", "[todo, vscode, agent]", "primary", "[worker-a]");
+        WriteAgent(root, "primary-lonely", "plain", "[todo, vscode]", "primary");
+        WriteAgent(root, "delegating-sub", "orchestrator", "[todo, vscode, agent]", "subagent", "[worker-a]");
+        WriteAgent(root, "worker-a", "plain", "[todo, vscode]");
     }
 
     private static string ExtractFrontmatterText(string markdown)
@@ -468,16 +592,16 @@ public sealed class CopilotRendererTests
     }
 
     /// <summary>
-    /// The "agent" tool grants a subagent the mechanism to delegate; "agents" names who it
-    /// may reach. Emitting only the first leaves architect and code-reviewer holding a tool
+    /// The "agent" tool grants an agent the mechanism to delegate; "agents" names who it
+    /// may reach. Emitting only the first leaves a delegating agent holding a tool
     /// with an empty roster — delegation that looks configured and silently does nothing.
-    /// A primary agent is dispatched from the top-level session and receives the full
-    /// roster from the harness, so declaring one there would only narrow it.
+    /// This holds for primary agents too: GitHub Copilot does not grant a primary agent
+    /// the full roster automatically, so a delegating primary declares its roster exactly
+    /// like a subagent does — but stays user-invocable (asserted separately).
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
     [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
-    [InlineData("product-owner", "agents: ['research-agent']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
         string agentName,
         string expectedAgentsLine)
@@ -490,17 +614,145 @@ public sealed class CopilotRendererTests
             ?.Trim();
 
         Assert.Equal(expectedAgentsLine, actual);
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A subagent that delegates to nothing, and every primary agent, must carry no roster:
-    /// an empty or redundant "agents" key is a permission statement nobody meant to make.
+    /// The real product conductor is a primary agent with a delegation roster. GitHub
+    /// Copilot does not grant it the full roster automatically, so it declares its roster
+    /// exactly like a subagent does — but stays user-invocable, since it is the default
+    /// entry point a human chooses directly. The two root wrappers follow the same rule.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "conductor",
+        "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'product-owner', " +
+        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'rust-dev', 'sql-database-architect', " +
+        "'tauri-dev', 'test-dev', 'typescript-dev']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
+        string agentName,
+        string expectedAgentsLine)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(expectedAgentsLine, actual);
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The per-task reviewer was retired; a Copilot render that still emits any path naming it would
+    /// hand the harness an agent the conductor can no longer route to by contract.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_DoesNotEmitAnyPathNamingTheRetiredTaskReviewer()
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string[] offenders = result.Files
+            .Select(file => file.RelativePath)
+            .Where(path => path.Contains("task-reviewer", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// A primary agent that delegates to nothing, like a non-delegating subagent, carries
+    /// no roster: an empty "agents" key is a permission statement nobody meant to make.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OmitsDelegationRosterForPrimaryAgentWithoutDelegates()
+    {
+        using TempDirectory temp = new();
+        WritePrimaryDelegationSquad(temp.Path);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: temp.Path,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-lonely.agent.md");
+
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A delegating primary agent declares its roster without becoming non-invocable, and a
+    /// delegating subagent keeps both its roster and "user-invocable: false".
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_PrimaryDelegationRosterDoesNotImplyNonInvocable()
+    {
+        using TempDirectory temp = new();
+        WritePrimaryDelegationSquad(temp.Path);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: temp.Path,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile primary = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-boss.agent.md");
+        string primaryFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(primary.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            primaryFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.DoesNotContain(
+            primaryFrontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+
+        SquadDeploymentFile subagent = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/delegating-sub.agent.md");
+        string subagentFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(subagent.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            subagentFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.Contains("user-invocable: false", subagentFrontmatter, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A subagent that delegates to nothing must carry no roster: an empty "agents" key
+    /// is a permission statement nobody meant to make. (Primary agents are covered
+    /// separately: the conductor declares its roster, and a primary without delegates is
+    /// exercised through a synthetic source below.)
     /// </summary>
     [Theory]
     [InlineData("csharp-dev")]
     [InlineData("review-lens")]
     [InlineData("azure-reader")]
-    [InlineData("conductor")]
     public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);
@@ -508,6 +760,247 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("agents:", StringComparison.Ordinal));
+    }
+
+    private static readonly string[] ConductorReferenceFiles =
+        ["plan-path.md", "spec-path.md", "intake-path.md", "execution-and-review.md", "autonomy.md"];
+
+    /// <summary>
+    /// Regression for the global-install report where <c>conductor</c> could not find
+    /// <c>intake-path.md</c>: Copilot does not reliably anchor a relative link to the agent file
+    /// for user-level agents, so every declared-resource link must be absolute under the
+    /// resolved Copilot root.
+    /// </summary>
+    [Fact]
+    public async Task GlobalRenderRewritesEveryDeclaredResourceLinkToAbsolutePathUnderResolvedRoot()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](/home/u/.copilot/agents/conductor/references/{file})",
+                content,
+                StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("](conductor/references/", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderKeepsFragmentSuffixAndLeavesLinksOutsideTheResourceClosureUnchanged()
+    {
+        using TempDirectory temp = new();
+        WriteSyntheticSquad(temp.Path, MinimalCapabilitiesYaml);
+        Directory.CreateDirectory(Path.Combine(temp.Path, "agents", "conductor", "references"));
+        await File.WriteAllTextAsync(
+            Path.Combine(temp.Path, "agents", "conductor", "references", "intake-path.md"),
+            "# Intake\n");
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "agents", "conductor.md"), """
+            ---
+            schema: kyber-squad.agent/v1
+            name: conductor
+            description: Test agent conductor
+            invocation: subagent
+            model-profile: default
+            capability-profile: read-only-custom
+            copilot-tools: [todo, read, vscode]
+            delegates-to: []
+            fallback: none
+            aliases: []
+            ---
+            Read [intake](conductor/references/intake-path.md#steps) first.
+            See [external](https://example.com/conductor/references/intake-path.md) and [local](#top).
+            """);
+
+        SquadRenderResult result = await RenderGloballyAsync(temp.Path, "/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](/home/u/.copilot/agents/conductor/references/intake-path.md#steps)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "](https://example.com/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains("[local](#top)", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderNormalizesWindowsRootToForwardSlashes()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync(@"C:\Users\u\.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](C:/Users/u/.copilot/agents/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        string[] targets = content
+            .Split("](", StringSplitOptions.None)
+            .Skip(1)
+            .Select(segment => segment[..segment.IndexOf(')', StringComparison.Ordinal)])
+            .Where(target => target.Contains("/agents/conductor/references/", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(5, targets.Length);
+        Assert.All(targets, target => Assert.DoesNotContain("\\", target, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalRenderWrapsLinkTargetInAngleBracketsWhenRootContainsASpace()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/my user/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](</home/my user/.copilot/agents/conductor/references/{file}>)",
+                content,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task GlobalRenderRecordsResourceLinksRewrittenDegradationForConductor()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        Assert.Contains(
+            result.Degradations,
+            d => d.Target == "copilot" &&
+                 d.CanonicalIdentity == "conductor" &&
+                 d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderStillEmitsResourceFilesBesideThePrincipalAtUnchangedPaths()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                result.Files,
+                f => f.RelativePath == $"agents/conductor/references/{file}");
+        }
+    }
+
+    [Fact]
+    public async Task ProjectRenderKeepsRelativeLinksAndIgnoresAnySuppliedGlobalRootResolver()
+    {
+        SquadRenderResult withoutResolver = await RenderAsync(ProductRoot, SquadDeploymentScope.Project, null);
+        SquadRenderResult withResolver = await RenderAsync(
+            ProductRoot,
+            SquadDeploymentScope.Project,
+            new FixedGlobalRootResolver("/home/u/.copilot"));
+
+        SquadDeploymentFile baseline = Assert.Single(
+            withoutResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+        SquadDeploymentFile supplied = Assert.Single(
+            withResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+
+        string content = Encoding.UTF8.GetString(baseline.Content.Span);
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains($"](conductor/references/{file})", content, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(baseline.Content.ToArray(), supplied.Content.ToArray());
+        Assert.DoesNotContain(withResolver.Degradations, d => d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderWithoutAGlobalRootResolverFailsClosedNamingTheMissingInput()
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Global);
+
+        SquadRenderValidationException exception =
+            await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
+
+        Assert.Contains("GlobalRoots", exception.Message, StringComparison.Ordinal);
+    }
+
+    private const string MinimalCapabilitiesYaml = """
+        schema: kyber-squad.capability-profiles/v1
+        capabilities:
+          - filesystem.read
+          - filesystem.search
+          - filesystem.write
+          - process.execute
+          - network.read
+          - network.publish
+          - delegate
+        profiles:
+          exec-only:
+            permissions:
+              filesystem.read: deny
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: allow
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+          read-only-custom:
+            permissions:
+              filesystem.read: allow
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: deny
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+          all-denied:
+            permissions:
+              filesystem.read: deny
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: deny
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+        """;
+
+    private static Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot) =>
+        RenderGloballyAsync(ProductRoot, copilotRoot);
+
+    private static Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot) =>
+        RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
+
+    private static async Task<SquadRenderResult> RenderAsync(
+        string sourceDirectory,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots)
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: sourceDirectory,
+            Targets: [SquadTarget.Copilot],
+            Scope: scope,
+            GlobalRoots: globalRoots);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        return result;
+    }
+
+    private static string ConductorAgentContent(SquadRenderResult result, string relativePath)
+    {
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == relativePath);
+        return Encoding.UTF8.GetString(file.Content.Span);
+    }
+
+    private sealed class FixedGlobalRootResolver(string root) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) => root;
     }
 
     private static async Task<string> RenderFrontmatterAsync(string agentName)

@@ -1,15 +1,27 @@
-//! Owns the one `kyberdash web` server the tray reads from.
+//! Launches or attaches to the one `kyberdash web` server the tray reads from.
 //!
-//! Requirement 7.1 has the tray read `/api/kyber/*` from a server it started,
-//! rather than spawning a CLI per poll, and 7.2 has it reuse that server for
-//! its lifetime and restart it with bounded backoff when it exits. 7.3 says the
-//! URL is whatever the server reports, because the preferred port may be taken.
+//! The tray is a display layer, so this is its only process duty (rule R1).
+//! Requirement 7.1 has the tray read `/api/kyber/*` from a server rather than
+//! spawning a CLI per poll, and 7.2 has it reuse that server for its lifetime
+//! and restart it with bounded backoff when it exits. 7.3 says the URL is
+//! whatever the server reports, because the preferred port may be taken.
+//!
+//! A server another process already runs (for example the user's own
+//! `kyberdash web`) is attached to, never launched twice and never killed:
+//! `server.json` in the state directory names its pid, URL and API version. Only
+//! a server this module launched is owned, and only an owned one is reaped on
+//! quit. This is also the only module allowed to start a process, so every
+//! launch is auditable in one place.
 //!
 //! The decisions live in [`Supervisor`], which owns no process and no timer.
 //! Spawning and sleeping arrive through [`Spawner`] and [`Clock`] so the
 //! restart schedule can be tested in microseconds rather than minutes, and so a
 //! test never depends on a port being free.
 
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -128,12 +140,81 @@ pub enum Attempt {
 /// for a human — the tray uses whatever URL comes back (7.3).
 pub const SERVER_ARGS: [&str; 2] = ["web", "--no-open"];
 
+/// The state file a running `kyberdash web` leaves for other processes.
+pub const SERVER_FILE: &str = "server.json";
+
+/// Reads `server.json` and returns the server it names only when attaching to it
+/// is safe: loopback URL, an API version this tray understands, and a process
+/// that is still alive. A stale file (the server crashed, the port was reused)
+/// therefore means "launch", never "talk to whoever holds that port now".
+pub fn discover(state_dir: &Path) -> Option<Listening> {
+    let text = std::fs::read_to_string(state_dir.join(SERVER_FILE)).ok()?;
+    let listening = parse_server_record(&text)?;
+    pid_is_alive(listening.pid).then_some(listening)
+}
+
+fn parse_server_record(text: &str) -> Option<Listening> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let api_version = u32::try_from(value.get("apiVersion")?.as_u64()?).ok()?;
+    if api_version < crate::cli::MIN_API_VERSION {
+        return None;
+    }
+    Some(Listening {
+        url: api::loopback_origin(value.get("url")?.as_str()?).ok()?,
+        pid: u32::try_from(value.get("pid")?.as_u64()?).ok()?,
+        // The record does not carry a release number; nothing reads it.
+        version: String::new(),
+        api_version,
+    })
+}
+
+/// Whether a process with this id exists. Signal 0 checks without sending.
+#[cfg(unix)]
+fn pid_is_alive(pid: u32) -> bool {
+    // Pid 0 and negative values address process groups, never one server.
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: `kill` with signal 0 performs only the existence and permission
+    // check; it delivers nothing and touches no memory.
+    let delivered = unsafe { libc::kill(pid, 0) } == 0;
+    // EPERM means the process exists but belongs to someone else.
+    delivered || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn pid_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // The exit code `GetExitCodeProcess` reports while a process still runs.
+    const STILL_ACTIVE: u32 = 259;
+
+    // SAFETY: the handle is owned by this block and closed before it ends.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code = 0u32;
+        let queried = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        queried && code == STILL_ACTIVE
+    }
+}
+
 pub struct Supervisor {
     program: String,
     failures: u32,
     phase: ServerPhase,
     listening: Option<Listening>,
     process: Option<Box<dyn ServerProcess>>,
+    /// True when `listening` names a server this supervisor did not launch.
+    attached: bool,
 }
 
 impl Supervisor {
@@ -144,6 +225,7 @@ impl Supervisor {
             phase: ServerPhase::Starting,
             listening: None,
             process: None,
+            attached: false,
         }
     }
 
@@ -167,9 +249,31 @@ impl Supervisor {
     /// child keeps neither a misleading ready phase nor a stale socket forever;
     /// the next `attempt` owns the documented bounded restart backoff.
     pub fn is_running(&mut self) -> bool {
+        if self.attached {
+            return self
+                .listening
+                .as_ref()
+                .is_some_and(|listening| pid_is_alive(listening.pid));
+        }
         self.process
             .as_mut()
             .is_some_and(|process| process.is_running())
+    }
+
+    /// Uses a server somebody else runs. It is never stopped by this
+    /// supervisor: quitting the tray must not take down a server the user (or
+    /// another surface) is also using.
+    pub fn attach(&mut self, listening: Listening) {
+        self.stop();
+        self.failures = 0;
+        self.phase = ServerPhase::Ready;
+        self.listening = Some(listening);
+        self.attached = true;
+    }
+
+    /// Whether quitting would stop the server (it was launched, not attached).
+    pub fn owns_server(&self) -> bool {
+        self.process.is_some()
     }
 
     /// Spawns the server and waits for its listening line.
@@ -188,6 +292,7 @@ impl Supervisor {
         // A previous process may still be running if it announced itself and
         // then stopped answering; never leave two servers holding ports.
         self.stop();
+        self.attached = false;
         self.phase = self.phase_for_start();
 
         let mut process = match spawner.spawn(&self.program, &SERVER_ARGS) {
@@ -220,11 +325,13 @@ impl Supervisor {
         Attempt::Listening(listening)
     }
 
-    /// Requirement 6.9: quitting stops every process the tray started.
+    /// Requirement 6.9: quitting stops every process the tray started. An
+    /// attached server is only let go of.
     pub fn stop(&mut self) {
         if let Some(mut process) = self.process.take() {
             process.kill_tree();
         }
+        self.attached = false;
     }
 
     /// Refresh now clears the stale phase and retries immediately, which is
@@ -265,6 +372,120 @@ impl Drop for Supervisor {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// A real `kyberdash web` process with a bounded stdout listening-line wait.
+pub struct SystemServerProcess {
+    child: Child,
+    lines: Receiver<String>,
+}
+
+impl ServerProcess for SystemServerProcess {
+    fn next_line(&mut self, within: Duration) -> Option<String> {
+        self.lines.recv_timeout(within).ok()
+    }
+
+    fn kill_tree(&mut self) {
+        // `kyberdash web` is a single direct child.  Killing and waiting here
+        // keeps the owned process from becoming a zombie during quit/restart.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    fn is_running(&mut self) -> bool {
+        self.child
+            .try_wait()
+            .map(|status| status.is_none())
+            .unwrap_or(true)
+    }
+}
+
+/// Direct argv launch of the server: no shell, validated binary, fixed args.
+pub struct SystemServerSpawner {
+    leading_args: Vec<String>,
+}
+
+impl SystemServerSpawner {
+    pub fn new(leading_args: Vec<String>) -> Self {
+        Self { leading_args }
+    }
+}
+
+impl Spawner for SystemServerSpawner {
+    fn spawn(&mut self, program: &str, args: &[&str]) -> std::io::Result<Box<dyn ServerProcess>> {
+        let mut command = Command::new(program);
+        command
+            .args(&self.leading_args)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = command.spawn()?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "kyberdash server has no stdout",
+            )
+        })?;
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                match line {
+                    Ok(line) => {
+                        if sender.send(line).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Box::new(SystemServerProcess {
+            child,
+            lines: receiver,
+        }))
+    }
+}
+
+#[derive(Default)]
+pub struct ThreadClock;
+
+impl Clock for ThreadClock {
+    fn sleep(&mut self, duration: Duration) {
+        if !duration.is_zero() {
+            std::thread::sleep(duration);
+        }
+    }
+}
+
+/// Windows' `CreateProcess` searches the current directory before `PATH`, so spawning
+/// `reg` by bare name lets anything dropped next to the app impersonate a system
+/// tool -- and the tray badge re-runs `reg query` every refresh. Always spawn the real one
+/// out of `%SystemRoot%\System32`, falling back to the documented default when the
+/// environment variable is missing or relative.
+#[cfg(windows)]
+pub fn system32_path(exe: &str) -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+    root.join("System32").join(exe)
+}
+
+/// `system32_path` plus the CREATE_NO_WINDOW flag every one of these callers wants.
+#[cfg(windows)]
+pub fn system_command(exe: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut cmd = Command::new(system32_path(exe));
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
 }
 
 #[cfg(test)]
@@ -627,5 +848,68 @@ mod tests {
 
         let userinfo = r#"{"event":"kyberdash.web.listening","url":"http://127.0.0.1:1@evil.test","pid":1,"version":"0.9.23","apiVersion":1}"#;
         assert_eq!(parse_listening_line(userinfo), None);
+    }
+
+    fn record(pid: u32, url: &str, api_version: u32) -> String {
+        format!(r#"{{"pid":{pid},"url":"{url}","apiVersion":{api_version}}}"#)
+    }
+
+    /// Attaching is only safe to a live, compatible, loopback server.
+    #[test]
+    fn a_server_record_is_attachable_only_when_compatible_and_loopback() {
+        let own_pid = std::process::id();
+        let good = parse_server_record(&record(own_pid, "http://127.0.0.1:4747", 1))
+            .expect("a compatible record parses");
+        assert_eq!(good.url, "http://127.0.0.1:4747");
+        assert_eq!(good.pid, own_pid);
+
+        let too_old = record(own_pid, "http://127.0.0.1:4747", 0);
+        assert_eq!(parse_server_record(&too_old), None);
+        for refused in [
+            record(own_pid, "http://evil.test:4747", 1),
+            record(own_pid, "http://127.0.0.1:1@evil.test", 1),
+            "{ not json".to_string(),
+            r#"{"url":"http://127.0.0.1:4747","apiVersion":1}"#.to_string(),
+        ] {
+            assert_eq!(parse_server_record(&refused), None, "{refused}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_pid_is_not_attachable() {
+        assert!(pid_is_alive(std::process::id()));
+        assert!(!pid_is_alive(0));
+        // Above any real pid_max, so it can never name a live process.
+        assert!(!pid_is_alive(i32::MAX as u32));
+    }
+
+    #[test]
+    fn an_attached_server_is_never_killed() {
+        let killed = Arc::new(Mutex::new(false));
+        let mut supervisor = Supervisor::new("kyberdash");
+        let mut spawner = FakeSpawner {
+            scripted: vec![vec![listening_line(4747)]],
+            killed: Arc::clone(&killed),
+            ..Default::default()
+        };
+        supervisor.attach(Listening {
+            url: "http://127.0.0.1:4747".to_string(),
+            pid: std::process::id(),
+            version: String::new(),
+            api_version: 1,
+        });
+
+        assert_eq!(supervisor.phase(), ServerPhase::Ready);
+        assert!(!supervisor.owns_server());
+        supervisor.stop();
+        assert!(!*killed.lock().unwrap(), "attach must not own a process");
+        assert!(spawner.calls.is_empty());
+
+        // A later launch is owned and is reaped.
+        supervisor.attempt(&mut spawner, &mut FakeClock::default());
+        assert!(supervisor.owns_server());
+        supervisor.stop();
+        assert!(*killed.lock().unwrap());
     }
 }

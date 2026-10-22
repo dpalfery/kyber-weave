@@ -250,7 +250,7 @@ describe('refreshHarnessSources', () => {
       expect(store.listAll().map((record) => record.harness).sort()).toEqual(['antigravity'])
       expect(store.listAll().some((record) => record.harness === 'gemini')).toBe(false)
       expect(store.getProblems().some((problem) => problem.code === PROVIDER_PARSE_ERROR)).toBe(true)
-      expect(store.listSessions().map((session) => session.harness)).toEqual(['antigravity'])
+      expect(store.countSessionsByHarness()).toEqual({ antigravity: 1 })
       expect(store.listRuns().map((run) => run.harness)).toEqual(['antigravity'])
       expect(store.getHarnessRollup('antigravity')).toMatchObject({ harness: 'antigravity', sampleCount: 1 })
       expect(store.getHarnessRollup('gemini')).toBeUndefined()
@@ -454,6 +454,72 @@ describe('refreshHarnessSources', () => {
       expect(second.rows[0]?.status).toBe('partial')
       expect(second.rows[0]?.problems).toBe(first.rows[0]?.problems)
       expect(store.getProblems()).toEqual(problemsAfterFirst)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('clears a resolved source problem on a clean re-read, keeping neighbours and unchanged units (#243)', async () => {
+    const store = temporaryStore()
+    const sourceKeyA = 'pi:session-a'
+    const sourceKeyB = 'pi:session-b'
+    const spanA = `harness:pi:${sourceKeyA}:FUTURE_DATED`
+    const spanB = `harness:pi:${sourceKeyB}:FUTURE_DATED`
+    const codeB = `harness:pi:${sourceKeyB}:MALFORMED_TIMESTAMP`
+    const token = 'span-token'
+    const importedAt = '2026-09-12T00:00:00.000Z'
+    const problem = (spanId: string, code: string) => ({
+      spanId,
+      severity: 'error' as const,
+      code,
+      message: `${code} in source`,
+      harness: 'pi',
+      timestamp: importedAt,
+    })
+    try {
+      let passes = 0
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date(importedAt),
+        parseAllSessions: async () => undefined,
+        ingestProviders: async () => ({ records: [], problems: [] }),
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          passes += 1
+          if (passes === 1) {
+            return [
+              { ...unit('pi', 'session-a', []), sourceKey: sourceKeyA, problems: [{ code: 'FUTURE_DATED', message: 'record is dated in the future' }] },
+              { ...unit('pi', 'session-b', []), sourceKey: sourceKeyB, problems: [{ code: 'FUTURE_DATED', message: 'record is dated in the future' }] },
+            ]
+          }
+          return [
+            { ...unit('pi', 'session-a', []), sourceKey: sourceKeyA, problems: [] },
+            {
+              ...unit('pi', 'session-b', []),
+              sourceKey: sourceKeyB,
+              status: 'unchanged' as const,
+              envelopes: [],
+              problems: [],
+            },
+          ]
+        },
+      }
+
+      await refreshHarnessSources(store, dependencies)
+      expect(store.getProblems(spanA)).toHaveLength(1)
+      expect(store.getProblems(spanB)).toHaveLength(1)
+
+      // A sibling code on B and a TOKEN_* row on a real span must survive the clean re-read of A.
+      store.recordProblem(problem(codeB, 'MALFORMED_TIMESTAMP'))
+      store.recordProblem(problem(token, 'TOKEN_SUM_MISMATCH'))
+
+      await refreshHarnessSources(store, dependencies)
+
+      expect(store.getProblems(spanA)).toEqual([])
+      expect(store.getProblems(spanB)).toHaveLength(1)
+      expect(store.getProblems(codeB)).toHaveLength(1)
+      expect(store.getProblems(token)).toHaveLength(1)
     } finally {
       store.close()
     }

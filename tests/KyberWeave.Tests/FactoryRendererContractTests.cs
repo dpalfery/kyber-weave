@@ -3,6 +3,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Squad.Validation;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -23,6 +24,9 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class FactoryRendererContractTests : IDisposable
 {
+    // Mirrors FactoryRenderer's allow-list (Factory accepts only these); update both together.
+    private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
+
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
@@ -85,6 +89,14 @@ public sealed class FactoryRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
+    /// A primary shared identity reuses its canonical skill as the entry point, so it is
+    /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
     {
@@ -129,11 +141,25 @@ public sealed class FactoryRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    [Theory]
+    [InlineData("glm-5.3[reasoningEffort=max]")]
+    [InlineData("glm-5.3[reasoningEffort=high][reasoningEffort=low]")]
+    [InlineData("[reasoningEffort=high]")]
+    [InlineData(" [reasoningEffort=high]")]
+    [InlineData("glm-5.3 [reasoningEffort=high]")]
+    [InlineData("glm 5.3[reasoningEffort=high]")]
+    [InlineData("glm-5.3[reasoningEffort=high")]
+    public void ParseReasoningEffortSuffix_RejectsMalformedValues(string value)
+    {
+        Assert.Throws<SquadRenderValidationException>(() => FactoryRenderer.ParseReasoningEffortSuffix(value));
+    }
+
     [Fact]
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -144,13 +170,22 @@ public sealed class FactoryRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
+
+        // A non-shared primary agent also projects an entry-point skill (1 + its resource
+        // closure) beside its droid, per the native dual entry point. A primary shared identity
+        // contributes no extra entry-point skill: its canonical skill already is the entry point
+        // and is counted with the skills.
+        int primaryAgentSkillContribution = source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
+            .Sum(agent => 1 + agent.Resources.Count);
 
         int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + expectedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
+                .Sum(skill => skill.Resources.Count)
+            + primaryAgentSkillContribution;
         Assert.Equal(expectedFileCount, result.Files.Count);
 
         Assert.All(result.Files, f =>
@@ -188,9 +223,15 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("permissions")),
                 $"Agent '{agent.Name}' should not emit 'permissions'.");
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
-                $"Agent '{agent.Name}' should omit 'reasoningEffort'.");
+            if (frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")))
+            {
+                Assert.Contains(
+                    RequireScalar(frontmatter, "reasoningEffort", agent.Name),
+                    AllowedReasoningEfforts);
+                Assert.True(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' emits 'reasoningEffort' without a pinned 'model' (Factory ignores it on inherit).");
+            }
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("license")),
                 $"Agent '{agent.Name}' should not emit 'license' on a droid.");
@@ -220,19 +261,44 @@ public sealed class FactoryRendererContractTests : IDisposable
                 }
                 else
                 {
-                    Assert.Equal(factoryHarnessModel, RequireScalar(frontmatter, "model", agent.Name));
+                    (string expectedModel, string? expectedEffort) = FactoryRenderer.ParseReasoningEffortSuffix(factoryHarnessModel);
+                    Assert.Equal(expectedModel, RequireScalar(frontmatter, "model", agent.Name));
+                    if (expectedEffort is not null)
+                    {
+                        Assert.Equal(expectedEffort, RequireScalar(frontmatter, "reasoningEffort", agent.Name));
+                    }
+                    else
+                    {
+                        Assert.False(
+                            frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                            $"Agent '{agent.Name}' should omit 'reasoningEffort' (no suffix on the factory model).");
+                    }
                 }
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal) &&
                      !string.IsNullOrWhiteSpace(modelProfile.Default))
             {
-                Assert.Equal(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name));
+                (string defaultModel, string? defaultEffort) = FactoryRenderer.ParseReasoningEffortSuffix(modelProfile.Default);
+                Assert.Equal(defaultModel, RequireScalar(frontmatter, "model", agent.Name));
+                if (defaultEffort is not null)
+                {
+                    Assert.Equal(defaultEffort, RequireScalar(frontmatter, "reasoningEffort", agent.Name));
+                }
+                else
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                        $"Agent '{agent.Name}' should omit 'reasoningEffort' (profile default has no suffix).");
+                }
             }
             else
             {
                 Assert.False(
                     frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
                     $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                    $"Agent '{agent.Name}' should omit 'reasoningEffort' (profile default is inherit).");
             }
 
             string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -247,14 +313,23 @@ public sealed class FactoryRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".factory/droids/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".factory/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".factory/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".factory/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -463,6 +538,308 @@ public sealed class FactoryRendererContractTests : IDisposable
 
         Assert.DoesNotContain(result.Files, f =>
             f.RelativePath.Contains("agents/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The Factory app dispatches custom droids as subagents and exposes no session-parent
+    /// selector, so the primary agent renders as both a droid (kept for Task dispatch) and an
+    /// entry-point skill carrying the canonical agent body and its resource closure, under
+    /// exactly one role-skill-fallback record.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsDroid()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Droid file is present.
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".factory/droids/{primaryAgent.Name}.md");
+
+        // Entry-point skill is present with the Factory skill frontmatter: {name, description}.
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".factory/skills/{primaryAgent.Name}/SKILL.md");
+        (YamlMappingNode skillFrontmatter, string skillBody) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            primaryAgent.Name);
+        Assert.Equal(
+            ["name", "description"],
+            skillFrontmatter.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(n => n.Value)
+                .ToArray());
+        Assert.Equal(primaryAgent.Name, RequireScalar(skillFrontmatter, "name", primaryAgent.Name));
+        string expectedDescription = string.Join(" ", primaryAgent.Description.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        Assert.Equal(expectedDescription, RequireScalar(skillFrontmatter, "description", primaryAgent.Name));
+
+        // Body matches the canonical agent body.
+        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!expectedAgentBody.EndsWith('\n'))
+        {
+            expectedAgentBody += "\n";
+        }
+        Assert.Equal(expectedAgentBody, skillBody);
+
+        // Resources are projected beside the skill.
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            SquadDeploymentFile resourceFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".factory/skills/{primaryAgent.Name}/{resource.RelativePath}");
+            ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
+            Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
+        }
+
+        // Exactly one role-skill-fallback record, naming the entry-point skill and the profile.
+        SquadDegradationRecord roleSkillFallback = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        Assert.Equal("factory", roleSkillFallback.Target);
+        Assert.Equal(primaryAgent.Name, roleSkillFallback.OutputIdentity);
+        Assert.Equal(primaryAgent.BodyDigest, roleSkillFallback.InstructionDigest);
+        Assert.Contains(
+            $".factory/skills/{primaryAgent.Name}/SKILL.md",
+            roleSkillFallback.Details,
+            StringComparison.Ordinal);
+        Assert.Contains(primaryAgent.Fallback, roleSkillFallback.Details, StringComparison.Ordinal);
+        Assert.Contains("no-primary-agent: skill", roleSkillFallback.Details, StringComparison.Ordinal);
+
+        // The shared permission-not-expressible record states the entry-point caveat.
+        SquadDegradationRecord permissionNotExpressible = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible");
+        Assert.Contains(
+            $".factory/skills/{primaryAgent.Name}/SKILL.md",
+            permissionNotExpressible.Details,
+            StringComparison.Ordinal);
+
+        // The orchestrator profile yields exactly these two codes (no asks to narrow, and
+        // process.execute/filesystem.write are denied, so no capability-not-isolable record).
+        Assert.Equal(
+            ["permission-not-expressible", "role-skill-fallback"],
+            result.Degradations
+                .Where(d => d.CanonicalIdentity == primaryAgent.Name)
+                .Select(d => d.Code)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(c => c, StringComparer.Ordinal));
+
+        // All relative Markdown links in the skill body resolve to emitted files.
+        const string linkPattern = @"\[([^\]]+)\]\(([^)]+)\)";
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(skillBody, linkPattern))
+        {
+            string link = match.Groups[2].Value;
+            if (!link.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !link.StartsWith('#'))
+            {
+                string expectedPath = Path.Combine(
+                    $".factory/skills/{primaryAgent.Name}",
+                    link).Replace("\\", "/", StringComparison.Ordinal);
+                Assert.Contains(result.Files, f => f.RelativePath == expectedPath);
+            }
+        }
+
+        // At most one record per (Target, CanonicalIdentity, Code), and no widening anywhere.
+        var recordKeys = result.Degradations
+            .Select(d => (d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        Assert.Equal(recordKeys.Count, recordKeys.Distinct().Count());
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.Details != null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Global scope renders the primary agent entry-point skill under <c>skills/</c> instead
+    /// of <c>.factory/skills/</c>, and the droid under <c>droids/</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_GlobalScopePlacesTheEntryPointSkillUnderSkills()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Global);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Skill file and resources are under skills/ without the .factory prefix.
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            Assert.Single(
+                result.Files,
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+        }
+
+        // Droid file is under droids/ without the .factory prefix.
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"droids/{primaryAgent.Name}.md");
+
+        // Degradation records name the skill at its global-scope path, not the
+        // project-scope form.
+        SquadDegradationRecord roleSkillFallback = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        Assert.Contains(
+            $"skills/{primaryAgent.Name}/SKILL.md",
+            roleSkillFallback.Details,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(".factory/", roleSkillFallback.Details, StringComparison.Ordinal);
+        SquadDegradationRecord permissionNotExpressible = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible");
+        Assert.Contains(
+            $"skills/{primaryAgent.Name}/SKILL.md",
+            permissionNotExpressible.Details,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.StartsWith(".factory/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The no-primary-agent setting switches only the entry-point skill: omit mode keeps the
+    /// droid byte-identical, emits nothing under the entry-point skill path, and records no
+    /// role-skill-fallback.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+
+        SquadRenderRequest skillRequest = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project);
+        SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
+        Assert.True(skillResult.Success);
+
+        using (var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
+        {
+            SquadRenderRequest omitRequest = new(
+                SourceDirectory: omitFixture.ProductRoot,
+                Targets: [SquadTarget.Factory],
+                Scope: SquadDeploymentScope.Project);
+            SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
+            Assert.True(omitResult.Success, string.Join("; ", omitResult.Errors));
+
+            // Omit mode emits nothing under the entry-point skill path.
+            Assert.DoesNotContain(
+                omitResult.Files,
+                f => f.RelativePath.StartsWith($".factory/skills/{primaryAgent.Name}/", StringComparison.Ordinal));
+
+            // All omit-mode paths appear in skill mode.
+            foreach (SquadDeploymentFile omitFile in omitResult.Files)
+            {
+                Assert.Contains(skillResult.Files, sf => sf.RelativePath == omitFile.RelativePath);
+            }
+
+            // Skill-mode paths minus omit-mode paths are exactly the skill and its resources.
+            HashSet<string> skillPaths = new(skillResult.Files.Select(f => f.RelativePath));
+            HashSet<string> omitPaths = new(omitResult.Files.Select(f => f.RelativePath));
+            skillPaths.ExceptWith(omitPaths);
+            string[] expectedSkillPaths = new string[1 + primaryAgent.Resources.Count];
+            expectedSkillPaths[0] = $".factory/skills/{primaryAgent.Name}/SKILL.md";
+            for (int i = 0; i < primaryAgent.Resources.Count; i++)
+            {
+                expectedSkillPaths[i + 1] = $".factory/skills/{primaryAgent.Name}/{primaryAgent.Resources[i].RelativePath}";
+            }
+            Assert.Equal(
+                expectedSkillPaths.OrderBy(p => p, StringComparer.Ordinal),
+                skillPaths.OrderBy(p => p, StringComparer.Ordinal));
+
+            // Droid bytes are identical across the two modes.
+            SquadDeploymentFile skillDroidFile = Assert.Single(
+                skillResult.Files,
+                f => f.RelativePath == $".factory/droids/{primaryAgent.Name}.md");
+            SquadDeploymentFile omitDroidFile = Assert.Single(
+                omitResult.Files,
+                f => f.RelativePath == $".factory/droids/{primaryAgent.Name}.md");
+            Assert.True(skillDroidFile.Content.Span.SequenceEqual(omitDroidFile.Content.Span));
+
+            // Omit mode records no role-skill-fallback and no entry-point caveat.
+            Assert.DoesNotContain(
+                omitResult.Degradations,
+                d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+            Assert.All(
+                omitResult.Degradations.Where(d => d.CanonicalIdentity == primaryAgent.Name),
+                d => Assert.DoesNotContain(
+                    $".factory/skills/{primaryAgent.Name}",
+                    d.Details ?? string.Empty,
+                    StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// The renderer throws when a canonical skill has the same name as the primary agent,
+    /// before any file is produced: Factory renders both a droid and an entry-point skill, so
+    /// the collision cannot be resolved by role-prefixed fallback.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+
+        using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
+        {
+            FactoryRenderer renderer = new();
+            SquadRenderRequest request = new(
+                SourceDirectory: collisionFixture.ProductRoot,
+                Targets: [SquadTarget.Factory],
+                Scope: SquadDeploymentScope.Project);
+
+            SquadRenderValidationException ex = await Assert.ThrowsAsync<SquadRenderValidationException>(
+                () => renderer.RenderAsync(request));
+            Assert.Contains(primaryAgent.Name, ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Regression guard: the loader rejects unsupported no-primary-agent values before the
+    /// renderer runs, so an unknown value fails closed rather than silently skipping the
+    /// entry-point skill.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_FailsClosedOnAnUnsupportedNoPrimaryAgentValue()
+    {
+        using (var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
+        {
+            FactoryRenderer renderer = new();
+            SquadRenderRequest request = new(
+                SourceDirectory: renameFixture.ProductRoot,
+                Targets: [SquadTarget.Factory],
+                Scope: SquadDeploymentScope.Project);
+
+            SquadSourceValidationException ex = await Assert.ThrowsAsync<SquadSourceValidationException>(
+                () => renderer.RenderAsync(request));
+            Assert.Contains("no-primary-agent", ex.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

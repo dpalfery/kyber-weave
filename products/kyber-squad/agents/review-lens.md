@@ -5,7 +5,7 @@ description: "Applies one named review lens to a diff and returns structured fin
 invocation: subagent
 model-profile: reviewer
 capability-profile: read-only
-copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, web]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -28,6 +28,15 @@ SKIPPED: <one sentence naming what the lens needs and what the diff contains ins
 ```
 
 and stop. Skipping is a first-class, expected outcome, not a failure and not a shortcut. A council is only affordable because most lenses skip most diffs. What is **not** acceptable is skipping silently, skipping because the analysis looked like work, or returning "no findings" when you mean "this lens does not apply" — those are different claims and the reviewer treats them differently.
+
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Discovery reporting is exempt for this lens because its machine-consumed output is the fixed findings list, `SKIPPED`, or `NO FINDINGS` schema. Follow the discovery order internally; do not append counts or alter that output schema.
 
 # 2. Read the code, not just the diff
 

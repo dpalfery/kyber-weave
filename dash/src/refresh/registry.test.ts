@@ -47,6 +47,7 @@ const REQUIRED_HARNESS_IDS = [
 const REMAINING_HARNESS_IDS = [
   'codewhale',
   'codebuff',
+  'commandcode',
   'devin',
   'droid',
   'dsh',
@@ -81,6 +82,7 @@ const INVENTORY_PROVIDER_NAMES = [
   'codewhale',
   'codebuff',
   'codex',
+  'commandcode',
   'copilot',
   'devin',
   'droid',
@@ -129,12 +131,16 @@ describe('HarnessSourceRegistry', () => {
   it('keeps an explicit content capability disposition for every harness descriptor', () => {
     const expectedHarnessIds = [...REQUIRED_HARNESS_IDS, ...REMAINING_HARNESS_IDS]
     const existingReaderHarnessIds = new Set([
+      'antigravity',
+      'antigravity-cli',
+      'antigravity-ide',
       'claude-cli',
       'claude-desktop',
       'claude-unclassified',
       'codex-cli',
       'codex-desktop',
       'codex-unclassified',
+      'commandcode',
       'copilot-cli',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
@@ -249,37 +255,37 @@ describe('HarnessSourceRegistry', () => {
     expect(descriptorFor('antigravity-cli')?.label).toBe('Antigravity CLI')
     expect(descriptorFor('antigravity-ide')?.label).toBe('Antigravity IDE')
     expect(descriptorFor('kilo-shared-runtime')?.label).toBe('Kilo shared runtime')
-    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('2')
+    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('4')
     expect(descriptorFor('kilo-vscode-legacy')?.label).toBe('Kilo for VS Code (legacy)')
-    expect(descriptorFor('kilo-vscode-legacy')?.parserContractVersion).toBe('2')
+    expect(descriptorFor('kilo-vscode-legacy')?.parserContractVersion).toBe('4')
     expect(descriptorFor('kimi-code')?.providerName).toBe('kimicode')
     expect(PROVIDER_DISPOSITIONS.kimicode).toEqual({ kind: 'alias-of', harnessId: 'kimi-code' })
   })
 
-  it('assigns kilo contract version 2 by named harness or kilo-code provider, not a kilo- prefix', () => {
+  it('assigns kilo contract version 4 by named harness or kilo-code provider, not a kilo- prefix', () => {
     expect(parserContractVersionFor({
       providerName: 'kilo-code',
       harnessId: 'kilo-shared-runtime',
-    })).toBe('2')
+    })).toBe('4')
     expect(parserContractVersionFor({
       providerName: 'other',
       harnessId: 'kilo-vscode-legacy',
-    })).toBe('2')
+    })).toBe('4')
     expect(parserContractVersionFor({
       providerName: 'kilo-experimental',
       harnessId: 'kilo-experimental-ide',
     })).toBe('1')
   })
 
-  it('assigns claude contract version 4 by named harness or claude provider, not a claude- prefix', () => {
+  it('assigns claude contract version 7 by named harness or claude provider, not a claude- prefix', () => {
     expect(parserContractVersionFor({
       providerName: 'claude',
       harnessId: 'claude-cli',
-    })).toBe('4')
+    })).toBe('7')
     expect(parserContractVersionFor({
       providerName: 'other',
       harnessId: 'claude-desktop',
-    })).toBe('4')
+    })).toBe('7')
     expect(parserContractVersionFor({
       providerName: 'claude-experimental',
       harnessId: 'claude-something-else',
@@ -433,5 +439,29 @@ describe('HarnessSourceRegistry', () => {
     const digest = createHash('sha256').update(digested.path).digest('hex').slice(0, 16)
     expect(sourceKeyFor('pi', digested)).toBe(`pi:${digest}`)
     expect(sourceKeyFor('pi', digested)).not.toContain('/Users/dave')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D12 — the Antigravity and Copilot parser contracts move apart
+// ---------------------------------------------------------------------------
+
+describe('parserContractVersionFor — Antigravity and Copilot contracts (D12)', () => {
+  it('assigns Antigravity contract version 2 for its provider and every Antigravity harness', () => {
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-cli' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-ide' })).toBe('2')
+  })
+
+  it('assigns Copilot contract version 3 for the copilot provider, whatever the harness', () => {
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-cli' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-vscode' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-jetbrains' })).toBe('3')
+  })
+
+  it('leaves the other skills-contract providers on contract version 2', () => {
+    for (const providerName of ['opencode', 'cline-cli', 'codewhale', 'openclaude', 'dsh']) {
+      expect(parserContractVersionFor({ providerName, harnessId: providerName })).toBe('2')
+    }
   })
 })

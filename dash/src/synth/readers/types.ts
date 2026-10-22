@@ -75,6 +75,13 @@ export type ReaderTurn = {
   sessionId?: string
   /** Model context window in tokens, when an `event_msg` reported one. */
   contextWindow?: number
+  /**
+   * Model context window in tokens, as the harness declared (configured) it
+   * rather than measured it. Kept apart from `contextWindow` because a
+   * declared window is weaker provenance: synthesis files it under the
+   * dedicated declared raw key, never under a reported key.
+   */
+  declaredContextWindow?: number
   /** Termination or exit indicator, when the transcript reported one. */
   terminationReason?: string
   /** Process or command exit code observed in transcript. */

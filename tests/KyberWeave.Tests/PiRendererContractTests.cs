@@ -70,6 +70,15 @@ public sealed class PiRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    /// whose file already holds the identical body. A primary shared identity reuses its
+    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     private static IReadOnlyList<string> ComputeExpectedTools(SquadCapabilityProfile profile)
     {
         HashSet<string> granted = new(StringComparer.Ordinal);
@@ -175,18 +184,23 @@ public sealed class PiRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
 
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // R17: Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
-        // Σ non-suppressed skill resources. The conductor contributes one principal whether
-        // it renders as an agent (elsewhere) or, here, a lowered skill.
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        // Σ non-suppressed skill resources. A non-shared primary agent (the conductor) contributes
+        // one principal whether it renders as an agent (elsewhere) or, here, a lowered skill. A
+        // primary shared identity contributes no agent principal: its canonical skill is the entry
+        // point and is counted with the skills, so it is subtracted from the agent term.
+        int sharedPrimaries = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expectedFileCount, result.Files.Count);
@@ -239,8 +253,8 @@ public sealed class PiRendererContractTests : IDisposable
             {
                 "architect" => "zai/glm-5.3",
                 "deep-planning" => "zai/glm-5.3",
-                "fast" => "opencode/muse-spark-1.3-contributor-free",
-                "general" => "opencode/muse-spark-1.3-contributor-free",
+                "fast" => "opencode-go/muse-spark-1.3-contributor",
+                "general" => "opencode-go/muse-spark-1.3-contributor",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "orchestration" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
@@ -400,16 +414,31 @@ public sealed class PiRendererContractTests : IDisposable
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         SquadAgent[] primaryAgents = source.Agents.Where(a => a.Invocation == SquadInvocation.Primary).ToArray();
 
-        // The current corpus declares exactly one primary agent (conductor); asserting
-        // non-empty here keeps the loop below from silently vacuously passing if that ever
-        // changes to zero.
+        // The corpus declares the conductor plus the two root wrappers; asserting non-empty
+        // here keeps the loop below from silently vacuously passing if that ever changes to zero.
         Assert.NotEmpty(primaryAgents);
 
         foreach (SquadAgent agent in primaryAgents)
         {
             SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
+
+            if (sharedIdentities.Contains(agent.Name))
+            {
+                // A primary shared identity reuses the canonical skill as its entry point: Pi
+                // emits no lowered skill of its own, and the canonical skill ships unchanged.
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == $".pi/agents/{agent.Name}.md");
+                Assert.Single(result.Files, f => f.RelativePath == $".pi/skills/{agent.Name}/SKILL.md");
+
+                SquadDegradationRecord sharedFallbackRecord = Assert.Single(
+                    result.Degradations,
+                    d => d.CanonicalIdentity == agent.Name && d.Code == "role-skill-fallback");
+                Assert.Equal(agent.Name, sharedFallbackRecord.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, sharedFallbackRecord.InstructionDigest);
+                continue;
+            }
 
             if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
             {
@@ -758,7 +787,9 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
         SquadSource baselineSource = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, a => a.Invocation == SquadInvocation.Primary);
+        // The conductor is the primary agent that is NOT a declared shared identity, so a
+        // canonical skill occupying its identity is a real, unresolvable collision.
+        SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, a => a.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
 
@@ -951,8 +982,8 @@ public sealed class PiRendererContractTests : IDisposable
     /// with their approved thinking levels. Against the real corpus, the D2 profiles resolve to:
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
-    /// general → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>medium</c>;
-    /// fast → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>low</c>;
+    /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
     /// </summary>
@@ -960,8 +991,8 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("architect", "zai/glm-5.3", "high")]
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
-    [InlineData("general", "opencode/muse-spark-1.3-contributor-free", "medium")]
-    [InlineData("fast", "opencode/muse-spark-1.3-contributor-free", "low")]
+    [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,
         string expectedModel,

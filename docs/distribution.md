@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-16
 ---
 
 # Distribution and release flow
@@ -71,7 +71,9 @@ install path is `scripts/install.sh` against GitHub Release assets. Neither carr
 KyberDash; adding it there would mean maintaining a second unpublished channel.
 
 `nuget.org` is never used. A `dotnet tool` package may go to GitHub Packages as an
-optional secondary channel for .NET specialists.
+optional secondary channel for .NET specialists and maintainers. It is **not an end-user
+install path**: that registry requires authentication, and [install.md](install.md)
+documents only `scripts/install.sh` and the Windows `.zip`.
 
 ## RID matrix
 
@@ -97,8 +99,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 68 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 68 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 28 skills with 82 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 28 portable skills, their 82 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -117,18 +119,17 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 24 `SKILL.md` files plus 68 retained resources, for
-92 skill-tree files. Every retained resource has a reviewed disposition in the
+Both formats package `skills/` recursively: 28 `SKILL.md` files plus 82 retained resources, for
+110 skill-tree files. Every retained resource has a reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
-`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
-exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
+`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from a
+fixed 24-file Copilot skill surface is not a package
 contract.
 
-`products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
-`.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an
-intentional stale self-deployment and its tracked state, not release-package inputs. This work
-leaves them untouched for a human refresh after a fresh Kyber-Weave release candidate.
+`products/kyber-squad/` is canonical and package authority. The repository no longer carries a
+project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
+`.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were removed.
 
 ### Version lockstep and toolchain validation
 
@@ -172,12 +173,13 @@ git tag v0.2.0 && git push origin v0.2.0
 ```
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
-each RID, builds the Squad archives via `squad pack`, and runs a pre-publish manifest check
-before creating a GitHub Release. This check verifies that `SHA256SUMS.txt` names exactly
-the expected 20 assets (see [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
+each RID, builds the Squad archives via `squad pack`, generates the SBOM, and runs a
+pre-publish manifest check before creating a GitHub Release. This check verifies that
+`SHA256SUMS.txt` names exactly the expected 21 assets (see
+[Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
 and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
 
-On success, the workflow creates a GitHub Release with the 20 assets, the manifest, and changelogs (passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
+On success, the workflow creates a GitHub Release with the 21 assets, the manifest, and changelogs (passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
 
 The workflow also pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages (`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
@@ -201,7 +203,7 @@ When a version containing a hyphen (`-`) is processed:
 
 - `.github/workflows/release.yml` passes `--prerelease` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
 - Release notes automatically include a pre-release callout banner highlighting the candidate version.
-- Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`.
+- Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`. This is a maintainer/testing channel only, not a supported end-user install path (see [Other published artifacts](#other-published-artifacts)).
 
 ### Binary versioning and inspection
 
@@ -241,10 +243,10 @@ for the complete decision record.
 
 ### Manifest completeness and the pre-publish check
 
-The release workflow enforces that `SHA256SUMS.txt` lists exactly the 20 expected assets and
-never itself. The published release contains those 20 assets plus `SHA256SUMS.txt` (21 files total).
+The release workflow enforces that `SHA256SUMS.txt` lists exactly the 21 expected assets and
+never itself. The published release contains those 21 assets plus `SHA256SUMS.txt` (22 files total).
 
-The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. A post-publish check runs after the release is created and compares the published asset names against the 20 expected assets plus `SHA256SUMS.txt` and byte-compares the published manifest; on mismatch it fails the job (the release is already public, so this check is detective only).
+The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. A post-publish check runs after the release is created and compares the published asset names against the 21 expected assets plus `SHA256SUMS.txt` and byte-compares the published manifest; on mismatch it fails the job (the release is already public, so this check is detective only).
 
 - **5** CLI: `kyber-weave-linux-x64.tar.gz`, `kyber-weave-linux-arm64.tar.gz`,
   `kyber-weave-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-win-x64.zip`
@@ -254,10 +256,51 @@ The pre-publish check runs before `gh release create` and fails the job if the m
   `kyberdash-linux-arm64.tar.gz`, `kyberdash-linux-x64.tar.gz`, `kyberdash-win-x64.zip`
 - **3** Tray: `kyberdash-tray-darwin-arm64.zip`, `kyberdash-tray-darwin-x64.zip`, `kyberdash-tray-win-x64-setup.exe`
 - **2** Squad: `kyber-squad-<version>.zip`, `kyber-squad-plugin-<version>.zip`
+- **1** SBOM: `kyber-weave-sbom-<version>.cdx.json`
 
 If an expected asset is missing or an unexpected file is present, the release fails before
 publish with a diagnostic naming the cause. Each new asset requires updating the `EXPECTED_ASSETS` array in `scripts/verify-release-checksums.sh`; the matching build job and the count test must also be updated. Adding a supported platform or distribution format is a
 deliberate step that must be coordinated with the release automation.
+
+### The SBOM asset
+
+Every release carries one aggregate Software Bill of Materials, `kyber-weave-sbom-<version>.cdx.json`
+(CycloneDX JSON, format version 1.6). It is a machine-readable inventory of the third-party
+components the release depends on — NuGet, npm and Cargo — so that a consumer can feed it to
+a vulnerability scanner or a licence audit without unpacking the binaries. What it covers, and
+what it deliberately does not, is documented in
+[install.md](install.md#the-sbom-what-each-release-ships).
+
+It is generated by `scripts/generate-sbom.sh <out-dir> <version>`, which is shared by the
+release workflow, the CI validation job and `scripts/release-local.sh`, so all three produce
+the same document for the same version.
+
+What the SBOM covers, and what it deliberately does not, is documented in
+[install.md](install.md#the-sbom-what-each-release-ships). In short: it is the
+repository's dependency closure, not a byte-level scan of a published archive, and it
+does **not** list the .NET runtime that the self-contained CLI and MCP binaries embed
+(the single largest component of what actually ships), the Node runtime that the
+KyberDash single-executable embeds, or test-only dependencies. A byte-level inventory
+requires scanning the published archives; that and SBOM attestation are tracked as a
+follow-up.
+
+Two properties of that generator are worth knowing before changing it:
+
+- **The generator is pinned by SHA-256.** It downloads a pinned Syft release tarball and
+  verifies the hash before running it, and re-verifies the cached tarball on every run. A
+  mismatch aborts rather than producing an SBOM from an unverified binary. `nuget.org` is
+  never used: the generator is not a `dotnet tool`.
+- **The .NET coverage depends on a publish, not on the lock files.** The .NET cataloger
+  reads `*.deps.json`, which only a publish produces, so the script publishes
+  `KyberWeave.Cli` and `KyberWeave.Mcp` framework-dependent and non-single-file into a
+  throwaway directory and copies only the `deps.json` into the scanned tree. Without the
+  .NET SDK it falls back to the checked-in `packages.lock.json` files — which under-report
+  .NET, because `src/KyberWeave.Mcp` has no lock file — and says so in its output rather
+  than emitting a quietly incomplete SBOM.
+
+The generated document is validated against the vendored CycloneDX 1.6 JSON schema before
+it is accepted; see [`scripts/schemas/PROVENANCE.md`](../scripts/schemas/PROVENANCE.md) for
+the schema's provenance and the validator's scope.
 
 ### Verification paths
 
@@ -271,7 +314,7 @@ Users and maintainers can verify asset integrity by:
 3. **Whole-release download verification**: `shasum -a 256 --ignore-missing -c SHA256SUMS.txt`
    (macOS) or `sha256sum --ignore-missing -c SHA256SUMS.txt` (Linux) verifies the entire
    downloaded release. The `--ignore-missing` flag allows verification of a partial download
-   if you have only a subset of the 20 assets.
+   if you have only a subset of the 21 assets.
 
 SmartScreen reputation is tracked per file, so binaries from a new release will typically warn
 again. The documented hash-verification and **More info → Run anyway** flow in

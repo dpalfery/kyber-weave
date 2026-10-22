@@ -1,0 +1,20 @@
+{
+  "sessionId": "claude-req-id-session-synthetic",
+  "spanId": "synth:claude-code:claude-req-id-session-synthetic:msg_B01Synthetic0002",
+  "requestId": "req_A01Synthetic0001",
+  "turnId": "msg_B01Synthetic0002",
+  "nativeRecordId": "msg_B01Synthetic0002",
+  "tokens": {
+    "freshInput": 4,
+    "cacheRead": 40500,
+    "cacheCreation": 800,
+    "output": 280,
+    "reportedInput": 41304,
+    "reportedOutput": 280
+  },
+  "timestamp": "2026-10-02T14:00:03.000Z",
+  "parts": [
+    { "part": "conversation_history", "text": "user: synthetic fixture question" },
+    { "part": "conversation_history", "text": "assistant: synthetic fixture answer" }
+  ]
+}

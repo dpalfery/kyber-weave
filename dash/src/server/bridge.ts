@@ -2,10 +2,10 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
 import {
   SessionIdentities,
@@ -14,10 +14,14 @@ import {
 } from '../canon/measurability.js'
 import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
+import { formatSessionTitle } from '../canon/naming.js'
 import {
   CanonStore,
-  decompressRaw,
   normalizeHistoryWeeks,
+  problemsHarnessWhere,
+  quarantineHarnessWhere,
+  readSessionSummaryFigures,
+  systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
   toRecord,
@@ -29,7 +33,18 @@ import {
   type RunDbRow,
   type HarnessRollupDbRow,
   type ExecutionDbRow,
+  type QuarantineEntryDetail,
+  type SessionSummaryFigureRow,
 } from '../canon/store.js'
+import { decompressColumn } from '../canon/compressed-column.js'
+import {
+  SESSION_PAYLOAD_FRAGMENTS_SELECT,
+  SESSION_PAYLOAD_SELECT,
+  SESSION_TURNS_SELECT,
+  parseJsonObject,
+  sessionTurnsOf,
+  turnObjectOf,
+} from '../canon/session-read.js'
 import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
 import {
   toSourceCheckpoint,
@@ -49,6 +64,7 @@ import {
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
 import { DETECTOR_IDS } from '../analysis/findings.js'
+import type { CleanReport, CleanRequest } from '../clean/clean.js'
 import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
 
 import {
@@ -63,7 +79,10 @@ import {
   type ExecutionRow,
   type ExecutionTreeNode,
   type HarnessRollupRow,
+  type NotMeasurable,
+  notMeasurable,
 } from '../canon/types.js'
+import type { CostBasisMismatch } from '../canon/cost.js'
 import {
   assembleRollup,
   digestSessionPayloads,
@@ -71,6 +90,16 @@ import {
 import { harnessExportsCacheCounter } from '../canon/measurability.js'
 import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
 import type { AsadSessionPayload } from '../canon/sessions.js'
+import { projectCanonicalStore } from '../canon/projection.js'
+import {
+  MODEL_WINDOW_CATALOG_SOURCES,
+  getModelCatalogSnapshot,
+  readBundledVendorCatalog,
+  refreshModelWindowCatalog,
+  type ModelCatalogSnapshot,
+  type ModelWindowCatalogRefreshResult,
+  type ModelWindowCatalogVendor,
+} from '../canon/model-window-catalog.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -123,6 +152,14 @@ export type ComparisonTableResult = {
   problems: Array<{ severity: string; code: string; message: string }>
 }
 
+export type SessionRollup = {
+  turn_count: number
+  request_count: number
+  total_input: number
+  total_output: number
+  cost_usd: number | null
+}
+
 export type SessionSummary = {
   session_id: string
   harness: string
@@ -144,6 +181,86 @@ export type SessionSummary = {
   cost: { basis: string; status: string; value?: number; currency?: string }
   models: string[]
   problems: number
+  subagents?: SessionSummary[]
+  rollup?: SessionRollup
+  /**
+   * Set on a projected subagent row whose records are already inside its parent's own
+   * counters (the projection builds both from one merged record set), so a rollup must not
+   * add it a second time.
+   */
+  included_in_parent?: boolean
+}
+
+/**
+ * One session's identity and summary, without its payload.
+ *
+ * <remarks>
+ * The bounded shape `GET /api/kyber/session/:id/summary` serves. It carries
+ * no run or execution linkage: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured.
+ * </remarks>
+ */
+export type SessionSummaryDetail = {
+  session_id: string
+  harness: string
+  /** The stored label, the same string the session payload carries. */
+  label: string | null
+  /** The `INTEGER` column as a boolean, as the session list reports it. */
+  is_subagent: boolean
+  parent_session: string | null
+  agent_name: string | null
+  started: string | null
+  ended: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count: number
+}
+
+/**
+ * One turn's measured counters, read without the session's payload.
+ *
+ * <remarks>
+ * The four counters the turn inspector renders. A counter the stored row does
+ * not carry is absent, never a zero: a zero would claim the harness measured
+ * nothing, and absence is what the row actually says.
+ */
+export type SessionTurnFigures = {
+  /** The turn's own index, as the stored row names it. */
+  index: number
+  input?: number
+  output?: number
+  fresh?: number
+  cache_read?: number
+}
+
+/**
+ * One session's timeline, read as a narrow fragment of its payload.
+ *
+ * <remarks>
+ * `timeline` is the payload's own value, so the served bytes are the bytes
+ * the whole-payload read produced. A session that carries no timeline serves
+ * `undefined`, which the route answers as the empty timeline it served
+ * before.
+ */
+export type SessionTimelineRead = {
+  timeline: unknown
+}
+
+/**
+ * One session's persisted context analysis, read as a narrow fragment of its
+ * payload.
+ *
+ * <remarks>
+ * `context` is the payload's own `context` block — where the per-turn
+ * pressure, buckets and residual live — and `lastTurnIndex` the index of the
+ * session's last turn, which is the fallback for a turn the analysis does not
+ * number itself.
+ */
+export type SessionContextRead = {
+  context: Record<string, unknown> | undefined
+  lastTurnIndex: number | undefined
 }
 
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
@@ -193,9 +310,18 @@ export type IngestActivitySource = {
   display: string
   /** T7 origin kind for the stored name. */
   kind: SourceKind
-  /** Rows in `records` carrying this source. */
+  /**
+   * Rows in `records` carrying this source — canonical stored telemetry only.
+   * Quarantined spans are held out of the corpus and never counted here.
+   */
   recordCount: number
-  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  /**
+   * Summed `ingest_log.count` for this source: received OTLP span/log volume as the
+   * collector tallied it on arrival — including spans later quarantined or rejected.
+   * `ingestedCount > 0` beside `recordCount === 0` therefore means transport is
+   * receiving while nothing is landing in the corpus (quarantine, not silence); 0 when
+   * the log names the source nowhere.
+   */
   ingestedCount: number
   /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
   lastReceivedAt: string | null
@@ -220,6 +346,18 @@ export type QuarantineRow = {
   timestamp?: string | null
 }
 
+/**
+ * One quarantined span with its incoming evidence. `rawPayload` is the exact span JSON
+ * stored at quarantine time (v18+ rows), parsed; older rows carry null with
+ * `evidenceAvailable: false` — explicitly unavailable, never reconstructed from the
+ * records table (that row is the normalized record, not the incoming payload).
+ * List routes never serve this shape; it is metadata-only there (bounded).
+ */
+export type QuarantineDetail = QuarantineRow & {
+  rawPayload: unknown | null
+  evidenceAvailable: boolean
+}
+
 export type ProblemRow = {
   id: number | string
   session_id: string | null
@@ -232,6 +370,16 @@ export type ProblemRow = {
   timestamp?: string | null
 }
 
+/**
+ * One recorded problem with its exception evidence. `message` is the exact stored
+ * message; `stack` is the exception stack when the problem came from a throw, null
+ * otherwise — a computed validation problem has no stack and must not claim one.
+ * List routes never serve the stack; it is metadata-only there (bounded).
+ */
+export type ProblemDetail = ProblemRow & {
+  stack: string | null
+}
+
 export type ParsedSummary = {
   turn_count?: number | null
   request_count?: number | null
@@ -242,6 +390,7 @@ export type ParsedSummary = {
   schema_tokens_per_turn?: number | null
   cost?: CostBlock | null
   models?: string[] | null
+  included_in_parent?: boolean | null
 }
 
 export type SessionPayload = Record<string, unknown> & {
@@ -250,6 +399,17 @@ export type SessionPayload = Record<string, unknown> & {
   summary?: ParsedSummary
   turns?: unknown[]
   problems?: unknown[]
+  /**
+   * The server's cost-basis verdict for this session (rule R1 — the display
+   * layers render it, they never re-derive it). `null` when the cost blocks
+   * agree, or when nothing was priced; an object when they do not, carrying
+   * the problem text and the separate per-basis totals.
+   *
+   * Optional because a row stored before this field existed does not carry it.
+   * `undefined` means "this store has not been re-projected by a build that
+   * computes it" — unknown, which a consumer must not read as "no mismatch".
+   */
+  costBasisMismatch?: CostBasisMismatch | null
 }
 
 /** Measured session-summary figures behind one session, keyed by session id. */
@@ -504,6 +664,12 @@ export type SessionContentPart = {
   server?: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident, so the route never invents the mark on a part that
+   * did not carry it. Mirrors `ContentPart.resident`.
+   */
+  resident?: false
 }
 
 export type SessionContentResult = {
@@ -515,6 +681,37 @@ export type SessionContentResult = {
 export type SessionContentOptions = {
   spanId?: string
   part?: string
+  /**
+   * Explicit lossless request (`?full=true` on the session-content route):
+   * bypasses `CONTENT_RESPONSE_BUDGET` so the full source text returns
+   * intact with no truncation flags. A large-number budget is not offered
+   * here — lossless is opt-in and documented, the default stays capped so
+   * existing callers keep their current behavior.
+   */
+  full?: boolean
+}
+
+/**
+ * Captured-context recurrence for one turn-content part: whether its exact
+ * whole source text was captured as the same part kind in an earlier turn of
+ * this session. Exact bytes only — no normalization, trimming, or
+ * token-level similarity. Recurrence is independent of model cache use: a
+ * repeated part may still be uncached, and a new part may sit in a cached
+ * prefix. Never convert this into a cache claim.
+ */
+export type TurnContentPartRecurrence = {
+  seenBefore: boolean
+}
+
+/**
+ * Aggregated recurrence for one canonical block: `newThisTurn` when at
+ * least one member part is new, `seenBefore` when at least one member part
+ * exactly matches an earlier same-kind part. Both may hold at once for a
+ * block mixing new and repeated parts.
+ */
+export type TurnContentBlockRecurrence = {
+  newThisTurn: boolean
+  seenBefore: boolean
 }
 
 export type TurnContentPart = {
@@ -528,6 +725,12 @@ export type TurnContentPart = {
   truncated?: boolean
   totalLength?: number
   order?: number
+  recurrence?: TurnContentPartRecurrence
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident. Mirrors `ContentPart.resident`.
+   */
+  resident?: false
 }
 
 export type TurnContentBlock = {
@@ -539,18 +742,79 @@ export type TurnContentBlock = {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  recurrence?: TurnContentBlockRecurrence
 }
 
+/**
+ * One session-level shared prompt part. `truncated`/`totalLength` appear
+ * only when the default (non-`full`) response budget cut this part — the
+ * same truthful flagging as every other budgeted text in this response.
+ * `turnIndex` is the 0-based transport index of the turn that contributed a
+ * turn-derived occurrence; it is present only on turn-derived parts.
+ * Session-scope (non-turn) parts carry no `turnIndex` — absent is not zero
+ * and must never be guessed as a turn.
+ */
+export type TurnContentSharedPart = {
+  text: string
+  spanId?: string
+  turnIndex?: number
+  truncated?: boolean
+  totalLength?: number
+}
+
+/**
+ * Session-level shared context for a turn: every captured `system_prompt`
+ * part in session scope at or before this turn, in capture order — the turn
+ * spans' own prompts (preceding plus current, each occurrence carrying its
+ * contributing `turnIndex`) united with the session-wide scan that reaches
+ * only non-turn prompts (turn spans are excluded by operation as well as by
+ * span id, so a turn span never appears as an unindexed duplicate). `seenBefore`
+ * holds when any part exactly matches an earlier-turn same-kind part; it is
+ * capture evidence only, never a cache claim. Null when no system prompt
+ * was captured in scope. The client hides exact duplicates of the turn's
+ * own parts and otherwise labels the section `Shared session context`.
+ */
+export type TurnContentSharedContext = {
+  parts: TurnContentSharedPart[]
+  seenBefore: boolean
+}
+
+/**
+ * Payload-size note (no silent omission): the explicit lossless path
+ * returns every source byte, and by design the same bytes appear up to
+ * three times per response — once in `assembledText`, once across
+ * `blocks[].text`/`blocks[].parts[].text`, and once in `parts[].text` —
+ * because supported callers (`ContextInspector`, the TurnDetail page) read
+ * `assembledText` and per-part views respectively. Callers that cannot hold
+ * ~3x source bytes must use the default budget (explicit `truncated` flags),
+ * never a trimmed illusion of completeness.
+ */
 export type TurnContentResult = {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: TurnContentBlock[]
   parts: TurnContentPart[]
   assembledText: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always — a served turn is a stored record — and the
+   * quarantined parent's packet only when that row kept a payload, so the
+   * pointer is never a link to nothing.
+   */
+  rawPacket: { spanAttributesPath: string; interactionPath?: string }
+  sharedContext?: TurnContentSharedContext | null
+  /**
+   * The skills this turn had access to and invoked. Not a content block: it
+   * sits beside `blocks` and leaves them unchanged. The whole entry is declared
+   * not measurable when the session's payload carries no skills view.
+   */
+  skills?: TurnSkillsContent | NotMeasurable
 }
 
 /**
@@ -558,8 +822,20 @@ export type TurnContentResult = {
  * characters). A single system prompt fits; a 7,000-turn dump does not get
  * serialized whole. When a part does not fit, it is cut and flagged — never
  * silently shortened.
+ *
+ * The turn-content route also accepts an explicit lossless request
+ * (`?full=true`): callers that need every byte pass `full` instead of
+ * guessing a large `budget` number. See `isFullContentRequest` in routes.ts.
  */
 export const CONTENT_RESPONSE_BUDGET = 2_000_000
+
+/**
+ * Documented sentinel for an explicit lossless turn-content request. The
+ * route checks the `full` query value (`true`/`1`); anything else keeps the
+ * default budget. A large-number `budget` is not a substitute — it is
+ * undocumented and still truncates past its value.
+ */
+export const TURN_CONTENT_FULL_PARAM = 'full'
 
 interface SessionDbRow {
   session_id: string
@@ -576,6 +852,318 @@ interface SessionDbRow {
   problems_count?: number | null
   payload?: string | null
 }
+
+/**
+ * One row's summary, as an object.
+ *
+ * <remarks>
+ * The stored summary is a JSON string; the served shape is the object it
+ * encodes. A summary that is not an object, or that does not parse, is an
+ * absent summary — never a fabricated one.
+ * </remarks>
+ */
+function parseSummaryObject(value: string | object | null | undefined): Record<string, unknown> {
+  if (typeof value === 'object' && value !== null) return value as Record<string, unknown>
+  if (typeof value !== 'string' || value === '') return {}
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * One JSON value, parsed from the text SQLite's JSON functions return.
+ *
+ * <remarks>
+ * `NULL` — an absent path — is no value at all. A JSON `null` is a value and
+ * stays one, so a timeline that is null is served as null rather than as
+ * absent.
+ */
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== 'string') return undefined
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One turn row's measured counters.
+ *
+ * <remarks>
+ * The counters are taken as the row holds them. A counter the row does not
+ * carry stays absent, because a zero would claim the harness measured
+ * nothing — and absence is what the row actually says.
+ */
+function turnFiguresOf(turn: Record<string, unknown>, turnIndex: number): SessionTurnFigures {
+  const index = turn['index']
+  return {
+    index: typeof index === 'number' && Number.isFinite(index) ? index : turnIndex,
+    input: turnCounter(turn, 'input'),
+    output: turnCounter(turn, 'output'),
+    fresh: turnCounter(turn, 'fresh'),
+    cache_read: turnCounter(turn, 'cache_read'),
+  }
+}
+
+/** One measured counter, or `undefined` when the row carries no finite one. */
+function turnCounter(turn: Record<string, unknown>, key: string): number | undefined {
+  const value = turn[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * One row's summary and problem count, read out of its own payload.
+ *
+ * <remarks>
+ * The reading the session list already makes for a row it cannot serve from
+ * the materialized columns, narrowed to one row.
+ * </remarks>
+ */
+function summaryFromPayload(payload: string | null | undefined): {
+  summary: Record<string, unknown>
+  problems_count: number
+} {
+  if (typeof payload !== 'string' || payload === '') return { summary: {}, problems_count: 0 }
+  try {
+    const parsed = JSON.parse(payload) as { summary?: unknown; problems?: unknown } | null
+    if (parsed === null || typeof parsed !== 'object') return { summary: {}, problems_count: 0 }
+    return {
+      summary: parseSummaryObject(parsed.summary as string | object | null | undefined),
+      problems_count: Array.isArray(parsed.problems) ? parsed.problems.length : 0,
+    }
+  } catch {
+    return { summary: {}, problems_count: 0 }
+  }
+}
+
+/**
+ * Whether a row is missing either of the two materialized summary columns.
+ *
+ * <remarks>
+ * NULL is the writer's per-column "not materialized" sentinel, so a row is
+ * never whole or empty: a payload carrying a problems array and no summary is
+ * written as a NULL summary beside a real count, and a payload carrying a
+ * summary and no problems array is written as a NULL count beside a real
+ * summary. A row is complete only when it carries both columns.
+ */
+function isMissingSessionColumn(row: SessionDbRow): boolean {
+  return (
+    row.summary_json === null ||
+    row.summary_json === undefined ||
+    row.problems_count === null ||
+    row.problems_count === undefined
+  )
+}
+
+/**
+ * Fill a row's missing materialized columns from a legacy reading.
+ *
+ * <remarks>
+ * Only what the row is missing is filled in: a materialized value is never
+ * replaced by the payload's, and a value the payload does not carry leaves
+ * the row's own NULL in place. The session list and the bounded summary route
+ * both merge through this, so the two surfaces cannot drift apart on what a
+ * NULL column means.
+ */
+function fillMissingSessionColumns(
+  row: SessionDbRow,
+  legacy: { summary_json?: string | object | null; problems_count?: number | null },
+): void {
+  if (row.summary_json === null || row.summary_json === undefined) {
+    row.summary_json = legacy.summary_json ?? null
+  }
+  if (row.problems_count === null || row.problems_count === undefined) {
+    row.problems_count = legacy.problems_count ?? null
+  }
+}
+
+/**
+ * The session list, read from the materialized columns only.
+ *
+ * <remarks>
+ * `summary_json` and `problems_count` carry the two facts the list needs out
+ * of the payload blob (the serialized `$.summary`, and the length of
+ * `$.problems`), so a materialized corpus is served without reading a byte of
+ * `payload`. The statement is column-only on purpose: naming `payload` here
+ * at all — even inside `json_extract` — makes SQLite read and parse the whole
+ * blob of every row, which is what made a list request cost the size of the
+ * payload store.
+ * </remarks>
+ */
+const SESSION_LIST_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'repo, branch, started, ended, summary_json, problems_count ' +
+  'FROM session ORDER BY started DESC'
+
+/**
+ * The legacy subset: rows missing a materialized value.
+ *
+ * <remarks>
+ * The predicate is the load-bearing part: it confines the payload read to the
+ * rows that are not fully materialized, so a corpus where every row carries
+ * both values never issues this statement at all. It covers a row missing
+ * *either* value, because NULL is the writer's per-column "not materialized"
+ * sentinel — a payload with a problems array and no summary is written as a
+ * NULL summary beside a real count, and a payload with no problems array is
+ * written as a NULL count beside a real summary. The extracted values are
+ * merged back into the primary rows by `session_id`, and a value the row
+ * already carries is never overwritten.
+ * </remarks>
+ */
+const SESSION_LIST_LEGACY_SELECT =
+  "SELECT session_id, json_extract(payload, '$.summary') AS summary_json, " +
+  "json_array_length(json_extract(payload, '$.problems')) AS problems_count " +
+  'FROM session WHERE summary_json IS NULL OR problems_count IS NULL'
+
+/**
+ * The last resort: the whole payload, parsed in JS.
+ *
+ * <remarks>
+ * Taken when the SQLite build has no JSON functions (the legacy fallback
+ * cannot run) or when the schema predates the materialized columns (the
+ * primary statement cannot run). Unchanged from the pre-materialization
+ * reader, so a database the fast path cannot serve still lists.
+ * </remarks>
+ */
+const SESSION_LIST_PAYLOAD_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'repo, branch, started, ended, payload ' +
+  'FROM session ORDER BY started DESC'
+
+/**
+ * One session's identity columns and its materialized summary.
+ *
+ * <remarks>
+ * The narrow read the bounded summary is built on. `payload` is not named
+ * here: a session's blob is unbounded — 15.3 MB for a 10,933-turn session —
+ * and this read answers from the columns alone.
+ * </remarks>
+ */
+const SESSION_SUMMARY_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'started, ended, summary_json, problems_count ' +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * The legacy subset for one row: the summary and the problem count read out
+ * of that row's own payload.
+ *
+ * <remarks>
+ * Transitional, and scoped to the requested id — the `WHERE` clause is that
+ * same single id, so this reads one row's payload and never the table's. It
+ * is issued only for a row that is missing *either* materialized value, since
+ * NULL is the writer's per-column "not materialized" sentinel, so a fully
+ * materialized corpus never runs it. `json_extract` keeps the blob inside
+ * SQLite: only the extracted fragment crosses into JS.
+ * </remarks>
+ */
+const SESSION_SUMMARY_LEGACY_SELECT =
+  "SELECT json_extract(payload, '$.summary') AS summary_json, " +
+  "json_array_length(json_extract(payload, '$.problems')) AS problems_count " +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * The last resort for one row: its payload, parsed in JS.
+ *
+ * <remarks>
+ * Taken when the schema predates the materialized columns (the narrow read
+ * cannot run) or when the SQLite build has no JSON functions (the legacy
+ * extraction cannot run). One row only, so it is never worse than the detail
+ * route's whole-payload read.
+ * </remarks>
+ */
+const SESSION_SUMMARY_PAYLOAD_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'started, ended, payload ' +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * One turn row, read from the turns table.
+ *
+ * <remarks>
+ * A session's turns live in `session_turn`, one row each, indexed by
+ * `(session_id, turn_index)`. One turn is therefore a seek — not the session
+ * blob, which held 10,933 turn rows and 15.3 MB for the corpus's largest
+ * session.
+ */
+const SESSION_TURN_SELECT =
+  'SELECT turn_json FROM session_turn WHERE session_id = ? AND turn_index = ?'
+
+/**
+ * Whether a session has turn rows of its own.
+ *
+ * <remarks>
+ * The load-bearing part of the legacy fallback below: a session whose turns
+ * are split out no longer carries them in its payload, so an index with no
+ * row is simply out of range — and saying so must not cost a payload read.
+ */
+const SESSION_TURN_ROWS_SELECT =
+  'SELECT 1 AS present FROM session_turn WHERE session_id = ? LIMIT 1'
+
+/**
+ * The legacy turn read: one turn out of a payload that still carries its turns.
+ *
+ * <remarks>
+ * `json_each` walks the payload's own turn array inside SQLite, so only the
+ * one matching turn crosses into JS. The identity rule is the writer's own: a
+ * turn that names an `index` is that turn, and a turn that names none is its
+ * position — the rule the turns table itself was built with, so the two paths
+ * answer for the same turn.
+ *
+ * The array check is load-bearing: a `turns` key that is not an array is a
+ * malformed payload, and walking it as one would answer for a turn that does
+ * not exist.
+ */
+const SESSION_TURN_LEGACY_SELECT =
+  'SELECT t.value AS turn_json FROM session s, json_each(json_extract(s.payload, \'$.turns\')) AS t ' +
+  "WHERE s.session_id = ? AND json_type(s.payload, '$.turns') = 'array' AND COALESCE(" +
+  "CASE WHEN json_type(t.value, '$.index') IN ('integer', 'real') " +
+  "THEN CAST(json_extract(t.value, '$.index') AS INTEGER) END, " +
+  'CAST(t.key AS INTEGER)) = ? LIMIT 1'
+
+/**
+ * Whether a derived session row exists.
+ *
+ * <remarks>
+ * Membership only: a seek on the session table's primary key, and the whole
+ * of what "does this session exist" needs. The session's content is not part
+ * of that answer — a reader that took it from the payload would decompress
+ * the blob and reassemble every turn of the session out of `session_turn` to
+ * learn what the row's key already carries.
+ */
+const SESSION_EXISTS_SELECT = 'SELECT 1 FROM session WHERE session_id = ?'
+
+/**
+ * One session's timeline, read as a narrow fragment of its payload.
+ *
+ * <remarks>
+ * `->` hands over the JSON text of the value at the path, so the timeline
+ * crosses into JS and the blob around it does not — and the text is the
+ * value's own JSON, so a timeline of any JSON type is served byte for byte
+ * as the whole-payload read served it. The timeline is session metadata: it
+ * lives beside the turns, not inside them, so it survives the payload split
+ * intact.
+ */
+const SESSION_TIMELINE_SELECT =
+  "SELECT (payload -> '$.timeline') AS timeline_json FROM session WHERE session_id = ?"
+
+/**
+ * One session's context analysis, read as narrow fragments of its payload.
+ *
+ * <remarks>
+ * Both fragments are taken by SQLite's JSON functions: the persisted context
+ * block, and the index of the session's last turn. The blob around them never
+ * crosses into JS.
+ */
+const SESSION_CONTEXT_SELECT =
+  "SELECT json_extract(payload, '$.context') AS context_json, " +
+  "json_extract(payload, '$.turns[#-1].index') AS last_turn_index " +
+  'FROM session WHERE session_id = ?'
 
 interface QuarantineDbRow {
   span_id: string
@@ -640,7 +1228,15 @@ export function _clip<T = unknown>(value: T, maxLen = MAX_STRING_LENGTH, depth =
 type ContentSourceRecord = {
   spanId: string
   sessionKey: string | null
+  /** The record's parent span; the quarantined packet a turn may point at (B7). */
+  parentSpanId: string | null
   parts: ContentPart[]
+  /**
+   * Captured timestamp of the span, when the seam carries one. Lets the
+   * turn-content reader scope session prompts to those captured at or
+   * before the turn being shown without a second lookup per span.
+   */
+  timestamp?: string
 }
 
 /**
@@ -658,6 +1254,9 @@ type TurnDescriptor = {
   turn?: unknown
   spanId?: string
   model?: string
+  /** The projected skills of this turn (names); read by the skills entry, never trusted blind. */
+  skills_listed?: unknown
+  skills_invoked?: unknown
 }
 
 /**
@@ -672,20 +1271,114 @@ function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
   return undefined
 }
 
+/** The turn's skills entry for the content route (T2), as one turn of the content response. */
+export type TurnSkillsContent = {
+  /** What the turn had access to; each with its row's first observed description as `text` when one exists. */
+  listed: Array<{ name: string; text?: string }> | NotMeasurable
+  /** The distinct skills the turn itself invoked; `[]` is a measured none. */
+  invoked: string[] | NotMeasurable
+}
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+
 /**
- * Strict turn resolution: explicit identity first, array position only for
- * rows carrying neither `index` nor `turn`. Anything else resolves to
- * nothing — never a neighboring turn.
+ * A turn's skills entry, read from the already-loaded session payload only.
+ * The narrow turn-content seam must not walk session records, so the payload
+ * carries what the projection already derived: `skills.rows[].description`
+ * and each turn's `skills_listed` / `skills_invoked`. A payload projected
+ * before skills existed has no `skills` key and is declared so.
+ *
+ * Known limit (accepted): `text` is the skill's first observed description in
+ * the session. A later listing that changes the description does not alter the
+ * text served for earlier turns.
  */
-function resolveTurn<T>(
-  pool: readonly T[],
-  turnIndex: number,
+function skillsContentFromPayload(
+  payload: SessionPayload | null | undefined,
+  turn: TurnDescriptor | undefined,
+): TurnSkillsContent | NotMeasurable {
+  const skills = payload?.skills
+  if (!isRecordValue(skills)) return notMeasurable('session not yet projected with skills')
+  if (skills.availability === 'not_measurable') {
+    return notMeasurable(typeof skills.reason === 'string' ? skills.reason : 'Skills are not measurable for this session.')
+  }
+
+  const descriptions = new Map<string, string>()
+  if (Array.isArray(skills.rows)) {
+    for (const row of skills.rows) {
+      if (isRecordValue(row) && typeof row.name === 'string' && typeof row.description === 'string') {
+        descriptions.set(row.name, row.description)
+      }
+    }
+  }
+
+  const listed: TurnSkillsContent['listed'] = isStringArray(turn?.skills_listed)
+    ? turn.skills_listed.map((name) => {
+        const text = descriptions.get(name)
+        return text === undefined ? { name } : { name, text }
+      })
+    : notMeasurable('This turn has no skill listing in the projected session, so the skills it had access to are not measurable.')
+
+  const invoked: TurnSkillsContent['invoked'] = isStringArray(turn?.skills_invoked)
+    ? [...turn.skills_invoked]
+    : notMeasurable('Skill invocations are not measured for this session, so the skills this turn invoked are not measurable.')
+
+  return { listed, invoked }
+}
+
+/**
+ * Index of explicit 0-based transport identities over one ordered turn list,
+ * built in a single pass. First identity wins on duplicates, matching the
+ * historic `find` order.
+ */
+export function buildTransportIndex<T>(
+  items: readonly T[],
   identityOf: (item: T) => number | undefined,
+): Map<number, T> {
+  const byIdentity = new Map<number, T>()
+  for (const item of items) {
+    const id = identityOf(item)
+    if (id !== undefined && !byIdentity.has(id)) byIdentity.set(id, item)
+  }
+  return byIdentity
+}
+
+/**
+ * Strict turn resolution over one ordered list: explicit identity first,
+ * array position only for the row that carries neither `index` nor `turn`.
+ * Anything else resolves to nothing — never a neighboring turn (issue #184).
+ */
+export function lookupTransport<T>(
+  items: readonly T[] | undefined,
+  byIdentity: Map<number, T> | undefined,
+  identityOf: (item: T) => number | undefined,
+  turnIndex: number,
 ): T | undefined {
-  return (
-    pool.find((item) => identityOf(item) === turnIndex) ??
-    pool.find((item, i) => i === turnIndex && identityOf(item) === undefined)
-  )
+  const direct = byIdentity?.get(turnIndex)
+  if (direct !== undefined) return direct
+  const positional = items !== undefined && turnIndex >= 0 && turnIndex < items.length ? items[turnIndex] : undefined
+  if (positional !== undefined && identityOf(positional) === undefined) return positional
+  return undefined
+}
+
+/**
+ * Normalized turn-resolution row: the span an index resolves to plus its
+ * explicit 0-based identity (`undefined` for position-only rows), with the
+ * one-pass identity map beside the ordered entries. Built once per response
+ * and shared by the target lookup and every preceding-turn lookup.
+ */
+export type TurnResolutionEntry = {
+  spanId: string
+  model?: string
+  identity: number | undefined
+}
+
+export type TurnResolutionPool = {
+  entries: TurnResolutionEntry[]
+  byIdentity: Map<number, TurnResolutionEntry>
 }
 
 /**
@@ -715,6 +1408,15 @@ function logErr(value: unknown): string {
   return raw.replace(/[^\x20-\x7e]/g, '?').slice(0, 500)
 }
 
+/**
+ * Stable hash of exact source bytes for recurrence comparison. Hashes (not
+ * texts) are retained per earlier part so a long session keeps one small
+ * digest per captured part instead of every earlier byte in memory.
+ */
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
 
 function isCanonicalPart(value: string): value is CanonicalContentKey {
   return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)
@@ -740,14 +1442,16 @@ function partsFromRecord(record: CanonicalRecord): ContentPart[] {
 
 function partsFromRow(row: Record<string, unknown>): ContentPart[] {
   if (row.parts_json !== null && row.parts_json !== undefined) {
-    try {
-      const parts = decompressRaw(row.parts_json as Uint8Array) as ContentPart[]
-      if (Array.isArray(parts) && parts.length > 0) {
-        return [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      }
-    } catch {
-      // Fall through to content_json — a corrupt blob is not an empty session.
+    // The column holds the deflated parts, and the plain JSON a row written
+    // before the compression landed holds. Both are read here, so a pre-change
+    // row keeps its parts — the fall-through to `content_json` below would
+    // lose them, because that column is '{}' on a parts-carrying row.
+    const parts = decompressColumn(row.parts_json)
+    if (Array.isArray(parts) && parts.length > 0) {
+      return [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     }
+    // A column that holds nothing usable falls through to content_json — a
+    // corrupt blob is not an empty session.
   }
   if (typeof row.content_json === 'string' && row.content_json !== '' && row.content_json !== '{}') {
     try {
@@ -767,12 +1471,48 @@ function partsFromRow(row: Record<string, unknown>): ContentPart[] {
   return []
 }
 
+/** A record row's parent span id, or null when it carries none. */
+function parentSpanIdOf(row: Record<string, unknown>): string | null {
+  return row.parent_span_id === null || row.parent_span_id === undefined
+    ? null
+    : String(row.parent_span_id)
+}
+
 function toContentSource(record: CanonicalRecord): ContentSourceRecord {
   return {
     spanId: record.spanId,
     sessionKey: sessionKeyOf(record),
+    parentSpanId: record.parentSpanId,
     parts: partsFromRecord(record),
+    timestamp: normalizeRecordTimestamp(record.timestamp),
   }
+}
+
+/**
+ * A canonical timestamp as the narrow stored string. A `Date` round-trips
+ * through ISO; anything else is unknown rather than invented.
+ */
+function normalizeRecordTimestamp(value: CanonicalRecord['timestamp'] | unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString()
+  return undefined
+}
+
+/**
+ * Temporal gate for shared session prompts: only a prompt provably captured
+ * after the shown turn is withheld. Both timestamps parse and the candidate
+ * is strictly later — anything missing or unparseable stays included,
+ * because the reader cannot prove it is future evidence and dropping it
+ * would invent a claim the corpus cannot support. Equal timestamps stay
+ * included for the same reason: millisecond equality cannot order two
+ * captures, so the limitation is documented, not decided.
+ */
+function sessionPromptAtOrBefore(candidate: string | undefined, target: string | undefined): boolean {
+  if (candidate === undefined || target === undefined) return true
+  const candidateMs = Date.parse(candidate)
+  const targetMs = Date.parse(target)
+  if (!Number.isFinite(candidateMs) || !Number.isFinite(targetMs)) return true
+  return candidateMs <= targetMs
 }
 
 function applyContentBudget(
@@ -943,6 +1683,40 @@ function buildIngestActivity(
   return { status: 'known', sources, lastReceivedAt }
 }
 
+/**
+ * A session's own counters plus its descendants', counted once. A child whose records are
+ * already inside this session's counters (`included_in_parent`) adds nothing, and neither
+ * does anything beneath it; every other child contributes its own rollup, leaf-first.
+ * `visiting` guards a malformed parent cycle from recursing forever.
+ */
+function computeSessionRollup(session: SessionSummary, visiting: Set<string> = new Set()): SessionRollup {
+  visiting.add(session.session_id)
+  let turnCount = session.turn_count ?? 0
+  let requestCount = session.request_count ?? 0
+  let totalInput = session.total_input ?? 0
+  let totalOutput = session.total_output ?? 0
+  let costUsdSum: number | null = session.cost_usd != null ? session.cost_usd : null
+
+  for (const child of session.subagents ?? []) {
+    if (child.included_in_parent === true || visiting.has(child.session_id)) continue
+    const rolled = child.rollup ?? computeSessionRollup(child, visiting)
+    turnCount += rolled.turn_count
+    requestCount += rolled.request_count
+    totalInput += rolled.total_input
+    totalOutput += rolled.total_output
+    if (rolled.cost_usd != null) costUsdSum = (costUsdSum ?? 0) + rolled.cost_usd
+  }
+  visiting.delete(session.session_id)
+
+  return {
+    turn_count: turnCount,
+    request_count: requestCount,
+    total_input: totalInput,
+    total_output: totalOutput,
+    cost_usd: costUsdSum,
+  }
+}
+
 export class KyberBridge {
   private canonDb?: DatabaseSync
   private readonly store?: CanonStore
@@ -988,10 +1762,9 @@ export class KyberBridge {
   private readonly warnedShareDrops = new Set<string>()
 
   constructor(options?: KyberBridgeOptions) {
-    this.canonPath =
-      options?.canonPath ??
-      process.env.KYBER_CANON_DB ??
-      join(homedir(), '.kyberdash', 'canon.db')
+    // The shared resolver, so the server can only ever read the store the CLI
+    // and the receiver write (src/canon/paths.ts).
+    this.canonPath = resolveCanonDbPath(options?.canonPath)
 
     this.ratesPath = options?.ratesPath
 
@@ -1187,6 +1960,30 @@ export class KyberBridge {
     return this.canonDb
   }
 
+  /**
+   * The handle the session reads go through.
+   *
+   * <remarks>
+   * The store's handle when a store is injected: the store owns the sessions,
+   * and a bridge that carries both a store and a handle of its own reads the
+   * sessions from the store — the two can be different databases, and the
+   * store's is the one that holds them. The store's handle also outlives the
+   * bridge: closing drops the bridge's reference to it, not the handle.
+   *
+   * Without a store, the bridge's own handle — which it stops using once it
+   * has closed.
+   */
+  private sessionHandle(): DatabaseSync | undefined {
+    if (this.store && typeof this.store.getDatabase === 'function') {
+      try {
+        return this.store.getDatabase()
+      } catch {
+        return undefined
+      }
+    }
+    return this.getDb()
+  }
+
   private hasTable(db: DatabaseSync | undefined, tableName: string): boolean {
     if (!db) return false
     try {
@@ -1215,10 +2012,12 @@ export class KyberBridge {
 
   /**
    * List all available sessions from the canonical store, sorted by started DESC.
+   * Child subagent sessions are hierarchically nested under their parent session,
+   * with read-time spend and counters rolled up to the parent.
    */
   listSessions(limit?: number): SessionSummary[] {
     const db = this.getDb()
-    const list: SessionSummary[] = []
+    const rawSessions: SessionSummary[] = []
 
     // The canonical derived `session` cache is the only reporting authority.
     // Raw `records` are never synthesized into sessions here: projection
@@ -1226,31 +2025,18 @@ export class KyberBridge {
     // so a record-only group is not yet a session and must not appear.
     if (this.hasTable(db, 'session')) {
       try {
-        let rows: SessionDbRow[] = []
-        try {
-          // Fast path: use json_extract so we don't pull large payload blobs across the bridge
-          rows = db!
-            .prepare(
-              'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, ' +
-                "json_extract(payload, '$.summary') as summary_json, " +
-                "json_array_length(json_extract(payload, '$.problems')) as problems_count " +
-                'FROM session ORDER BY started DESC'
-            )
-            .all() as unknown as SessionDbRow[]
-        } catch {
-          // Fallback if SQLite json functions are unavailable
-          rows = db!
-            .prepare(
-              'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload ' +
-                'FROM session ORDER BY started DESC'
-            )
-            .all() as unknown as SessionDbRow[]
-        }
-
+        const rows = this.readSessionListRows(db!)
         for (const row of rows) {
           let summ: ParsedSummary | null = null
           let problemsCount = 0
 
+          // The two materialized columns are independent facts. A payload can
+          // carry a problems array without a summary, and the writer stores
+          // that as a NULL summary beside a real count; a payload can carry a
+          // summary without a problems array, and the writer stores that as a
+          // NULL count beside a real summary. So neither column gates the
+          // other: a missing summary never hides a count, and a missing count
+          // never discards a summary.
           if (row.summary_json !== undefined && row.summary_json !== null) {
             if (typeof row.summary_json === 'string') {
               try {
@@ -1259,11 +2045,17 @@ export class KyberBridge {
             } else if (typeof row.summary_json === 'object') {
               summ = row.summary_json as ParsedSummary
             }
+          }
+          if (row.problems_count !== undefined && row.problems_count !== null) {
             problemsCount = Number(row.problems_count) || 0
           } else if (typeof row.payload === 'string') {
+            // Last resort only: a row that reached here without a materialized
+            // count was read by the payload statement, because this SQLite
+            // build has no JSON functions or the schema predates the
+            // materialized columns.
             try {
               const p = JSON.parse(row.payload) as { summary?: ParsedSummary; problems?: unknown[] }
-              summ = p?.summary ?? null
+              summ = summ ?? p?.summary ?? null
               problemsCount = Array.isArray(p?.problems) ? p.problems.length : 0
             } catch {}
           }
@@ -1279,10 +2071,22 @@ export class KyberBridge {
                   ...(typeof block.currency === 'string' ? { currency: block.currency } : {}),
                 }
               : { basis: 'unknown', status: 'no_rate' }
-          list.push({
+
+          const rawLabel = row.label ?? null
+          const label =
+            rawLabel && rawLabel.trim() !== ''
+              ? rawLabel
+              : formatSessionTitle({
+                  sessionId: row.session_id,
+                  agentName: row.agent_name,
+                  harness: row.harness,
+                  rawLabel: row.label,
+                })
+
+          rawSessions.push({
             session_id: row.session_id,
             harness: row.harness,
-            label: row.label ?? null,
+            label,
             is_subagent: Boolean(row.is_subagent),
             parent_session: row.parent_session ?? null,
             agent_name: row.agent_name ?? null,
@@ -1301,6 +2105,8 @@ export class KyberBridge {
             cost,
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
+            subagents: [],
+            ...(summ.included_in_parent === true ? { included_in_parent: true } : {}),
           })
         }
       } catch (err) {
@@ -1308,13 +2114,129 @@ export class KyberBridge {
       }
     }
 
+    // Index all sessions by session_id for fast parent lookup
+    const sessionMap = new Map<string, SessionSummary>()
+    for (const session of rawSessions) {
+      sessionMap.set(session.session_id, session)
+    }
+
+    // Attach each child to its parent. A child is not attached when that would close a cycle
+    // (the parent is the child or one of its descendants), so malformed ancestry cannot make
+    // sessions vanish from the list.
+    const attachedChildIds = new Set<string>()
+    const isAncestorOrSelf = (candidateId: string, ofId: string): boolean => {
+      const seen = new Set<string>()
+      for (let id: string | null | undefined = ofId; id != null && !seen.has(id); id = sessionMap.get(id)?.parent_session) {
+        if (id === candidateId) return true
+        seen.add(id)
+      }
+      return false
+    }
+
+    for (const session of rawSessions) {
+      const isChild = session.is_subagent || Boolean(session.parent_session)
+      if (!isChild || !session.parent_session) continue
+      const parent = sessionMap.get(session.parent_session)
+      if (parent === undefined || isAncestorOrSelf(session.session_id, parent.session_id)) continue
+      parent.subagents = parent.subagents ?? []
+      parent.subagents.push(session)
+      attachedChildIds.add(session.session_id)
+    }
+
+    // Every session keeps its own children (a chain A <- B <- C nests two deep), ordered by
+    // start. Rollups are computed leaf-first so a parent folds in already-rolled children.
+    for (const session of rawSessions) {
+      session.subagents = (session.subagents ?? []).sort((a, b) => (a.started ?? '').localeCompare(b.started ?? ''))
+    }
+    const rolledUp = new Set<string>()
+    const rollUp = (session: SessionSummary): void => {
+      if (rolledUp.has(session.session_id)) return
+      rolledUp.add(session.session_id)
+      for (const child of session.subagents ?? []) rollUp(child)
+      session.rollup = computeSessionRollup(session)
+    }
+    for (const session of rawSessions) rollUp(session)
+
+    // Filter to root sessions only
+    const rootSessions = rawSessions.filter((s) => !attachedChildIds.has(s.session_id))
+
     // Sort globally by started DESC
-    list.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
+    rootSessions.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
 
     if (typeof limit === 'number' && limit > 0) {
-      return list.slice(0, Math.floor(limit))
+      // The limit stays here, after the nesting and the rollup: a SQL-side
+      // LIMIT would count rows, not roots, and would cut the children of a
+      // returned parent out of the tree (and out of its rolled-up counters).
+      return rootSessions.slice(0, Math.floor(limit))
     }
-    return list
+    return rootSessions
+  }
+
+  /**
+   * Read the rows the session list is built from, without touching the
+   * `payload` blob unless a row forces it.
+   *
+   * <remarks>
+   * Three shapes, in order:
+   *
+   * 1. The materialized read — the whole table, columns only.
+   * 2. The legacy fallback — issued only when the primary result carries a
+   *    row that is missing a materialized value, i.e. a row written before
+   *    the materialization existed, not yet re-projected, or holding a
+   *    payload the writer could not materialize both values for. It reads the
+   *    payload of exactly those rows and is merged back by `session_id`.
+   * 3. The payload read — the last resort, unchanged: taken when the SQLite
+   *    build has no JSON functions (the fallback cannot run) or when the
+   *    schema predates the materialized columns (the primary cannot run).
+   * </remarks>
+   */
+  private readSessionListRows(db: DatabaseSync): SessionDbRow[] {
+    let primary: SessionDbRow[]
+    try {
+      primary = db.prepare(SESSION_LIST_SELECT).all() as unknown as SessionDbRow[]
+    } catch {
+      // A schema without the materialized columns: only the payload read can
+      // serve it.
+      return this.readSessionListRowsFromPayload(db)
+    }
+
+    // A row is complete when it carries both materialized values. The
+    // fallback covers every row that does not, and the two values are read
+    // independently downstream — so a row that is missing one of them keeps
+    // the other.
+    const incomplete = primary.filter((row) => isMissingSessionColumn(row))
+    if (incomplete.length === 0) return primary
+
+    let legacy: SessionDbRow[]
+    try {
+      legacy = db.prepare(SESSION_LIST_LEGACY_SELECT).all() as unknown as SessionDbRow[]
+    } catch {
+      // No JSON functions in this SQLite build: the fallback cannot run, so
+      // the payload read is the only way to serve the rows it would have
+      // completed.
+      return this.readSessionListRowsFromPayload(db)
+    }
+
+    const extracted = new Map(legacy.map((row) => [row.session_id, row]))
+    for (const row of incomplete) {
+      const legacyRow = extracted.get(row.session_id)
+      if (legacyRow === undefined) continue
+      // Only what the row is missing is filled in, one column at a time.
+      fillMissingSessionColumns(row, legacyRow)
+    }
+    return primary
+  }
+
+  /**
+   * The last resort: every row's payload, parsed in JS.
+   *
+   * <remarks>
+   * Unchanged from the pre-materialization reader, so a database the fast
+   * path cannot serve still lists.
+   * </remarks>
+   */
+  private readSessionListRowsFromPayload(db: DatabaseSync): SessionDbRow[] {
+    return db.prepare(SESSION_LIST_PAYLOAD_SELECT).all() as unknown as SessionDbRow[]
   }
 
   /**
@@ -1424,24 +2346,53 @@ export class KyberBridge {
    * Get the full precomputed view payload for a given session ID.
    * The canonical session payload is returned without route-level adaptation.
    * Strings longer than maxLen are safely truncated to prevent oversized JSON responses.
+   *
+   * <remarks>
+   * The session's turns are read from `session_turn` — one range scan for the
+   * whole session, however many turns it holds — and the rest of the session
+   * from the payload row without them. A session's blob was 15.3 MB for a
+   * 10,933-turn session, and reading it whole to serve its turns is what the
+   * split exists to stop.
+   *
+   * Both shapes are in the store at once, and both are served the same way.
+   * A row whose payload still carries a `turns` array was written before the
+   * split, or by a build that still writes whole payloads: its turns are the
+   * ones it carries, and they are the fresh ones — a re-write by such a build
+   * leaves the split rows behind it stale. A row without one has had its
+   * turns split out, and they are read from the turns table. The payload's
+   * own `turns` key is the signal, because it is the one thing the split
+   * leaves behind: the migration removed the key and moved the turns, and the
+   * writer drops the key as it writes the rows.
+   *
+   * The turns are re-attached at the end of the payload, because the split
+   * took the key out and nothing records where it stood.
+   * </remarks>
    */
   getSessionPayload<T = SessionPayload>(sessionId: string): T | null {
     if (!sessionId) return null
 
-    if (this.store) {
-      const payload = this.store.getSessionPayload(sessionId)
-      return payload === undefined ? null : (_clip(payload) as T)
+    const db = this.sessionHandle()
+    if (this.hasTable(db, 'session')) {
+      const assembled = this.readSessionWithTurns(db!, sessionId)
+      if (assembled !== undefined) return assembled === null ? null : (_clip(assembled) as T)
     }
 
-    const db = this.getDb()
+    // The whole payload, as the store holds it: the last resort for a handle
+    // that cannot serve the split read — a schema without the JSON functions
+    // the fragments are taken with, or a store that answers the payload
+    // itself. The turns are attached back from the turns table, so this path
+    // serves the same session the split read does.
+    if (this.store) {
+      const payload = this.store.getSessionPayload(sessionId)
+      if (payload === undefined) return null
+      return _clip(this.attachSessionTurns(db, payload as SessionPayload, sessionId)) as T
+    }
     if (this.hasTable(db, 'session')) {
       try {
-        const row = db!
-          .prepare('SELECT payload FROM session WHERE session_id = ?')
-          .get(sessionId) as { payload: string } | undefined
-        if (row && typeof row.payload === 'string') {
-          const parsed = JSON.parse(row.payload) as unknown
-          return _clip(parsed) as T
+        const row = db!.prepare(SESSION_PAYLOAD_SELECT).get(sessionId) as { payload?: unknown } | undefined
+        if (row !== undefined && typeof row.payload === 'string') {
+          const payload = JSON.parse(row.payload) as SessionPayload
+          return _clip(this.attachSessionTurns(db!, payload, sessionId)) as T
         }
       } catch (err) {
         console.warn(
@@ -1453,6 +2404,316 @@ export class KyberBridge {
     }
 
     return null
+  }
+
+  /**
+   * One session's payload with its turns back, read from the split store.
+   *
+   * <remarks>
+   * `null` when the store holds no such session, and `undefined` when this
+   * handle cannot serve the split read at all — the caller's whole-payload
+   * read is the fallback then.
+   */
+  private readSessionWithTurns(
+    db: DatabaseSync,
+    sessionId: string,
+  ): Record<string, unknown> | null | undefined {
+    let row: { payload_json?: unknown; turns_type?: unknown; turns_json?: unknown } | undefined
+    try {
+      row = db.prepare(SESSION_PAYLOAD_FRAGMENTS_SELECT).get(sessionId) as typeof row
+    } catch (err) {
+      // This handle cannot take the payload apart — no JSON functions in its
+      // SQLite build. Anything else is not a missing capability and must not
+      // read as an empty session.
+      if (err instanceof Error && /no such function/i.test(err.message)) return undefined
+      throw err
+    }
+    if (row === undefined) return null
+    const payload = parseJsonObject(row.payload_json)
+    if (payload === undefined) return undefined
+
+    // The turns: the payload's own when it still carries them, the split rows
+    // when they have been moved out. The range scan is issued either way — it
+    // is one indexed lookup that answers whether the session has turn rows of
+    // its own, and hands over every one of them when it does.
+    //
+    // Which of the two wins is the shared contract's rule, not this reader's:
+    // the store's reader and the bridge's reader must answer alike, so the
+    // decision lives in one place (`canon/session-read.ts`).
+    const splitTurns = this.readSessionTurnRows(db, sessionId)
+    payload['turns'] = sessionTurnsOf(row.turns_type, row.turns_json, splitTurns)
+    return payload
+  }
+
+  /**
+   * One session's turns, read from the turns table in one range scan.
+   *
+   * <remarks>
+   * `undefined` when the store carries no turns table at all: the table is
+   * materialized on demand, so a store that never held a turn row may not
+   * have one — and a session in such a store has no turns anywhere. Any
+   * other read failure is rethrown rather than served as an empty turn list.
+   */
+  private readSessionTurnRows(
+    db: DatabaseSync,
+    sessionId: string,
+  ): Array<Record<string, unknown>> | undefined {
+    if (!this.hasTable(db, 'session_turn')) return undefined
+    let rows: Array<{ turn_json?: unknown }>
+    try {
+      rows = db.prepare(SESSION_TURNS_SELECT).all(sessionId) as Array<{ turn_json?: unknown }>
+    } catch (err) {
+      if (err instanceof Error && /no such table/i.test(err.message)) return undefined
+      throw err
+    }
+    const turns: Array<Record<string, unknown>> = []
+    for (const row of rows) {
+      const turn = turnObjectOf(row.turn_json)
+      // A row that does not parse is not a turn: it is dropped rather than
+      // served as an empty object, which would read as "measured, and there
+      // was nothing there".
+      if (turn !== undefined) turns.push(turn)
+    }
+    return turns
+  }
+
+  /**
+   * One session's identity and summary, read without its payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/session/:id/summary`. A consumer
+   * that needs a handful of identity fields should not pay for the whole
+   * session blob — 15.3 MB and a multi-second cold page-in for a session with
+   * 10,933 turns, to learn a handful of fields.
+   *
+   * The answer is bounded by construction, so no `_clip` is applied here. The
+   * detail route clips because its payload is unbounded; clipping a summary
+   * would only risk truncating a measured figure.
+   *
+   * A row that predates the materialization — or one the writer could not
+   * materialize both values for — is read out of that one row's payload, the
+   * transitional shape the session list already falls back to. The fallback
+   * is per column, exactly as the list merges it: the payload fills only the
+   * column the row is missing, so a materialized value is never replaced by
+   * the payload's. The shape carries no run or execution linkage — neither
+   * the `session` table nor the session payload holds such a field, so
+   * serving one would invent a link the client does not have today.
+   * </remarks>
+   */
+  getSessionSummary(sessionId: string): SessionSummaryDetail | undefined {
+    const id = sessionId.trim()
+    if (!id) return undefined
+
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return undefined
+
+    let row: SessionDbRow | undefined
+    try {
+      row = db!.prepare(SESSION_SUMMARY_SELECT).get(id) as SessionDbRow | undefined
+    } catch {
+      // A schema without the materialized columns: this row's own payload is
+      // the only place its summary lives.
+      return this.readSessionSummaryFromPayload(db!, id)
+    }
+    if (row === undefined) return undefined
+
+    // The two materialized columns are independent facts, and NULL is the
+    // writer's per-column "not materialized" sentinel: a missing count never
+    // discards a materialized summary, and a missing summary never hides a
+    // materialized count. So the row is resolved column by column, the same
+    // way the session list resolves it — a row carrying both is served from
+    // the columns alone, with no payload read at all, and a row missing
+    // either one falls back to that one row's payload for the missing
+    // column only.
+    if (isMissingSessionColumn(row)) {
+      const legacy = this.readSessionSummaryLegacy(db!, id)
+      if (legacy === undefined) return undefined
+      fillMissingSessionColumns(row, legacy)
+    }
+
+    return this.buildSessionSummary(row, {
+      summary:
+        row.summary_json === null || row.summary_json === undefined
+          ? {}
+          : parseSummaryObject(row.summary_json),
+      problems_count: Number(row.problems_count) || 0,
+    })
+  }
+
+  /**
+   * The two materialized columns of one row, read out of that row's payload.
+   *
+   * <remarks>
+   * Returned as columns, not as served facts, so the caller merges them per
+   * column: a value the row already carries is never replaced by the
+   * payload's, and a value the payload does not carry leaves the row's own
+   * NULL in place.
+   */
+  private readSessionSummaryLegacy(
+    db: DatabaseSync,
+    sessionId: string,
+  ): { summary_json?: string | object | null; problems_count?: number | null } | undefined {
+    try {
+      const row = db
+        .prepare(SESSION_SUMMARY_LEGACY_SELECT)
+        .get(sessionId) as { summary_json?: string | null; problems_count?: number | null } | undefined
+      if (row === undefined) return undefined
+      return {
+        summary_json: row.summary_json ?? null,
+        problems_count: row.problems_count ?? null,
+      }
+    } catch {
+      // No JSON functions in this SQLite build: the extraction cannot run, so
+      // this row's payload is the only way to serve it.
+      const row = db.prepare(SESSION_SUMMARY_PAYLOAD_SELECT).get(sessionId) as SessionDbRow | undefined
+      if (row === undefined) return undefined
+      const facts = summaryFromPayload(row.payload)
+      return { summary_json: facts.summary, problems_count: facts.problems_count }
+    }
+  }
+
+  /**
+   * One row's summary, parsed from its own payload.
+   *
+   * <remarks>
+   * The last resort, and the same reading the session list makes when the
+   * materialized columns cannot serve it. One row only, so it never costs
+   * more than the detail route's whole-payload read.
+   * </remarks>
+   */
+  private readSessionSummaryFromPayload(
+    db: DatabaseSync,
+    sessionId: string,
+  ): SessionSummaryDetail | undefined {
+    const row = db.prepare(SESSION_SUMMARY_PAYLOAD_SELECT).get(sessionId) as SessionDbRow | undefined
+    if (row === undefined) return undefined
+    return this.buildSessionSummary(row, summaryFromPayload(row.payload))
+  }
+
+  /**
+   * The served shape, from one row's columns plus its summary facts.
+   */
+  private buildSessionSummary(
+    row: SessionDbRow,
+    facts: { summary: Record<string, unknown>; problems_count: number },
+  ): SessionSummaryDetail {
+    return {
+      session_id: row.session_id,
+      harness: row.harness,
+      label: row.label ?? null,
+      // The column is an INTEGER; the session list reports it as a boolean,
+      // and so does this.
+      is_subagent: Boolean(row.is_subagent),
+      parent_session: row.parent_session ?? null,
+      agent_name: row.agent_name ?? null,
+      started: row.started ?? null,
+      ended: row.ended ?? null,
+      summary: facts.summary,
+      problems_count: facts.problems_count,
+    }
+  }
+
+  /**
+   * One turn's measured counters, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/session/:id/turn/:index`. A
+   * consumer that needs one turn's counters should not pay for the session
+   * blob: the detail route served 10,933 turn rows to read four numbers.
+   *
+   * A session whose turns were never split out of their payload — a row
+   * written before the split — is read the transitional way, with SQLite
+   * walking the payload's own turn array and handing over the one turn that
+   * matches. The identity rule is the writer's own, so both paths answer for
+   * the same turn.
+   * </remarks>
+   */
+  getSessionTurnFigures(sessionId: string, turnIndex: number): SessionTurnFigures | null {
+    if (!sessionId || !Number.isInteger(turnIndex) || turnIndex < 0) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    if (this.hasTable(db, 'session_turn')) {
+      const row = db.prepare(SESSION_TURN_SELECT).get(sessionId, turnIndex) as
+        | { turn_json?: unknown }
+        | undefined
+      const turn = row === undefined ? undefined : turnObjectOf(row.turn_json)
+      if (turn !== undefined) return turnFiguresOf(turn, turnIndex)
+      // No row for that index. A session that has turn rows of its own is
+      // split, and its payload no longer carries them: the index is out of
+      // range, and no payload is read to say so.
+      if (db.prepare(SESSION_TURN_ROWS_SELECT).get(sessionId) !== undefined) return null
+    }
+
+    // A session written before the split still carries its turns in the
+    // payload. That is the transitional read, and it hands over one turn.
+    const legacy = db.prepare(SESSION_TURN_LEGACY_SELECT).get(sessionId, turnIndex) as
+      | { turn_json?: unknown }
+      | undefined
+    if (legacy === undefined) return null
+    const turn = turnObjectOf(legacy.turn_json)
+    return turn === undefined ? null : turnFiguresOf(turn, turnIndex)
+  }
+
+  /**
+   * One session's timeline, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/timeline`. The timeline is
+   * session metadata: it lives beside the turns, not inside them, so it
+   * survives the payload split — and reading it never needs the turns that
+   * were the blob's bulk.
+   *
+   * `null` when the store holds no such session: the route's 404. The
+   * timeline itself is the payload's own value, so the served bytes are the
+   * bytes the whole-payload read produced.
+   * </remarks>
+   */
+  getSessionTimeline(sessionId: string): SessionTimelineRead | null {
+    if (!sessionId) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    const row = db.prepare(SESSION_TIMELINE_SELECT).get(sessionId) as
+      | { timeline_json?: unknown }
+      | undefined
+    if (row === undefined) return null
+    const timeline = parseJsonValue(row.timeline_json)
+    // Clipped at the depth the timeline sat at inside the payload, so the
+    // served bytes are the bytes the whole-payload read produced.
+    return { timeline: timeline === undefined ? undefined : _clip(timeline, MAX_STRING_LENGTH, 1) }
+  }
+
+  /**
+   * One session's persisted context analysis, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind the report's latest-session block. The context
+   * analysis — the per-turn pressure, buckets, residual and tool-definition
+   * sources — lives in the payload's `context` key, while the payload also
+   * carries the session's whole turn list, which this block needs none of.
+   *
+   * `null` when the store holds no such session.
+   * </remarks>
+   */
+  getSessionContext(sessionId: string): SessionContextRead | null {
+    if (!sessionId) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    const row = db.prepare(SESSION_CONTEXT_SELECT).get(sessionId) as
+      | { context_json?: unknown; last_turn_index?: unknown }
+      | undefined
+    if (row === undefined) return null
+    const context = parseJsonObject(row.context_json)
+    const lastTurnIndex = row.last_turn_index
+    return {
+      // Clipped at the depth the context block sat at inside the payload, so
+      // the derived figures are the ones the whole-payload read produced.
+      context: context === undefined ? undefined : _clip(context, MAX_STRING_LENGTH, 1),
+      lastTurnIndex:
+        typeof lastTurnIndex === 'number' && Number.isFinite(lastTurnIndex) ? lastTurnIndex : undefined,
+    }
   }
 
   /**
@@ -1541,6 +2802,9 @@ export class KyberBridge {
         }
         if (piece.tokens !== undefined) entry.tokens = piece.tokens
         if (piece.server !== undefined) entry.server = piece.server
+        // Copied only when set: the drawer labels a definition as offered on
+        // `false`, so a resident part must come back with no key at all.
+        if (piece.resident === false) entry.resident = false
         assembled.push(entry)
       }
     }
@@ -1549,7 +2813,13 @@ export class KyberBridge {
 
     const result: SessionContentResult = {
       sessionId,
-      parts: applyContentBudget(assembled, CONTENT_RESPONSE_BUDGET),
+      // Lossless callers pass `full` so content longer than the default
+      // budget returns exact with no flags; everyone else keeps the capped
+      // behavior with explicit `truncated`/`totalLength` markers. Flags are
+      // only ever added by the budget below — never invented, and upstream
+      // (storage-level) truncation stays visible wherever the store records
+      // it rather than being papered over here.
+      parts: applyContentBudget(assembled, options.full === true ? Number.POSITIVE_INFINITY : CONTENT_RESPONSE_BUDGET),
     }
     if (options.spanId) result.spanId = options.spanId
     return result
@@ -1566,6 +2836,18 @@ export class KyberBridge {
    * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
    * instruction_context, conversation_history, tool_result_content) and parts
    * (including user_messages, assistant_turns, etc.).
+   *
+   * Every part carries exact-match `recurrence` against earlier captured
+   * turns of this session (same part kind, whole text, hashed), aggregated
+   * per block; `sharedContext` carries every captured `system_prompt` part
+   * in scope at or before this turn, in capture order, each with its own recurrence. Recurrence is
+   * capture-only and never a cache claim — cache totals stay on the turn
+   * row, unattributed to blocks.
+   *
+   * `budget` caps the returned characters with explicit `truncated` flags.
+   * Pass `Number.POSITIVE_INFINITY` for the documented lossless path (the
+   * route maps `?full=true` to it): no branch silently truncates, so content
+   * longer than `CONTENT_RESPONSE_BUDGET` returns intact.
    */
   assembleTurnContent(
     sessionId: string,
@@ -1579,17 +2861,22 @@ export class KyberBridge {
     let targetSpanId: string | undefined
     let model: string | undefined
 
-    // 1. Try resolving via session payload if available
+    // 1. Try resolving via session payload if available. The identity map is
+    // built in one pass and shared by the target lookup and every
+    // preceding-turn lookup below — O(1) per index, no repeated scans.
     const payload = this.getSessionPayload<SessionPayload>(sessionId)
     const turns: TurnDescriptor[] = Array.isArray(payload?.turns)
       ? (payload.turns as TurnDescriptor[])
       : []
+    const payloadByIdentity = buildTransportIndex(turns, turnTransportIndexOf)
+    let payloadTurn: TurnDescriptor | undefined
     if (turns.length > 0) {
-      const turnItem = resolveTurn(turns, turnIndex, turnTransportIndexOf)
+      const turnItem = lookupTransport(turns, payloadByIdentity, turnTransportIndexOf, turnIndex)
       if (turnItem) {
+        payloadTurn = turnItem
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
-      } else if (turns.some((t) => turnTransportIndexOf(t) !== undefined)) {
+      } else if (payloadByIdentity.size > 0) {
         // The payload names its turns and none matches: stop here. Falling
         // through to the positional record lookup below could serve a
         // neighboring span's content instead of the documented 404
@@ -1598,45 +2885,26 @@ export class KyberBridge {
       }
     }
 
+    // Ordered record pool, loaded at most once and shared by the target
+    // lookup and the preceding-turn reads (payload-less sessions).
+    let pool: TurnResolutionPool | null | undefined
+    const getPool = (): TurnResolutionPool | null => {
+      if (pool === undefined) pool = this.loadTurnResolutionPool(sessionId, db)
+      return pool
+    }
+
     // 2. If targetSpanId not resolved yet, search canonical records
     if (!targetSpanId) {
-      if (this.store) {
-        const records = this.store.recordsForSession(sessionId)
-        const turnRecords = records.filter((r) => r.op === 'llm.invoke')
-        const pool = turnRecords.length > 0 ? turnRecords : records
-        const target = resolveTurn(pool, turnIndex, (r) =>
-          turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
-        )
-        if (target) {
-          targetSpanId = target.spanId
-          model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
-        }
-      } else if (this.hasTable(db, 'records')) {
-        try {
-          const rows = db!
-            .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
-            .all(sessionId) as Record<string, unknown>[]
-          const turnRows = rows.filter((r) => r.op === 'llm.invoke')
-          const pool = turnRows.length > 0 ? turnRows : rows
-          // DB rows predate the descriptor shape: `index` may arrive as a
-          // numeric string, and a null/empty index is no identity (unlike
-          // `Number(null)`, which coerces to 0 and would hijack turn 0).
-          const target = resolveTurn(pool, turnIndex, (r) => {
-            const rawIndex: unknown = r.index
-            const index =
-              rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
-            return turnTransportIndexOf({
-              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
-              turn: r.turn,
-            })
-          })
-          if (target) {
-            targetSpanId = String(target.span_id)
-            model = String(target.name || '')
-          }
-        } catch {
-          // ignore
-        }
+      const resolvedPool = getPool()
+      const resolved = lookupTransport(
+        resolvedPool?.entries,
+        resolvedPool?.byIdentity,
+        (e: TurnResolutionEntry) => e.identity,
+        turnIndex,
+      )
+      if (resolved) {
+        targetSpanId = resolved.spanId
+        model = resolved.model
       }
     }
 
@@ -1645,114 +2913,107 @@ export class KyberBridge {
     // Load unclipped content records for this span
     const contentRecords = this.loadContentRecords(sessionId, targetSpanId)
     const rawParts: ContentPart[] = contentRecords[0]?.parts ?? []
+    // The turn's parent span is what a quarantined packet would be filed
+    // under (B7); absent when the record named no parent.
+    const parentSpanId = contentRecords[0]?.parentSpanId ?? null
 
     // Map and extract structured parts (system prompt, tools, user messages, assistant turns, etc.)
-    const parts: TurnContentPart[] = []
-    let orderCounter = 0
+    const parts = this.mapTurnContentParts(rawParts, targetSpanId)
 
-    for (const p of rawParts) {
-      if (p.part === 'system_prompt') {
-        parts.push({
-          id: `part-sys-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'system_prompt',
-          label: 'System Prompt',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_definitions') {
-        const label = p.server ? `Tools (${p.server})` : 'Tools'
-        parts.push({
-          id: `part-tool-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_definitions',
-          label,
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'instruction_context') {
-        parts.push({
-          id: `part-inst-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'instruction_context',
-          label: 'Instruction Context',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_result_content') {
-        parts.push({
-          id: `part-toolres-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_result_content',
-          label: 'Tool Results',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'conversation_history') {
-        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
-        if (userMessages.length > 0 || assistantMessages.length > 0) {
-          if (userMessages.length > 0) {
-            parts.push({
-              id: `part-user-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'user_messages',
-              label: 'User Messages',
-              text: userMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-          if (assistantMessages.length > 0) {
-            parts.push({
-              id: `part-asst-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'assistant_turns',
-              label: 'Assistant Turns',
-              text: assistantMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-        } else {
-          // Generic conversation history
-          parts.push({
-            id: `part-user-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'user_messages',
-            label: 'User Messages',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
-          parts.push({
-            id: `part-conv-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'conversation_history',
-            label: 'Conversation History',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
-        }
-      } else {
-        parts.push({
-          id: `part-other-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: p.part,
-          label: String(p.part).replace(/_/g, ' '),
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
+    // Captured-context recurrence: exact whole-part-text matches of the same
+    // part kind in earlier captured turns. Only per-kind digest sets plus the
+    // system-prompt candidate texts below are retained — each preceding part
+    // is hashed and released turn-by-turn, never accumulated. No
+    // normalization, no token-level similarity: a changed part is new unless
+    // its exact text was captured before. Recurrence is independent of model
+    // cache use and is never a cache claim; computed before budgeting so
+    // truncation cannot rewrite it.
+    const preceding = this.loadPrecedingTurnDigests(sessionId, turnIndex, turns, payloadByIdentity, getPool)
+    for (const p of parts) {
+      p.recurrence = { seenBefore: preceding.digests.get(p.part)?.has(sha256Hex(p.text)) ?? false }
+    }
+
+    // Session-level shared context: the union of the turn spans at or
+    // before this turn (preceding plus current, each occurrence carrying its
+    // contributing turnIndex) and every non-turn captured system_prompt in
+    // session scope at or before this turn, in capture order. A mixed session
+    // — an `llm.invoke` turn prompt coexisting with one or more non-turn
+    // (e.g. `session.start`) prompts — keeps both: the old only-when-empty
+    // fallback silently dropped the non-turn prompt as soon as any turn
+    // prompt existed. Occurrence identity is the contributing turn index,
+    // never the text alone: identical text from distinct turns stays
+    // repeated, and one span serving two turn indexes contributes two
+    // occurrences. Turn spans are excluded from the session scan by their
+    // canonical operation (`llm.invoke`) as well as by the resolved turn
+    // span set (never by text inference), so a turn span missing from the
+    // payload turn list never appears as an unindexed duplicate.
+    // Temporal scope comes from captured timestamps — a prompt provably
+    // captured after this turn is withheld; missing, unparseable, or equal
+    // timestamps stay included (see `sessionPromptAtOrBefore`), because the
+    // corpus cannot order those captures and the reader must not invent it.
+    // Each part's own recurrence follows the same exact-match rule against
+    // strictly earlier turns; the client hides exact duplicates of the
+    // turn's own parts and otherwise labels the section Shared session
+    // context. `seenBefore` for the section holds when any part has earlier
+    // evidence; parts without it show no recurrence badge (never "new" —
+    // first capture is unverifiable outside the turn spans).
+    const targetTimestamp = contentRecords[0]?.timestamp
+    // Turn span ids known from the resolved turn set (payload first, so the
+    // narrow seam pays no extra record walk; the already-loaded pool joins
+    // when present). The session scan filters these out, so a turn span is
+    // never contributed as an unindexed session duplicate — turn occurrences
+    // arrive only with their contributing turnIndex below. Identity is never
+    // inferred from text.
+    const turnSpanIds = new Set<string>()
+    for (const t of turns) {
+      if (typeof t.spanId === 'string') turnSpanIds.add(t.spanId)
+    }
+    if (pool !== undefined && pool !== null) {
+      for (const e of pool.entries) turnSpanIds.add(e.spanId)
+    }
+    type SharedCandidate = TurnContentSharedPart & { timestamp?: string; seq: number }
+    const sharedCandidates: SharedCandidate[] = []
+    let sharedSeq = 0
+    for (const fallback of this.loadSessionSystemPrompts(sessionId, turnSpanIds)) {
+      if (!sessionPromptAtOrBefore(fallback.timestamp, targetTimestamp)) continue
+      const spanId = fallback.spanId ?? targetSpanId
+      if (spanId === undefined) continue
+      if (turnSpanIds.has(spanId)) continue
+      sharedCandidates.push({ text: fallback.text, spanId, timestamp: fallback.timestamp, seq: sharedSeq++ })
+    }
+    for (const p of preceding.prompts) {
+      sharedCandidates.push({ text: p.text, spanId: p.spanId, turnIndex: p.turnIndex, timestamp: p.timestamp, seq: sharedSeq++ })
+    }
+    // The current turn contributes its own occurrences under the requested
+    // turn index — even when its span also served an earlier turn index. Each
+    // full-turn copy is a distinct API-seen occurrence, so the same span id
+    // at turn 0 and turn 1 yields two entries with different turnIndex
+    // values. Same-turn repeated identical parts stay repeated.
+    for (const p of parts.filter((p) => p.part === 'system_prompt' && p.text !== '')) {
+      const spanId = p.spanId ?? targetSpanId
+      sharedCandidates.push({ text: p.text, spanId, turnIndex, timestamp: targetTimestamp, seq: sharedSeq++ })
+    }
+    // Capture order: provable timestamps order the union; missing,
+    // unparseable, or equal timestamps keep insertion order (stable sort) —
+    // the corpus cannot order those captures and the reader must not invent it.
+    sharedCandidates.sort((a, b) => {
+      const aMs = a.timestamp === undefined ? Number.NaN : Date.parse(a.timestamp)
+      const bMs = b.timestamp === undefined ? Number.NaN : Date.parse(b.timestamp)
+      const aKnown = Number.isFinite(aMs)
+      const bKnown = Number.isFinite(bMs)
+      if (aKnown && bKnown && aMs !== bMs) return (aMs as number) - (bMs as number)
+      return a.seq - b.seq
+    })
+    const sharedParts: TurnContentSharedPart[] = sharedCandidates.map(({ text, spanId, turnIndex: ti, truncated, totalLength }) =>
+      ti === undefined ? { text, spanId, ...(truncated !== undefined ? { truncated } : {}), ...(totalLength !== undefined ? { totalLength } : {}) } : { text, spanId, turnIndex: ti },
+    )
+    let sharedContext: TurnContentSharedContext | null = null
+    if (sharedParts.length > 0) {
+      sharedContext = {
+        parts: sharedParts,
+        seenBefore: sharedParts.some(
+          (c) => preceding.digests.get('system_prompt')?.has(sha256Hex(c.text)) ?? false,
+        ),
       }
     }
 
@@ -1776,7 +3037,9 @@ export class KyberBridge {
         return true
       })
       const text = uniqueParts.map((p) => p.text).join('\n\n')
-      const tokens = uniqueParts.reduce((sum, p) => sum + (p.tokens ?? 0), 0) || undefined
+      // A non-resident definition stays in the block's parts so the reader can
+      // show it, but it adds no tokens: the block's figure is the resident one (D7).
+      const tokens = uniqueParts.reduce((sum, p) => sum + (p.resident === false ? 0 : (p.tokens ?? 0)), 0) || undefined
 
       const block: TurnContentBlock = {
         key: def.key,
@@ -1786,13 +3049,26 @@ export class KyberBridge {
         tokens,
       }
 
-      // Check measurability from payload
-      const flat = payload?.measurability as MeasurabilityMap | undefined
-      const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
-        ?.first?.buckets
-      const measurability = flat?.[def.key] ?? buckets?.[def.key]
-      if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
-        block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+      // Check measurability from payload — but only for a block this turn
+      // has no parts for (R6/B6): the payload's declaration is
+      // session-level, and a session-wide "not measurable" must not
+      // survive onto a block the turn itself carries text for.
+      if (uniqueParts.length === 0) {
+        const flat = payload?.measurability as MeasurabilityMap | undefined
+        const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
+          ?.first?.buckets
+        const measurability = flat?.[def.key] ?? buckets?.[def.key]
+        if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
+          block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+        }
+      }
+
+      // Block recurrence aggregates its rendered members: new when any
+      // member part is new, seen when any member part exactly matches an
+      // earlier same-kind part. Both hold for mixed blocks.
+      block.recurrence = {
+        newThisTurn: uniqueParts.some((p) => p.recurrence !== undefined && !p.recurrence.seenBefore),
+        seenBefore: uniqueParts.some((p) => p.recurrence?.seenBefore === true),
       }
 
       blocks.push(block)
@@ -1837,39 +3113,411 @@ export class KyberBridge {
         part.truncated = true
       }
     }
+    // Shared context is budgeted and flagged exactly like every other text:
+    // a default response caps each part with explicit markers, while the
+    // explicit lossless path (unbounded budget) returns every byte intact.
+    if (sharedContext) {
+      for (const sharedPart of sharedContext.parts) {
+        if (sharedPart.text.length > budget) {
+          sharedPart.totalLength = sharedPart.text.length
+          sharedPart.text = sharedPart.text.slice(0, budget)
+          sharedPart.truncated = true
+        }
+      }
+    }
+
+    // B7's raw-packet pointers. The turn's own span is a stored record, so
+    // its attributes are always reachable; the parent's packet is linked
+    // only when its quarantine row exists and kept a payload — a pointer
+    // to nothing is worse than none.
+    const rawPacket: TurnContentResult['rawPacket'] = {
+      spanAttributesPath: `/api/kyber/span/${targetSpanId}/attributes`,
+    }
+    if (parentSpanId !== null) {
+      const entry = this.getQuarantineEntry(parentSpanId)
+      if (entry !== null && entry.rawPayload !== null) {
+        rawPacket.interactionPath = `/api/kyber/quarantine/${parentSpanId}`
+      }
+    }
 
     const result: TurnContentResult = {
       sessionId,
       turnIndex,
       spanId: targetSpanId,
+      ...(parentSpanId !== null ? { parentSpanId } : {}),
       model,
       blocks,
       parts,
       assembledText,
+      rawPacket,
       ...(truncated ? { truncated, totalLength } : {}),
+      sharedContext,
+      skills: skillsContentFromPayload(payload, payloadTurn),
     }
 
     return result
   }
 
+  /**
+   * Structured turn parts for one span, in raw order: system prompt, tools,
+   * instruction context, tool results, conversation history split into user
+   * messages / assistant turns (or kept generic when unparseable), and any
+   * other part kind passed through with its exact text. The current turn and
+   * every preceding turn map through this same function so recurrence
+   * compares identical kinds.
+   */
+  private mapTurnContentParts(rawParts: ContentPart[], spanId: string): TurnContentPart[] {
+    const parts: TurnContentPart[] = []
+    let orderCounter = 0
+
+    for (const p of rawParts) {
+      if (p.part === 'system_prompt') {
+        parts.push({
+          id: `part-sys-${orderCounter++}`,
+          spanId,
+          part: 'system_prompt',
+          label: 'System Prompt',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_definitions') {
+        const label = p.server ? `Tools (${p.server})` : 'Tools'
+        parts.push({
+          id: `part-tool-${orderCounter++}`,
+          spanId,
+          part: 'tool_definitions',
+          label,
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+          ...(p.resident === false ? { resident: false } : {}),
+        })
+      } else if (p.part === 'instruction_context') {
+        parts.push({
+          id: `part-inst-${orderCounter++}`,
+          spanId,
+          part: 'instruction_context',
+          label: 'Instruction Context',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_result_content') {
+        parts.push({
+          id: `part-toolres-${orderCounter++}`,
+          spanId,
+          part: 'tool_result_content',
+          label: 'Tool Results',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'conversation_history') {
+        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
+        if (userMessages.length > 0 || assistantMessages.length > 0) {
+          if (userMessages.length > 0) {
+            parts.push({
+              id: `part-user-${orderCounter++}`,
+              spanId,
+              part: 'user_messages',
+              label: 'User Messages',
+              text: userMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+          if (assistantMessages.length > 0) {
+            parts.push({
+              id: `part-asst-${orderCounter++}`,
+              spanId,
+              part: 'assistant_turns',
+              label: 'Assistant Turns',
+              text: assistantMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+        } else {
+          // Generic conversation history
+          parts.push({
+            id: `part-user-${orderCounter++}`,
+            spanId,
+            part: 'user_messages',
+            label: 'User Messages',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+          parts.push({
+            id: `part-conv-${orderCounter++}`,
+            spanId,
+            part: 'conversation_history',
+            label: 'Conversation History',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+        }
+      } else {
+        parts.push({
+          id: `part-other-${orderCounter++}`,
+          spanId,
+          part: p.part,
+          label: String(p.part).replace(/_/g, ' '),
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      }
+    }
+
+    return parts
+  }
+
+  /**
+   * Normalized turn-resolution row: the span an index resolves to plus its
+   * explicit 0-based identity (`undefined` for position-only rows).
+   */
+  private loadTurnResolutionPool(
+    sessionId: string,
+    db: DatabaseSync | undefined,
+  ): TurnResolutionPool | null {
+    if (this.store) {
+      const records = this.store.recordsForSession(sessionId)
+      const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+      const pool = turnRecords.length > 0 ? turnRecords : records
+      const entries = pool.map((r) => ({
+        spanId: r.spanId,
+        model: (r as CanonicalRecord & TurnDescriptor).model ?? r.name,
+        identity: turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
+      }))
+      return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
+    }
+    if (this.hasTable(db, 'records')) {
+      try {
+        const rows = db!
+          .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
+          .all(sessionId) as Record<string, unknown>[]
+        const turnRows = rows.filter((r) => r.op === 'llm.invoke')
+        const pool = turnRows.length > 0 ? turnRows : rows
+        // DB rows predate the descriptor shape: `index` may arrive as a
+        // numeric string, and a null/empty index is no identity (unlike
+        // `Number(null)`, which coerces to 0 and would hijack turn 0).
+        const entries = pool.map((r) => {
+          const rawIndex: unknown = r.index
+          const index =
+            rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
+          return {
+            spanId: String(r.span_id),
+            model: String(r.name || ''),
+            identity: turnTransportIndexOf({
+              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
+              turn: r.turn,
+            }),
+          }
+        })
+        return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  /**
+   * Recurrence evidence for every captured turn before `turnIndex`: per-kind
+   * digest sets plus the system-prompt candidate texts in turn order.
+   * Resolution reuses the caller's one-pass payload index and the shared
+   * pool (loaded at most once per response); content itself is read with
+   * single-span gets — never a full-session content walk. Each preceding
+   * part is hashed and released immediately: only digests and prompt texts
+   * are retained, so prefix cost is one small digest per earlier part.
+   * Comparisons stay exact and follow the same identity rules as the target
+   * lookup (issue #184).
+   */
+  private loadPrecedingTurnDigests(
+    sessionId: string,
+    turnIndex: number,
+    payloadTurns: TurnDescriptor[],
+    payloadByIdentity: Map<number, TurnDescriptor>,
+    getPool: () => TurnResolutionPool | null,
+  ): {
+    digests: Map<string, Set<string>>
+    prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }>
+  } {
+    const digests = new Map<string, Set<string>>()
+    const prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }> = []
+    if (turnIndex <= 0) return { digests, prompts }
+    const occurrences: Array<{ span: string; turnIndex: number }> = []
+    for (let i = 0; i < turnIndex; i++) {
+      let span: string | undefined
+      if (payloadTurns.length > 0) {
+        const item = lookupTransport(payloadTurns, payloadByIdentity, turnTransportIndexOf, i)
+        if (item && typeof item.spanId === 'string') {
+          span = item.spanId
+        } else if (payloadByIdentity.size > 0) {
+          // An identity-bearing payload that names no turn i contributes
+          // nothing for i — same guard as the target lookup (issue #184).
+          continue
+        }
+      }
+      if (span === undefined) {
+        const pool = getPool()
+        const found = lookupTransport(pool?.entries, pool?.byIdentity, (e) => e.identity, i)
+        if (found) span = found.spanId
+      }
+      if (span !== undefined) occurrences.push({ span, turnIndex: i })
+    }
+    // Load each distinct span once for digests, then replicate its system
+    // prompts once per turn index that references it: complete turn copies
+    // repeat a prompt, so the same span id at two turn indexes is two
+    // API-seen occurrences with different turnIndex values.
+    const cached = new Map<string, { texts: string[]; timestamp?: string }>()
+    for (const { span } of occurrences) {
+      if (cached.has(span)) continue
+      const records = this.loadContentRecords(sessionId, span)
+      const raw: ContentPart[] = records[0]?.parts ?? []
+      const timestamp = records[0]?.timestamp
+      const texts: string[] = []
+      for (const p of this.mapTurnContentParts(raw, span)) {
+        const set = digests.get(p.part) ?? new Set<string>()
+        set.add(sha256Hex(p.text))
+        digests.set(p.part, set)
+        // System-prompt texts alone are retained (shared-context
+        // candidates); every other part releases its text after hashing.
+        if (p.part === 'system_prompt' && p.text !== '') {
+          texts.push(p.text)
+        }
+      }
+      cached.set(span, { texts, timestamp })
+    }
+    for (const { span, turnIndex: sourceIndex } of occurrences) {
+      const entry = cached.get(span)
+      if (!entry) continue
+      for (const text of entry.texts) {
+        prompts.push({ text, spanId: span, turnIndex: sourceIndex, timestamp: entry.timestamp })
+      }
+    }
+    return { digests, prompts }
+  }
+
+  /**
+   * Non-turn session-wide system prompts for the shared-context reader: every
+   * captured `system_prompt` part outside `excludeSpan`, in session order.
+   * Turn spans are excluded by their canonical operation (`llm.invoke`) as
+   * well as by the caller's resolved span set, so a turn-derived prompt
+   * missing from the payload turn list never masquerades as an unindexed
+   * session-scope prompt; identity is never inferred from text. Always
+   * combined with the turn spans' own prompts by the caller (a mixed
+   * session keeps both); retains system prompts alone — never the
+   * surrounding content. Each entry carries its row's captured timestamp so
+   * the caller can withhold prompts captured after the turn being shown.
+   *
+   * <remarks>
+   * Cost: this deliberately never calls `loadContentRecords(sessionId)` — that
+   * walk selects every column (including the large `raw` blob) and inflates
+   * every session row's parts just to keep the prompts. The store seam reads
+   * only the content columns plus the short timestamp through
+   * `CanonStore.systemPromptPartsForSession`, and the store-less seam runs the
+   * same projection directly; rows carrying parts still inflate their own blob
+   * to filter (deflated bytes admit no SQL index — an indexed pre-filter would
+   * need a schema migration, out of scope), but unrelated rows are never
+   * materialized into records and their other columns never leave SQLite.
+   * Returned content, order, texts, and span ids match the old walk exactly.
+   * </remarks>
+   */
+  private loadSessionSystemPrompts(
+    sessionId: string,
+    excludeSpans?: string | Set<string>,
+  ): Array<{ text: string; spanId?: string; timestamp?: string }> {
+    if (!sessionId) return []
+    const isExcluded = (spanId: string): boolean => {
+      if (excludeSpans === undefined) return false
+      if (typeof excludeSpans === 'string') return spanId === excludeSpans
+      return excludeSpans.has(spanId)
+    }
+    if (this.store) {
+      return this.store
+        .systemPromptPartsForSession(sessionId, excludeSpans)
+        .map(({ spanId, text, timestamp }) => (timestamp === undefined ? { text, spanId } : { text, spanId, timestamp }))
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        )
+        .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+      const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
+      for (const row of rows) {
+        if (row.op === 'llm.invoke') continue
+        const spanId = String(row.span_id)
+        if (isExcluded(spanId)) continue
+        const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
+        for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
+          out.push(timestamp === undefined ? { text, spanId } : { text, spanId, timestamp })
+        }
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
+
+  /**
+   * Whether a derived `session` row exists for `sessionId`.
+   *
+   * <remarks>
+   * Membership only, and deliberately so. "Does this session exist" is
+   * answered by the session table's key: the row's presence is the fact, and
+   * the session's content is not part of the answer. The check used to ask the
+   * store for the session's payload, and that read is the split reader — it
+   * decompresses the blob and reassembles every turn of the session out of
+   * `session_turn`, 10,933 of them on the corpus's largest session — so every
+   * existence check cost a full read of the session it was only sizing up.
+   *
+   * The seek costs the same whatever the session holds, so a session's size no
+   * longer decides what an existence check pays.
+   */
+  private sessionRowExists(db: DatabaseSync | undefined, sessionId: string): boolean {
+    if (!this.hasTable(db, 'session')) return false
+    try {
+      return db!.prepare(SESSION_EXISTS_SELECT).get(sessionId) !== undefined
+    } catch {
+      // Older or partial schemas still fall through to the records check.
+      return false
+    }
+  }
 
   /**
    * A session is known if a derived row exists or any record keys to it.
    * The session table is cheap; records are the fallback for a corpus that
    * has not been built into `session` yet. Checking the table first avoids
    * clipping a large payload just to decide whether to 404.
+   *
+   * <remarks>
+   * The derived row is probed, never read: the session's payload and its turns
+   * are the answer to a different question, and reading them here made every
+   * existence check reassemble the whole session before the caller could ask
+   * for any of it.
+   *
+   * The store's handle is probed first — it is the one that holds the
+   * sessions. The bridge's own handle is probed as well, for a bridge that
+   * carries both a store and a handle of its own.
    */
   private sessionKnown(sessionId: string): boolean {
-    if (this.store?.getSessionPayload(sessionId) !== undefined) return true
-    const db = this.getDb()
-    if (this.hasTable(db, 'session')) {
-      try {
-        const row = db!.prepare('SELECT 1 FROM session WHERE session_id = ?').get(sessionId)
-        if (row) return true
-      } catch {
-        // Older or partial schemas still fall through to the records check.
-      }
-    }
+    const sessionDb = this.sessionHandle()
+    if (this.sessionRowExists(sessionDb, sessionId)) return true
+    const ownDb = this.getDb()
+    if (ownDb !== sessionDb && this.sessionRowExists(ownDb, sessionId)) return true
     // Records without a derived session row still make the session real —
     // otherwise a span miss on an unbuilt session would 404 as "unknown".
     if (this.store) return this.store.recordsForSession(sessionId).length > 0
@@ -1914,7 +3562,9 @@ export class KyberBridge {
           {
             spanId: String(row.span_id),
             sessionKey: key,
+            parentSpanId: parentSpanIdOf(row),
             parts: partsFromRow(row),
+            timestamp: normalizeRecordTimestamp(row.timestamp),
           },
         ]
       } catch {
@@ -1931,7 +3581,9 @@ export class KyberBridge {
       return rows.map((row) => ({
         spanId: String(row.span_id),
         sessionKey: sessionId,
+        parentSpanId: parentSpanIdOf(row),
         parts: partsFromRow(row),
+        timestamp: normalizeRecordTimestamp(row.timestamp),
       }))
     } catch {
       try {
@@ -1941,7 +3593,9 @@ export class KyberBridge {
         return rows.map((row) => ({
           spanId: String(row.span_id),
           sessionKey: sessionId,
+          parentSpanId: parentSpanIdOf(row),
           parts: partsFromRow(row),
+          timestamp: normalizeRecordTimestamp(row.timestamp),
         }))
       } catch {
         return []
@@ -2245,7 +3899,14 @@ export class KyberBridge {
     }
   }
 
-  getQuarantine(limit = 200, offset = 0): QuarantineRow[] {
+  /**
+   * Quarantine rows, metadata-only (bounded — never the stored raw payload).
+   * `harness` scopes the list: `undefined` is unfiltered (backwards-compatible),
+   * `'unknown'` keeps unattributed sources only, and a canonical id keeps the stored
+   * source spellings normalizing to it. The scope matches the stored source grouping,
+   * never attribution — quarantined spans have no harness by construction.
+   */
+  getQuarantine(limit = 200, offset = 0, harness?: string): QuarantineRow[] {
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) {
       return []
@@ -2258,6 +3919,9 @@ export class KyberBridge {
       const cols = new Set(
         (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
       )
+      // A scope needs the column it matches on; without `source` no row can be scoped.
+      if (harness !== undefined && !cols.has('source')) return []
+      const { where, params } = quarantineHarnessWhere(harness)
 
       const selectCols = ['span_id', 'namespaces', 'reason']
       selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
@@ -2273,9 +3937,9 @@ export class KyberBridge {
             ? 'seen_at'
             : 'span_id'
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
+      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine${where} ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as QuarantineDbRow[]
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as QuarantineDbRow[]
       const results: QuarantineRow[] = []
       for (const r of rows) {
         results.push({
@@ -2295,24 +3959,105 @@ export class KyberBridge {
     }
   }
 
-  /** Count every quarantine row without applying the inspector's default page limit. */
-  getQuarantineCount(): number {
+  /** Count quarantine rows under one scope, without applying the page limit. */
+  getQuarantineCount(harness?: string): number {
     if (this.store) {
-      return this.store.countQuarantine()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countQuarantine()
+      return this.store.countQuarantineFiltered(harness)
     }
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) return 0
-    const row = db!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('source')) return 0
+    }
+    const { where, params } = quarantineHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM quarantine${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
   }
 
   /**
+   * One quarantine row in the detail shape the route serves (B7): every
+   * field present, absent values explicit null. The list stays light — this
+   * is the only bridge surface that returns a stored packet, and a row
+   * written before the columns existed answers `rawPayload: null,
+   * evidenceAvailable: false` rather than inventing evidence. `null` when
+   * no row names the span.
+   */
+  getQuarantineEntry(spanId: string): QuarantineEntryDetail | null {
+    if (!spanId) return null
+
+    if (this.store) {
+      return this.store.getQuarantineEntry(spanId) ?? null
+    }
+
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return null
+
+    try {
+      // The shared canon.db may predate the evidence columns; presence-check
+      // each one exactly like getQuarantine does for its optional fields.
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['span_id', 'namespaces', 'reason']
+      for (const col of ['source', 'name', 'timestamp', 'harness', 'raw_payload']) {
+        selectCols.push(cols.has(col) ? col : `NULL AS ${col}`)
+      }
+      const row = db!
+        .prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`)
+        .get(spanId) as
+        | {
+            span_id: string
+            namespaces: string | null
+            reason: string | null
+            source: string | null
+            name: string | null
+            timestamp: string | null
+            harness: string | null
+            raw_payload: string | null
+          }
+        | undefined
+      if (row === undefined) return null
+
+      let namespaces: string[] = []
+      try {
+        const parsed: unknown = JSON.parse(row.namespaces ?? '[]')
+        if (Array.isArray(parsed)) {
+          namespaces = parsed.filter((n): n is string => typeof n === 'string')
+        }
+      } catch {}
+
+      return {
+        spanId: row.span_id,
+        source: row.source ?? null,
+        name: row.name ?? null,
+        reason: row.reason ?? '',
+        timestamp: row.timestamp ?? null,
+        namespaces,
+        harness: row.harness ?? null,
+        rawPayload: row.raw_payload ?? null,
+        evidenceAvailable: row.raw_payload !== null && row.raw_payload !== undefined,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying quarantine entry from canon.db:', err)
+      return null
+    }
+  }
+
+  /**
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
    * Reads canonical diagnostics, deduplicated by the store's problem identity.
+   * Metadata-only (bounded — never the exception stack); `harness` scopes like the
+   * quarantine list (`undefined` is unfiltered and backwards-compatible).
    */
-  getProblems(limit = 200, offset = 0): ProblemRow[] {
+  getProblems(limit = 200, offset = 0, harness?: string): ProblemRow[] {
     const db = this.getDb()
     const canonTable = this.hasTable(db, 'problems')
       ? 'problems'
@@ -2339,9 +4084,13 @@ export class KyberBridge {
       selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
       selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
+      // A scope needs the column it matches on; without `harness` no row can be scoped.
+      if (harness !== undefined && !cols.has('harness')) return []
+      const { where, params } = problemsHarnessWhere(harness)
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as ProblemDbRow[]
+      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable}${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as ProblemDbRow[]
       const results: ProblemRow[] = []
       for (const r of rows) {
         results.push({
@@ -2363,10 +4112,13 @@ export class KyberBridge {
     }
   }
 
-  /** Count every problem row without applying the inspector's default page limit. */
-  getProblemCount(): number {
+  /** Count problem rows under one scope, without applying the page limit. */
+  getProblemCount(harness?: string): number {
     if (this.store) {
-      return this.store.countProblems()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countProblems()
+      return this.store.countProblemsFiltered(harness)
     }
     const db = this.getDb()
     const table = this.hasTable(db, 'problems')
@@ -2375,10 +4127,95 @@ export class KyberBridge {
         ? 'problem'
         : null
     if (table === null) return 0
-    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('harness')) return 0
+    }
+    const { where, params } = problemsHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
+  }
+
+  /**
+   * One recorded problem with its exception evidence. `message` is the exact stored
+   * message; `stack` is the exception stack when the problem came from a throw, null
+   * otherwise. Absent id gives undefined (the route's 404).
+   */
+  getProblemEntry(id: number | string): ProblemDetail | undefined {
+    const numeric = typeof id === 'number' ? id : /^\d+$/.test(id.trim()) ? Number(id.trim()) : NaN
+    if (!Number.isSafeInteger(numeric)) return undefined
+    const db = this.getDb()
+    const canonTable = this.hasTable(db, 'problems')
+      ? 'problems'
+      : this.hasTable(db, 'problem')
+        ? 'problem'
+        : null
+    if (!canonTable) return undefined
+    try {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['id', 'severity', 'code', 'message']
+      selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
+      selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
+      selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
+      selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+      selectCols.push(cols.has('stack') ? 'stack' : 'NULL AS stack')
+      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM ${canonTable} WHERE id = ?`).get(numeric) as
+        | (ProblemDbRow & { stack?: unknown })
+        | undefined
+      if (row === undefined) return undefined
+      return {
+        id: row.id,
+        session_id: row.session_id ?? null,
+        span_id: row.span_id ?? null,
+        severity: row.severity,
+        code: row.code,
+        message: row.message,
+        at: row.at ?? row.timestamp ?? null,
+        timestamp: row.timestamp ?? (typeof row.at === 'number' ? new Date(row.at * 1000).toISOString() : (row.at ? String(row.at) : null)),
+        harness: row.harness ?? null,
+        stack: typeof row.stack === 'string' && row.stack !== '' ? row.stack : null,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying problem entry from canon.db:', err)
+      return undefined
+    }
+  }
+
+  /**
+   * The store's last clean stamp (`last_clean_at`), or null when the store cannot say.
+   * Read through whichever handle this bridge owns: an injected store and its own
+   * read-only file handle must agree, or the coverage window would depend on which path
+   * the caller happened to take.
+   */
+  private lastCleanAt(): string | null {
+    try {
+      if (this.store) return this.store.getMetadata('last_clean_at') ?? null
+      const db = this.getDb()
+      if (!this.hasTable(db, 'metadata')) return null
+      const row = db!.prepare('SELECT value FROM metadata WHERE key = ?').get('last_clean_at') as
+        | { value?: unknown }
+        | undefined
+      return typeof row?.value === 'string' && row.value !== '' ? row.value : null
+    } catch {
+      // Unknown, not "never cleaned": an unreadable stamp must not retract a real window.
+      return null
+    }
+  }
+
+  /** True when `at` is strictly older than `since` (epoch compare, offset stamps included). */
+  private stampedBefore(at: string, since: string | null): boolean {
+    if (since === null) return false
+    const atMs = Date.parse(at)
+    const sinceMs = Date.parse(since)
+    if (!Number.isFinite(atMs) || !Number.isFinite(sinceMs)) return false
+    return atMs < sinceMs
   }
 
   /**
@@ -2456,8 +4293,16 @@ export class KyberBridge {
     const success = latest('success')
     const failure = latest('failure')
     const running = latest('running')
-    const historyWeeks = success?.historyWeeks ?? null
-    const { coveredFrom, coveredThrough } = refreshWindowBounds(success?.startedAt, historyWeeks)
+    // A clean deletes the data this window described, and it does NOT delete the
+    // refresh_run row that described it - that row is audit history. So after a wipe the
+    // newest success row describes data that no longer exists, and the report would claim
+    // coverage it does not have. `cleanDatabase` stamps `last_clean_at`; a success run that
+    // STARTED before that stamp describes the wiped store and is ignored, while a run
+    // that started after it describes the new data and counts again.
+    const superseded = success !== undefined && this.stampedBefore(success.startedAt, this.lastCleanAt())
+    const windowRun = superseded ? undefined : success
+    const historyWeeks = windowRun?.historyWeeks ?? null
+    const { coveredFrom, coveredThrough } = refreshWindowBounds(windowRun?.startedAt, historyWeeks)
     return {
       lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
       lastFailure:
@@ -2684,12 +4529,18 @@ export class KyberBridge {
         }
         if (owner === null) {
           const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+          return payload?.context?.contextLimitSource === 'default' ||
+            payload?.context?.contextLimitSource === 'absent'
+            ? 1
+            : 0
         }
         if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
       }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+      return payload?.context?.contextLimitSource === 'default' ||
+        payload?.context?.contextLimitSource === 'absent'
+        ? 1
+        : 0
     }
     if (runId !== undefined && runId !== '') {
       // Same fold rule as everywhere else (review): a run scoped to a legacy
@@ -2708,8 +4559,10 @@ export class KyberBridge {
       ]
       return ids.filter(
         (id) =>
-          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
-          'default',
+          ['default', 'absent'].includes(
+            this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context
+              ?.contextLimitSource ?? '',
+          ),
       ).length
     }
     // Harness and workspace scopes read the persisted rollups (review): the
@@ -2792,7 +4645,7 @@ export class KyberBridge {
     }
     if (!this.hasTable(db, 'session')) return 0
     try {
-      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const conds = [this.sessionWindowSourceCondition(db!)]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')
@@ -2806,6 +4659,30 @@ export class KyberBridge {
       console.warn('[KyberBridge] Failed counting unknown-window sessions:', err)
       return 0
     }
+  }
+
+  /**
+   * The condition that selects the sessions whose context window no source
+   * reported.
+   *
+   * Schema v22 materializes the window provenance into a `context_limit_source`
+   * column, and the column carries the payload's `$.context.contextLimitSource`
+   * verbatim, so the two paths count the same rows: a payload with no source
+   * leaves the column NULL, and `NULL IN ('default', 'absent')` is not true,
+   * so such a session is not counted either way.
+   *
+   * The payload expression stays the fallback for a database whose session
+   * table predates the column -- a handle opened without the store that would
+   * have migrated it -- so the count still answers there instead of failing on
+   * a missing column.
+   */
+  private sessionWindowSourceCondition(db: DatabaseSync): string {
+    const columns = (db.prepare('PRAGMA table_info(session)').all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    )
+    return columns.includes('context_limit_source')
+      ? `context_limit_source IN ('default', 'absent')`
+      : `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`
   }
 
   /**
@@ -3118,81 +4995,54 @@ export class KyberBridge {
    * carried as USD only when its block names USD (or predates currency, as
    * the legacy `usd` shape does); any other currency is omitted rather than
    * mislabelled (review follow-up: Copilot C4).
+   *
+   * Both paths read the figures out of the materialized `summary_json`
+   * column, and only a row written before the materialization existed — a
+   * row whose `summary_json` is NULL — falls back to its own payload. The
+   * read is the store's own (`readSessionSummaryFigures`), so the store mode
+   * and the direct-DB mode cannot drift apart on what a session's figures
+   * are.
    */
   sessionSummaryFigures(sessionIds: readonly string[]): SessionSummaryFigures {
     const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
     const out: SessionSummaryFigures = new Map()
     if (uniqueIds.length === 0) return out
 
-    type SummaryRow = {
-      session_id: unknown
-      turn_count: unknown
-      total_input: unknown
-      total_output: unknown
-      cost_status: unknown
-      cost_value: unknown
-      cost_currency: unknown
-      cost_usd: unknown
-    }
-    const readRows = (): SummaryRow[] => {
-      if (this.store) {
-        return this.store.sessionSummaryFigures(uniqueIds).map((row) => ({
-          session_id: row.sessionId,
-          turn_count: row.turnCount,
-          total_input: row.totalInput,
-          total_output: row.totalOutput,
-          cost_status: row.costStatus,
-          cost_value: row.costValue,
-          cost_currency: row.costCurrency,
-          cost_usd: row.costUsdLegacy,
-        }))
-      }
-      const db = this.getDb()
-      if (!this.hasTable(db, 'session')) return []
-      const rows: SummaryRow[] = []
-      const chunkSize = 900
-      for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
-        const chunk = uniqueIds.slice(offset, offset + chunkSize)
-        const placeholders = chunk.map(() => '?').join(', ')
-        try {
-          rows.push(
-            ...(db!
-              .prepare(
-                `SELECT session_id,
-                        json_extract(payload, '$.summary.turn_count') AS turn_count,
-                        json_extract(payload, '$.summary.total_input') AS total_input,
-                        json_extract(payload, '$.summary.total_output') AS total_output,
-                        json_extract(payload, '$.summary.cost.status') AS cost_status,
-                        json_extract(payload, '$.summary.cost.value') AS cost_value,
-                        json_extract(payload, '$.summary.cost.currency') AS cost_currency,
-                        json_extract(payload, '$.summary.cost.usd') AS cost_usd
-                 FROM session WHERE session_id IN (${placeholders})`,
-              )
-              .all(...chunk) as SummaryRow[]),
-          )
-        } catch (err) {
-          console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
-          return []
-        }
-      }
-      return rows
-    }
-
-    const figure = (value: unknown): number | undefined =>
-      typeof value === 'number' && Number.isFinite(value) ? value : undefined
-    for (const row of readRows()) {
-      if (typeof row.session_id !== 'string') continue
-      const cost = pricedUsd(row.cost_status, row.cost_value, row.cost_currency, row.cost_usd)
-      out.set(row.session_id, {
-        ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
-        ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
-        ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+    for (const row of this.readSessionSummaryFigureRows(uniqueIds)) {
+      const cost = pricedUsd(row.costStatus, row.costValue, row.costCurrency, row.costUsdLegacy)
+      out.set(row.sessionId, {
+        ...(row.turnCount !== undefined ? { turnCount: row.turnCount } : {}),
+        ...(row.totalInput !== undefined ? { totalInput: row.totalInput } : {}),
+        ...(row.totalOutput !== undefined ? { totalOutput: row.totalOutput } : {}),
         ...(cost !== undefined ? { costUsd: cost } : {}),
         // Re-review #2 (Kilo B): the status a bare figure cannot carry.
-        ...(row.cost_status === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
+        ...(row.costStatus === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
       })
     }
     return out
+  }
+
+  /**
+   * The figures of a set of sessions, read from whichever handle this bridge
+   * has.
+   *
+   * <remarks>
+   * With a store injected, the store's own reader answers; without one, this
+   * bridge's handle does. Both are the same read, so the two paths agree.
+   * A direct read that fails leaves the figures empty rather than taking the
+   * caller down with it.
+   * </remarks>
+   */
+  private readSessionSummaryFigureRows(sessionIds: readonly string[]): SessionSummaryFigureRow[] {
+    if (this.store) return this.store.sessionSummaryFigures(sessionIds)
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return []
+    try {
+      return readSessionSummaryFigures(db!, sessionIds)
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
+      return []
+    }
   }
 
   /**
@@ -3234,12 +5084,64 @@ export class KyberBridge {
       bySession.set(sessionId, group)
     }
     for (const [sessionId, group] of bySession) {
-      const payload = this.getSessionPayload(sessionId)
+      const payload = this.readSessionBlobPayload(sessionId)
       if (payload === null) continue
       for (const execution of group) {
         yield { execution, payload }
       }
     }
+  }
+
+  /**
+   * One session's whole payload, as the store holds it.
+   *
+   * <remarks>
+   * The run digest reads whole sessions, one at a time, and wants the blob
+   * the store holds: the store's own read is the canonical one, and the
+   * digest's laziness contract — one payload parsed per pulled session — is
+   * measured against it. A session whose turns have been split out of the
+   * payload gets them attached back from the turns table, so the digest sees
+   * the same session the detail route serves.
+   */
+  private readSessionBlobPayload(sessionId: string): SessionPayload | null {
+    const db = this.sessionHandle()
+    if (this.store) {
+      const payload = this.store.getSessionPayload(sessionId)
+      if (payload === undefined) return null
+      return _clip(this.attachSessionTurns(db, payload as SessionPayload, sessionId))
+    }
+    if (!this.hasTable(db, 'session')) return null
+    try {
+      const row = db!.prepare(SESSION_PAYLOAD_SELECT).get(sessionId) as { payload?: unknown } | undefined
+      if (row === undefined || typeof row.payload !== 'string') return null
+      const payload = JSON.parse(row.payload) as SessionPayload
+      return _clip(this.attachSessionTurns(db, payload, sessionId))
+    } catch (err) {
+      console.warn(
+        '[KyberBridge] Error reading session payload from canon.db for %s: %s',
+        logId(sessionId),
+        logErr(err),
+      )
+      return null
+    }
+  }
+
+  /**
+   * Attach the session's split-out turns to a payload that carries none.
+   *
+   * <remarks>
+   * A payload that still carries its turns is left alone: those are its own
+   * turns, and they are the fresh ones.
+   */
+  private attachSessionTurns(
+    db: DatabaseSync | undefined,
+    payload: SessionPayload,
+    sessionId: string,
+  ): SessionPayload {
+    if (Array.isArray(payload.turns) || db === undefined) return payload
+    const turns = this.readSessionTurnRows(db, sessionId)
+    if (turns !== undefined) payload.turns = turns
+    return payload
   }
 
   /**
@@ -3702,6 +5604,93 @@ export class KyberBridge {
    * unreadable table reads as no rows, matching `getQuarantineCount`'s
    * zero-on-absent contract for this seam.
    */
+  /**
+   * Catalog snapshot for `GET /api/kyber/model-catalog`.
+   *
+   * Read-only. An empty table stays empty until `POST /refresh` fills it;
+   * seeding here would make a GET rewrite the store.
+   */
+  getModelCatalog(): ModelCatalogSnapshot {
+    const store = this.store
+    if (store === undefined) {
+      const vendors = {} as ModelCatalogSnapshot['vendors']
+      for (const vendor of Object.keys(MODEL_WINDOW_CATALOG_SOURCES) as ModelWindowCatalogVendor[]) {
+        vendors[vendor] = {
+          documentationUrl: MODEL_WINDOW_CATALOG_SOURCES[vendor].documentationUrl,
+          status: 'unknown',
+          rowCount: 0,
+          lastRefreshAt: null,
+        }
+      }
+      return { rowCount: 0, lastRefreshAt: null, vendors }
+    }
+    return getModelCatalogSnapshot(store)
+  }
+
+  /**
+   * User-facing refresh. One derived rebuild runs only after a vendor's rows
+   * actually changed; the count is how many times that hook ran, which the
+   * refresh itself caps at one.
+   */  async refreshModelCatalog(): Promise<
+    ModelCatalogSnapshot & ModelWindowCatalogRefreshResult & { derivedRebuildCount: number }
+  > {
+    const store = this.store
+    if (store === undefined) {
+      return { ...this.getModelCatalog(), vendorsUpdated: [], vendorsFailed: [], derivedRebuildCount: 0 }
+    }
+    let derivedRebuildCount = 0
+    let rebuild: Promise<unknown> | undefined
+    const result = refreshModelWindowCatalog(store, {
+      readVendor: readBundledVendorCatalog,
+      now: () => new Date().toISOString(),
+      rebuildDerived: () => {
+        derivedRebuildCount += 1
+        rebuild = projectCanonicalStore(store)
+      },
+    })
+    if (rebuild !== undefined) await rebuild
+    return { ...getModelCatalogSnapshot(store), ...result, derivedRebuildCount }
+  }
+
+  /**
+   * User-initiated database clean (issue #312), behind `POST /api/kyber/clean`.
+   * The owned handle is read-only by design, so the clean runs on a
+   * short-lived read-write `CanonStore` at this bridge's `canonPath` — the
+   * same code the `dash clean` CLI runs — opened for the operation and closed
+   * in a `finally`. Tests inject a `store` instead, which keeps the file
+   * untouched. Both paths hold the store refresh lock for the operation, so
+   * concurrent cleans and refreshes serialize. A busy refresh lock surfaces
+   * as `CLEAN_BUSY` for the route's 409; anything else is a 500 with a
+   * bounded message.
+   */
+  async cleanDatabase(request: CleanRequest): Promise<CleanReport> {
+    if (this.store === undefined && this.canonPath === ':memory:') {
+      throw new Error('cleanDatabase: no store to clean')
+    }
+    const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
+    const { acquireStoreRefreshLock } = await import('../refresh/lock.js')
+    const lock = await acquireStoreRefreshLock()
+    if (lock.outcome !== 'acquired') {
+      const busy = new Error('a refresh or clean is already running') as Error & { code: string }
+      busy.code = 'CLEAN_BUSY'
+      throw busy
+    }
+    try {
+      if (this.store !== undefined) {
+        return await cleanDatabase(this.store, request, portsForClean(this.store))
+      }
+      const { CanonStore } = await import('../canon/store.js')
+      const store = new CanonStore(this.canonPath)
+      try {
+        return await cleanDatabase(store, request, portsForClean(store))
+      } finally {
+        store.close()
+      }
+    } finally {
+      await lock.handle.release()
+    }
+  }
+
   getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
     if (this.store) {
       try {

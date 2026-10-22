@@ -8,6 +8,8 @@ import {
   ingestLogBatch,
   type OtlpLog,
 } from '../canon/log-ingest.js'
+import { ingestBatch } from '../canon/ingest.js'
+import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { CanonStore } from '../canon/store.js'
 import { startOtlpCollectorService } from './service.js'
 import type { OtlpSpan } from './receiver.js'
@@ -26,9 +28,59 @@ function identifiedLog(): OtlpLog {
   }
 }
 
+/**
+ * A Claude Code interaction span — its `user_prompt` parks in pending_logs
+ * because no llm.invoke child is ever stored beneath it. The parked row is
+ * what the timer path must retire (B8).
+ */
+function interactionSpan(): OtlpSpan {
+  return {
+    traceId: 'interaction-trace-svc',
+    spanId: 'service-test-interaction',
+    parentSpanId: null,
+    name: 'claude_code.interaction',
+    kind: 'internal',
+    startTimeUnixNano: '1756980000000000000',
+    endTimeUnixNano: '1756980000050000000',
+    timestamp: '2026-09-04T10:00:00.000Z',
+    durationMs: 50,
+    status: { code: 'ok' },
+    resource: {},
+    scope: {},
+    attributes: {
+      'claude.deployment_mode': '1p',
+      'span.type': 'interaction',
+      user_prompt: 'service-test prompt',
+    },
+  }
+}
+
 describe('startOtlpCollectorService pending-log lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('retires a parked interaction prompt at the TTL without a quarantined copy', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+
+    try {
+      ingestBatch([interactionSpan()], service.canon)
+      // Parked: the interaction span is quarantined and no child arrives.
+      // If the timer path skipped the marker rows, this wait would outlive
+      // the TTL until the next span batch or a wipe.
+      expect(service.canon.getPendingLogs()).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(DEFAULT_PENDING_TTL_MS)
+
+      expect(service.canon.getPendingLogs()).toEqual([])
+      // The interaction span's quarantine packet already holds the prompt,
+      // so expiry must not invent a second copy in quarantined_logs (T6).
+      expect(service.canon.quarantinedLogCount()).toBe(0)
+    } finally {
+      await service.close()
+    }
   })
 
   it('reconciles expired pending logs without a later ingestion batch', async () => {
@@ -85,7 +137,7 @@ function claimableSpan(over: Partial<OtlpSpan> = {}): OtlpSpan {
     traceId: TRACE_ID,
     spanId: SPAN_ID,
     parentSpanId: null,
-    name: 'llm_request',
+    name: 'claude_code.llm_request',
     kind: 'client',
     startTimeUnixNano: '1756980000000000000',
     endTimeUnixNano: '1756980000100000000',
@@ -116,9 +168,10 @@ function enrichingLog(): OtlpLog {
     spanId: SPAN_ID,
     sessionId: null,
     timestamp: '2026-09-04T10:00:00.000Z',
-    body: 'claude api request body',
+    body: 'claude_code.api_request_body',
     attributes: {
-      'claude_code.api_request_body': JSON.stringify({
+      'event.name': 'api_request_body',
+      body: JSON.stringify({
         system: [{ type: 'text', text: 'Projection fixture system prompt.' }],
         tools: [
           {
@@ -175,7 +228,7 @@ describe('startOtlpCollectorService canonical projection', () => {
       // Records alone are not the projection: the derived session and its
       // persisted payload exist without any static refresh having run.
       expect(service.canon.getSessionPayload(TRACE_ID)).toMatchObject({ harness: 'claude-code' })
-      expect(service.canon.listSessions().map((session) => session.sessionId)).toContain(TRACE_ID)
+      expect(service.canon.builtSessionIds()).toContain(TRACE_ID)
       expect(service.canon.listRefreshRuns()).toEqual([])
     } finally {
       await service.close()
@@ -383,6 +436,157 @@ describe('startOtlpCollectorService ingest_log', () => {
       expect(service.canon.count()).toBeGreaterThan(0)
     } finally {
       await service.close()
+    }
+  })
+})
+
+describe('startOtlpCollectorService persistence-failure logging', () => {
+  it('logs the error object itself, so the stack survives', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    const logged: unknown[][] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args)
+    })
+    try {
+      vi.spyOn(service.canon, 'upsertMany').mockImplementation(() => {
+        throw new Error('store refused the batch')
+      })
+      // A full batch (64) makes the writer flush on its own, which is the path that
+      // reports through onError rather than rejecting a caller.
+      service.writer.write(Array.from({ length: 64 }, (_, i) => claimableSpan({ spanId: `fail-span-${i}` })))
+      await vi.waitFor(() => expect(logged.length).toBeGreaterThan(0))
+
+      const entry = logged.find((args) => String(args[0]).includes('persistence failed'))
+      expect(entry).toBeDefined()
+      const error = entry!.find((arg): arg is Error => arg instanceof Error)
+      expect(error?.message).toBe('store refused the batch')
+      expect(error?.stack).toContain('store refused the batch')
+    } finally {
+      spy.mockRestore()
+      vi.restoreAllMocks()
+      await service.close().catch(() => undefined)
+    }
+  })
+})
+
+describe('startOtlpCollectorService quarantined Claude body relink (D5)', () => {
+  const CALL_START = Date.now() - 60_000
+
+  function seed(dbPath: string): { spanId: string; logId: string } {
+    const store = new CanonStore(dbPath)
+    try {
+      store.upsert({
+        spanId: 'relink-svc-call',
+        traceId: 'relink-svc-trace',
+        parentSpanId: null,
+        source: 'synthetic-test',
+        harness: 'claude-code',
+        sessionId: 'relink-svc-session',
+        name: 'claude_code.llm_request',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: new Date(CALL_START).toISOString(),
+        durationMs: 1000,
+        status: 'ok',
+        tokens: { freshInput: 1, cacheRead: 0, cacheCreation: 0, output: 1, reportedInput: 1, reportedOutput: 1 },
+        content: {},
+        cost: { basis: 'unknown', status: 'no_rate' },
+      })
+      const log: OtlpLog = {
+        logId: 'relink-svc-log',
+        traceId: 'relink-svc-trace',
+        spanId: null,
+        sessionId: 'relink-svc-session',
+        timestamp: new Date(CALL_START + 50).toISOString(),
+        body: 'claude_code.api_request_body',
+        attributes: {
+          'event.name': 'api_request_body',
+          body: JSON.stringify({
+            system: [{ type: 'text', text: 'Synthetic service system prompt.' }],
+            messages: [{ role: 'user', content: 'Synthetic.' }],
+          }),
+        },
+        resource: {},
+        scope: {},
+      }
+      store.quarantineLog(log, 'identified log remained unmatched past pending expiry', 'claude-code')
+      return { spanId: 'relink-svc-call', logId: log.logId }
+    } finally {
+      store.close()
+    }
+  }
+
+  it('relinks a quarantined Claude body once at start and logs the elapsed time', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kw-service-relink-'))
+    const dbPath = join(dir, 'canon.db')
+    const { spanId, logId } = seed(dbPath)
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '))
+    })
+    const service = await startOtlpCollectorService({ port: 0, dbPath })
+    try {
+      expect(service.canon.getQuarantinedLog(logId)).toBeUndefined()
+      expect(service.canon.isLogEnriched(logId)).toBe(true)
+      expect(service.canon.get(spanId)?.parts?.some((part) => part.part === 'system_prompt')).toBe(true)
+      expect(logged.some((line) => /Relinked 1 of 1 .* in \d+ ms/.test(line))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      await service.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('requests the derived-session projection after a startup relink that enriched a call', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kw-service-relink-proj-'))
+    const dbPath = join(dir, 'canon.db')
+    seed(dbPath)
+    const request = vi.spyOn(CanonicalProjectionScheduler.prototype, 'request').mockResolvedValue(undefined)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const service = await startOtlpCollectorService({ port: 0, dbPath })
+    try {
+      expect(request).toHaveBeenCalledTimes(1)
+    } finally {
+      log.mockRestore()
+      request.mockRestore()
+      await service.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not request a projection when the startup relink enriched nothing', async () => {
+    const request = vi.spyOn(CanonicalProjectionScheduler.prototype, 'request').mockResolvedValue(undefined)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+      request.mockRestore()
+      await service.close()
+    }
+  })
+
+  it('keeps the service running and logs the error when the relink throws', async () => {
+    const errors: unknown[][] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args)
+    })
+    const original = CanonStore.prototype.quarantinedLogsAfter
+    CanonStore.prototype.quarantinedLogsAfter = () => {
+      throw new Error('relink store failure')
+    }
+    try {
+      const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+      try {
+        expect(service.receiver.port).toBeGreaterThan(0)
+        expect(errors.some((args) => args.some((arg) => arg instanceof Error && arg.message === 'relink store failure'))).toBe(true)
+      } finally {
+        await service.close()
+      }
+    } finally {
+      CanonStore.prototype.quarantinedLogsAfter = original
+      spy.mockRestore()
     }
   })
 })

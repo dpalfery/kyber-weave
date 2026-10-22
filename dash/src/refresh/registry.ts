@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { getAllProviders } from '../providers/index.js'
 import type { SessionSource } from '../providers/types.js'
-import { READER_UNMEASURABLE } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName, READER_UNMEASURABLE } from '../canon/measurability.js'
 import { PROVIDER_READERS } from '../synth/provider.js'
 
 import type {
@@ -21,12 +21,62 @@ const DEFAULT_PARSER_CONTRACT_VERSION = '1'
 // synth records. Repair contract (option a): a version mismatch must upsert
 // corrected same-span rows over stale counters-only payloads (see
 // recordsForUncoveredCommit); the bump is not merely a checkpoint watermark.
-const CLAUDE_PARSER_CONTRACT_VERSION = '4'
+// v5: P2.0 — stamp the transcript's top-level requestId so twin dedupe can
+// join OTel `request_id` to the file row. Same repair contract: stale
+// checkpoints must be re-read, or file rows stay without the join key.
+// v6: invoked skill names onto turn records (`kyber.skills.invoked`). Stale
+// checkpoints are re-read so the skill names upsert over the stale rows.
+// v7: the session's skill listing (`skill_listing` attachment) onto the following
+// call and turn record (`kyber.skills.listed`). Stale checkpoints are re-read so
+// the listing upserts over the stale rows.
+const CLAUDE_PARSER_CONTRACT_VERSION = '7'
 // v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
 // tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
 // must not be reused or previously dropped sessions stay missing after upgrade.
-const CODEX_PARSER_CONTRACT_VERSION = '2'
-const KILO_PARSER_CONTRACT_VERSION = '2'
+// v3 (both): invoked skill names onto turn records (`kyber.skills.invoked`).
+const CODEX_PARSER_CONTRACT_VERSION = '3'
+// v4: the kilo.db reader now attaches conversation and tool-result parts to
+// records, pairing by `message.id`. Stale counters-only checkpoints under v3
+// must be re-read so the same-span content upserts over them (ADR 0016 repair
+// contract), not a migration.
+const KILO_PARSER_CONTRACT_VERSION = '4'
+// v2: invoked skill names onto turn records (`kyber.skills.invoked`). Applies
+// to the providers named in SKILLS_CONTRACT_PROVIDER_NAMES; the VS Code
+// `cline` descriptor and hermes do not fill skills and keep their versions.
+const SKILLS_CONTRACT_VERSION = '2'
+// v2: Antigravity's own contract, split from the default. Tool definitions are
+// measured only on records whose paired turn carries catalogue definitions, and
+// a transcript-covered call states its empty skills list (D6, D8). Stale
+// checkpoints under v1 re-synthesize so those declarations upsert over them.
+const ANTIGRAVITY_PARSER_CONTRACT_VERSION = '2'
+// v3: Copilot's own contract, moved out of the shared skills contract. Copilot
+// CLI's system_prompt is now measured per record, on the records whose paired
+// journal turn carries it (D-C), so its measurability differs from v2. That
+// changed declaration requires re-deriving stored records, so checkpoints under
+// v2 re-synthesize. Copilot is kept at 3 for that reason alone.
+const COPILOT_PARSER_CONTRACT_VERSION = '3'
+const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+  'opencode',
+  'cline-cli',
+  'codewhale',
+  'openclaude',
+  'dsh',
+])
+// v2: token-bubble pairing via pairingId — usage spans now carry the model
+// context of the request they belong to. Stale counters-only checkpoints
+// under v1 must re-synthesize on installs that do not reset the owner's
+// store: the bump is the ADR 0016 repair contract (same-span upsert over
+// stale rows), not a migration.
+const CURSOR_PARSER_CONTRACT_VERSION = '2'
+// v2: declared context window read from models-store.json, scoped to the
+// turn's provider. Version-invalidated checkpoints re-open the unit so the
+// declared-window payload upserts over stale rows (ADR 0016 repair contract).
+// v3: invoked skill names onto turn records (`kyber.skills.invoked`).
+const PI_PARSER_CONTRACT_VERSION = '3'
+// v2: content reader registered (one turn per assistant message, keyed by the
+// message id) and assistant calls stamped with that id as pairingId for pairing.
+// Version-invalidated checkpoints re-open the unit so the parts upsert (ADR 0016).
+const COMMANDCODE_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -57,6 +107,26 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   if (partial.providerName === 'kilo-code' || KILO_HARNESS_IDS.some((id) => id === partial.harnessId)) {
     return KILO_PARSER_CONTRACT_VERSION
   }
+  // Exact identity, not a cursor- prefix: the cursor-agent transcript parser
+  // did not change, so it keeps the default contract until its own repair.
+  if (partial.providerName === 'cursor' || partial.harnessId === 'cursor') {
+    return CURSOR_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
+    return PI_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'antigravity') {
+    return ANTIGRAVITY_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'copilot') {
+    return COPILOT_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'commandcode' || partial.harnessId === 'commandcode') {
+    return COMMANDCODE_PARSER_CONTRACT_VERSION
+  }
+  if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
+    return SKILLS_CONTRACT_VERSION
+  }
   return DEFAULT_PARSER_CONTRACT_VERSION
 }
 
@@ -76,6 +146,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   codebuff: job(['codebuff']),
   codex: job(['codex-cli', 'codex-desktop', 'codex-unclassified']),
   copilot: job(['copilot-cli', 'copilot-vscode', 'copilot-jetbrains', 'copilot-agent']),
+  commandcode: job(['commandcode']),
   devin: job(['devin']),
   droid: job(['droid']),
   dsh: job(['dsh']),
@@ -313,6 +384,14 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
     nativeFormat: 'native-session',
   }),
   descriptor({
+    harnessId: 'commandcode',
+    label: 'Command Code',
+    providerName: 'commandcode',
+    classifier: 'provider-identity',
+    sourceRootLabel: '~/.commandcode/projects',
+    nativeFormat: 'jsonl',
+  }),
+  descriptor({
     harnessId: 'devin',
     label: 'Devin',
     providerName: 'devin',
@@ -528,6 +607,9 @@ export type HarnessContentCapability = {
 }
 
 const READER_HARNESS_IDS = new Set([
+  'antigravity',
+  'antigravity-cli',
+  'antigravity-ide',
   ...CLAUDE_HARNESS_IDS,
   'codex-cli',
   'codex-desktop',
@@ -536,6 +618,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
+  'commandcode',
   ...KILO_HARNESS_IDS,
   'opencode',
   'pi',
@@ -553,6 +636,82 @@ export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCap
 
 export function descriptorFor(harnessId: string): HarnessSourceDescriptor | undefined {
   return DESCRIPTORS_BY_ID.get(harnessId)
+}
+
+/**
+ * One resolution of a caller-supplied harness scope, shared by every consumer that takes
+ * harness names from a user: the folder-history import, the clean wipe scope, and the
+ * route validation that guards both.
+ *
+ * <remarks>
+ * Two vocabularies meet here. The registry stores per-front-end ids (`codex-cli`,
+ * `codex-desktop`, `codex-unclassified`) and `normalizeHarnessName` deliberately does
+ * NOT fold them onto `codex` — the split is what tells two clients apart in stored data
+ * (issue #182). Surfaces, however, show and accept the FAMILY label: the tray's harness
+ * preference is `codex`, and the web dashboard's clean control shows rollup rows beside a
+ * `family` field. So a family label resolves to every member descriptor, while a direct
+ * descriptor id resolves to itself.
+ *
+ * `known` is the expanded id list, not the labels, and that matters: `CanonStore.
+ * wipeHarnesses` matches stored raw names against the requested set and their normalized
+ * forms, and `normalizeHarnessName('codex-cli')` is still `codex-cli`. Handing the wipe
+ * `codex` would therefore delete nothing at all while reporting a successful clean.
+ *
+ * `descriptors` is what the folder reader can actually open, so an id the wipe understands
+ * but no folder exists for is visible rather than silently dropped. `unknown` is the
+ * caller's own spelling, kept for the error message.
+ * </remarks>
+ */
+export type HarnessScopeResolution = {
+  /** Canonical ids the store wipe understands, family labels expanded, in first-seen order. */
+  readonly known: string[]
+  /** Folder source descriptors, a family label expanded to all of its members. */
+  readonly descriptors: HarnessSourceDescriptor[]
+  /** The requested names this registry cannot place at all. */
+  readonly unknown: string[]
+}
+
+export function resolveHarnessScope(ids: readonly string[]): HarnessScopeResolution {
+  const known: string[] = []
+  const descriptors: HarnessSourceDescriptor[] = []
+  const unknown: string[] = []
+  const seenKnown = new Set<string>()
+  const seenDescriptors = new Set<string>()
+  const addKnown = (id: string): void => {
+    if (seenKnown.has(id)) return
+    seenKnown.add(id)
+    known.push(id)
+  }
+  const addDescriptor = (entry: HarnessSourceDescriptor): void => {
+    if (seenDescriptors.has(entry.harnessId)) return
+    seenDescriptors.add(entry.harnessId)
+    descriptors.push(entry)
+  }
+  for (const requested of ids) {
+    const name = requested.trim()
+    if (name === '') {
+      unknown.push(requested)
+      continue
+    }
+    const id = normalizeHarnessName(name)
+    const direct = descriptorFor(id)
+    if (direct !== undefined) {
+      addKnown(id)
+      addDescriptor(direct)
+      continue
+    }
+    // Not a descriptor id: it is either a family label or a name nothing knows.
+    const members = HARNESS_DESCRIPTORS.filter((entry) => harnessFamily(entry.harnessId) === id)
+    if (members.length === 0) {
+      unknown.push(requested)
+      continue
+    }
+    for (const member of members) {
+      addKnown(member.harnessId)
+      addDescriptor(member)
+    }
+  }
+  return { known, descriptors, unknown }
 }
 
 export function auditProviderRegistry(providers: readonly { name: string }[]): void {

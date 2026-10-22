@@ -8,11 +8,14 @@
 // protobuf decoder rather than trusting it.
 
 import { createRequire } from 'node:module'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 import {
   DEFAULT_OTLP_PORT,
+  OTLP_ADMIN_PAUSE_PATH,
+  OTLP_ADMIN_RESUME_PATH,
   OTLP_LOGS_PATH,
   OTLP_TRACES_PATH,
   InMemoryLogStore,
@@ -661,6 +664,118 @@ describe('OtlpReceiver log signal (ADR 0009)', () => {
   })
 })
 
+/**
+ * Claude Code sends the conversation under `session.id`. The receiver read only
+ * `session_id`, so every log's sessionId was null and the session-time fallback
+ * was dead (D4). Both encodings read the same key, so both are pinned.
+ */
+describe('OtlpReceiver session identity key (D4)', () => {
+  function jsonLogWithAttributes(attributes: readonly (readonly [string, string])[]): string {
+    return JSON.stringify({
+      resourceLogs: [
+        {
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code-desktop' } }] },
+          scopeLogs: [
+            {
+              scope: { name: 'com.anthropic.claude_code.events' },
+              logRecords: [
+                {
+                  timeUnixNano: '1756478400123456789',
+                  traceId: TRACE_ID,
+                  spanId: ROOT_SPAN_ID,
+                  body: { stringValue: 'claude_code.api_request_body' },
+                  attributes: attributes.map(([key, value]) => ({ key, value: { stringValue: value } })),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  }
+
+  function protobufLogWithAttributes(attributes: readonly (readonly [string, string])[]): Uint8Array {
+    const resource = pbLengthDelimited(
+      1,
+      pbKeyValue({ key: 'service.name', value: { t: 'string', v: 'claude-code-desktop' } }),
+    )
+    const logRecord = [
+      ...pbFixed64Field(1, 1756478400123456789n),
+      ...pbSubmessage(5, pbValue({ t: 'string', v: 'claude_code.api_request_body' })),
+      ...attributes.flatMap(([key, v]) => pbLengthDelimited(6, pbKeyValue({ key, value: { t: 'string', v } }))),
+      ...pbBytesField(9, TRACE_ID),
+      ...pbBytesField(10, ROOT_SPAN_ID),
+    ]
+    const scopeLogs = [
+      ...pbSubmessage(1, [...pbStringField(1, 'com.anthropic.claude_code.events')]),
+      ...pbSubmessage(2, logRecord),
+    ]
+    return Uint8Array.from(pbSubmessage(1, [...pbSubmessage(1, resource), ...pbSubmessage(2, scopeLogs)]))
+  }
+
+  it('reads the session from session.id in the JSON encoding when no session_id is sent', () => {
+    const [log] = decodeOtlpLogJson(jsonLogWithAttributes([['session.id', 'session-desktop-1']]))
+    expect(log?.sessionId).toBe('session-desktop-1')
+  })
+
+  it('reads the session from session.id in the protobuf encoding when no session_id is sent', () => {
+    const [log] = decodeOtlpLogProtobuf(protobufLogWithAttributes([['session.id', 'session-desktop-1']]))
+    expect(log?.sessionId).toBe('session-desktop-1')
+  })
+
+  it('prefers session_id over session.id when a sender sends both, in either encoding', () => {
+    const attributes = [
+      ['session.id', 'from-session-dot'],
+      ['session_id', 'from-session-underscore'],
+    ] as const
+    expect(decodeOtlpLogJson(jsonLogWithAttributes(attributes))[0]?.sessionId).toBe('from-session-underscore')
+    expect(decodeOtlpLogProtobuf(protobufLogWithAttributes(attributes))[0]?.sessionId).toBe(
+      'from-session-underscore',
+    )
+  })
+
+  /**
+   * The JSON decoder rejects an empty `stringValue` object outright, so an empty
+   * string reaches the session helper only as a bare JSON primitive (which
+   * hand-rolled senders do post) or over protobuf.
+   */
+  function jsonLogWithBareAttributes(attributes: Record<string, string>): string {
+    const parsed = JSON.parse(jsonLogWithAttributes([]))
+    parsed.resourceLogs[0].scopeLogs[0].logRecords[0].attributes = Object.entries(attributes).map(
+      ([key, value]) => ({ key, value }),
+    )
+    return JSON.stringify(parsed)
+  }
+
+  it('falls through an empty session_id to session.id, in either encoding', () => {
+    expect(
+      decodeOtlpLogJson(jsonLogWithBareAttributes({ session_id: '', 'session.id': 'from-session-dot' }))[0]?.sessionId,
+    ).toBe('from-session-dot')
+    expect(
+      decodeOtlpLogProtobuf(
+        protobufLogWithAttributes([
+          ['session_id', ''],
+          ['session.id', 'from-session-dot'],
+        ]),
+      )[0]?.sessionId,
+    ).toBe('from-session-dot')
+  })
+
+  it('reads a null session when both session keys are empty or absent, in either encoding', () => {
+    expect(decodeOtlpLogJson(jsonLogWithBareAttributes({ session_id: '', 'session.id': '' }))[0]?.sessionId).toBeNull()
+    expect(
+      decodeOtlpLogProtobuf(
+        protobufLogWithAttributes([
+          ['session_id', ''],
+          ['session.id', ''],
+        ]),
+      )[0]?.sessionId,
+    ).toBeNull()
+    expect(decodeOtlpLogJson(jsonLogWithAttributes([]))[0]?.sessionId).toBeNull()
+    expect(decodeOtlpLogProtobuf(protobufLogWithAttributes([]))[0]?.sessionId).toBeNull()
+  })
+})
+
 describe('OtlpReceiver parity between encodings', () => {
   it('stores identical records for the same fixture posted in each encoding', async () => {
     const json = await startReceiver()
@@ -753,9 +868,12 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('application/json')
-    expect(await response.json()).toEqual({
+    // Identity keys keep their names; the health contract is additive (endpoint,
+    // listening, lastAcceptedAt, window facts) so the tray probe keeps reading it.
+    expect(await response.json()).toMatchObject({
       service: 'kyberdash-otlp',
       version: PACKAGE_VERSION,
+      paused: false,
     })
   })
 
@@ -771,3 +889,133 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     expect(logs.status).toBe(405)
   })
 })
+
+// Issue #312, plan T5 RED: the receiver pauses ingestion on an explicit admin
+// call so a database clean can hold the store without racing the writer.
+// Traces and logs shed load with 503 + Retry-After (OTLP exporters retry, so
+// nothing is dropped); the liveness probe stays 200 so the tray still knows
+// the port is ours. A lease TTL auto-resumes a cleaner that crashed mid-wipe.
+// The admin routes do not exist yet — every test below fails until T5 lands.
+describe('OtlpReceiver pause for database clean (issue #312)', () => {
+  async function pause(url: string, body?: unknown): Promise<Response> {
+    return fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+  }
+
+  it('pauses and resumes: traces shed load with 503 while paused, then ingest again', async () => {
+    const { url } = await startReceiver()
+
+    const paused = await pause(url)
+    expect(paused.status).toBe(200)
+    expect((await paused.json()) as { paused: boolean }).toMatchObject({ paused: true })
+
+    const shed = await post(url, 'application/json', '{}')
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+
+    const resumed = await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(resumed.status).toBe(200)
+    expect((await resumed.json()) as { paused: boolean }).toMatchObject({ paused: false })
+
+    const accepted = await post(url, 'application/json', minimalTraceBody())
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects non-POST admin calls with 405', async () => {
+    const { url } = await startReceiver()
+
+    expect((await fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`)).status).toBe(405)
+    expect((await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`)).status).toBe(405)
+  })
+
+  it('rejects a cross-origin admin POST with 403 and stays unpaused (F3)', async () => {
+    const { receiver, url } = await startReceiver()
+
+    for (const path of [OTLP_ADMIN_PAUSE_PATH, OTLP_ADMIN_RESUME_PATH]) {
+      const response = await fetch(`${url}${path}`, {
+        method: 'POST',
+        headers: { Origin: 'https://evil.example' },
+        body: '{}',
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: { code: 'OTLP_FORBIDDEN' } })
+    }
+    expect(receiver.isPaused()).toBe(false)
+
+    const accepted = await post(url, 'application/json', '{}')
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects an admin pause from a non-loopback peer with 403 (F3)', async () => {
+    const receiver = new OtlpReceiver({ port: 0 })
+    const req = {
+      url: OTLP_ADMIN_PAUSE_PATH,
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: '203.0.113.7' },
+    } as unknown as IncomingMessage
+    let status = 0
+    const res = {
+      setHeader: () => {},
+      writeHead: (s: number) => {
+        status = s
+      },
+      end: () => {},
+    } as unknown as ServerResponse
+    await receiver.handleRequest(req, res)
+    expect(status).toBe(403)
+    expect(receiver.isPaused()).toBe(false)
+  })
+
+  it('reports paused:true on healthz while paused, without breaking the tray probe', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const health = await fetch(`${url}/healthz`)
+    expect(health.status).toBe(200)
+    expect(await health.json()).toMatchObject({ service: 'kyberdash-otlp', paused: true })
+
+    await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(await (await fetch(`${url}/healthz`)).json()).toMatchObject({
+      service: 'kyberdash-otlp',
+      paused: false,
+    })
+  })
+
+  it('auto-resumes when the pause lease expires', async () => {
+    vi.useFakeTimers()
+    try {
+      const { url } = await startReceiver()
+      await pause(url, { leaseMs: 60_000 })
+
+      expect((await post(url, 'application/json', '{}')).status).toBe(503)
+      await vi.advanceTimersByTimeAsync(60_001)
+
+      const accepted = await post(url, 'application/json', minimalTraceBody())
+      expect(accepted.status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sheds logs with 503 while paused too', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const shed = await fetch(`${url}${OTLP_LOGS_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+  })
+})
+
+/** Smallest body the JSON trace decoder accepts: one fixture span. */
+function minimalTraceBody(): string {
+  return jsonFixture('hand-rolled')
+}

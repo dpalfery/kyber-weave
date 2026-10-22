@@ -27,21 +27,71 @@ export type RefreshInfo = {
   lastFailure: string | null
 }
 
+/**
+ * The server's job state (`GET /api/kyber/jobs`), forwarded verbatim by the
+ * Rust core. The tray renders it and never derives a schedule from it (R1).
+ */
+export type JobsInfo = {
+  refresh: RefreshInfo & { nextDueAt: string | null }
+  /** True only for scheduled jobs; manual actions, OTLP ingest and retention continue. */
+  paused: boolean
+  storeGeneration: number
+  hostedElsewhere?: boolean
+}
+
+/** The server-owned settings document (`GET /api/kyber/settings`). */
+export type SharedSettings = {
+  folderImportScheduled: boolean
+  jobsPaused: boolean
+  refreshCadenceMinutes: number
+  receiverHosted: boolean
+}
+
+/**
+ * Live receiver health (`GET /api/kyber/coverage` → `receiver`), carried
+ * verbatim like `jobs`. `healthy` is authoritative; the saber renders it and
+ * never re-derives liveness. Absent (servers predating the probe, or a failed
+ * fetch) is unknown — and unknown renders red.
+ */
+export type CoverageReceiver = {
+  enabled?: boolean | null
+  status?: string | null
+  listening?: boolean | null
+  hostedByUs?: boolean | null
+  paused?: boolean | null
+  healthy?: boolean | null
+  endpoint?: string | null
+  checkedAt?: string | null
+  lastAcceptedAt?: string | null
+  failures5m?: number | null
+  lastError?: string | null
+  lastCode?: string | null
+  lastErrorAt?: string | null
+}
+
+export type CoverageDoc = {
+  receiver?: CoverageReceiver | null
+}
+
 export type ReceiverStatus =
   | 'reachable'
   | 'not-reachable'
   | 'hosted'
+  | 'off'
   | 'port-held-by-other'
   | 'unknown'
 
+/**
+ * Tray-local display preferences. The refresh cadence and the receiver live on
+ * the server now (`SharedSettings`), so this document carries neither: a
+ * required field here would be one the Rust side no longer sends.
+ */
 export type TraySettings = {
   harness: string
   windowDays: number
-  refreshMinutes: number
   attentionThreshold: number
   criticalThreshold: number
   launchAtLogin: boolean
-  hostReceiver: boolean
 }
 
 export type ViewState = {
@@ -50,10 +100,27 @@ export type ViewState = {
   report: ContextReport | null
   reportFetchedAt: string | null
   error: string | null
-  refresh: RefreshInfo
-  receiver: ReceiverStatus
+  /**
+   * `null` or absent means the core could not read it: unknown, never a
+   * default. Optional so a payload that omits the key is also "unknown".
+   */
+  jobs?: JobsInfo | null
+  sharedSettings?: SharedSettings | null
+  /** Shared coverage, carried verbatim; the saber reads only `receiver`. */
+  coverage?: CoverageDoc | null
+  /**
+   * Legacy: the Rust core no longer serializes these two (the server owns the
+   * refresh and receiver state now, see `jobs` / `sharedSettings`). They stay
+   * optional only so older fixtures type-check; the UI treats absence as unknown.
+   */
+  refresh?: RefreshInfo
+  receiver?: ReceiverStatus
+  /** Tray-local display preferences. */
   settings: TraySettings
 }
+
+/** The scope a `clean_database` popover command may wipe (issue #312). */
+export type CleanDatabaseScope = 'all' | { harness: string }
 
 /** The commands the popover can invoke, as the design's IPC surface names them. */
 export type TrayCommands = {
@@ -61,4 +128,10 @@ export type TrayCommands = {
   openView: (view: string) => void
   setSettings: (patch: Partial<TraySettings>) => void
   quit: () => void
+  /** `importWeeks` is present only when the user opted into a folder import after the wipe. */
+  cleanDatabase: (scope: CleanDatabaseScope, importWeeks?: number) => void
+  importFolderHistory: (request: ImportFolderHistoryRequest) => void
+  setSharedSettings: (patch: Partial<SharedSettings>) => void
 }
+
+export type ImportFolderHistoryRequest = { weeks: number; harness?: string }

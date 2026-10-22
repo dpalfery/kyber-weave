@@ -33,7 +33,23 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
+import { stripIdentityAttributes } from './identity.js'
+
 const execFileAsync = promisify(execFile)
+
+/**
+ * The conversation a log belongs to. a non-empty `session_id` wins; Claude Code sends the
+ * same identity as `session.id`, which the receiver used to ignore, leaving
+ * every Claude log's session null (D4).
+ */
+function sessionIdFromAttributes(attributes: Record<string, unknown>): string | null {
+  // An empty string is no identity: it must fall through to `session.id`
+  // rather than shadow it. Shared by the JSON and protobuf log decoders.
+  const underscore = attributes.session_id
+  if (typeof underscore === 'string' && underscore.length > 0) return underscore
+  const dotted = attributes['session.id']
+  return typeof dotted === 'string' && dotted.length > 0 ? dotted : null
+}
 
 /** The OTLP/HTTP standard port (R2.1). */
 export const DEFAULT_OTLP_PORT = 4318
@@ -48,6 +64,23 @@ export const OTLP_LOGS_PATH = '/v1/logs'
  * rule so a GET here is not 405'd as an OTLP method error.
  */
 export const OTLP_HEALTHZ_PATH = '/healthz'
+
+/**
+ * Ingestion-pause controls for a user-initiated database clean (issue #312).
+ * POST-only, and gated on a loopback TCP peer plus a loopback-or-absent
+ * `Origin` header, so a cross-origin `no-cors` POST from a visited website
+ * cannot pause ingestion. While paused, the
+ * OTLP export paths shed load with 503 + Retry-After — exporters retry, so
+ * pausing never drops telemetry — and `/healthz` keeps answering 200 with a
+ * `paused` flag so the tray's hosting probe still recognizes the port as
+ * ours. Every pause carries a lease TTL that auto-resumes; a cleaner that
+ * crashes mid-wipe cannot wedge the collector shut.
+ */
+export const OTLP_ADMIN_PAUSE_PATH = '/v1/admin/pause'
+export const OTLP_ADMIN_RESUME_PATH = '/v1/admin/resume'
+
+/** Default pause lease: a crashed cleaner resumes ingestion after 10 minutes. */
+export const DEFAULT_PAUSE_LEASE_MS = 10 * 60 * 1000
 
 const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
@@ -489,9 +522,11 @@ export function decodeOtlpJson(body: string): OtlpSpan[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(
-            expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
-            `${rsWhere}.resource.attributes`,
+        : stripIdentityAttributes(
+            attributesFromJson(
+              expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
+              `${rsWhere}.resource.attributes`,
+            ),
           )
 
     const scopeSpansRaw = resourceSpan.scopeSpans
@@ -537,7 +572,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`)
+        : stripIdentityAttributes(attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`))
     const scopes = resourceLog.scopeLogs
     if (scopes === undefined || scopes === null) continue
     if (!Array.isArray(scopes)) throw new OtlpDecodeError(`${where}.scopeLogs must be an array`)
@@ -552,9 +587,8 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
         const recordWhere = `${scopeWhere}.logRecords[${li}]`
         const record = expectObject(recordRaw, recordWhere)
         const time = nanosToBigInt(record.timeUnixNano, `${recordWhere}.timeUnixNano`)
-        const attributes = attributesFromJson(record.attributes, `${recordWhere}.attributes`)
-        const session = attributes.session_id
-        const sessionId = typeof session === 'string' ? session : null
+        const attributes = stripIdentityAttributes(attributesFromJson(record.attributes, `${recordWhere}.attributes`))
+        const sessionId = sessionIdFromAttributes(attributes)
         const traceId = record.traceId === undefined || record.traceId === null || record.traceId === ''
           ? null : idToHex(record.traceId, 16, `${recordWhere}.traceId`)
         const spanId = record.spanId === undefined || record.spanId === null || record.spanId === ''
@@ -577,7 +611,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -623,8 +657,8 @@ function spanFromJson(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status: statusFromJson(span.status, `${where}.status`),
-    attributes: attributesFromJson(span.attributes, `${where}.attributes`),
-    resource,
+    attributes: stripIdentityAttributes(attributesFromJson(span.attributes, `${where}.attributes`)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
@@ -910,7 +944,8 @@ export function decodeOtlpProtobuf(body: Uint8Array): OtlpSpan[] {
   for (const [rsIndex, resourceSpan] of pbMessages(request, 1, 'resource_spans').entries()) {
     const rsWhere = `resource_spans[${rsIndex}]`
     const resourceMessage = pbMessage(resourceSpan, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
 
     for (const [ssIndex, scopeSpans] of pbMessages(resourceSpan, 2, `${rsWhere}.scope_spans`).entries()) {
       const ssWhere = `${rsWhere}.scope_spans[${ssIndex}]`
@@ -937,7 +972,8 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
   for (const [ri, resourceLogs] of pbMessages(request, 1, 'resource_logs').entries()) {
     const where = `resource_logs[${ri}]`
     const resourceMessage = pbMessage(resourceLogs, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
     for (const [, scopeLogs] of pbMessages(resourceLogs, 2, `${where}.scope_logs`).entries()) {
       const scopeMessage = pbMessage(scopeLogs, 1)
       const scope: OtlpScope = {}
@@ -950,9 +986,8 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
         if (time === undefined) throw new OtlpDecodeError(`${where}.time_unix_nano is required`)
         const trace = pbBytes(logMessage, 9)
         const span = pbBytes(logMessage, 10)
-        const attributes = pbKeyValues(logMessage, 6)
-        const session = attributes.session_id
-        const sessionId = typeof session === 'string' ? session : null
+        const attributes = stripIdentityAttributes(pbKeyValues(logMessage, 6))
+        const sessionId = sessionIdFromAttributes(attributes)
         const bodyMessage = pbMessage(logMessage, 5)
         const body = bodyMessage === undefined ? null : String(pbAnyValue(bodyMessage))
         const eventName = pbString(logMessage, 12)
@@ -974,7 +1009,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -1020,8 +1055,8 @@ function spanFromProtobuf(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status,
-    attributes: pbKeyValues(message, 9),
-    resource,
+    attributes: stripIdentityAttributes(pbKeyValues(message, 9)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
@@ -1042,9 +1077,71 @@ export type OtlpReceiverOptions = {
   maxBodyBytes?: number
   /** Override port-occupant discovery; tests pin this to make the report deterministic. */
   discoverOccupants?: PortOccupantDiscovery
+  /** Clock for the error window and accepted-batch timestamps; tests pin this. Default `Date.now`. */
+  clock?: () => number
 }
 
 class BodyTooLargeError extends Error {}
+
+// ---------------------------------------------------------------------------
+// Receiver health and the five-minute error window
+// ---------------------------------------------------------------------------
+
+/** Rolling five-minute window for OTLP and persistence failures (the approved indicator rule). */
+export const RECEIVER_ERROR_WINDOW_MS = 5 * 60 * 1000
+
+/** Cap on retained failure samples; the window is time-bounded, this bounds a burst inside it. */
+export const MAX_RECEIVER_ERROR_SAMPLES = 100
+
+/** One failure inside the window: when, with what code, and why. */
+export type ReceiverErrorSample = {
+  /** Epoch milliseconds (the receiver's clock). */
+  at: number
+  /** The response or persistence code, e.g. `OTLP_MALFORMED_PAYLOAD`. */
+  code: string
+  /** The diagnostic message, bounded at the recording site. */
+  message: string
+}
+
+/**
+ * What `/healthz` reports beyond identity. The original `{ service, version, paused }`
+ * shape is preserved; everything else is additive so an older main process still reads it.
+ */
+export type ReceiverHealthSnapshot = {
+  service: 'kyberdash-otlp'
+  version: string
+  paused: boolean
+  /** Where the receiver listens, e.g. `http://127.0.0.1:4318` (actual port once bound). */
+  endpoint: string
+  /** Whether the server socket is bound right now. */
+  listening: boolean
+  /**
+   * ISO time of the most recent batch the store confirmed persisted, or null when no
+   * batch has been confirmed since start. A 200 to an exporter means "decoded and queued",
+   * not "stored" — the writer confirms later — so this moves only on persistence, never on receipt.
+   */
+  lastAcceptedAt: string | null
+  /** ISO time this snapshot was taken. */
+  checkedAt: string
+  /** Failures on the OTLP signal paths inside the rolling five-minute window. */
+  failures5m: number
+  /** Message of the most recent in-window failure, or null when the window is clean. */
+  lastError: string | null
+  /** Code of the most recent in-window failure, or null when the window is clean. */
+  lastCode: string | null
+  /** ISO time of the most recent in-window failure, or null when the window is clean. */
+  lastErrorAt: string | null
+}
+
+/** True for the two signal paths whose failures enter the error window. */
+function isOtlpSignalPath(path: string): boolean {
+  return path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH
+}
+
+/** Bound an error message before retaining it; a hostile batch must not grow the window. */
+function boundErrorMessage(text: string): string {
+  return text.length > 500 ? `${text.slice(0, 500)}…` : text
+}
 
 /**
  * Decodes OTLP trace payloads and writes the resulting spans to a store.
@@ -1061,6 +1158,11 @@ export class OtlpReceiver {
   private readonly maxBodyBytes: number
   private readonly discoverOccupants: PortOccupantDiscovery
   private readonly server: Server
+  private readonly clock: () => number
+  private pausedUntil: number | null = null
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null
+  private lastAcceptedAt: string | null = null
+  private errorSamples: ReceiverErrorSample[] = []
 
   constructor(opts: OtlpReceiverOptions = {}) {
     this.listenPort = opts.port ?? DEFAULT_OTLP_PORT
@@ -1068,6 +1170,7 @@ export class OtlpReceiver {
     this.store = opts.store ?? new InMemorySpanStore()
     this.maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
     this.discoverOccupants = opts.discoverOccupants ?? discoverPortOccupants
+    this.clock = opts.clock ?? Date.now
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response)
     })
@@ -1082,6 +1185,70 @@ export class OtlpReceiver {
   /** True while the server is bound; a failed `start()` leaves this false. */
   get listening(): boolean {
     return this.server.listening
+  }
+
+  /** Where this receiver listens, with the actual port once bound. */
+  get endpoint(): string {
+    return `http://${this.hostname}:${this.port}`
+  }
+
+  /**
+   * Record a rejected OTLP signal-path request inside the rolling window. Health probes
+   * (`/healthz`), admin routes, and unknown paths never reach this: only the two signal
+   * paths' failures are receiver-health evidence. Intentional paused-503 responses are
+   * also excluded — the paused state is reported separately (`paused`), so counting them
+   * would turn an explicit, operator-chosen state into failure noise.
+   */
+  recordOtlpFailure(code: string, message: string): void {
+    this.errorSamples.push({ at: this.clock(), code, message: boundErrorMessage(message) })
+    if (this.errorSamples.length > MAX_RECEIVER_ERROR_SAMPLES) {
+      this.errorSamples.splice(0, this.errorSamples.length - MAX_RECEIVER_ERROR_SAMPLES)
+    }
+  }
+
+  /**
+   * Record a persistence/write failure inside the rolling window: the writer's sink threw
+   * during a flush, so a batch the receiver already answered 200 for never landed. The
+   * message is the store's error text (bounded); the response to the exporter stays the
+   * generic code, since bind-interface detail must not travel to the caller.
+   */
+  recordPersistenceFailure(message: string): void {
+    this.recordOtlpFailure('OTLP_PERSISTENCE_FAILED', message)
+  }
+
+  /**
+   * Mark a batch persisted now. Called by the collector service after the sink commits —
+   * never by the request path, whose 200 only means decoded and queued. A queued batch
+   * that never flushes must not move `lastAcceptedAt`.
+   */
+  markPersisted(): void {
+    this.lastAcceptedAt = new Date(this.clock()).toISOString()
+  }
+
+  /** In-window failures, oldest first; also prunes samples that aged out. */
+  recentFailures(): ReceiverErrorSample[] {
+    const floor = this.clock() - RECEIVER_ERROR_WINDOW_MS
+    this.errorSamples = this.errorSamples.filter((sample) => sample.at >= floor)
+    return [...this.errorSamples]
+  }
+
+  /** The `/healthz` body: identity plus the freshness and window facts the indicator reads. */
+  getHealth(): ReceiverHealthSnapshot {
+    const recent = this.recentFailures()
+    const last = recent.length > 0 ? recent[recent.length - 1]! : undefined
+    return {
+      service: 'kyberdash-otlp',
+      version: KYBERDASH_VERSION,
+      paused: this.isPaused(),
+      endpoint: this.endpoint,
+      listening: this.listening,
+      lastAcceptedAt: this.lastAcceptedAt,
+      checkedAt: new Date(this.clock()).toISOString(),
+      failures5m: recent.length,
+      lastError: last?.message ?? null,
+      lastCode: last?.code ?? null,
+      lastErrorAt: last === undefined ? null : new Date(last.at).toISOString(),
+    }
   }
 
   async start(): Promise<void> {
@@ -1142,7 +1309,12 @@ export class OtlpReceiver {
     try {
       await this.dispatch(req, res)
     } catch (err) {
+      // The error window covers the two signal paths only: a throw while serving
+      // `/healthz`, an admin route, or an unknown path is not OTLP evidence.
+      const path = (req.url ?? '/').split('?')[0]
+      const inWindow = isOtlpSignalPath(path)
       if (err instanceof BodyTooLargeError) {
+        if (inWindow) this.recordOtlpFailure('OTLP_PAYLOAD_TOO_LARGE', `body exceeds the ${this.maxBodyBytes}-byte limit`)
         respondJson(res, 413, {
           error: {
             code: 'OTLP_PAYLOAD_TOO_LARGE',
@@ -1151,12 +1323,19 @@ export class OtlpReceiver {
         })
       } else if (err instanceof OtlpDecodeError) {
         // Malformed OTLP: reject with a diagnostic; nothing was written.
+        if (inWindow) this.recordOtlpFailure('OTLP_MALFORMED_PAYLOAD', err.message)
         respondJson(res, 400, { error: { code: 'OTLP_MALFORMED_PAYLOAD', message: err.message } })
       } else {
         // The bind interface is configurable (see `opts.host`), so an internal
         // error's text — paths, driver detail — must not travel to the caller.
         // It goes to the operator's console; the caller gets the code only.
+        // On a signal path this is a persistence/write failure until proven otherwise:
+        // decode already ran (a decode failure throws OtlpDecodeError above), so what
+        // remains is the store refusing the batch.
         console.error('[KyberOtel] Internal error handling OTLP request:', err)
+        if (inWindow) {
+          this.recordOtlpFailure('OTLP_PERSISTENCE_FAILED', err instanceof Error ? err.message : String(err))
+        }
         respondJson(res, 500, {
           error: { code: 'OTLP_INTERNAL', message: 'internal receiver error' },
         })
@@ -1174,7 +1353,45 @@ export class OtlpReceiver {
         })
         return
       }
-      respondJson(res, 200, { service: 'kyberdash-otlp', version: KYBERDASH_VERSION })
+      // Identity keys (`service`, `version`, `paused`) keep their names so the tray's
+      // hosting probe and older main processes keep reading this probe.
+      respondJson(
+        res,
+        200,
+        healthBodyForPeer(this.getHealth(), req.socket?.remoteAddress) as unknown as Record<string, unknown>,
+      )
+      return
+    }
+    if (path === OTLP_ADMIN_PAUSE_PATH || path === OTLP_ADMIN_RESUME_PATH) {
+      if (req.method !== 'POST') {
+        res.setHeader('Allow', 'POST')
+        respondJson(res, 405, {
+          error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use POST` },
+        })
+        return
+      }
+      if (!isLoopbackAdminRequest(req)) {
+        respondJson(res, 403, {
+          error: { code: 'OTLP_FORBIDDEN', message: 'admin routes accept loopback requests only' },
+        })
+        return
+      }
+      if (path === OTLP_ADMIN_PAUSE_PATH) {
+        const leaseMs = await this.readPauseLeaseMs(req)
+        this.pause(leaseMs)
+      } else {
+        this.resume()
+      }
+      respondJson(res, 200, { paused: this.isPaused() })
+      return
+    }
+    if ((path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH) && this.isPaused()) {
+      // Shed load, do not drop it: OTLP exporters retry on 503, so a paused
+      // collector tells the sender to hold rather than refusing the batch.
+      res.setHeader('Retry-After', '5')
+      respondJson(res, 503, {
+        error: { code: 'OTLP_PAUSED', message: 'receiver paused for a database clean; retry' },
+      })
       return
     }
     if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
@@ -1188,6 +1405,7 @@ export class OtlpReceiver {
     }
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST')
+      this.recordOtlpFailure('OTLP_METHOD_NOT_ALLOWED', `${req.method} is not supported on ${path}: use POST`)
       respondJson(res, 405, {
         error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use POST` },
       })
@@ -1195,6 +1413,10 @@ export class OtlpReceiver {
     }
     const encoding = encodingForContentType(req.headers['content-type'])
     if (encoding === undefined) {
+      this.recordOtlpFailure(
+        'OTLP_UNSUPPORTED_MEDIA_TYPE',
+        `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported on ${path}`,
+      )
       respondJson(res, 415, {
         error: {
           code: 'OTLP_UNSUPPORTED_MEDIA_TYPE',
@@ -1253,11 +1475,96 @@ export class OtlpReceiver {
       req.on('error', fail)
     })
   }
+
+  /** Whether ingestion is currently paused for a database clean. */
+  isPaused(): boolean {
+    return this.pausedUntil !== null && this.pausedUntil > Date.now()
+  }
+
+  /**
+   * Pause ingestion for `leaseMs` (default `DEFAULT_PAUSE_LEASE_MS`). The
+   * lease is the crash guard: when it expires the receiver resumes on its
+   * own, so a cleaner that dies mid-wipe cannot wedge the collector shut.
+   * The timer is unref'd — a paused receiver must never keep the CLI alive.
+   */
+  pause(leaseMs: number = DEFAULT_PAUSE_LEASE_MS): void {
+    const lease = Number.isFinite(leaseMs) && leaseMs > 0 ? Math.floor(leaseMs) : DEFAULT_PAUSE_LEASE_MS
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = Date.now() + lease
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null
+      this.pausedUntil = null
+    }, lease)
+    this.pauseTimer.unref()
+  }
+
+  /** Resume ingestion now, cancelling any outstanding pause lease. */
+  resume(): void {
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = null
+  }
+
+  /**
+   * Read an optional `{ leaseMs }` JSON body off a pause request. Absent or
+   * unreadable bodies mean the default lease; the pause itself never fails
+   * on body shape.
+   */
+  private async readPauseLeaseMs(req: IncomingMessage): Promise<number> {
+    try {
+      const text = (await this.readBody(req)).toString('utf8').trim()
+      if (text === '') return DEFAULT_PAUSE_LEASE_MS
+      const parsed = JSON.parse(text) as { leaseMs?: unknown }
+      return typeof parsed.leaseMs === 'number' ? parsed.leaseMs : DEFAULT_PAUSE_LEASE_MS
+    } catch {
+      return DEFAULT_PAUSE_LEASE_MS
+    }
+  }
 }
 
 function respondJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * Gate for the ingestion-pause admin routes. Two checks, matching the web
+ * dashboard's loopback guard (`dash/src/cli/web.ts`): the TCP peer must be a
+ * loopback address (the server's bind interface is configurable, so the bind
+ * alone does not prove the caller is local), and a browser `Origin` header —
+ * always present on a page-initiated POST, never sent by the loopback pause
+ * client or OTLP exporters — must itself be loopback. A `no-cors` fetch from
+ * any website the user visits therefore cannot pause ingestion.
+ */
+function isLoopbackPeer(peer: string | undefined): boolean {
+  return peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+}
+
+/**
+ * The `/healthz` body for one caller. `/healthz` is unauthenticated and the bind interface
+ * is configurable, so a non-loopback peer gets the failure code and counts but never the
+ * store's error text (paths, SQL, internals); loopback callers — the dashboard's own
+ * probe — keep the full message.
+ */
+export function healthBodyForPeer(
+  health: ReceiverHealthSnapshot,
+  peer: string | undefined,
+): ReceiverHealthSnapshot {
+  return isLoopbackPeer(peer) ? health : { ...health, lastError: null }
+}
+
+function isLoopbackAdminRequest(req: IncomingMessage): boolean {
+  const peer = req.socket?.remoteAddress ?? ''
+  const loopbackPeer = isLoopbackPeer(peer)
+  if (!loopbackPeer) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)
 }
 
 function headerValue(value: string | string[] | undefined): string {

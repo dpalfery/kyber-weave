@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-10-15
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
@@ -302,7 +302,7 @@ means the server is bound to a different repository, not this checkout.
 
 ## The tools
 
-All five are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
+All six are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
 protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -324,7 +324,7 @@ merit — superseded documents are outside the corpus, so a match is current gui
 logs` puts those nouns in permanently resident text held back only by a negation, and
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only `docs_explore` carries an
-exclusion, because it is the broadest of the five; the narrower four state their territory
+exclusion, because it is the broadest of the six; the narrower five state their territory
 positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — how `maxDocs` and
@@ -335,7 +335,9 @@ point of use.
 
 Ranked documents for a question, symbol, route, component, or document id. Each hit
 carries its frontmatter identity, its most relevant `##` sections within budget, and its
-resolved code joins as `symbol -> file:line`.
+resolved code joins as `symbol -> file:line`. The `doc-type:` in that identity is the
+ontology's spelling rather than the enum member's name, so a coding standard comes back as
+`doc-type: CODING-STANDARD`.
 
 The response leads with the relevance range so a caller can judge confidence, and warns
 explicitly when no CodeGraph index was readable and joins are therefore unresolved.
@@ -344,6 +346,107 @@ enormous document cannot crowd out every other result.
 
 A miss says so plainly, reports how many documents were considered, and suggests naming a
 component, doc-id, or symbol instead. Treat that as permission to fall back to grep.
+
+### `agent_coding_standards(technology, topic = null, charBudget = 12000)`
+
+The local answer for one stack: which standard this repository writes that technology by,
+and what it says. A portable agent arrives holding the standard its own stack ships; this
+returns *this* repository's, which is why it is a lookup by declared key rather than a
+ranked guess at whichever standard is worded most like the question.
+
+`technology` is required and accepts either the slug (`csharp`, `test`) or the
+configuration registry's property name for it (`csharp-coding-standard`,
+`<csharp-coding-standard>`), matched case-insensitively. Resolution trims the value, strips
+one surrounding `<>` pair and the literal suffix `-coding-standard`, then matches corpus
+documents whose `doc-type` is `coding-standard` by their declared `technology`. **The
+corpus decides, not the registry**: declaring a technology in `ontology.technologies`
+without a standard scaffolded at `docs/standards/<technology>/README.md` is still a miss.
+Only a *pair* of angle brackets is the registry's prose form — a half-typed `"<csharp"` is
+not quietly repaired into a hit.
+
+`topic` is what the caller is about to do (`naming`, `error handling`, `pull request
+review`). Omitted, the whole standard comes back in document order under budget. Provided,
+the sections that answer it are chosen by the same rarity-weighted section ranking
+[`docs_explore`](#docs_explorequery-maxdocs--5-charbudget--12000) uses. A topic no section
+clears returns no prose — it does not fall back to the whole standard.
+
+`charBudget` is total characters of prose across the standards returned, clamped to
+1000–120000 and defaulting to 12000. One technology can be answered by more than one
+standard — a README and an appendix beside it — and they share that one budget, ordered by
+path so the same request answers the same way twice.
+
+The provenance line is emitted whole and the budget applies to the body, so what did not fit
+is named instead of silently dropped: `[omitted for space, ask again with a larger
+charBudget: …]` when the budget was what bit, and `[also in this document, not matching this
+topic: …]` when the section was dropped for irrelevance and no larger budget will bring it
+back.
+
+The response reads, in order:
+
+1. the provenance line
+2. a count line naming the technology asked for and the status that answered — `1 standard
+   for technology 'csharp' (status CURRENT).`
+3. a `###` heading with the standard's title, then the identity block — `path:`, `id:`,
+   `doc-type:`, `status:`, `component:` — and a `technology:` line echoing the corpus value
+   verbatim, not the caller's spelling. The declared value is what a later lookup is defined
+   against, so echoing the request would hide a standard that answers under a different
+   name. A standard declares no `component` by ontology design, so that field reads
+   `component: (none)`. The `doc-type:` is the ontology's own spelling rather than the enum
+   member's name, so a coding standard reads `doc-type: CODING-STANDARD` — the value a
+   reader can look up, not `CODINGSTANDARD`, which no document or rule id uses.
+4. the rule-id index
+5. the chosen sections, with the `[complete document]` marker when nothing was omitted
+6. nothing else — a coding standard declares no `code-refs` by ontology design, so the
+   response never carries code joins.
+
+**The rule-id index is emitted ahead of the prose.** It lists the `KW-*` ids the standard
+states, deduped: the ids its section headings and bodies cite, in document order — the order
+the standard itself reads — then any id its frontmatter title states that no section repeats.
+An id stated in both appears once, at the position its section gave it. The title's ids come
+last rather than first, though the title precedes the body in the file, because the 50-id
+window below is a window over the body: a title id placed at the front of it would let
+frontmatter displace a section id from what the caller actually reads. The ids are what a
+finding cites, a suppression names, and the repository's own documentation indexes, and
+clipping the prose is recoverable by asking again with a larger budget while losing the ids
+is not, so the index is placed where a budget can never reach it. A standard that states no
+ids gets an honest empty line — `rule ids: (this standard states no rule ids)` — rather than
+an absent one, which would read as ids the tool failed to find. Both standards in this
+repository state no ids today.
+
+The index is capped at 50 ids. A standard that states more names the first 50 and then
+reports how many more it states; an id past the cap is replaced with `[rule id withheld]`
+everywhere the response echoes the document's own text — the headings and bodies of the
+returned sections, the title echoed in the identity block, and the headings the omission
+markers name, whichever of the two markers carries them. The same replacement, never a
+deletion, so a reader sees that an id was cited rather than that a sentence lost a word. The
+identity block's `path:`, `id:` and `technology:` lines print as they stand, because each is
+a key the caller reuses in a later call and none can hold a rule id. So the cap the response
+states is a cap it keeps, and an omitted id cannot leak further down and contradict the count.
+
+**A standard whose status is not `current` still answers**, carrying a warning line above
+its identity block that names the status. A caller about to follow a draft has to know it is
+not the settled answer, and a status field two lines down is the part of a response a reader
+skims past.
+
+Four replies are not a standard at all:
+
+- A **miss** — a technology no standard answers for — says so, names the technologies this
+  repository does declare, and reports how many documents were considered. That is a real
+  miss: the answer for that technology is not written down here, not a lookup that failed
+  quietly.
+- An **empty or whitespace `technology`** is a caller error rather than a lookup, and returns
+  usage prose naming both accepted key forms.
+- A standard whose body carries **no `##` headings** is reported as such in place of the
+  prose, below the identity block that names its path, rather than handed back as an identity
+  block followed by nothing: `no sections: this standard's body carries no ## headings, so
+  there is nothing to excerpt from it.`
+- A standard that **has** headings but none of them matching the caller's `topic` is the other
+  case, and must not be read as the one above. It reports
+  `no section matches the topic '<topic>'` and then names the headings the standard does carry,
+  with the relevance marker a partially returned excerpt uses —
+  `[also in this document, not matching this topic: <headings>]`. The body does carry sections,
+  so this reply never claims otherwise, and no prose comes back: the topic selected nothing, and
+  a larger `charBudget` cannot fit a section the topic did not select.
 
 ### `docs_for_symbol(symbol)`
 
@@ -418,6 +521,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_glossary` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
+| `agent_coding_standards` reports no standard for a technology | The key names no technology this corpus declares a standard for — check the Config Reg block of the repository root [`AGENTS.md`](../../AGENTS.md) and `ontology.technologies` in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml). Spelling alone cannot be it: the match is case-insensitive, so a miss means the technology is undeclared, or is declared with no standard scaffolded at `docs/standards/<technology>/README.md` |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 | Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: root=` line to `git rev-parse --show-toplevel`, call `docs_status`, and pin the server with `--expect-root` |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |

@@ -4,6 +4,8 @@ import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 import { TOKEN_NEGATIVE_FRESH, TOKEN_SUM_MISMATCH } from '../types.js'
 import {
+  canonicalOp,
+  canonicalParts,
   canonicalSessionId,
   convertInclusiveCounts,
   copilotAdapter,
@@ -41,10 +43,27 @@ describe('copilotAdapter.detect', () => {
   it.each([
     ['full fingerprint', { ...copilotCounts(), 'github.copilot.chat.turn.id': 't-1' }, 1],
     ['vendor namespace alone', { 'codeburn.provider': 'github-copilot' }, 0.6],
+    ['legacy copilot_chat namespace alone', { 'copilot_chat.chat_session_id': 's-1' }, 0.6],
+    ['copilot namespace alone', { 'copilot.model': 'gpt-4o' }, 0.6],
     ['shared GenAI usage alone', copilotCounts(), 0.4],
     ['no fingerprint', { 'trae.session': 'x' }, 0],
   ])('scores %s as %s', (_label, attributes, score) => {
     expect(copilotAdapter.detect(rawSpan({ spanId: 'a', attributes }))).toBe(score)
+  })
+
+  // R6.2: the span name is not admissible evidence. A span named
+  // `copilot_chat/...` carrying only shared `gen_ai.usage.*` counters scores
+  // the usage 0.4 — below the registry threshold — and a bare Copilot-like
+  // name with no usage scores nothing. No raw Copilot span has yet been
+  // captured, so the name alone must never vote.
+  it.each([
+    ['copilot_chat name with generic usage only', 'copilot_chat/gen_ai', copilotCounts(), 0.4],
+    ['copilot name with generic usage only', 'copilot.chat.turn', copilotCounts(), 0.4],
+    ['copilot_chat name alone', 'copilot_chat/healthcheck', {}, 0],
+  ])('does not vote on %s', (_label, name, attributes, score) => {
+    expect(
+      copilotAdapter.detect(rawSpan({ spanId: 'a', source: 'copilot-chat', name, attributes })),
+    ).toBe(score)
   })
 })
 
@@ -372,5 +391,53 @@ describe('the ported adapters under AdapterRegistry (R6.2)', () => {
     // adapter, below the threshold, so no harness is claimed.
     const span = rawSpan({ spanId: 'a', traceId: 't1', attributes: { 'gen_ai.usage.input_tokens': 512 } })
     expect(registry.attribute([span]).has('a')).toBe(false)
+  })
+
+  it('quarantines a copilot_chat-named span with generic usage and no vendor attributes', () => {
+    // The span name must not vote: `copilot_chat/...` plus shared counters
+    // scores 0.4 from Copilot alone, below the 0.6 threshold, so the group
+    // stays unclaimed. A misleading Copilot-like service source changes
+    // nothing — service names are grouping keys only (R6.2).
+    const span = rawSpan({
+      spanId: 'a',
+      traceId: 't1',
+      source: 'copilot-chat',
+      name: 'copilot_chat/gen_ai',
+      attributes: copilotCounts(),
+    })
+    expect(copilotAdapter.detect(span)).toBe(0.4)
+    expect(registry.attribute([span]).has('a')).toBe(false)
+  })
+})
+
+describe('canonicalOp — the invoke_agent roll-up', () => {
+  it('does not label an invoke_agent roll-up an llm.invoke turn, though it carries usage', () => {
+    const attributes = { 'gen_ai.operation.name': 'invoke_agent', ...copilotCounts() }
+    expect(canonicalOp(attributes)).toBe('agent.invoke')
+  })
+
+  it('still labels a chat span carrying usage an llm.invoke turn', () => {
+    const attributes = { 'gen_ai.operation.name': 'chat', ...copilotCounts() }
+    expect(canonicalOp(attributes)).toBe('llm.invoke')
+  })
+})
+
+describe('canonicalParts — structured system_instructions', () => {
+  it('stores the text of a [{type, content}] array as the plain-text system prompt', () => {
+    const parts = canonicalParts({
+      'gen_ai.system_instructions': JSON.stringify([
+        { type: 'text', content: 'You are an architect.' },
+        { type: 'text', content: 'Be concise.' },
+      ]),
+    })
+    const system = parts.find((part) => part.part === 'system_prompt')
+    expect(system?.text).toBe('You are an architect.\n\nBe concise.')
+  })
+
+  it('keeps an already-decoded array and a plain string as they are', () => {
+    const decoded = canonicalParts({ 'gen_ai.system_instructions': [{ type: 'text', text: 'Hi' }] })
+    expect(decoded.find((part) => part.part === 'system_prompt')?.text).toBe('Hi')
+    const plain = canonicalParts({ 'gen_ai.system_instructions': 'plain prose' })
+    expect(plain.find((part) => part.part === 'system_prompt')?.text).toBe('plain prose')
   })
 })

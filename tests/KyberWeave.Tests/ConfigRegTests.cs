@@ -108,6 +108,44 @@ public class ConfigRegLoadingTests
     }
 
     [Theory]
+    [InlineData("supervised")]
+    [InlineData("autonomous")]
+    public void ReadsTheAutonomySetting(string value)
+    {
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml($"autonomy: {value}\n");
+
+        Assert.Equal(value, config.ConfigReg.Autonomy);
+    }
+
+    [Fact]
+    public void AutonomyIsUnsetByDefault()
+    {
+        Assert.Null(KyberWeaveConfig.ProductDefaults.ConfigReg.Autonomy);
+        Assert.Null(KyberWeaveConfigLoader.LoadFromYaml("config-reg:\n  x: docs/x.md\n").ConfigReg.Autonomy);
+    }
+
+    [Theory]
+    [InlineData("yolo")]
+    [InlineData("Autonomous")]
+    [InlineData("true")]
+    public void RejectsAnAutonomyValueThatIsNotOneOfTheTwo(string value)
+    {
+        string message = AssertInvalid($"autonomy: {value}\n").Message;
+
+        Assert.Contains("autonomy", message, StringComparison.Ordinal);
+        Assert.Contains("supervised", message, StringComparison.Ordinal);
+        Assert.Contains("autonomous", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutonomyIsAReservedNameInTheConfigRegPathMap()
+    {
+        string message = AssertInvalid("config-reg:\n  autonomy: docs/x.md\n").Message;
+
+        Assert.Contains("reserved", message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("Auth Design")]
     [InlineData("auth_design")]
     [InlineData("-auth")]
@@ -227,6 +265,46 @@ public sealed class ConfigRegValidatorTests : IDisposable
         DiagnosticReport report = Validate(Configured("dotnet"));
 
         Assert.Contains(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+    }
+
+    [Fact]
+    public void AnAutonomyValueIsNotPathCheckedAsARegistryProperty()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" });
+        Write("AGENTS.md", ConfigRegMarkdown.Splice(
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology), "autonomous")));
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.Empty(report.Items);
+    }
+
+    [Fact]
+    public void AMissingAutonomyLineIsCONFIGREG002()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        DiagnosticReport report = Validate(
+            Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" }));
+
+        Assert.Contains(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+    }
+
+    [Fact]
+    public void AWrongOrRemovedAutonomyLineIsCONFIGREG002()
+    {
+        KyberWeaveConfig autonomous = Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" });
+        Write("AGENTS.md", ConfigRegMarkdown.Render(autonomous.ConfigReg.Resolve(autonomous.Ontology), "autonomous"));
+
+        DiagnosticReport wrong = Validate(
+            Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "supervised" }));
+        DiagnosticReport removed = Validate(Configured());
+
+        Assert.Contains(wrong.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+        Assert.Contains(removed.Items, i => i.Code == ConfigRegValidator.StaleRendering);
     }
 
     [Fact]

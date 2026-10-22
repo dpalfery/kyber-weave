@@ -239,6 +239,7 @@ internal sealed class StatusLineReceiptStore
             StatusLineTarget.Claude => "claude",
             StatusLineTarget.Agy => "agy",
             StatusLineTarget.Pi => "pi",
+            StatusLineTarget.CommandCode => "commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

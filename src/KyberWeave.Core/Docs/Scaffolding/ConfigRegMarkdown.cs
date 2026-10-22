@@ -35,7 +35,9 @@ internal static class ConfigRegMarkdown
     }
 
     /// <summary>The generated region, markers included, with <c>\n</c> line endings.</summary>
-    public static string Render(IReadOnlyList<ConfigRegEntry> entries)
+    /// <param name="entries">Path properties, rendered in order.</param>
+    /// <param name="autonomy">The autonomy setting, rendered as a final property line only when set.</param>
+    public static string Render(IReadOnlyList<ConfigRegEntry> entries, string? autonomy = null)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -53,6 +55,12 @@ internal static class ConfigRegMarkdown
         foreach (ConfigRegEntry entry in entries)
         {
             builder.Append("- **<").Append(entry.Name).Append(">**: `").Append(entry.Path).Append("`\n");
+        }
+
+        if (autonomy is not null)
+        {
+            builder.Append("- **<").Append(ConfigRegConfig.AutonomyProperty).Append(">**: `")
+                .Append(autonomy).Append("`\n");
         }
 
         // The worked example names a real property rather than a literal, so renaming one

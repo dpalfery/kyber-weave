@@ -81,6 +81,7 @@ public sealed class StatusLineTargetRoots
             StatusLineTarget.Agy => ResolveWithOverride(
                 AgyConfigDirectoryVariable,
                 Path.Combine(".gemini", "antigravity-cli")),
+            StatusLineTarget.CommandCode => ResolveWithOverride(null, ".commandcode"),
             _ => throw UnknownTarget(target)
         };
     }
@@ -106,8 +107,9 @@ public sealed class StatusLineTargetRoots
     /// without the user's consent. Empty for a harness with no auto-load hazard.
     /// </summary>
     /// <remarks>
-    /// Pi discovers extensions in <c>~/.pi/agent/extensions/</c>. Claude Code and the Antigravity CLI
-    /// load no status-line file from a directory at all.
+    /// Pi discovers extensions in <c>~/.pi/agent/extensions/</c>. Command Code auto-loads mods from
+    /// <c>~/.commandcode/mods/</c>. Claude Code and the Antigravity CLI load no status-line file
+    /// from a directory at all.
     /// </remarks>
     public IReadOnlyList<string> ResolveAutoLoadDirectories(StatusLineTarget target)
     {
@@ -115,6 +117,7 @@ public sealed class StatusLineTargetRoots
         return target switch
         {
             StatusLineTarget.Pi => [Path.Combine(ResolveHarnessRoot(target), "extensions")],
+            StatusLineTarget.CommandCode => [Path.Combine(ResolveHarnessRoot(target), "mods")],
             _ => []
         };
     }
@@ -143,12 +146,16 @@ public sealed class StatusLineTargetRoots
             ],
             StatusLineTarget.Agy => [Path.Combine(root, "settings.json")],
             StatusLineTarget.Pi => [Path.Combine(root, "settings.json")],
+            StatusLineTarget.CommandCode => [Path.Combine(root, "config.json")],
             _ => throw UnknownTarget(target)
         };
     }
 
-    private string ResolveWithOverride(string overrideVariableName, string defaultRelativePath)
+    private string ResolveWithOverride(string? overrideVariableName, string defaultRelativePath)
     {
+        if (overrideVariableName is null)
+            return Path.Combine(_homeDirectory, defaultRelativePath);
+
         string? overrideValue = _getEnvironmentVariable(overrideVariableName);
         return string.IsNullOrEmpty(overrideValue)
             ? Path.Combine(_homeDirectory, defaultRelativePath)

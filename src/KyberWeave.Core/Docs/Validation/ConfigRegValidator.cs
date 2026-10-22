@@ -53,6 +53,7 @@ public sealed class ConfigRegValidator
         DiagnosticReport report = new DiagnosticReport();
         string agentsFile = Path.Combine(_repoRoot, AgentsFilePath);
         bool adopted = _config.ConfigReg.Additions.Count > 0
+            || _config.ConfigReg.Autonomy is not null
             || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
 
         if (!adopted)
@@ -100,7 +101,7 @@ public sealed class ConfigRegValidator
         string expected;
         try
         {
-            expected = ConfigRegMarkdown.Splice(existing, ConfigRegMarkdown.Render(entries));
+            expected = ConfigRegMarkdown.Splice(existing, ConfigRegMarkdown.Render(entries, _config.ConfigReg.Autonomy));
         }
         catch (InvalidDataException ex)
         {

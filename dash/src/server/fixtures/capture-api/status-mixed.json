@@ -1,0 +1,315 @@
+{
+  "platform": "darwin",
+  "receiver": {
+    "hosted": true,
+    "liveness": "kyberdash",
+    "detail": "KyberDash receiver is listening at http://127.0.0.1:4318/healthz"
+  },
+  "harnesses": [
+    {
+      "id": "copilot",
+      "displayName": "Copilot",
+      "mode": "managed",
+      "installed": "detected",
+      "installEvidence": [
+        "VS Code Stable user settings found at /Users/example/Library/Application Support/Code/User/settings.json",
+        "VS Code Insiders user settings not found at /Users/example/Library/Application Support/Code - Insiders/User/settings.json"
+      ],
+      "state": "partial",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "vscode-stable",
+          "path": "/Users/example/Library/Application Support/Code/User/settings.json",
+          "applicable": true,
+          "exists": true,
+          "expectedKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "presentKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint"
+          ],
+          "missingKeys": [
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "mismatchedKeys": [],
+          "drift": null
+        },
+        {
+          "id": "vscode-insiders",
+          "path": "/Users/example/Library/Application Support/Code - Insiders/User/settings.json",
+          "applicable": false,
+          "exists": false,
+          "expectedKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "presentKeys": [],
+          "missingKeys": [],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [
+        {
+          "code": "exporter-not-delivering",
+          "text": "exporter resolves to file (dev-null): the github.copilot.chat.otel settings keys are not all at the values enable writes. Run \"kyberdash kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it."
+        }
+      ],
+      "manualSteps": [],
+      "statusLines": [
+        "exporter: file (dev-null) — Copilot discards every span"
+      ],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "missing-keys",
+          "severity": "blocking",
+          "text": "Missing github.copilot.chat.otel.dbSpanExporter.enabled, github.copilot.chat.otel.captureContent, github.copilot.chat.otel.maxAttributeSizeChars",
+          "path": "/Users/example/Library/Application Support/Code/User/settings.json",
+          "remedy": "Use Enable to write the missing keys (previewed first)."
+        },
+        {
+          "code": "exporter-not-delivering",
+          "severity": "blocking",
+          "text": "exporter resolves to file (dev-null): the github.copilot.chat.otel settings keys are not all at the values enable writes. Run \"kyberdash kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it.",
+          "remedy": "Follow the warning text; the exporter must be OTLP/HTTP for records to arrive."
+        }
+      ]
+    },
+    {
+      "id": "claude-code",
+      "displayName": "Claude Code",
+      "mode": "managed",
+      "installed": "detected",
+      "installEvidence": [
+        "config found at /Users/example/.claude/settings.json"
+      ],
+      "state": "on",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "claude-settings",
+          "path": "/Users/example/.claude/settings.json",
+          "applicable": true,
+          "exists": true,
+          "expectedKeys": [
+            "env.OTEL_LOGS_EXPORTER",
+            "env.OTEL_LOG_USER_PROMPTS",
+            "env.OTEL_LOG_ASSISTANT_RESPONSES",
+            "env.OTEL_LOG_TOOL_DETAILS",
+            "env.OTEL_LOG_TOOL_CONTENT",
+            "env.OTEL_LOG_RAW_API_BODIES",
+            "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+            "env.CLAUDE_CODE_ENABLE_TELEMETRY",
+            "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+            "env.OTEL_TRACES_EXPORTER",
+            "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+            "env.OTEL_EXPORTER_OTLP_ENDPOINT"
+          ],
+          "presentKeys": [
+            "env.OTEL_LOGS_EXPORTER",
+            "env.OTEL_LOG_USER_PROMPTS",
+            "env.OTEL_LOG_ASSISTANT_RESPONSES",
+            "env.OTEL_LOG_TOOL_DETAILS",
+            "env.OTEL_LOG_TOOL_CONTENT",
+            "env.OTEL_LOG_RAW_API_BODIES",
+            "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+            "env.CLAUDE_CODE_ENABLE_TELEMETRY",
+            "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+            "env.OTEL_TRACES_EXPORTER",
+            "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+            "env.OTEL_EXPORTER_OTLP_ENDPOINT"
+          ],
+          "missingKeys": [],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [
+        {
+          "code": "endpoint-differs",
+          "text": "env.OTEL_EXPORTER_OTLP_ENDPOINT is http://127.0.0.1:4319; the KyberDash receiver listens at http://127.0.0.1:4318"
+        }
+      ],
+      "manualSteps": [],
+      "statusLines": [],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "endpoint-differs",
+          "severity": "blocking",
+          "text": "env.OTEL_EXPORTER_OTLP_ENDPOINT is http://127.0.0.1:4319; the KyberDash receiver listens at http://127.0.0.1:4318",
+          "path": "/Users/example/.claude/settings.json",
+          "remedy": "Set it to http://127.0.0.1:4318, then restart Claude Code so it reads the change. KyberDash never overwrites an endpoint you set."
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "mode": "status-only",
+      "installed": "detected",
+      "installEvidence": [
+        "config found at /Users/example/.codex/config.toml"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "codex-config",
+          "path": "/Users/example/.codex/config.toml",
+          "applicable": false,
+          "exists": true,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": [
+        "no [otel] table is present; coverage comes from session files"
+      ],
+      "health": "read-only",
+      "issues": []
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "mode": "managed",
+      "installed": "detected",
+      "installEvidence": [
+        "config found at /Users/example/.config/opencode/opencode.jsonc"
+      ],
+      "state": "off",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "opencode-config",
+          "path": "/Users/example/.config/opencode/opencode.jsonc",
+          "applicable": true,
+          "exists": true,
+          "expectedKeys": [
+            "experimental.openTelemetry"
+          ],
+          "presentKeys": [],
+          "missingKeys": [
+            "experimental.openTelemetry"
+          ],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [
+        {
+          "id": "opencode-otel-endpoint",
+          "text": "OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from",
+          "env": {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://127.0.0.1:4318"
+          }
+        }
+      ],
+      "statusLines": [],
+      "health": "off",
+      "issues": []
+    },
+    {
+      "id": "pi",
+      "displayName": "Pi",
+      "mode": "status-only",
+      "installed": "detected",
+      "installEvidence": [
+        "agent settings found at /Users/example/.pi/agent/settings.json",
+        "packages includes @dpalfery/pi-statusline",
+        "observme.yaml present at /Users/example/.pi/agent/observme.yaml"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "pi-agent-settings",
+          "path": "/Users/example/.pi/agent/settings.json",
+          "applicable": false,
+          "exists": true,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": [
+        "extension: collector (@dpalfery/pi-statusline)",
+        "extension: ObservMe (observme.yaml)",
+        "warn: both the collector and ObservMe are loaded"
+      ],
+      "health": "read-only",
+      "issues": []
+    },
+    {
+      "id": "antigravity",
+      "displayName": "Antigravity",
+      "mode": "status-only",
+      "installed": "detected",
+      "installEvidence": [
+        "settings found at /Users/example/.gemini/antigravity-cli/settings.json"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "antigravity-settings",
+          "path": "/Users/example/.gemini/antigravity-cli/settings.json",
+          "applicable": false,
+          "exists": true,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "mismatchedKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [
+        {
+          "id": "antigravity-declared-context-window",
+          "text": "Add span.set_attribute(\"declaredContextWindow\", <positive token count>) on the statusline bridge's chat span; the window exists only when the user declares it"
+        }
+      ],
+      "statusLines": [
+        "statusline bridge: /Users/example/.local/bin/antigravity-statusline-bridge.sh",
+        "bridge route: the statusline script posts to 4318",
+        "declaredContextWindow snippet: span.set_attribute(\"declaredContextWindow\", <positive token count>)"
+      ],
+      "health": "read-only",
+      "issues": []
+    }
+  ],
+  "check": {
+    "checkedAt": "2026-10-18T00:00:00.000Z",
+    "health": "attention",
+    "enabled": 2,
+    "attention": 2,
+    "issueCount": 3
+  }
+}

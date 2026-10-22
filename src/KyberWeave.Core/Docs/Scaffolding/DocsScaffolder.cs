@@ -155,10 +155,8 @@ public static class DocsScaffolder
                 standardContent, force));
         }
 
-        files.Add(WriteConfigReg(
-            root,
-            resolvedDocsRoot,
-            (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg.Resolve(ontology)));
+        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
+        files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
         return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files);
     }
@@ -352,10 +350,11 @@ public static class DocsScaffolder
     private static ScaffoldedFile WriteConfigReg(
         string repoRoot,
         string docsRoot,
-        IReadOnlyList<ConfigRegEntry> entries)
+        IReadOnlyList<ConfigRegEntry> entries,
+        string? autonomy)
     {
         string absolute = RequireContained(repoRoot, AgentsFilePath, nameof(repoRoot));
-        string block = ConfigRegMarkdown.Render(entries);
+        string block = ConfigRegMarkdown.Render(entries, autonomy);
 
         if (!File.Exists(absolute))
         {
@@ -622,7 +621,8 @@ public static class DocsScaffolder
             + "Capturing it here is what stops it evaporating between sessions."),
         "adr" => ("Architecture decision records",
             "One record per architectural decision: what was decided, the alternatives, and why.\n"
-            + "An ADR is never edited to say something else — it is superseded."),
+            + "An ADR is edited in place to state only the current decision; outdated content is\n"
+            + "removed, because git holds the history."),
         "rules" => ("Rules",
             "Repository-wide rules that govern how the system is built, independent of any one\n"
             + "technology. A rule about one language belongs in that technology's coding standard."),

@@ -1,0 +1,1 @@
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_00000000000000000000FAKE", "name": "Skill", "input": {"skill": "writing-trigger-descriptions"}, "caller": {"type": "direct"}}]}, "uuid": "00000000-0000-4000-8000-000000000002", "sessionId": "00000000-0000-4000-8000-0000000000aa", "timestamp": "2026-01-01T00:00:01.000Z"}

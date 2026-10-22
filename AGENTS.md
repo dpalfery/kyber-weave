@@ -6,7 +6,25 @@ working in the code.
 
 ## Commands
 
-Before opening a PR, run the local equivalents of the required CI gates, plus the
+### The inner loop
+
+While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It builds
+Release with warnings-as-errors and analyzers on, runs the fast test tier, runs
+`docs validate`, and checks formatting — in a fraction of the time the declared
+suite takes, because it drops coverage collection, the `Category=Scale` envelope, and the
+slowest classes by measured cost. The fast tier is the list in
+`scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
+`scripts/fast-loop.sh --regenerate`. Of the declared gates it runs only `docs validate` and the
+whitespace formatting check.
+
+It is **not** evidence and must never be cited as such. It answers "did this edit break
+something"; the declared suite below answers "may this change be committed", and a
+review citing a hand-picked subset is citing evidence it selected
+([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
+
+### Before opening a PR
+
+Run the local equivalents of the required CI gates, plus the
 CodeGraph-backed documentation drift check:
 
 ```bash
@@ -139,6 +157,8 @@ merits, under the same gates as the rest of the repository. AgentSeal's MIT noti
 `dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md`; outside those two files, no upstream
 reference belongs anywhere in the tree.
 
+**KyberDash surfaces are display layers.** **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE) LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db, resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.** See [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), enforced by `dash/src/architecture/display-layer.test.ts`.
+
 **New dependencies need justification.** Core takes only Markdig and YamlDotNet. The
 CodeGraph index is read through the `sqlite3` CLI rather than `Microsoft.Data.Sqlite`
 because that package's native dependency carries an unresolved advisory — a deliberate
@@ -157,8 +177,9 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
+| Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
+| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it. Editing `dash/tray` or `dash/web` — a display layer — also read [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 
@@ -205,6 +226,8 @@ references that belong to this repository.
 - **<adr-index>**: `docs/adr/README.md`
 - **<rules-index>**: `docs/rules/README.md`
 - **<reference-index>**: `docs/reference/README.md`
+- **<review-guidance>**: `REVIEW.md`
+- **<autonomy>**: `autonomous`
 
 Skills and other portable instruction files SHALL reference these paths by the
 property name above — "the path declared as **<component-catalog>**

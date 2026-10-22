@@ -57,6 +57,15 @@ public sealed class CursorRendererContractTests
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    /// whose file already holds the identical body. A primary shared identity reuses its
+    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     [Fact]
     public void SupportedTargets_IsExactlyCursor()
     {
@@ -99,6 +108,7 @@ public sealed class CursorRendererContractTests
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -109,42 +119,45 @@ public sealed class CursorRendererContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         // SKILL-ONLY replacement (Pi-renderer precedent): a canonical agent with
         // invocation: primary whose fallback profile declares no-primary-agent: skill
         // contributes its principal as a lowered skill (.cursor/skills/<name>/SKILL.md)
         // plus its resource closure beside it — never an agent file. An omit-mode
-        // primary contributes nothing. Every non-omitted agent still contributes exactly
-        // one principal; only the projection path changes.
+        // primary contributes nothing. A primary SHARED identity contributes no agent
+        // principal at all: its canonical skill is the entry point and is counted with the
+        // skills. Every non-omitted, non-shared agent still contributes exactly one principal.
         SquadAgent[] primaryAgents = source.Agents
             .Where(agent => agent.Invocation == SquadInvocation.Primary)
             .ToArray();
 
-        // The current corpus declares exactly one primary agent (conductor); asserting
-        // non-empty here keeps the replacement math below from silently vacuously passing
-        // if that ever changes to zero.
+        // The corpus declares the conductor plus the two root wrappers; asserting non-empty
+        // here keeps the replacement math below from silently vacuously passing if that ever
+        // changes to zero.
         Assert.NotEmpty(primaryAgents);
         int omittedPrimaryCount = primaryAgents.Count(agent =>
             string.Equals(
                 source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
                 "omit",
                 StringComparison.Ordinal));
+        int sharedPrimaryCount = primaryAgents.Count(agent => sharedIdentities.Contains(agent.Name));
         int emittedAgentResourceCount = source.Agents.Sum(agent => agent.Resources.Count)
             - primaryAgents
                 .Where(agent =>
                     string.Equals(
                         source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
                         "omit",
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal) ||
+                    sharedIdentities.Contains(agent.Name))
                 .Sum(agent => agent.Resources.Count);
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
         int expectedFileCount =
-            source.Agents.Count - omittedPrimaryCount + emittedAgentResourceCount
+            source.Agents.Count - omittedPrimaryCount - sharedPrimaryCount + emittedAgentResourceCount
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("cursor", f.Target));
@@ -226,6 +239,26 @@ public sealed class CursorRendererContractTests
         foreach (SquadAgent primaryAgent in primaryAgents)
         {
             SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[primaryAgent.Fallback];
+            if (sharedIdentities.Contains(primaryAgent.Name))
+            {
+                // Reused canonical skill: no agent file, and the skill at that path is the
+                // canonical skill's own body, not a lowered copy of the wrapper body.
+                Assert.DoesNotContain(
+                    result.Files,
+                    f => f.RelativePath == $".cursor/agents/{primaryAgent.Name}.md");
+                SquadDeploymentFile reusedSkill = Assert.Single(
+                    result.Files,
+                    f => f.RelativePath == $".cursor/skills/{primaryAgent.Name}/SKILL.md");
+                SquadSkill canonicalSkill = Assert.Single(
+                    source.Skills,
+                    skill => skill.Name == primaryAgent.Name);
+                Assert.Contains(
+                    canonicalSkill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal),
+                    Encoding.UTF8.GetString(reusedSkill.Content.Span),
+                    StringComparison.Ordinal);
+                continue;
+            }
+
             if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
             {
                 Assert.DoesNotContain(
@@ -293,16 +326,26 @@ public sealed class CursorRendererContractTests
 
         foreach (string sharedIdentity in sharedIdentities)
         {
-            Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".cursor/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point; no agent file.
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".cursor/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -402,12 +445,15 @@ public sealed class CursorRendererContractTests
             .Where(agent => agent.Invocation == SquadInvocation.Primary)
             .ToArray();
 
-        // The current corpus declares exactly one primary agent (conductor); asserting
-        // non-empty here keeps the loop below from silently vacuously passing if that ever
-        // changes to zero.
+        // The corpus declares the conductor plus the two root wrappers; asserting non-empty
+        // here keeps the loop below from silently vacuously passing if that ever changes to zero.
         Assert.NotEmpty(primaryAgents);
 
-        foreach (SquadAgent agent in primaryAgents)
+        // Primary shared identities reuse their canonical skill and carry no lowered skill of
+        // their own; they are pinned by the corpus test. This test pins the lowering of the
+        // remaining (non-shared) primaries.
+        HashSet<string> sharedIdentities = SharedIdentities(source);
+        foreach (SquadAgent agent in primaryAgents.Where(a => !sharedIdentities.Contains(a.Name)))
         {
             SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
             Assert.True(
@@ -475,7 +521,7 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_LoweredPrimarySkillUsesGlobalScopePaths()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Invocation == SquadInvocation.Primary);
+        SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest request = new(
@@ -515,7 +561,7 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_NoPrimaryAgentValueSwitchesOnlyTheLoweredSkill()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Invocation == SquadInvocation.Primary);
+        SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest skillRequest = new(
@@ -574,7 +620,7 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
         SquadSource baselineSource = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, agent => agent.Invocation == SquadInvocation.Primary);
+        SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, agent => agent.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
 

@@ -26,6 +26,13 @@ export type SessionSource = {
   // this discriminant (`jsonl`, `session-store`, `chatsession`, `transcript`,
   // `otel`, `jetbrains`). Optional because other providers never set it.
   sourceType?: 'jsonl' | 'session-store' | 'chatsession' | 'transcript' | 'otel' | 'jetbrains'
+  // Set only on synthetic marker sources (sqlite-session-parser's
+  // `__unreadable-store__` suffix): the db file exists but discovery already
+  // failed to read it this pass, and this carries WHY. The read path throws
+  // the recorded reason rather than re-opening — a transient cause (busy
+  // lock) may have cleared by parse time, and a succeeding second open
+  // would masquerade the failure as an empty store.
+  unreadableStoreError?: string
 }
 
 export type SessionParser = {
@@ -61,6 +68,11 @@ export type ParsedProviderCall = {
   // Skill names invoked in this call (e.g. 'commit'). Feeds the Skills & Agents
   // breakdown; optional since most providers don't expose it.
   skills?: string[]
+  // Skills Claude Code listed as available to the session, from the
+  // `skill_listing` attachment written just before this call. Present only on the
+  // call that follows a listing (never empty). `isInitial` marks the session's
+  // first listing; whether a later listing replaces or unions is decided downstream.
+  skillsListed?: { isInitial: boolean; skills: { name: string; description?: string }[] }
   timestamp: string
   speed: 'standard' | 'fast'
   deduplicationKey: string
@@ -91,6 +103,19 @@ export type ParsedProviderCall = {
   nanoAiu?: number
   requestMultiplier?: number
   turnId?: string
+  // Claude transcript API request id (`req_…`), read from the line's top-level
+  // `requestId`. It is not `message.id` (`turnId`): OTel stamps the request id
+  // on `request_id` / `gen_ai.response.id`, and twin dedupe joins on this field.
+  requestId?: string
+  // Pairing-only key matching one parser call to its reader turn. Cursor's
+  // token-bearing bubbles share their request's id but must not reuse the
+  // identity-bearing `turnId`: span identity derives from the bubble's own
+  // deduplication key (synth.ts keeps the cursor pairing id out of it), so
+  // reusing `turnId` would collapse the prompt and reply spans onto one
+  // identity. `matchingTurns` pairs on `turnId ?? pairingId` and assigns
+  // each turn at most once, with the pairing claim winning so the
+  // usage-carrying span receives the reader parts and window.
+  pairingId?: string
   toolSequence?: ToolCall[][]
   userMessage: string
   sessionId: string

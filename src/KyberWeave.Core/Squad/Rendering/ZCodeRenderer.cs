@@ -226,16 +226,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
         "WebFetch", "WebSearch", "Agent"
     ];
 
-    /// <summary>
-    /// A Markdown inline link or image whose target is captured for resource-link rewriting.
-    /// Matching the link syntax rather than the bare path keeps the rewrite from touching
-    /// prose that merely mentions a filename.
-    /// </summary>
-    private static readonly Regex MarkdownLinkTarget = new(
-        @"(?<prefix>\]\()(?<target>[^)\s]+)(?<suffix>\))",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(2));
-
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.ZCode];
 
@@ -263,6 +253,12 @@ public sealed class ZCodeRenderer : ISquadRenderer
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
 
         // Read upfront so the lowered-command collision check can see whether a canonical
         // skill already occupies the identity the resource closure would claim, regardless of
@@ -316,8 +312,9 @@ public sealed class ZCodeRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection, per the same
             // rule ClaudeRenderer follows. Resolved from source so a fallbacks.yml change is
-            // honored without a renderer change.
-            if (sharedIdentities.Contains(skill.Name))
+            // honored without a renderer change. A primary shared identity is the exception:
+            // its canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -411,6 +408,20 @@ public sealed class ZCodeRenderer : ISquadRenderer
             throw new SquadRenderValidationException(
                 $"Fallback profile '{agent.Fallback}' declares unsupported no-primary-agent " +
                 $"value '{fallbackProfile.NoPrimaryAgent}' for primary agent '{agent.Name}'.");
+        }
+
+        if (SquadSharedIdentityProjection.IsPrimarySharedIdentity(source, agent.Name))
+        {
+            // The canonical skill is the entry point and is emitted by the skill loop, so no
+            // command is emitted here; one identity, one projection.
+            degradations.AddRange(BuildPrimaryAgentDegradations(
+                agent,
+                fallbackProfile,
+                source.CapabilityProfiles.Profiles,
+                capabilityVocabulary,
+                mcpServerNames,
+                reusedCanonicalSkill: true));
+            return;
         }
 
         // A command name is lowercased and must match ^[a-z0-9][a-z0-9_:-]{0,63}$
@@ -568,21 +579,11 @@ public sealed class ZCodeRenderer : ISquadRenderer
             .Select(resource => resource.RelativePath)
             .ToHashSet(StringComparer.Ordinal);
 
-        bool changed = false;
-        string body = MarkdownLinkTarget.Replace(agent.InstructionBody, match =>
-        {
-            string target = match.Groups["target"].Value;
-            int suffixIndex = target.IndexOfAny(['#', '?']);
-            string pathPart = suffixIndex < 0 ? target : target[..suffixIndex];
-            string linkSuffix = suffixIndex < 0 ? string.Empty : target[suffixIndex..];
-            if (pathPart.Length == 0 || !resourcePaths.Contains(Uri.UnescapeDataString(pathPart)))
-            {
-                return match.Value;
-            }
-
-            changed = true;
-            return $"{match.Groups["prefix"].Value}../skills/{pathPart}{linkSuffix}{match.Groups["suffix"].Value}";
-        });
+        string body = SquadResourceLinkRewriter.Rewrite(
+            agent.InstructionBody,
+            resourcePaths,
+            pathPart => $"../skills/{pathPart}",
+            out bool changed);
 
         rewritten = true;
         degradations.Add(new SquadDegradationRecord(
@@ -905,8 +906,17 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary,
-        IReadOnlyList<string> mcpServerNames)
+        IReadOnlyList<string> mcpServerNames,
+        bool reusedCanonicalSkill = false)
     {
+        string projectionText = reusedCanonicalSkill
+            ? "this agent reuses the same-name canonical skill as its entry point, because the " +
+                "canonical skill already occupies that identity, so no slash command is emitted " +
+                $"and the entry point is the '{agent.Name}' skill"
+            : "ZCode has a project-scoped slash-command primitive, so this agent renders as a " +
+                $"command at '.zcode/commands/{agent.Name}.md' and is invoked as '/{agent.Name}' " +
+                "rather than as a skill";
+
         yield return new SquadDegradationRecord(
             Target: TargetToken,
             CanonicalIdentity: agent.Name,
@@ -916,9 +926,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
             Details: "ZCode has no primary-agent selection primitive: its agent modes are a " +
                 "closed set of permission modes (build, edit, plan, yolo), not selectable " +
                 $"agents. Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, and ZCode has a project-scoped slash-command " +
-                "primitive, so this agent renders as a command at '.zcode/commands/" +
-                $"{agent.Name}.md' and is invoked as '/{agent.Name}' rather than as a skill.");
+                $"{fallbackProfile.NoPrimaryAgent}, and " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)

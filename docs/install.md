@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-10-16
 ---
 
 # Installing Kyber-Weave
@@ -34,6 +34,49 @@ Make sure `~/.local/bin` is on your PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+## Which product, and which install path
+
+Two products ship from this repository, and the same installer places both. Choose by what
+you are trying to do:
+
+| Product | What it is | Start with |
+|---|---|---|
+| **Kyber-Weave** | The `kyber-weave` CLI and `kyber-weave-mcp` server: documentation governance, skill and agent linting, multi-harness deployment, and CI diagnostics. | This page |
+| **KyberDash** | The `kyberdash` binary: local token, cost, and context observability across coding harnesses. | [KyberDash adoption guide](dash/onboarding.md) |
+
+There is one documented first-install path per platform; the KyberDash tray is a
+post-install add-on, not a peer path. Everything else is deliberately unsupported:
+
+| Path | Platform | How |
+|---|---|---|
+| Installer script (**the documented path**) | Linux, macOS | the one-liner above |
+| Release `.zip` | Windows | [download and verify](#verifying-a-download) |
+| KyberDash tray (post-install add-on) | macOS, Windows | `kyberdash menubar`, or `install.sh --with-menubar` on macOS |
+
+After installing, run [Verify](#verify), then read [Updating](#updating). Configuration
+splits the same way as the products: [Configuration](configuration.md) for Kyber-Weave, and
+[KyberDash configure](dash/onboarding.md#configure) for KyberDash.
+
+## Install channels that are not supported
+
+Only the paths in the table above are supported. The rest are stated here so that
+"unsupported" is distinguishable from "undocumented":
+
+- **npm.** The `npm/` wrapper in the repository (`@dpalfery/kyber-weave`) is in-tree for
+  local experiments and manual packaging; the release workflow does not publish it, and it
+  does not carry KyberDash. There is no public npm package for `kyberdash` either
+  (`npm view kyberdash` returns 404), so there is no `npm install` path for either product.
+- **Homebrew.** The in-tree `homebrew/` formula is unpublished for the same reason. There is
+  no `brew install` path.
+- **`dotnet tool`.** Tool packages are published, when they are, to **GitHub Packages** — an
+  authenticated registry — for maintainers and .NET specialists, not for installing
+  Kyber-Weave on a fresh machine. `kyber-weave update` also refuses `dotnet run` and
+  `dotnet tool` installs. See [Other published artifacts](distribution.md#other-published-artifacts)
+  for the maintainer view.
+
+The supported path remains `scripts/install.sh`, or the Windows `.zip` from
+[Releases](https://github.com/dpalfery/kyber-weave/releases).
 
 ## Options
 
@@ -116,6 +159,31 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 `kyberdash --version` reports the KyberDash product version (for example `0.9.23`), not the
 Kyber-Weave release tag it shipped in. The two version lines are independent.
 
+## The KyberDash tray
+
+KyberDash ships a macOS and Windows tray as its own release asset, from `0.1.7-rc.13`. The
+tray is a display layer over the same engine as the CLI and the browser dashboard, so
+install it only after `kyberdash` is on your PATH:
+
+```bash
+kyberdash menubar            # download, verify, install, and launch the tray
+```
+
+On macOS you can fold the tray into the initial install with `--with-menubar`, which
+downloads the signed app, verifies its SHA-256 and its code signature, and places it in
+`~/Applications`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | sh -s -- --prerelease --with-menubar
+```
+
+`--with-menubar` is macOS only, and it cannot be combined with `--no-kyberdash`: the tray is
+installed by the `kyberdash` binary itself, so skipping that binary would leave nothing to run
+it. On Linux, `kyberdash menubar` exits `1` — the tray ships for macOS and Windows only. For
+the rest of the tray flow, see [Install the tray](dash/onboarding.md#install-the-tray) in the
+KyberDash adoption guide.
+
 ## Supported platforms
 
 `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64` — and for KyberDash, the same platforms
@@ -172,6 +240,58 @@ sha256sum --ignore-missing -c SHA256SUMS.txt
 The `--ignore-missing` flag allows you to verify a subset of files if you downloaded
 only some of the release assets. A mismatch causes the command to exit with a non-zero
 status and print a `FAILED` line.
+
+## The SBOM: what each release ships
+
+Every release also publishes `kyber-weave-sbom-<version>.cdx.json` — a **Software Bill of
+Materials** in [CycloneDX](https://cyclonedx.org/) JSON, format version 1.6. It is a
+machine-readable inventory of the third-party components the release depends on, across
+the three ecosystems this repository ships:
+
+| Ecosystem | What the SBOM covers | Where it comes from |
+|---|---|---|
+| .NET (NuGet) | `KyberWeave.Cli`, `KyberWeave.Mcp`, `KyberWeave.Core` | the resolved `*.deps.json` of a throwaway publish |
+| Node (npm) | KyberDash, the web dashboard, the tray UI, the npm wrapper | `package-lock.json` |
+| Rust (Cargo) | the KyberDash tray | `Cargo.lock` |
+
+It exists so that the inventory can be fed to a vulnerability scanner or a licence audit
+without unpacking every binary. See
+[issue #383](https://github.com/dpalfery/kyber-weave/issues/383) for the rationale.
+
+### Verifying the SBOM
+
+The SBOM is listed in `SHA256SUMS.txt` like every other asset, so the same command that
+verifies the binaries verifies it — there is nothing extra to download or trust:
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+### What the SBOM does and does not tell you
+
+It is a dependency inventory, not a statement about what is running on your machine, and
+not a scan of the published archives. Four limits are worth stating plainly.
+
+- **It describes the repository's dependency closure, not any individual RID's binary.**
+  Every asset in a release is built from the same locked dependency set, so the closure
+  is the same for all of them — but this is an inventory of the inputs, not a
+  measurement of the bytes inside an archive.
+- **The embedded .NET runtime is not in it.** The shipped `kyber-weave` and
+  `kyber-weave-mcp` binaries are self-contained: they embed the entire .NET runtime,
+  which is the single largest component of what actually ships. The SBOM is built from
+  a *framework-dependent* publish, because that is what produces the readable
+  dependency manifest, and a framework-dependent manifest lists NuGet packages only.
+  The .NET runtime therefore does not appear as a component.
+- **The embedded Node runtime is not in it either.** `kyberdash` is a Node
+  single-executable, and the runtime is a platform input rather than an npm
+  dependency.
+- **Test-only dependencies are not in it.** The SBOM covers what the release ships,
+  not the test suite.
+
+So: the SBOM answers *"which third-party libraries does this release depend on?"*. It
+does not answer *"what is in this archive?"*, and in particular it does not account
+for the two runtimes the release embeds. For a byte-level inventory, scan the published
+archives themselves.
 
 ## Windows: unsigned binaries and SmartScreen
 
@@ -262,6 +382,15 @@ kyber-weave update --release-candidate  # newest listed Release, including -rc a
 kyber-weave update 0.2.0              # pin a tag (leading v is optional)
 kyber-weave update --no-mcp           # CLI only
 kyber-weave update --no-kyberdash     # leave an installed kyberdash unchanged
+kyber-weave update --no-menubar       # leave an installed KyberDash tray unchanged
+```
+
+When a tray is installed, `kyber-weave update` also hands off to `kyberdash menubar --update`,
+which quits the running tray, replaces it, and relaunches it — restoring the previous app if
+any step fails. Update the tray directly with:
+
+```bash
+kyberdash menubar --update
 ```
 
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
@@ -361,3 +490,4 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 - [Distribution and release flow](distribution.md) — how binaries are built and published
 - [Deploying Kyber-Squad](kyber-squad/onboarding.md) — installing and managing multi-harness agent squads
 - [Configuration](configuration.md) — adapting Kyber-Weave to your repository
+- [KyberDash adoption guide](dash/onboarding.md) — installing, updating, and configuring KyberDash

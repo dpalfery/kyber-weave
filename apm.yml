@@ -20,8 +20,11 @@ targets:
   - agent-skills
 
 dependencies:
-  apm:
-    - dpalfery/kyber-weave
+  # Deliberately empty: this repository is the package, not a consumer of it. A
+  # self-entry here makes `apm install dpalfery/kyber-weave` abort on a circular
+  # dependency in every consuming repo (#285), which is how docs init's skill
+  # deployment broke. Pinned by ApmManifestGuardTests.
+  apm: []
   mcp: []
 includes: auto
 scripts: {}

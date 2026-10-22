@@ -3,6 +3,7 @@ name: full
 agents:
   - architect
   - azure-reader
+  - bug-crusher
   - bug-crusher-investigator
   - code-reviewer
   - conductor
@@ -10,6 +11,7 @@ agents:
   - dal-dev
   - docs-dev
   - github-devops
+  - go-dev
   - maui-dev
   - product-owner
   - pulumi-dev
@@ -18,10 +20,11 @@ agents:
   - research-agent
   - review-lens
   - review-triage
+  - rust-dev
   - sql-database-architect
-  - task-reviewer
   - tauri-dev
   - test-dev
+  - typescript-dev
 skills:
   - app-docs-standard
   - architecture-decision-record
@@ -37,13 +40,17 @@ skills:
   - dp-code-reviewer
   - github-cli
   - github-devops
+  - go-dev
   - lm-studio-cli
   - maui-dev
   - pr-review-fix-comments
   - product-owner
   - python-dev
   - resharper-clt
+  - rust-dev
   - second-brain
   - security-review
   - setup-dev-environment
+  - task-gate
   - test-dev
+  - typescript-dev

@@ -44,7 +44,7 @@ public static class SquadSourceLoader
     private static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
     {
         "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
-        "antigravity", "warp", "factory", "pi", "zcode", "devin"
+        "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"
     };
 
     /// <remarks>

@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, statSync } from 'fs'
+import { createReadStream, readFileSync, readdirSync, statSync } from 'fs'
 import { readFile, readdir, stat } from 'fs/promises'
-import { basename, delimiter as pathDelimiter, extname, join, resolve, sep } from 'path'
+import { basename, delimiter as pathDelimiter, dirname, extname, join, resolve, sep } from 'path'
+import { createInterface } from 'readline'
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 
@@ -10,6 +11,7 @@ import { getShortModelName } from '../pricing/models.js'
 import { readConfig } from '../config.js'
 import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../ingest/fs-utils.js'
 import { extractBashCommands } from '../ingest/bash-utils.js'
+import { SKILL_LISTING_ATTACHMENT_TYPE, skillListingFromAttachment, type SkillListing } from '../ingest/skill-listing.js'
 
 export type ClaudeConfigSource = {
   id: string
@@ -308,8 +310,20 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
   const nativeMessageIds: Array<string | undefined> = []
   const fileStem = basename(filePath, extname(filePath))
   let index = 0
+  // A skill listing is not a turn. It waits for the next call that is pushed.
+  let pendingListing: SkillListing | undefined
 
   for (const rawLine of lines) {
+    // Only a line that really is a listing attachment is consumed here. The
+    // substring alone is not enough: an assistant turn can carry the quoted text
+    // inside a tool input and still be a call with usage, so it falls through.
+    if (rawLine.includes(`"${SKILL_LISTING_ATTACHMENT_TYPE}"`)) {
+      const listing = claudeSkillListingOf(rawLine)
+      if (listing !== undefined) {
+        pendingListing = listing
+        continue
+      }
+    }
     const usage = claudeUsageOf(rawLine)
     if (usage === undefined) continue
 
@@ -323,6 +337,8 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
     if (!message) continue
     const sessionId = claudeText(record['sessionId']) ?? fileStem
     const nativeMessageId = claudeText(message['id'])
+    // Top-level API request id. Distinct from `message.id`, which stays `turnId`.
+    const requestId = claudeText(record['requestId'])
     // `uuid` is the transcript's own per-record identity; the index keeps the
     // key unique for a transcript that omits it.
     const messageId = claudeText(record['uuid']) ?? nativeMessageId ?? `turn-${index}`
@@ -375,6 +391,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
 
     const newCall: ParsedProviderCall = {
       provider: 'claude',
+      ...(requestId !== undefined ? { requestId } : {}),
       ...(nativeMessageId !== undefined ? { turnId: nativeMessageId } : {}),
       model: claudeText(message['model']) ?? 'unknown',
       inputTokens: claudeCount(usage['input_tokens']),
@@ -405,6 +422,11 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
         nativeMessageIds[nativeMessageIds.length - 1] = nativeMessageId
         prevCall.turnId = nativeMessageId
       }
+      // A collapsed pair keeps one call. Stamp the request id when only the
+      // later line carried it, so the join key is not dropped with that line.
+      if (prevCall.requestId === undefined && newCall.requestId !== undefined) {
+        prevCall.requestId = newCall.requestId
+      }
       prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
       prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))
       if (newCall.toolSequence && newCall.toolSequence.length > 0) {
@@ -412,12 +434,28 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       }
       prevCall.webSearchRequests = Math.max(prevCall.webSearchRequests, newCall.webSearchRequests)
     } else {
+      if (pendingListing !== undefined) {
+        newCall.skillsListed = pendingListing
+        pendingListing = undefined
+      }
       calls.push(newCall)
       nativeMessageIds.push(nativeMessageId)
     }
   }
 
   return calls
+}
+
+/** The skill listing a transcript line carries, or undefined for any other line. */
+function claudeSkillListingOf(rawLine: string): SkillListing | undefined {
+  let record: unknown
+  try {
+    record = JSON.parse(rawLine)
+  } catch {
+    return undefined
+  }
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) return undefined
+  return skillListingFromAttachment((record as Record<string, unknown>)['attachment'])
 }
 
 function isContiguousPair(
@@ -628,6 +666,126 @@ export const claude: Provider = {
       },
     }
   },
+}
+
+
+/**
+ * Extracts custom title from `custom-title.json` within session directory.
+ * Returns `customTitle ?? title ?? null`.
+ */
+export async function extractCustomTitle(folderOrFilePath: string): Promise<string | null> {
+  try {
+    let customTitlePath = folderOrFilePath
+    if (basename(folderOrFilePath) !== 'custom-title.json') {
+      const s = await stat(folderOrFilePath).catch(() => null)
+      const dir = s?.isDirectory() ? folderOrFilePath : dirname(folderOrFilePath)
+      customTitlePath = join(dir, 'custom-title.json')
+    }
+    const content = await readFile(customTitlePath, 'utf8')
+    const data = JSON.parse(content) as { customTitle?: unknown; title?: unknown }
+    if (data && typeof data === 'object') {
+      if (typeof data.customTitle === 'string' && data.customTitle.trim()) {
+        return data.customTitle.trim()
+      }
+      if (typeof data.title === 'string' && data.title.trim()) {
+        return data.title.trim()
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Extracts first user prompt from transcript JSONL, truncated cleanly to 80 chars.
+ * Replaces newlines with space.
+ */
+export async function extractFirstPromptFallback(transcriptPath: string): Promise<string | null> {
+  // Hold the stream so it can be destroyed: closing the readline interface alone leaves the
+  // file descriptor open until the stream is collected.
+  const input = createReadStream(transcriptPath, { encoding: 'utf8' })
+  try {
+    const rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY })
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let entry: Record<string, unknown>
+      try {
+        entry = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (entry['type'] !== 'user') continue
+      let prompt: string | undefined
+      const message = entry['message']
+      if (typeof message === 'string' && message.trim()) {
+        prompt = message
+      } else if (message && typeof message === 'object') {
+        const content = (message as Record<string, unknown>)['content']
+        if (typeof content === 'string' && content.trim()) {
+          prompt = content
+        } else if (Array.isArray(content)) {
+          const texts: string[] = []
+          for (const block of content) {
+            if (block && typeof block === 'object') {
+              const text = (block as Record<string, unknown>)['text']
+              if (typeof text === 'string' && text.trim()) {
+                texts.push(text.trim())
+              }
+            }
+          }
+          if (texts.length > 0) prompt = texts.join(' ')
+        }
+      }
+      if (!prompt && typeof entry['prompt'] === 'string' && (entry['prompt'] as string).trim()) {
+        prompt = entry['prompt'] as string
+      }
+      if (!prompt && typeof entry['text'] === 'string' && (entry['text'] as string).trim()) {
+        prompt = entry['text'] as string
+      }
+      if (prompt) {
+        const cleaned = prompt.replace(/\r?\n+/g, ' ').trim()
+        if (cleaned.length > 0) {
+          rl.close()
+          // By code point, so a surrogate pair is never split.
+          return Array.from(cleaned).slice(0, 80).join('')
+        }
+      }
+    }
+    return null
+  } catch {
+    return null
+  } finally {
+    input.destroy()
+  }
+}
+
+/**
+ * Reads subagent metadata from `.meta.json` sidecar of a subagent transcript.
+ */
+export async function readSubagentMeta(
+  subagentTranscriptPath: string,
+): Promise<{ agentType?: string; description?: string } | null> {
+  try {
+    const metaPath = subagentTranscriptPath.endsWith('.meta.json')
+      ? subagentTranscriptPath
+      : subagentTranscriptPath.replace(/\.jsonl$/, '.meta.json')
+    const raw = await readFile(metaPath, 'utf8')
+    const data = JSON.parse(raw) as { agentType?: unknown; description?: unknown }
+    if (data && typeof data === 'object') {
+      const result: { agentType?: string; description?: string } = {}
+      if (typeof data.agentType === 'string' && data.agentType.trim()) {
+        result.agentType = data.agentType.trim()
+      }
+      if (typeof data.description === 'string' && data.description.trim()) {
+        result.description = data.description.trim()
+      }
+      return result
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 export default claude

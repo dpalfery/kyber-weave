@@ -48,8 +48,22 @@ public sealed class SquadDeploymentPlan
     /// <summary>The desired lock, or <see langword="null"/> for an uninstall.</summary>
     public SquadLock? Lock { get; }
 
-    /// <summary>The desired or retained ownership receipt.</summary>
-    public SquadReceipt Receipt { get; }
+    /// <summary>
+    /// The desired or retained ownership receipt. A transaction anchors it to its canonical root before
+    /// the first write, so after execution it names exactly what was written.
+    /// </summary>
+    public SquadReceipt Receipt { get; private set; }
+
+    /// <summary>
+    /// Replaces the receipt's target root with the canonical root it will be written against. Only the
+    /// transaction calls this, because only the store knows the home that a global receipt is anchored on.
+    /// </summary>
+    /// <param name="anchorRoot">The canonical absolute root to record.</param>
+    internal void AnchorReceipt(string anchorRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(anchorRoot);
+        Receipt = Receipt with { TargetRoot = anchorRoot };
+    }
 
     /// <summary>
     /// The pending file mutations, in apply order. Internal payload: hosts report
@@ -197,7 +211,8 @@ public sealed class SquadDeploymentPlan
             ["factory"] = ".factory/",
             ["pi"] = ".pi/",
             ["zcode"] = ".zcode/",
-            ["devin"] = ".devin/"
+            ["devin"] = ".devin/",
+            ["commandcode"] = ".commandcode/"
         };
 
     /// <summary>
@@ -334,7 +349,7 @@ public sealed class SquadDeploymentPlan
                 false));
         }
 
-        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, ownedFiles);
+        SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, ownedFiles);
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -512,7 +527,7 @@ public sealed class SquadDeploymentPlan
             }
         }
 
-        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles) with
+        SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, nextOwnedFiles) with
         {
             Layout = nextLayout
         };
@@ -622,15 +637,19 @@ public sealed class SquadDeploymentPlan
 
     /// <summary>
     /// Lists every rendered path that already exists at its resolved physical location
-    /// with bytes that do not match the render. <c>squad doctor --global</c> surfaces
-    /// the whole set as warnings; <see cref="CreateInstall"/> still throws on the first
-    /// via the existing unmanaged-collision rule.
+    /// with bytes that do not match the render. Files recorded as managed in the
+    /// deployment's receipt (or sibling global receipts) are excluded from collision
+    /// reporting. <c>squad doctor --global</c> surfaces the whole set as warnings;
+    /// <see cref="CreateInstall"/> still throws on the first via the existing
+    /// unmanaged-collision rule.
     /// </summary>
     public static IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
         string targetRoot,
         SquadDeploymentScope scope,
         IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        ISquadGlobalRootResolver? globalRoots)
+        ISquadGlobalRootResolver? globalRoots,
+        SquadReceipt? receipt = null,
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
@@ -641,9 +660,35 @@ public sealed class SquadDeploymentPlan
             scope,
             globalRoots,
             renderedFiles);
+
+        HashSet<string> managedIdentities = new(StringComparer.Ordinal);
+        if (receipt is not null)
+        {
+            foreach (SquadOwnedFile file in receipt.Files)
+            {
+                managedIdentities.Add(DeployedFileIdentity(file.Target, SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+            }
+        }
+
+        if (siblingGlobalReceipts is not null)
+        {
+            foreach (SquadReceipt sibling in siblingGlobalReceipts)
+            {
+                foreach (SquadOwnedFile file in sibling.Files)
+                {
+                    managedIdentities.Add(DeployedFileIdentity(file.Target, SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+                }
+            }
+        }
+
         List<SquadUnmanagedPathCollision> collisions = [];
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
         {
+            if (managedIdentities.Contains(DeployedFileIdentity(rendered.File.Target, rendered.File.RelativePath)))
+            {
+                continue;
+            }
+
             if (Directory.Exists(rendered.FullPath))
             {
                 collisions.Add(ToCollision(rendered));
@@ -790,15 +835,22 @@ public sealed class SquadDeploymentPlan
         return files;
     }
 
+    /// <summary>
+    /// Builds the receipt a plan will write. A project receipt records the canonical physical root it
+    /// was planned against. A global receipt cannot, because the home anchor is known only to the
+    /// store, so it carries <see cref="SquadStateStore.UnanchoredTargetRoot"/> until the transaction
+    /// anchors it at write time.
+    /// </summary>
     private static SquadReceipt NewReceipt(
         SquadDeploymentScope scope,
+        string physicalRoot,
         TimeProvider timeProvider,
         IReadOnlyList<SquadDegradation> degradations,
         IReadOnlyList<SquadOwnedFile> ownedFiles) =>
         new(
             SquadStateStore.ReceiptSchemaV1,
             scope,
-            ".",
+            scope == SquadDeploymentScope.Project ? physicalRoot : SquadStateStore.UnanchoredTargetRoot,
             timeProvider.GetUtcNow(),
             degradations.ToArray(),
             ownedFiles.ToArray());

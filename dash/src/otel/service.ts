@@ -1,11 +1,11 @@
 // Service runner for KyberDash OTLP trace receiver
-import { homedir } from 'os'
-import { join } from 'path'
+import { dirname } from 'path'
 import { mkdirSync } from 'fs'
 import chalk from 'chalk'
 import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpSpan } from './receiver.js'
 import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { readUsageCounters, exclusiveConvention, canonicalContent } from '../canon/adapters/copilot.js'
 import { ingestBatch, toRawSpan } from '../canon/ingest.js'
@@ -15,6 +15,7 @@ import {
   reconcileExpiredPending,
 } from '../canon/log-ingest.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { relinkQuarantinedClaudeLogs } from '../tools/backfill.js'
 
 /**
  * @deprecated Superseded by `ingestBatch`, which puts a span through the
@@ -94,9 +95,13 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
 }> {
   const port = opts.port ?? 4318
   const host = opts.host ?? '127.0.0.1'
-  const defaultDir = join(homedir(), '.kyberdash')
-  mkdirSync(defaultDir, { recursive: true })
-  const dbPath = opts.dbPath ?? join(defaultDir, 'canon.db')
+  // Shared with the CLI and the dashboard server (src/canon/paths.ts): the
+  // receiver must write the store those two read. The directory is created
+  // from the resolved path rather than assumed to be ~/.kyberdash, because
+  // KYBER_CANON_DB can point anywhere — including a directory that does not
+  // exist yet, which would otherwise fail on first ingest.
+  const dbPath = resolveCanonDbPath(opts.dbPath)
+  mkdirSync(dirname(dbPath), { recursive: true })
 
   const canon = new CanonStore(dbPath)
 
@@ -119,6 +124,22 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       )
     },
   })
+
+  // One-time relink of Claude request bodies quarantined before their model
+  // call arrived (D5), run once the scheduler exists so a relink can request a
+  // projection refresh. A failure is logged and never stops the service.
+  try {
+    const startedAt = Date.now()
+    const report = relinkQuarantinedClaudeLogs(canon, { now: startedAt })
+    console.log(chalk.dim(
+      `[${new Date().toLocaleTimeString()}] Relinked ${report.relinked} of ${report.scanned} quarantined Claude request bodies in ${Date.now() - startedAt} ms`,
+    ))
+    // Like the live batch paths: an enrichment changed stored records, so the
+    // derived-session projection must follow.
+    if (report.relinked > 0) void scheduler.request()
+  } catch (err) {
+    console.error(chalk.red('[relink] quarantined Claude body relink failed; service continues:'), err)
+  }
 
   const toCanon: SignalBatchSink = {
     upsertMany: (spans) => {
@@ -195,10 +216,29 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     },
   }
 
-  const writer = new IngestWriter(toCanon, { batchSize: 64, flushIntervalMs: 2000 })
+  // The receiver is created after the writer (it needs the writer as its store), so the
+  // persistence evidence flows through this holder: flush failures enter the receiver's
+  // five-minute error window, and a committed batch moves `lastAcceptedAt`. The fenced
+  // audit-log write stays out of the window — it is tallied console noise, not a failed
+  // OTLP request — while a sink refusal is a persistence failure even though the exporter
+  // already got its 200.
+  const receiverHolder: { current: OtlpReceiver | null } = { current: null }
+  const writer = new IngestWriter(toCanon, {
+    batchSize: 64,
+    flushIntervalMs: 2000,
+    onError: (error) => {
+      // Replaces the writer's default rethrow-on-next-turn: a collector that crashes on a
+      // transient store failure drops everything behind it, so the failure is recorded in
+      // the receiver's error window and logged for the operator instead.
+      receiverHolder.current?.recordPersistenceFailure(error instanceof Error ? error.message : String(error))
+      console.error(chalk.red('[ingest] persistence failed; batch re-queued:'), error)
+    },
+  })
   await writer.start()
 
   const receiver = new OtlpReceiver({ port, host, store: writer })
+  receiverHolder.current = receiver
+  writer.setPersistedHook(() => receiver.markPersisted())
   let pendingReconcileTimer: ReturnType<typeof setInterval> | null = null
 
   try {

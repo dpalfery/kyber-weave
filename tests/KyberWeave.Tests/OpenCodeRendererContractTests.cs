@@ -19,7 +19,8 @@ namespace KyberWeave.Tests;
 /// and skills lower to <c>.opencode/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
 /// shared-identity suppression, explicit tool allowlist lowering to OpenCode's tool taxonomy,
 /// model resolution from <c>models.yml</c>, deterministic output, and structured degradation accounting
-/// for <c>safety-narrowed</c> and <c>permission-not-expressible</c> codes.
+/// for <c>safety-narrowed</c>, <c>permission-not-expressible</c>, and <c>resource-links-rewritten</c>
+/// (discovery guard) codes.
 /// </remarks>
 public sealed class OpenCodeRendererContractTests : IDisposable
 {
@@ -102,10 +103,23 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     /// Shared identities are read from the loaded fallback profile so the test follows the
     /// same generic single-projection contract as the renderer.
     /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
+    private static HashSet<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    /// whose file already holds the identical body. A primary shared identity reuses its
+    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    }
 
     /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
@@ -127,9 +141,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Claude, SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -144,9 +158,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         OpenCodeRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project);
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
@@ -156,11 +170,12 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -173,8 +188,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal),
             $"File '{f.RelativePath}' does not start with expected OpenCode directory."));
 
-        // 2. Output counts: exactly 45 principal files (21 agents under .opencode/agents/*.md
-        // + 24 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
+        // 2. Output counts: exactly 52 principal files (24 agents under .opencode/agents/*.md
+        // + 28 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
         int principalAgentCount = result.Files.Count(f =>
             f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) &&
             f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
@@ -185,19 +200,19 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal) &&
             !f.RelativePath[".opencode/skills/".Length..^"/SKILL.md".Length].Contains('/', StringComparison.Ordinal));
 
-        Assert.Equal(21, principalAgentCount);
-        Assert.Equal(24, principalSkillCount);
-        Assert.Equal(45, principalAgentCount + principalSkillCount);
+        Assert.Equal(24, principalAgentCount);
+        Assert.Equal(28, principalSkillCount);
+        Assert.Equal(52, principalAgentCount + principalSkillCount);
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+                                + source.Skills.Count - suppressedSkillCount
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.Equal(122, result.Files.Count);
+        Assert.Equal(143, result.Files.Count);
 
         // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
         // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.
@@ -207,7 +222,16 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".opencode/agents/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".opencode/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".opencode/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
@@ -227,7 +251,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
 
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
             Assert.True(
-                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name),
+                    StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
             string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
@@ -246,14 +271,16 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 else
                 {
                     Assert.True(
-                        string.Equals(opencodeHarnessModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                        string.Equals(opencodeHarnessModel, RequireScalar(frontmatter, "model", agent.Name),
+                            StringComparison.Ordinal),
                         $"Agent '{agent.Name}' model mismatch: expected '{opencodeHarnessModel}'.");
                 }
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
             {
                 Assert.True(
-                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name),
+                        StringComparison.Ordinal),
                     $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
             }
             else
@@ -304,11 +331,14 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 }
             }
 
-            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow, excluding pure orchestrators and shared identities
+            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow,
+            // excluding pure orchestrators and suppressed (subagent) shared identities. A primary
+            // shared identity keeps the grant: it edits files and runs commands.
             bool isPureOrchestrator = string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal);
-            bool readAllowed = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                               readDecision == SquadPermissionDecision.Allow;
-            bool expectedKwMcp = !isPureOrchestrator && !sharedIdentities.Contains(agent.Name) && readAllowed;
+            bool readAllowed =
+                capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
+                readDecision == SquadPermissionDecision.Allow;
+            bool expectedKwMcp = !isPureOrchestrator && !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
             Assert.True(
                 permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
                 $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
@@ -317,8 +347,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
 
             // Delegation lowering
-            bool delegateAllowed = capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
-                                   delegateDecision == SquadPermissionDecision.Allow;
+            bool delegateAllowed =
+                capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision == SquadPermissionDecision.Allow;
             if (delegateAllowed)
             {
                 Assert.True(
@@ -355,21 +386,53 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 string permKey = Assert.IsType<YamlScalarNode>(keyNode).Value!;
                 int orderIndex = Array.IndexOf(PermissionOrder, permKey);
-                Assert.True(orderIndex >= 0, $"Agent '{agent.Name}' permission '{permKey}' not found in PermissionOrder.");
-                Assert.True(orderIndex > lastOrderIndex, $"Agent '{agent.Name}' permission '{permKey}' is out of order.");
+                Assert.True(orderIndex >= 0,
+                    $"Agent '{agent.Name}' permission '{permKey}' not found in PermissionOrder.");
+                Assert.True(orderIndex > lastOrderIndex,
+                    $"Agent '{agent.Name}' permission '{permKey}' is out of order.");
                 lastOrderIndex = orderIndex;
             }
 
-            // Body verification
-            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-            if (!expectedAgentBody.EndsWith('\n'))
+            // Body verification: the discovery guard rewrites in-closure .md resource
+            // links to .markdown so they still resolve beside their principal; every
+            // other byte stays verbatim.
+            string verbatimBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            if (!verbatimBody.EndsWith('\n'))
             {
-                expectedAgentBody += "\n";
+                verbatimBody += "\n";
+            }
+
+            string expectedAgentBody = verbatimBody;
+            foreach (SquadResource resource in agent.Resources)
+            {
+                if (resource.RelativePath.EndsWith(".md", StringComparison.Ordinal))
+                {
+                    expectedAgentBody = expectedAgentBody.Replace(
+                        resource.RelativePath,
+                        string.Concat(resource.RelativePath[..^".md".Length], ".markdown"),
+                        StringComparison.Ordinal);
+                }
             }
 
             Assert.True(
                 string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
                 $"Agent '{agent.Name}' body mismatch.");
+
+            // Pin the guard link-by-link, matching SquadResourceRenderingContract:
+            // every authored in-closure .md link appears rewritten, and the original
+            // target is gone.
+            foreach (SquadResource resource in agent.Resources)
+            {
+                if (!resource.RelativePath.EndsWith(".md", StringComparison.Ordinal) ||
+                    !verbatimBody.Contains(resource.RelativePath, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string rewrittenTarget = string.Concat(resource.RelativePath[..^".md".Length], ".markdown");
+                Assert.Contains(rewrittenTarget, body, StringComparison.Ordinal);
+                Assert.DoesNotContain(resource.RelativePath, body, StringComparison.Ordinal);
+            }
         }
 
         // Concrete lowering snapshots
@@ -399,7 +462,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["task"] = new Dictionary<string, string>
                 {
                     ["azure-reader"] = "allow",
-                    ["research-agent"] = "allow",
+                    ["research-agent"] = "allow"
                 }
             });
 
@@ -456,9 +519,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".opencode/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -474,7 +537,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name), StringComparison.Ordinal),
+                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name),
+                    StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description mismatch.");
             Assert.True(
                 string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
@@ -549,11 +613,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .Where(a =>
             {
                 SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool publishNotDeny = prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
-                                      publishDecision != SquadPermissionDecision.Deny;
-                bool rosterLimited = prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
-                                     delegateDecision == SquadPermissionDecision.Allow &&
-                                     a.DelegatesTo.Count > 0;
+                bool publishNotDeny =
+                    prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                    publishDecision != SquadPermissionDecision.Deny;
+                bool rosterLimited =
+                    prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                    delegateDecision == SquadPermissionDecision.Allow &&
+                    a.DelegatesTo.Count > 0;
                 return publishNotDeny || rosterLimited;
             })
             .Select(a => a.Name)
@@ -568,12 +634,39 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             expectedPermissionNotExpressible,
             permissionNotExpressible.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
 
+        // Discovery-guard degradations: every agent that owns resources records one
+        // resource-links-rewritten degradation quoting the harness scanner glob.
+        string[] expectedGuardDegraded = source.Agents
+            .Where(a => a.Resources.Count > 0)
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedGuardDegraded);
+        Assert.Equal(
+            expectedGuardDegraded,
+            result.Degradations
+                .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal))
+                .Select(d => d.CanonicalIdentity)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord degradation in result.Degradations
+                     .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal)))
+        {
+            Assert.Equal("opencode", degradation.Target);
+            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
+            Assert.Equal(agentsByName[degradation.CanonicalIdentity].BodyDigest, degradation.InstructionDigest);
+            Assert.Contains(".markdown", degradation.Details, StringComparison.Ordinal);
+            Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
+        }
+
         // Digest integrity: Every degradation record must match target, output identity, and agent InstructionDigest
         foreach (SquadDegradationRecord degradation in result.Degradations)
         {
             Assert.Equal("opencode", degradation.Target);
             Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable",
+                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable"
+                    or "resource-links-rewritten",
                 $"Degradation for '{degradation.CanonicalIdentity}' has unexpected code '{degradation.Code}'.");
             Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
             SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
@@ -599,9 +692,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -613,8 +706,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .Where(a =>
             {
                 SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) &&
+                            e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) &&
+                             w == SquadPermissionDecision.Allow;
                 return exec && !write;
             })
             .Select(a => a.Name)
@@ -626,13 +721,15 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+            bool executeAllowed =
+                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
                 exec == SquadPermissionDecision.Allow;
-            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+            bool writeAllowed =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
                 write == SquadPermissionDecision.Allow;
 
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
+                d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
 
             if (executeAllowed && !writeAllowed)
             {
@@ -646,6 +743,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 {
                     Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
                 }
+
                 foreach (string writeTool in withheldWriteTools)
                 {
                     Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
@@ -663,9 +761,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -704,12 +802,126 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_OpenCode_ProjectsLinkedAgentAndSkillResourcesDeterministically()
     {
-        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+        await SquadResourceRenderingContract.AssertDiscoveryGuardedProjectionAsync(
             new OpenCodeRenderer(),
             SquadTarget.OpenCode,
             ".opencode/agents/bug-crusher-investigator.md",
             ".opencode/agents",
             ".opencode/skills");
+    }
+
+    /// <summary>
+    /// The extension guard maps <c>references/x.md</c> to <c>references/x.markdown</c>; an agent
+    /// whose closure holds both spellings would overwrite one file with the other, so the
+    /// render fails closed instead of merging them.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_ExtensionGuardFailsClosedOnMdAndMarkdownAlias()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        fixture.WriteAgentResource("references/x.md", "X markdown.\n");
+        fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
+        fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
+        fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
+        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            registry.RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.OpenCode],
+                SquadDeploymentScope.Project)));
+
+        Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.markdown", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An agent whose only resources are non-markdown is invisible to agent discovery as
+    /// projected, so the guard leaves its files and links byte-identical to the native layout.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_TextOnlyAgentResourcesProjectVerbatim()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
+        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile payload = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".opencode/agents/bug-crusher-investigator/assets/agent-payload.txt");
+        Assert.True(
+            Encoding.UTF8.GetBytes(ResourceBearingSquadFixture.AgentPayload).AsSpan()
+                .SequenceEqual(payload.Content.Span),
+            "The text-only agent resource did not preserve its exact UTF-8 bytes.");
+
+        SquadDeploymentFile principal = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".opencode/agents/bug-crusher-investigator.md");
+        string body = Encoding.UTF8.GetString(principal.Content.Span);
+        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+        Assert.Equal("opencode", degradation.Target);
+        Assert.Equal(ResourceBearingSquadFixture.AgentName, degradation.OutputIdentity);
+        Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+        Assert.False(
+            string.IsNullOrWhiteSpace(degradation.Details),
+            "The resource-links-rewritten degradation must explain the discovery guard.");
+        Assert.Contains("project verbatim", degradation.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>.md</c> resource reached only transitively through a <c>.markdown</c> resource is
+    /// renamed on disk, but the body never links to it, so the degradation must report the
+    /// renamed file without claiming an authored link was rewritten.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
+        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The .md resource is renamed beside its principal, invisible to discovery.
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath ==
+                $".opencode/agents/{ResourceBearingSquadFixture.AgentName}/references/notes.markdown");
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+        // The file was renamed, so the receipt says so…
+        Assert.Contains("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        // …but no authored link was rewritten, so it must not claim one was.
+        Assert.DoesNotContain("authored links were rewritten", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("no authored link required rewriting", degradation.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -784,8 +996,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         }
     }
 
-    private static bool IsOpenCodePermission(string permission) =>
-        DocumentedOpenCodePermissions.Contains(permission, StringComparer.Ordinal);
+    private static bool IsOpenCodePermission(string permission)
+    {
+        return DocumentedOpenCodePermissions.Contains(permission, StringComparer.Ordinal);
+    }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
@@ -831,6 +1045,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         }
 
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }
