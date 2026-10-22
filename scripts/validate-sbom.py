@@ -190,6 +190,16 @@ class Validator:
         if "enum" in schema and instance not in schema["enum"]:
             errors.append("value is not one of the permitted values")
 
+        # `const` is Draft 7 and the JSF schema uses it as the discriminator inside
+        # `if` branches (`kty` is "EC", "OKP" or "RSA"). Leaving it unimplemented is
+        # not a harmless omission in the permissive direction: every branch's `if`
+        # then matches, every `then` applies, and a valid EC/RSA/OKP key is rejected
+        # because it cannot satisfy all three key shapes at once. `_canonical` is used
+        # rather than `==` so that JSON `true` and `1`, which Python equality folds
+        # together, stay distinct.
+        if "const" in schema and _canonical(instance) != _canonical(schema["const"]):
+            errors.append(f"value must be the constant {schema['const']!r}")
+
         if isinstance(instance, str):
             pattern = schema.get("pattern")
             if pattern is not None and re.search(pattern, instance) is None:
@@ -337,9 +347,20 @@ def validate_ecosystems(
     partly covered, and saying so is more useful than failing.
     """
     components = document.get("components") or []
+    if not isinstance(components, list):
+        components = []
     present: dict[str, int] = {}
     for component in components:
-        purl = component.get("purl") or ""
+        # The schema check above already reports a component that is not an object,
+        # and a purl that is not a string. This walk runs regardless of those errors
+        # (it is additive diagnostic), so it must not assume the shapes it is
+        # diagnosing: an AttributeError here would replace the clean ::error:: report
+        # and exit 1 with a traceback.
+        if not isinstance(component, dict):
+            continue
+        purl = component.get("purl")
+        if not isinstance(purl, str):
+            continue
         for name, prefix in ECOSYSTEM_PREFIXES.items():
             if purl.startswith(prefix + "/"):
                 present[name] = present.get(name, 0) + 1
@@ -360,17 +381,39 @@ def validate_ecosystems(
 def validate_dependency_graph(document: dict) -> list[str]:
     """Every dependency reference must name a component that is in the document."""
     components = document.get("components") or []
-    known = {component.get("bom-ref") for component in components}
-    root = (document.get("metadata") or {}).get("component") or {}
-    if root.get("bom-ref"):
+    if not isinstance(components, list):
+        components = []
+    # Same reasoning as validate_ecosystems: this diagnostic runs even when the
+    # schema has already rejected the document's shapes, so it skips what it cannot
+    # read rather than raising on it.
+    known = {
+        component["bom-ref"]
+        for component in components
+        if isinstance(component, dict) and isinstance(component.get("bom-ref"), str)
+    }
+    metadata = document.get("metadata")
+    root = metadata.get("component") if isinstance(metadata, dict) else None
+    if isinstance(root, dict) and isinstance(root.get("bom-ref"), str):
         known.add(root["bom-ref"])
 
+    dependencies = document.get("dependencies") or []
+    if not isinstance(dependencies, list):
+        dependencies = []
     errors: list[str] = []
-    for entry in document.get("dependencies") or []:
+    for entry in dependencies:
+        if not isinstance(entry, dict):
+            continue
         ref = entry.get("ref")
+        if not isinstance(ref, str):
+            continue
         if ref not in known:
             errors.append(f"dependency entry references an unknown component: {ref!r}")
-        for target in entry.get("dependsOn") or []:
+        targets = entry.get("dependsOn") or []
+        if not isinstance(targets, list):
+            continue
+        for target in targets:
+            if not isinstance(target, str):
+                continue
             if target not in known:
                 errors.append(f"dependency entry {ref!r} depends on an unknown component: {target!r}")
     return errors

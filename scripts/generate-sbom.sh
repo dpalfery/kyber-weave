@@ -242,8 +242,12 @@ resolve_syft() {
     local url="${SYFT_BASE_URL}/${tarball}"
     local work
     work="$(mktemp -d "${TMPDIR:-/tmp}/kw-syft-XXXXXX")"
+    # An EXIT trap, not RETURN: `die` exits the shell and RETURN only fires when a
+    # function returns, so a failed download or a hash mismatch would leak the
+    # directory exactly on the failure path. This function runs in a command
+    # substitution, so the trap is scoped to the subshell that runs it.
     # shellcheck disable=SC2064  # expand work now, not at trap time
-    trap "rm -rf '${work}'" RETURN
+    trap "rm -rf '${work}'" EXIT
 
     progress "downloading ${url}"
     curl -fsSL --retry 3 --retry-delay 2 -o "${work}/${tarball}" "$url" \

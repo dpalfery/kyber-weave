@@ -106,6 +106,31 @@ public sealed class SbomTests
             },
         """;
 
+    /// <summary>
+    /// An optional top-level <c>signature</c> block with an EC public key, for the
+    /// one place the vendored schemas use <c>const</c>: the JSF <c>publicKey</c>
+    /// definition picks its branch with <c>const</c> on <c>kty</c>.
+    /// </summary>
+    /// <remarks>
+    /// The algorithm is a URI rather than <c>ES256</c> on purpose. <c>algorithm</c>
+    /// is a <c>oneOf</c> of an <c>enum</c> and a <c>format: uri</c> string, and
+    /// <c>format</c> is annotation-only here (see PROVENANCE.md for why), so an
+    /// enumerated name matches both alternatives and <c>oneOf</c> rejects it —
+    /// exactly as the reference implementation does. A URI matches only the second.
+    /// </remarks>
+    private const string SignatureBlock = """
+        "signature": {
+          "algorithm": "https://example.test/alg/2026",
+          "value": "MEUCIQD...",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+          }
+        }
+        """;
+
     private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
 
     private static string ValidatorPath => Path.Combine(ToolRoot, "scripts", "validate-sbom.py");
@@ -239,6 +264,79 @@ public sealed class SbomTests
                 exitCode == 0,
                 $"the validator rejected a valid SBOM: exit {exitCode}\n{standardError}");
             Assert.Contains("CycloneDX 1.6", standardOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void AValidSignedSbomPassesSchemaValidation()
+    {
+        SkipOnWindows();
+
+        // A signature is optional and nothing this pipeline generates carries one,
+        // but it is part of the schema, and it is the only place the vendored files
+        // use `const`. With `const` unimplemented, every publicKey branch's `then`
+        // applied and an EC key was rejected for not also being an OKP and an RSA
+        // key, so the validator failed a document the schema permits.
+        string withoutClose = ValidSbom[..ValidSbom.LastIndexOf('}')].TrimEnd();
+        string signed = withoutClose + ",\n  " + SignatureBlock + "\n}";
+
+        string path = WriteTempSbom(signed);
+        try
+        {
+            (int exitCode, _, string standardError) = RunValidator(path);
+
+            Assert.True(
+                exitCode == 0,
+                $"the validator rejected a valid signed SBOM: exit {exitCode}\n{standardError}");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "a component that is not an object",
+        CargoComponent,
+        "\"not an object\",")]
+    [InlineData(
+        "a dependency entry that is not an object",
+        "{ \"ref\": \"pkg:nuget/Markdig@1.4.0\", \"dependsOn\": [ \"pkg:nuget/anchor@1.0.0\" ] }",
+        "\"not an object\"")]
+    [InlineData(
+        "a purl that is not a string",
+        "\"purl\": \"pkg:cargo/serde@1.0.229\"",
+        "\"purl\": 42")]
+    [InlineData(
+        "a dependsOn that is not an array",
+        "\"dependsOn\": [ \"pkg:nuget/anchor@1.0.0\" ]",
+        "\"dependsOn\": \"pkg:nuget/anchor@1.0.0\"")]
+    public void AMalformedSbomFailsCleanlyWithoutATraceback(string what, string find, string replaceWith)
+    {
+        SkipOnWindows();
+
+        string malformed = ValidSbom.Replace(find, replaceWith, StringComparison.Ordinal);
+        Assert.NotEqual(ValidSbom, malformed);
+
+        string path = WriteTempSbom(malformed);
+        try
+        {
+            (int exitCode, _, string standardError) = RunValidator(path);
+
+            Assert.True(exitCode != 0, $"{what} must be rejected");
+
+            // The schema check and the structural checks are additive: a shape the
+            // schema has already rejected must not become an AttributeError in the
+            // checks that run afterwards, and a string where an array belongs must
+            // not be walked character by character.
+            Assert.DoesNotContain("Traceback", standardError, StringComparison.Ordinal);
+            Assert.DoesNotContain("depends on an unknown component", standardError, StringComparison.Ordinal);
+            Assert.Contains("::error::", standardError, StringComparison.Ordinal);
         }
         finally
         {

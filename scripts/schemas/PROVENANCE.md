@@ -44,7 +44,7 @@ done
 
 `scripts/validate-sbom.py` implements the subset of JSON Schema Draft 7 that these files
 actually use: `type`, `required`, `properties`, `additionalProperties`, `items` (both the
-single-schema and tuple forms), `additionalItems`, `enum`, `pattern`, `$ref`, `oneOf`,
+single-schema and tuple forms), `additionalItems`, `enum`, `const`, `pattern`, `$ref`, `oneOf`,
 `anyOf`, `allOf`, `if`/`then`/`else`, `uniqueItems`, `minimum`, `maximum`, `minItems`,
 `maxLength` and `minLength`.
 

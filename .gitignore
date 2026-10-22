@@ -45,6 +45,11 @@ node_modules/
 __pycache__/
 *.pyc
 
+# The SBOM generator stages *.deps.json here so Syft can see the .NET closure. It
+# removes the directory on exit; a killed run (CI timeout, SIGKILL) leaves it behind,
+# and it must never be committed.
+.sbom-staging/
+
 .local-release/
 
 # --- dash/ build output ---
