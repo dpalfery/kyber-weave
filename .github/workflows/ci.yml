@@ -783,6 +783,7 @@ jobs:
             if [ "$attempt" -eq "$retry" ]; then
               exit 1
             fi
+            echo "Tauri apt attempt $attempt/$retry failed, retrying in 30s..." >&2
             sleep 30
             attempt=$((attempt + 1))
           done
