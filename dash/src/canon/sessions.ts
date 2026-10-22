@@ -27,9 +27,10 @@ import { buildFindingsYielding } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, releaseRecordParts, type ProjectedSessionRecord, type SessionRow } from './store.js'
+import { antigravitySkillDescription } from './antigravity-skill-text.js'
 import { extractInvokedSkills, readListingOf, skillsForSession, type ListingResult, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
-import { notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+import { SKILLS_INVOKED_KEY, notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // The default window and the reported-window rule moved to
 // `./context-window.js` so the finding detector can read the same derivation
@@ -446,6 +447,9 @@ function partsOf(
       text: part.text,
       ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
       ...(part.server !== undefined ? { server: part.server } : {}),
+      // Residency survives the mapping: analyzeContext reads the flag to keep
+      // an offered-but-unloaded definition out of the composition (D7).
+      ...(part.resident === false ? { resident: false } : {}),
     }))
   }
   return Object.entries(record.content)
@@ -932,6 +936,8 @@ export type AsadSkillsPayload =
       reported_skill_tokens?: number
       listed_count?: number
       listed_uninvoked_count?: number
+      /** Antigravity only: the invocation figures cover `measuredTurns` of `totalTurns` turns (D30). */
+      invocationsCoverage?: { measuredTurns: number; totalTurns: number }
       rows: AsadSkillRow[]
     }
   | NotMeasurable
@@ -1677,7 +1683,17 @@ export function buildSessionRow(
     'availability' in skillsView || skillsView.invocationsAvailability !== undefined
       ? undefined
       : invokedByTurnOf(records)
-  const skills = skillsPayloadOf(skillsView, firstDescriptionsOf(skillsListed, turnRecords), countTokens, turnRecords)
+  const skillDescriptions = firstDescriptionsOf(skillsListed, turnRecords)
+  if (skillsListed !== undefined && surveyFamily(harness) === 'antigravity') {
+    // Antigravity's listing is names only; the description comes from the skill's SKILL.md.
+    for (const names of skillsListed.values()) {
+      for (const name of names.keys()) {
+        const text = skillDescriptions.has(name) ? undefined : antigravitySkillDescription(name)
+        if (text !== undefined) skillDescriptions.set(name, text)
+      }
+    }
+  }
+  const skills = skillsPayloadOf(skillsView, skillDescriptions, countTokens, turnRecords)
 
   const rawAgentName = attributeOf(first, AGENT_NAME_KEYS) ?? null
   const agentName = options?.agentName !== undefined ? options.agentName : rawAgentName
@@ -1741,7 +1757,7 @@ export function buildSessionRow(
       cache_creation: record.tokens.cacheCreation,
       reasoning: record.tokens.reasoning ?? null,
       ...skillsListedOnTurn(skillsListed?.get(record.spanId)),
-      ...skillsInvokedOnTurn(skillsInvoked, record.spanId),
+      ...skillsInvokedOnTurn(skillsInvoked, record),
     })),
     // ASAD renders the session root's children; the synthetic root is an
     // analysis detail and is not part of the wire contract. The attribute maps
@@ -1855,10 +1871,24 @@ function invokedByTurnOf(records: readonly CanonicalRecord[]): Map<string, strin
   return new Map([...byTurn].map(([spanId, names]) => [spanId, [...names].sort(byCodeUnit)]))
 }
 
-/** A turn's `skills_invoked`: names it invoked, `[]` when measured and none. Absent when not measured. */
-function skillsInvokedOnTurn(invoked: Map<string, string[]> | undefined, spanId: string): { skills_invoked?: string[] } {
+/**
+ * A turn's `skills_invoked`: names it invoked, `[]` when measured and none. Absent when not measured.
+ * An Antigravity turn is measured only where its record carries the invoked array (D30), so a
+ * turn without one states nothing rather than a `[]` it never measured.
+ */
+function skillsInvokedOnTurn(
+  invoked: Map<string, string[]> | undefined,
+  record: CanonicalRecord,
+): { skills_invoked?: string[] } {
   if (invoked === undefined) return {}
-  return { skills_invoked: invoked.get(spanId) ?? [] }
+  if (surveyFamily(record.harness) === 'antigravity' && !hasInvokedArray(record)) return {}
+  return { skills_invoked: invoked.get(record.spanId) ?? [] }
+}
+
+/** True when the record carries the invoked-skills key as an array, `[]` included. */
+function hasInvokedArray(record: CanonicalRecord): boolean {
+  const raw = record.raw
+  return typeof raw === 'object' && raw !== null && Array.isArray((raw as Record<string, unknown>)[SKILLS_INVOKED_KEY])
 }
 
 /** The engine's skills view on the payload: rows by name, turns as payload indices. */
@@ -1894,6 +1924,7 @@ function skillsPayloadOf(
     ...(view.invocationsAvailability === undefined
       ? { listed_uninvoked_count: rows.filter((row) => row.listed && row.invocations === 0).length }
       : {}),
+    ...(view.invocationsCoverage !== undefined ? { invocationsCoverage: view.invocationsCoverage } : {}),
     rows,
   }
 }

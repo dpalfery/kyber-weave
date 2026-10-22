@@ -12,7 +12,7 @@ import type {
   KyberTurnContentResult,
   KyberTurnContentShadow,
 } from '../lib/kyberApi.js'
-import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
+import type { DrawerContent, SessionTimelineNode, ToolRow } from './AgentSessionDashboard.js'
 import { reasonOf, skillTurnLabel, unmeasured } from './SkillsPanel.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
@@ -1442,6 +1442,11 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
             name = record.function.name
           }
         }
+        // An MCP catalogue entry offered but not resident is labeled as such in
+        // the header. Its `resident` flag is said by that label, so the field is
+        // not repeated in the body, where it would read as the opposite claim.
+        const offeredOnly = record !== null && record.resident === false
+        const shown = record !== null && offeredOnly ? withoutResidentFlag(record) : def
         return (
           <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden" data-testid={`tool-definition-${idx}`}>
             <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 flex items-center gap-2 min-w-0">
@@ -1449,13 +1454,53 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
                 Tool {idx + 1} of {definitions.length}
               </span>
               <span className="font-mono text-xs font-semibold text-foreground break-words whitespace-pre-wrap min-w-0 flex-1">{name}</span>
+              {offeredOnly && (
+                <span
+                  className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                  data-testid="tool-definition-offered-label"
+                >
+                  offered (MCP catalogue)
+                </span>
+              )}
             </div>
             <div className="p-2.5">
-              <TurnLosslessValue value={def} />
+              <TurnLosslessValue value={shown} />
             </div>
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function withoutResidentFlag(record: Record<string, unknown>): Record<string, unknown> {
+  const { resident: _resident, ...rest } = record
+  return rest
+}
+
+/**
+ * The arguments and result an invocation carried, shown beside the raw row.
+ * Each block is omitted when its preview is absent; the raw row keeps every
+ * field, so this view never stands in for the exact payload.
+ */
+function ToolInvocationPreview({ tool }: { tool: ToolRow }) {
+  const args = typeof tool.arguments_preview === 'string' ? tool.arguments_preview : null
+  const result = typeof tool.result_preview === 'string' ? tool.result_preview : null
+  if (args === null && result === null) return null
+  return (
+    <div className="space-y-3">
+      {args !== null && (
+        <section className="space-y-1.5" data-testid="tool-arguments-preview">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Arguments</h4>
+          <TurnLosslessText text={args} />
+        </section>
+      )}
+      {result !== null && (
+        <section className="space-y-1.5" data-testid="tool-result-preview">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Result</h4>
+          <TurnLosslessText text={result} />
+        </section>
+      )}
     </div>
   )
 }
@@ -2624,6 +2669,17 @@ export function ToggleRawView({
 }
 
 /**
+ * The one claim an MCP catalogue offer may carry. It says the session offered
+ * the definition without keeping it resident, so it must never read "resident".
+ */
+const OFFERED_MCP_CATALOGUE_LABEL = 'offered (MCP catalogue)'
+
+/** True for a `tool_definitions` part the session offered without keeping resident. */
+function isOfferedMcpDefinition(part: { part: string; resident?: boolean }): boolean {
+  return part.part === 'tool_definitions' && part.resident === false
+}
+
+/**
  * One canonical turn-content block: measured tokens (or an honest absent
  * marker — zero renders as an explicit zero), measurability and truncation
  * notices, then the formatted/raw toggle. No per-block cache attribution.
@@ -2661,6 +2717,18 @@ export function TurnContentBlockView({
               Also present in prior captured context
             </span>
           ) : null}
+        </div>
+      ) : null}
+      {/* A block's text is one joined string, so the offered mark is per block:
+          it says some member is an MCP catalogue offer, not which definition. */}
+      {block.parts.some(isOfferedMcpDefinition) ? (
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+          <span
+            className="shrink-0 rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground"
+            data-testid={`${prefix}-tool-definition-offered-label`}
+          >
+            {OFFERED_MCP_CATALOGUE_LABEL}
+          </span>
         </div>
       ) : null}
       <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
@@ -2737,6 +2805,14 @@ export function TurnContentPartView({
         <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
           {part.part}
         </span>
+        {isOfferedMcpDefinition(part) ? (
+          <span
+            className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground"
+            data-testid="tool-definition-offered-label"
+          >
+            {OFFERED_MCP_CATALOGUE_LABEL}
+          </span>
+        ) : null}
         {part.server ? (
           <span className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
             {part.server}
@@ -3054,6 +3130,17 @@ function FullContentPanel({
     <div className="space-y-3">
       {groupIdenticalParts(data.parts).map(({ part, index, count }) => (
         <div key={`${part.spanId}-${part.part}-${index}`} className="space-y-2">
+          {/* A definition the turn offered without keeping resident is labelled in its header; resident and unmarked parts carry no label. */}
+          {part.resident === false && (
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                data-testid="tool-definition-offered-label"
+              >
+                offered (MCP catalogue)
+              </span>
+            </div>
+          )}
           {part.truncated === true && (
             <p
               className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
@@ -3173,6 +3260,7 @@ interface IdentifiablePart {
   text: string
   truncated?: boolean
   totalLength?: number
+  resident?: false
 }
 
 /**
@@ -3206,11 +3294,17 @@ function groupIdenticalParts<T extends IdentifiablePart>(
   return groups
 }
 
-/** True when two parts render as one block: same kind, truncation, and exact text. */
+/**
+ * True when two parts render as one block: same kind, truncation, residency,
+ * and exact text. Residency is part of the identity because the offered label
+ * is a claim about the part; identical text that one span kept resident and
+ * another did not must not fold into one labelled block.
+ */
 function sameBlock(a: IdentifiablePart, b: IdentifiablePart): boolean {
   return (
     a.part === b.part &&
     (a.truncated === true) === (b.truncated === true) &&
+    (a.resident === false) === (b.resident === false) &&
     a.totalLength === b.totalLength &&
     a.text === b.text
   )
@@ -3257,7 +3351,15 @@ function listingNamed(listed: unknown[], skillName: string): { text?: unknown } 
  * `skills` entry. Uses the same query as the whole-turn panel so both share
  * the cached response.
  */
-function SkillListingSection({ skillName, request }: { skillName: string; request: TurnFullContentRequest }) {
+function SkillListingSection({
+  skillName,
+  request,
+  description,
+}: {
+  skillName: string
+  request: TurnFullContentRequest
+  description?: string
+}) {
   const turnQuery = useQuery({
     queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
     queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
@@ -3295,9 +3397,14 @@ function SkillListingSection({ skillName, request }: { skillName: string; reques
     if (listing === undefined) {
       listingBody = <p className="text-xs text-tertiary-foreground">This turn&apos;s listing does not name {skillName}.</p>
     } else if (typeof listing.text !== 'string' || listing.text.length === 0) {
-      listingBody = (
-        <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
-      )
+      listingBody =
+        typeof description === 'string' && description.length > 0 ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+            {description}
+          </pre>
+        ) : (
+          <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
+        )
     } else {
       listingBody = (
         <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
@@ -3354,7 +3461,7 @@ function SkillDrawerPane({ row, request }: { row: KyberSkillRow; request: TurnFu
       {invocationsReason !== null && <NotMeasurableNote reason={invocationsReason} />}
       {hasTurns && <p className="text-xs text-muted-foreground">{skillTurnLabel(row.turns_listed)}</p>}
 
-      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} />}
+      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} description={row.description} />}
       {!hasTurns && row.listed === true && (
         <p className="text-xs text-tertiary-foreground">No turn lists this skill, so there is no listing text to read.</p>
       )}
@@ -3412,6 +3519,9 @@ export function SessionInspectorDrawer({
         ? { ...rawRecord, content: undefined }
         : rawContent
   const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
+  // A tool invocation carries its own previews; the raw row alone shows them
+  // only as nested JSON, so they also get a labeled pane of their own.
+  const toolRow = rawRecord !== null && 'tool' in rawRecord ? (rawRecord as { tool?: ToolRow }).tool ?? null : null
 
   // Invoked as a function rather than returned as JSX on purpose: the
   // characterization harnesses render this component directly — under a hook
@@ -3439,6 +3549,7 @@ export function SessionInspectorDrawer({
             request={isTurnFullContentRequest(contentRequest) ? contentRequest : null}
           />
         )}
+        {toolRow !== null && <ToolInvocationPreview tool={toolRow} />}
         {inspectorData !== undefined && inspectorData !== null && (
           <InspectorContent data={inspectorData} />
         )}

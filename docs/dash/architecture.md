@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-20
+last-reviewed: 2026-10-21
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -80,6 +80,11 @@ code-refs:
   - upsertSession
   - getSessionSummary
   - fetchKyberSession
+  - measurabilityForRecord
+  - measurabilityForChild
+  - segmentTranscript
+  - antigravitySkillDescription
+  - readAntigravityMcpCatalogue
 ---
 
 # KyberDash architecture
@@ -451,6 +456,28 @@ Upstream provider parsers produce `ParsedProviderCall` turns consumed by `Synthe
 - **Token extraction precedence and finite validation:** Nested usage structures (`data.tokens` or `data.usage`) take precedence over flat counters (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) used by stores such as KiloCode. Every candidate — nested or flat — passes through `finiteOrUndefined` on its own: strings, `NaN`, and `Infinity` are rejected as absent so the next candidate (and finally 0) applies, rather than corrupting downstream token and cost arithmetic.
 - **Substantive part recognition:** Assistant turns with zero-token and zero-cost values are retained as substantive activity if they contain text output. Both `type: 'text'` and `type: 'markdown'` parts are recognized as substantive text in `hasTextOutput` and `hasAnySubstantiveParts`, preventing assistant markdown responses from being dropped as silent no-op calls. User prompt extraction similarly accepts markdown parts, and model resolution normalizes both string identifiers and `{ id, providerID }` object descriptors.
 
+### Transcript-paired and journal-paired activity
+
+Two readers attach activity to records by pairing, and neither pairs by time.
+
+- **Antigravity.** Tool calls and `SKILL.md` reads come from the conversation transcript. Each model
+  call owns the transcript steps whose index lies in `(lsi[N], lsi[N+1]]`, where `lsi` is its
+  `gen_metadata.last_step_index`. The last call's range is open above. Each call carries the pairing
+  id `agy-step:<lsi>`, and a call before the transcript's first step gets nothing. The provider
+  (`dash/src/providers/antigravity.ts`) and the content reader
+  (`dash/src/synth/readers/antigravity.ts`) share one segmentation. The reader reaches file-based
+  sessions only. OTLP-only sessions get no transcript activity unless their conversation database is
+  imported under the `antigravity-cli` harness. The contract, the coverage rule, and the
+  owner-store observation are in the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
+- **Copilot CLI.** The reader yields one turn per journal `assistant.message`, keyed by its
+  `messageId`, and each turn carries the latest `system.message` the agent (root or subagent) wrote
+  before it. The provider pairs each call with the turn of its own message. Journal tool invocations
+  are not yet ingested as records; that follow-up is a todo. See the
+  [Copilot CLI journal](telemetry-inventory.md#copilot-cli-journal-and-system-prompt).
+
+Declared limits that a reader can measure on some records only are lifted per record, as described
+in [per-record lift](#per-record-lift-child-records-and-non-resident-parts).
+
 ## Canonical model
 
 The canonical record, `TokenUsage`, `CostBlock`, `Measurability`, `Problem` and the canonical
@@ -603,7 +630,7 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
 - `summary.skills_listed` and `summary.skills_invoked` are name arrays. Each key is absent when
   that side is not measured.
 - `skills` is either `{availability: 'not_measurable', reason}`, or
-  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, rows}`.
+  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, invocationsCoverage?, rows}`.
   - `reported_skill_tokens` is a single per-turn resident size, taken from the latest turn that
     carries it. It is never summed across turns and never split across skills. Antigravity
     reports it as `gen_ai.usage.skill_tokens`.
@@ -611,23 +638,32 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
     absent when invocation is not measured, which is the same case in which every row's
     `invocations` is the `not_measurable` object. A row is never counted while one of its
     sides is unmeasured.
+  - `invocationsCoverage` is `{measuredTurns, totalTurns}`. It is set only for an Antigravity
+    session where some turns carry `kyber.skills.invoked` and some do not, so `0 < measuredTurns <
+    totalTurns`. The invocation figures and `listed_uninvoked_count` then cover the measured turns
+    only. It is absent when every turn is measured, and absent when no turn is.
   - `rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
     description?, derived_tokens?}`.
     - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
       least one turn, and `false` for a skill that was only invoked.
-    - `invocations` is a number when invocation is measured, and `0` is a measured none. When the
-      harness has no invocation source (Copilot, Antigravity), it is always
-      `{availability: 'not_measurable', reason}`: never omitted, and never `0`.
+    - `invocations` is a number when invocation is measured, and `0` is a measured none. For
+      Copilot CLI and Antigravity it is that
+      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise.
+      Antigravity counts over the measured turns (see `invocationsCoverage`).
+      An unmeasured side is never omitted from the row and never reported as `0`.
     - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
       the skill was listed on no turn.
     - `description` is the first listing text observed for that skill in the session, stored
       once. `derived_tokens` is estimated from the description and is labelled derived. Both are
       absent when no listing carried a description.
 - `turns[i].skills_listed` is present only for measured turns. `turns[i].skills_invoked` lists
-  names, with `[]` as a measured none, and is absent when invocation is not measured.
+  names, with `[]` as a measured none, and is absent when invocation is not measured. For an
+  Antigravity turn it is absent unless that turn's record carries `kyber.skills.invoked` as an array,
+  so a turn the transcript did not cover is never shown as a measured none.
 - `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
-  carries that same reason. A partly measured view (Copilot or Antigravity, where invocation is
-  not measurable) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
+  carries that same reason. A partly measured view (Antigravity when no
+  record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
+  record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
   `invocations` object) and by the absent `summary.skills_invoked`, turn `skills_invoked`, and
   `listed_uninvoked_count` keys.
 
@@ -647,9 +683,16 @@ session payload; the narrow turn-content route never walks session records. A pa
 - After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
   Claude descriptions survive because they are kept in raw attributes. Copilot descriptions that
   came from stored system-prompt parts are absent, while the skill names remain.
+- Antigravity descriptions are read from each skill's `SKILL.md` when the session payload is built.
+  The cache is keyed by file path and valid while the file's mtime and size are unchanged, so an
+  edited description shows at the next payload build without a restart, and an absent file is never
+  cached. A skill that no Antigravity root holds has no description
+  ([telemetry inventory](telemetry-inventory.md#antigravity-skill-descriptions)).
 
 **Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
 their listed and invoked sets from `skills.ts` (see [Pure Signals Engine](#pure-signals-engine-dashsrcanalysissignalsts)).
+On a partly covered Antigravity session the invoked set is the names read on the covered turns,
+since an uncovered turn carries no key. The finding does not state that coverage.
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
@@ -687,6 +730,28 @@ installed" and not an empty history. Content readers (such as `copilotVscodeRead
 into input-side `ReaderTurn` snapshots without attributing current response text to input context or
 inventing unobserved prefix history. Where total tokens and context window are known, pressure is
 measured independently from whether individual composition buckets are available.
+
+### Per-record lift, child records, and non-resident parts
+
+- **Per-record lift (D8).** A key a reader declares not measurable (`READER_UNMEASURABLE`) is lifted
+  to `measured` on a record only where that record's paired reader turn carries parts of the key.
+  This applies to `copilot-cli`, `antigravity`, `antigravity-cli` and `antigravity-ide`
+  (`PER_RECORD_LIFT_HARNESSES`, `measurabilityForRecord` in `dash/src/canon/measurability.ts`). A
+  sibling turn the reader did not pair keeps the declared reason. Copilot CLI lifts only
+  `system_prompt`; `tool_definitions` is never lifted. Other readers keep their declaration whole.
+- **Child records (D29).** A `tool.invoke` child is not a paired reader turn, so it does not inherit
+  its parent's lifted state. For a harness in the per-record lift set, `measurabilityForChild` gives
+  each child the declared reason for every key it does not carry itself. `tool_result_content` is
+  measured on a child only when the tool result it was handed carries a `content` value. Other
+  harnesses copy the parent's map unchanged.
+- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived. The 14-day
+  purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) empties `content_json` and
+  `parts_json` and leaves `measurability_json` as it was, so a record can read as measured while no
+  text is stored for it.
+- **Non-resident parts.** `ContentPart.resident: false` marks a tool definition the turn was offered
+  but did not keep resident. It adds no tokens to the context composition (`dash/src/analysis/context.ts`),
+  is counted in `TurnPressure.nonResidentToolDefinitions`, and stays on the part for the turn-content
+  route. The session inspector labels such a catalogue entry `offered (MCP catalogue)`.
 
 ### Store
 

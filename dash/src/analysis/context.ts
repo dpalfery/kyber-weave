@@ -124,6 +124,12 @@ export type ContextPart = {
    * How many instruction blocks were stripped out of this part's text.
    */
   strippedCount?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * It adds no tokens to any bucket, server group, or the residual; it is
+   * counted once as offered (`TurnPressure.nonResidentToolDefinitions`).
+   */
+  resident?: false
 }
 
 /** One turn of a session, as the analysis consumes it. */
@@ -253,6 +259,14 @@ export type TurnPressure = {
   freshInput: number
   /** Present only on turns whose fresh-input rise was flagged (R7.5). */
   freshInputJump?: { previous: number; factor: number }
+  /**
+   * Tool definitions the turn offered but did not keep resident (D7). Present
+   * only when there were some, so a turn with none reads as before. It is a
+   * count, not tokens: the offered schemas were never counted into the turn,
+   * so no token figure for them is reported: they are excluded from every
+   * token total, and a count is the only fact this turn keeps about them.
+   */
+  nonResidentToolDefinitions?: number
   /**
    * Optional evidence-of-use classification per Decision D15 (strong / weak / none / unobserved),
    * present when requested or when telemetry is provided.
@@ -394,6 +408,7 @@ export function reduceContextParts(
         instructionTokens,
         strippedCount: blocks.length,
         ...(part.server !== undefined ? { server: part.server } : {}),
+        ...(part.resident === false ? { resident: false } : {}),
       }
     }
     // A part with no text and no measured count contributes nothing and
@@ -406,6 +421,9 @@ export function reduceContextParts(
       ...(structure ? { tokens: part.tokens ?? countTokens(part.text) } : {}),
       ...(part.tokens === undefined ? { derived: true } : {}),
       ...(part.server !== undefined ? { server: part.server } : {}),
+      // Reduction keeps residency: dropping the flag here would make a
+      // non-resident definition count again once the text is released (D7).
+      ...(part.resident === false ? { resident: false } : {}),
     }
   })
 }
@@ -474,8 +492,16 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     let strippedCount = 0
     let strippedTokens = 0
     let derivedThisTurn = false
+    let nonResidentToolDefinitions = 0
 
     for (const part of turn.parts) {
+      // A definition offered but not resident is not in the context, so it
+      // must add nothing to the buckets, the groups, or the residual (D7). It
+      // is still counted, so the turn can say what was offered.
+      if (part.resident === false) {
+        nonResidentToolDefinitions += 1
+        continue
+      }
       // Instruction fences ride inside history and tool results; stripping
       // them anywhere else would miscount a system prompt that happens to
       // quote a fence, so the strip applies to the carrier buckets only.
@@ -559,7 +585,10 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     let classification: ClassifiedTurnContext | undefined
     if (options.classify) {
       const telemetry = typeof options.classify === 'object' ? options.classify : undefined
-      classification = classifyTurnContext(turn, telemetry, { countTokens })
+      // Classification reads resident items only: a non-resident definition
+      // would otherwise be classified as if it occupied the context (D7).
+      const resident = { ...turn, parts: turn.parts.filter((part) => part.resident !== false) }
+      classification = classifyTurnContext(resident, telemetry, { countTokens })
     }
 
     perTurn.push({
@@ -579,6 +608,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
       accumulationRate,
       freshInput: turn.freshInput,
       ...(freshInputJump !== undefined ? { freshInputJump } : {}),
+      ...(nonResidentToolDefinitions > 0 ? { nonResidentToolDefinitions } : {}),
       ...(classification !== undefined ? { classification } : {}),
     })
     if (freshInputJump !== undefined) flaggedTurns.push(position + 1)

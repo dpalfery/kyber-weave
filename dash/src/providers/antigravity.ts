@@ -9,6 +9,7 @@ import https from 'https'
 import { getCacheDir, readExistingTextFile } from '../ingest/cache-dir.js'
 import { calculateCost } from '../pricing/models.js'
 import { isSqliteAvailable, isSqliteBusyError, openDatabase } from '../ingest/sqlite.js'
+import { agyStepId, agyStepIndexOf, attachTranscriptActivity, homeOfConversationPath } from './antigravity-transcript.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 type AntigravityConversationRoot = {
@@ -49,7 +50,10 @@ function conversationRoots(): readonly AntigravityConversationRoot[] {
     },
   ]
 }
-const CACHE_VERSION = 5
+// v6: gen_metadata calls carry the agy-step pairing id that segments the transcript.
+// A v5 entry has no pairing id, and a cache hit serves it without re-parsing, so it
+// would never gain its tool records. The bump moves every cascade to one re-parse.
+const CACHE_VERSION = 6
 export const ANTIGRAVITY_CACHE_VERSION = CACHE_VERSION
 export const ANTIGRAVITY_LEGACY_CACHE_FILE = 'antigravity-results.json'
 export function antigravityCacheFileName(version = CACHE_VERSION): string {
@@ -774,6 +778,16 @@ function antigravitySqliteMetadataAttributes(chatFields: readonly ProtoField[]):
   return attributes
 }
 
+// last_step_index is a key/value attribute on chatModel (#20), beside model_enum. It is
+// the last transcript step the model saw as input, so the model's own PLANNER_RESPONSE
+// sits one step after it. The row's top-level field #2 is not this value.
+function antigravitySqliteLastStepIndex(chatFields: readonly ProtoField[]): number | undefined {
+  const raw = antigravitySqliteMetadataAttributes(chatFields).get('last_step_index')
+  if (raw === undefined || !/^\d+$/.test(raw)) return undefined
+  const value = Number(raw)
+  return Number.isSafeInteger(value) ? value : undefined
+}
+
 function antigravitySqliteModel(chatFields: readonly ProtoField[]): string {
   const attributes = antigravitySqliteMetadataAttributes(chatFields)
   const displayName = protoFieldText(firstProtoField(chatFields, 21))
@@ -844,6 +858,7 @@ function buildCallFromSqliteGenMetadataRow(cascadeId: string, row: AntigravityGe
   const model = antigravitySqliteModel(chatFields)
   const pricingModel = normalizePricingModel(model)
   const costUSD = calculateCost(pricingModel, inputTokens, responseTokens + thinkingTokens, 0, 0, 0)
+  const lastStepIndex = antigravitySqliteLastStepIndex(chatFields)
 
   return {
     provider: 'antigravity',
@@ -861,6 +876,7 @@ function buildCallFromSqliteGenMetadataRow(cascadeId: string, row: AntigravityGe
     timestamp: antigravitySqliteCreatedAt(chatFields),
     speed: 'standard',
     deduplicationKey: `antigravity:${cascadeId}:${responseId}`,
+    ...(lastStepIndex !== undefined ? { pairingId: agyStepId(lastStepIndex) } : {}),
     userMessage: '',
     sessionId: cascadeId,
   }
@@ -898,6 +914,21 @@ async function parseSqliteGenMetadataCalls(filePath: string, cascadeId: string):
   } finally {
     db?.close()
   }
+}
+
+/**
+ * The ascending last_step_index values of the calls one conversation database yields.
+ * The reader segments the transcript by these same values, so the provider and the
+ * reader share this one decoder and cannot disagree about where a call's steps end.
+ */
+export async function antigravityCallStepIndexes(filePath: string): Promise<number[]> {
+  const calls = await parseSqliteGenMetadataCalls(filePath, antigravityCascadeIdFromPath(filePath))
+  const indexes = new Set<number>()
+  for (const call of calls) {
+    const lastStepIndex = agyStepIndexOf(call.pairingId)
+    if (lastStepIndex !== undefined) indexes.add(lastStepIndex)
+  }
+  return [...indexes].sort((a, b) => a - b)
 }
 
 function parseFiniteToken(value: unknown): number {
@@ -1384,6 +1415,31 @@ function withFallbackTimestamp(call: ParsedProviderCall, fallbackTimestamp: stri
 }
 
 function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
+  return {
+    async *parse(): AsyncGenerator<ParsedProviderCall> {
+      // The transcript is read fresh on every parse, so cached calls pick up new
+      // tool activity without a cache-version bump or an mtime on the transcript.
+      // Copies, never the raw parser's own objects: those are the calls the cache
+      // holds and flushes, so attaching to them would write transcript activity
+      // into the persisted cache (F1). The attach assigns fresh arrays, so a
+      // shallow copy is enough.
+      const calls: ParsedProviderCall[] = []
+      for await (const call of createRawParser(source, seenKeys).parse()) calls.push({ ...call })
+      // The transcript is the one beside this database, so the source path, not the
+      // machine's home directory, names where it lives.
+      // A database outside any `.gemini` folder has no transcript beside it, so it reads
+      // none: falling back to the machine's own home would pair it with an unrelated
+      // conversation's transcript.
+      const home = homeOfConversationPath(source.path)
+      if (home !== undefined) {
+        await attachTranscriptActivity(calls, { preferredRoot: antigravityAppDataDirFromSourcePath(source.path), home })
+      }
+      yield* calls
+    },
+  }
+}
+
+function createRawParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       if (isAntigravityStatusLineEventsPath(source.path)) {

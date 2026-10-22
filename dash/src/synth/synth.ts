@@ -66,7 +66,7 @@ import { billableOutputTokens } from '../pricing/models.js'
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
 import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
-import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
+import { FILE_SOURCE_PREFIX, measurabilityForChild, measurabilityForRecord, surveyFamily } from '../canon/measurability.js'
 import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
   ReaderToolCall,
@@ -450,8 +450,17 @@ export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
  * The skill names a parsed call invoked, in first-seen order with repeats
  * collapsed. Undefined when there are none, so the caller omits the key rather
  * than storing an empty list. Names are only ever the parser's own reports.
+ *
+ * Antigravity is the exception (D6, D30): its parser sets `skills` only on a call
+ * a transcript covers, so an array there, `[]` included, is a measured statement
+ * ("none invoked") and is kept whatever reader turn paired the call. An absent
+ * list there is not measured. Every other provider drops an empty list, since
+ * for them an empty list is an absence.
  */
 export function invokedSkillsOf(call: ParsedProviderCall): string[] | undefined {
+  if (surveyFamily(call.provider) === 'antigravity') {
+    return Array.isArray(call.skills) ? Array.from(new Set(call.skills)) : undefined
+  }
   if (call.skills === undefined || call.skills.length === 0) return undefined
   return Array.from(new Set(call.skills))
 }
@@ -522,8 +531,9 @@ export function synthesizeCall(
   const invokedSkills = invokedSkillsOf(call)
   const listedSkills = listedSkillsOf(call)
   const absentOutputReason = copilotAbsentOutputReason(call)
+  const carriedKeys = new Set((readerTurn?.parts ?? []).map((part) => part.part))
   const measurability = {
-    ...measurabilityFor(call.provider),
+    ...measurabilityForRecord(call.provider, harness, carriedKeys),
     ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
   }
 
@@ -810,7 +820,12 @@ export function synthesizeToolCall(
     parts,
     cost: { basis: 'unknown', status: 'no_rate' },
     measurability: {
-      ...parentRecord.measurability,
+      ...measurabilityForChild(
+        parentRecord.measurability ?? {},
+        provider,
+        parentRecord.harness,
+        new Set(toolResult?.content !== undefined ? ['tool_result_content'] : []),
+      ),
       duration: durationAvailability,
     },
     attributes,

@@ -14,8 +14,8 @@
 // existence signal (`ENOENT`) reads as absence — every other error is a
 // present store with a problem.
 
-import { afterAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,13 +23,16 @@ import { DatabaseSync } from 'node:sqlite'
 
 import type { ParsedProviderCall } from '../providers/types.js'
 import { copilot } from '../providers/copilot.js'
+import { createAntigravityProvider } from '../providers/antigravity.js'
 import { createCursorProvider } from '../providers/cursor.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
+import { measurabilityFor } from '../canon/measurability.js'
 import { contextLimitOf } from '../canon/context-window.js'
 import { CanonStore } from '../canon/store.js'
 import { Synthesizer } from './synth.js'
 import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
 import { codexReader } from './readers/codex.js'
+import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
 
 // ---------------------------------------------------------------------------
 // Fixture kit
@@ -1119,5 +1122,177 @@ describe('T4 — source-unit ingest seam', () => {
     expect(result.problems).toEqual([])
     expect(result.records[0]?.harness).toBe('claude-cli')
     expect(result.records[0]?.content.conversation_history).toBe('reader-provided conversation')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D24 — a Copilot CLI events journal never reaches the SQLite store loader.
+// Every fixture is synthetic and written into a scratch HOME.
+// ---------------------------------------------------------------------------
+
+describe('D24 — Copilot CLI journal and store loads through ingestProviders', () => {
+  let home = ''
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'kyber-copilot-home-'))
+    vi.stubEnv('HOME', home)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('an empty copilot-cli load whose filePath is events.jsonl runs the content reader with no parse problem', async () => {
+    const dir = join(home, '.copilot', 'session-state', 'S1')
+    mkdirSync(dir, { recursive: true })
+    const journal = join(dir, 'events.jsonl')
+    writeFileSync(journal, JSON.stringify({ type: 'system.message', data: { role: 'system', content: 'Root prompt.' } }) + '\n')
+    const readSpy = vi.spyOn(copilotCliReader, 'read')
+    try {
+      const result = await ingestProviders(['copilot-cli'], () => ({ calls: [], filePath: journal }))
+
+      expect(result.problems).toEqual([])
+      expect(readSpy.mock.calls.map(([file]) => file)).toContain(journal)
+    } finally {
+      readSpy.mockRestore()
+    }
+  })
+
+  it('measures a Copilot CLI system_prompt only on the record whose message the journal turn carries', async () => {
+    const dir = join(home, '.copilot', 'session-state', 'S5')
+    mkdirSync(dir, { recursive: true })
+    const journal = join(dir, 'events.jsonl')
+    const lines = [
+      { type: 'assistant.message', data: { messageId: 'msg-0', outputTokens: 5 } },
+      { type: 'system.message', data: { role: 'system', content: 'Root prompt for S5.' } },
+      { type: 'assistant.message', data: { messageId: 'msg-1', outputTokens: 9 } },
+    ]
+    writeFileSync(journal, lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
+    // Calls carry the message id as their pairing id, as the Copilot provider stamps them.
+    const calls = [
+      call({ provider: 'copilot', sessionId: 'S5', pairingId: 'msg-0', deduplicationKey: 'copilot:S5:msg-0' }),
+      call({ provider: 'copilot', sessionId: 'S5', pairingId: 'msg-1', deduplicationKey: 'copilot:S5:msg-1' }),
+    ]
+
+    // The refresh orchestrator supplies the harness id, so the records are Copilot CLI records.
+    const result = await ingestProviders(['copilot-cli'], () => ({ calls, filePath: journal, harnessId: 'copilot-cli' }))
+
+    expect(result.problems).toEqual([])
+    const [beforePrompt, afterPrompt] = result.records
+    expect(beforePrompt?.measurability?.['system_prompt']).toMatchObject({ availability: 'not_measurable' })
+    expect(afterPrompt?.measurability?.['system_prompt']).toBe('measured')
+  })
+
+  it('an empty copilot load whose filePath ends in .db still reads the store through loadCopilotCliCalls', async () => {
+    const dir = join(home, '.copilot')
+    mkdirSync(dir, { recursive: true })
+    const storePath = join(dir, 'session-store.db')
+    const db = new DatabaseSync(storePath)
+    try {
+      db.exec('CREATE TABLE sessions (id TEXT, cwd TEXT, repository TEXT);')
+      db.prepare('INSERT INTO sessions (id, cwd, repository) VALUES (?, ?, ?)').run('S1', '/synthetic/one', 'synthetic/one')
+    } finally {
+      db.close()
+    }
+
+    const fromStore = await ingestProviders(['copilot'], () => ({ calls: [], filePath: storePath }))
+    const explicit = await ingestProviders(['copilot'], () => ({ calls: loadCopilotCliCalls(storePath), filePath: storePath }))
+
+    expect(fromStore.problems).toEqual([])
+    expect(fromStore.records.map((record) => record.cost)).toEqual(explicit.records.map((record) => record.cost))
+    expect(fromStore.records.length).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D29 end to end — the Antigravity MCP catalogue lands on the first call record.
+// That call is the carrier of its tool_definitions; the agy-step tool children
+// the transcript hangs under it must not claim the catalogue as their own. The
+// fixtures are the synthetic gen_metadata and transcript the reader tests use.
+// ---------------------------------------------------------------------------
+
+const AGY_CONVERSATION = 'fixture-segments'
+const AGY_FIXTURE_ROOT = fileURLToPath(new URL('../../tests/fixtures/antigravity-transcript/', import.meta.url))
+
+/** A synthetic Antigravity CLI root: one conversation database, optionally a transcript and an MCP tool. */
+function antigravityRoot(options: { transcript: boolean; mcpTool: boolean }): string {
+  const root = mkdtempSync(join(tmpdir(), 'kyber-agy-e2e-'))
+  tempRoots.push(root)
+  mkdirSync(join(root, 'conversations'), { recursive: true })
+  const fixture = JSON.parse(readFileSync(join(AGY_FIXTURE_ROOT, 'gen-metadata.json'), 'utf-8')) as {
+    rows: Array<{ idx: number; hex: string }>
+  }
+  const db = new DatabaseSync(join(root, 'conversations', `${AGY_CONVERSATION}.db`))
+  try {
+    db.exec('CREATE TABLE gen_metadata (idx integer, data blob, size integer NOT NULL DEFAULT 0, PRIMARY KEY (idx))')
+    for (const row of fixture.rows) {
+      const data = Buffer.from(row.hex, 'hex')
+      db.prepare('INSERT INTO gen_metadata (idx, data, size) VALUES (?, ?, ?)').run(row.idx, data, data.length)
+    }
+  } finally {
+    db.close()
+  }
+  if (options.transcript) {
+    const logs = join(root, 'brain', AGY_CONVERSATION, '.system_generated', 'logs')
+    mkdirSync(logs, { recursive: true })
+    copyFileSync(
+      join(AGY_FIXTURE_ROOT, 'brain', AGY_CONVERSATION, '.system_generated', 'logs', 'transcript.jsonl'),
+      join(logs, 'transcript.jsonl'),
+    )
+  }
+  if (options.mcpTool) {
+    mkdirSync(join(root, 'mcp', 'srv-a'), { recursive: true })
+    writeFileSync(join(root, 'mcp', 'srv-a', 'alpha_lookup.json'), JSON.stringify({ name: 'alpha_lookup', description: 'Looks up alpha.' }))
+  }
+  return root
+}
+
+/** Parser calls for a conversation database, through the real Antigravity provider and its pairing. */
+async function antigravityCalls(dbPath: string): Promise<ParsedProviderCall[]> {
+  const cacheDir = mkdtempSync(join(tmpdir(), 'kyber-agy-e2e-cache-'))
+  tempRoots.push(cacheDir)
+  vi.stubEnv('KYBERDASH_CACHE_DIR', cacheDir)
+  try {
+    const parser = createAntigravityProvider().createSessionParser(
+      { path: dbPath, project: 'antigravity-cli', provider: 'antigravity' },
+      new Set(),
+    )
+    const parsedCalls: ParsedProviderCall[] = []
+    for await (const parsedCall of parser.parse()) parsedCalls.push(parsedCall)
+    return parsedCalls
+  } finally {
+    vi.unstubAllEnvs()
+  }
+}
+
+describe('D29 — Antigravity catalogue carrier and its tool children through ingestProviders', () => {
+  it('states tool_definitions not measurable on every tool child of the catalogue-carrying call, while the carrier measures it', async () => {
+    const root = antigravityRoot({ transcript: true, mcpTool: true })
+    const dbPath = join(root, 'conversations', `${AGY_CONVERSATION}.db`)
+    const calls = await antigravityCalls(dbPath)
+
+    const result = await ingestProviders(['antigravity-cli'], () => ({
+      calls,
+      filePath: dbPath,
+      harnessId: 'antigravity-cli',
+      sourceKey: `antigravity-cli:${AGY_CONVERSATION}`,
+    }))
+
+    expect(result.problems).toEqual([])
+    const carriers = result.records.filter(
+      (record) => record.op !== 'tool.invoke' && record.parts?.some((part) => part.part === 'tool_definitions'),
+    )
+    expect(carriers).toHaveLength(1)
+    const [carrier] = carriers
+    expect(carrier!.measurability?.['tool_definitions']).toBe('measured')
+
+    const children = result.records.filter((record) => record.op === 'tool.invoke' && record.parentSpanId === carrier!.spanId)
+    expect(children.length, 'transcript tool children of the catalogue carrier').toBeGreaterThan(0)
+    for (const child of children) {
+      expect(child.measurability?.['tool_definitions'], `tool_definitions on ${child.spanId}`).toEqual(
+        measurabilityFor('antigravity')['tool_definitions'],
+      )
+    }
   })
 })

@@ -664,6 +664,12 @@ export type SessionContentPart = {
   server?: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident, so the route never invents the mark on a part that
+   * did not carry it. Mirrors `ContentPart.resident`.
+   */
+  resident?: false
 }
 
 export type SessionContentResult = {
@@ -720,6 +726,11 @@ export type TurnContentPart = {
   totalLength?: number
   order?: number
   recurrence?: TurnContentPartRecurrence
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident. Mirrors `ContentPart.resident`.
+   */
+  resident?: false
 }
 
 export type TurnContentBlock = {
@@ -2791,6 +2802,9 @@ export class KyberBridge {
         }
         if (piece.tokens !== undefined) entry.tokens = piece.tokens
         if (piece.server !== undefined) entry.server = piece.server
+        // Copied only when set: the drawer labels a definition as offered on
+        // `false`, so a resident part must come back with no key at all.
+        if (piece.resident === false) entry.resident = false
         assembled.push(entry)
       }
     }
@@ -3023,7 +3037,9 @@ export class KyberBridge {
         return true
       })
       const text = uniqueParts.map((p) => p.text).join('\n\n')
-      const tokens = uniqueParts.reduce((sum, p) => sum + (p.tokens ?? 0), 0) || undefined
+      // A non-resident definition stays in the block's parts so the reader can
+      // show it, but it adds no tokens: the block's figure is the resident one (D7).
+      const tokens = uniqueParts.reduce((sum, p) => sum + (p.resident === false ? 0 : (p.tokens ?? 0)), 0) || undefined
 
       const block: TurnContentBlock = {
         key: def.key,
@@ -3177,6 +3193,7 @@ export class KyberBridge {
           tokens: p.tokens,
           server: p.server,
           order: p.order ?? orderCounter,
+          ...(p.resident === false ? { resident: false } : {}),
         })
       } else if (p.part === 'instruction_context') {
         parts.push({

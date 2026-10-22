@@ -845,6 +845,128 @@ describe('buildSkillsView, Antigravity', () => {
   })
 })
 
+// Antigravity invocations come from the transcript (D6): a transcript-covered turn
+// carries `kyber.skills.invoked`, even as `[]` (measured, none invoked). A session
+// whose records carry no such key has no transcript behind it.
+const SYNTHETIC_AGY_LISTING = 'Active Skills: synthetic-alpha, synthetic-beta'
+
+/** An Antigravity model turn carrying the synthetic listing and, when given, the transcript's invoked list. */
+function antigravityTurn(spanId: string, invoked?: string[]): CanonicalRecord {
+  return modelTurn('antigravity', spanId, {
+    source: 'antigravity',
+    raw: {
+      [ANTIGRAVITY_LISTING_KEY]: SYNTHETIC_AGY_LISTING,
+      ...(invoked !== undefined ? { [INVOKED_KEY]: invoked } : {}),
+    },
+  })
+}
+
+describe('buildSkillsView, Antigravity invocations from the transcript', () => {
+  it('a transcript-covered session with no skill load reports every listed skill as measured zero', () => {
+    const turns = [antigravityTurn('turn-1', []), antigravityTurn('turn-2', [])]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    for (const name of ['synthetic-alpha', 'synthetic-beta']) {
+      expect(rowNamed(view, name).invocations, name).toBe(0)
+    }
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toBeUndefined()
+  })
+
+  it('counts each skill once per covered turn that names it', () => {
+    const turns = [
+      antigravityTurn('turn-1', ['synthetic-alpha']),
+      antigravityTurn('turn-2', ['synthetic-alpha', 'synthetic-beta']),
+      antigravityTurn('turn-3', []),
+    ]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(rowNamed(view, 'synthetic-alpha').invocations).toBe(2)
+    expect(rowNamed(view, 'synthetic-beta').invocations).toBe(1)
+  })
+
+  it('a session with no kyber.skills.invoked key reports invocations not measurable, naming the transcript', () => {
+    const turns = [antigravityTurn('turn-1')]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/transcript/i),
+    })
+    expect(rowNamed(view, 'synthetic-alpha')).not.toHaveProperty('invocations')
+  })
+
+  it('a Copilot session without a skill record keeps its wording: the reason does not name a transcript', () => {
+    const rollup = copilotRollup('conductor-agent')
+    const chat = copilotChat('chat-1', 'conductor-agent')
+    const view = buildSkillsView([rollup, chat], [chat], {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    const availability = (view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability
+    expect(availability).toMatchObject({ availability: 'not_measurable' })
+    expect(availability!.reason).not.toMatch(/transcript/i)
+  })
+})
+
+// D30: an Antigravity turn is measured for invocations only where its record carries
+// `kyber.skills.invoked`, `[]` included. When some turns are covered and some are not,
+// the figures are measured over the covered turns and the view says how many they were.
+describe('buildSkillsView, Antigravity invocations per covered turn (D30)', () => {
+  // turn-1 carries no key (not covered), turn-2 is measured none, turn-3 names alpha.
+  const partiallyCovered = (): CanonicalRecord[] => [
+    antigravityTurn('turn-1'),
+    antigravityTurn('turn-2', []),
+    antigravityTurn('turn-3', ['synthetic-alpha']),
+  ]
+
+  it('measures invocations over the covered turns: alpha once, beta measured none', () => {
+    const turns = partiallyCovered()
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    expect(rowNamed(view, 'synthetic-alpha').invocations).toBe(1)
+    expect(rowNamed(view, 'synthetic-beta').invocations).toBe(0)
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toBeUndefined()
+  })
+
+  it('states the covered and total turn counts when only some turns are covered', () => {
+    const turns = partiallyCovered()
+    const view = buildSkillsView(turns, turns, {}, characterCount())
+
+    expect(view).toHaveProperty('invocationsCoverage', { measuredTurns: 2, totalTurns: 3 })
+  })
+
+  it('omits invocationsCoverage when every Antigravity turn is covered', () => {
+    const turns = [antigravityTurn('turn-1', []), antigravityTurn('turn-2', ['synthetic-alpha'])]
+    const view = buildSkillsView(turns, turns, {}, characterCount())
+
+    expect(view).toMatchObject({ measurable: true })
+    expect(view).not.toHaveProperty('invocationsCoverage')
+  })
+
+  it('omits invocationsCoverage when no turn is covered, and the invocations stay not measurable', () => {
+    const turns = [antigravityTurn('turn-1'), antigravityTurn('turn-2')]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).not.toHaveProperty('invocationsCoverage')
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toMatchObject({
+      availability: 'not_measurable',
+    })
+  })
+
+  it('leaves a Claude Code session, which has no transcript coverage, without invocationsCoverage', () => {
+    const turn1 = claudeTurn('turn-1', '2026-01-01T00:00:01.000Z')
+    const records = [
+      turn1,
+      toolCall('claude-code', 'tool-1', 'turn-1', 'Skill', { skill: 'docs' }, '2026-01-01T00:00:01.000Z'),
+    ]
+    const view = buildSkillsView(records, [turn1], {}, characterCount())
+
+    expect(view).not.toHaveProperty('invocationsCoverage')
+  })
+})
+
 describe('buildSkillsView, not measurable and wording', () => {
   it('a Pi session returns not_measurable with a reason naming skills, never rows', () => {
     const pi = modelTurn('pi', 'pi-turn', { source: 'pi', raw: {} })
