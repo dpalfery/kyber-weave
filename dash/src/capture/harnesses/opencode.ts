@@ -1,4 +1,4 @@
-// OpenCode capture writer (P2.4a).
+// OpenCode capture writer (P2.4a, T6 ownership).
 //
 // AI-SDK spans need `experimental.openTelemetry: true` in
 // ~/.config/opencode/opencode.jsonc (JSONC). The OTLP endpoint is not a
@@ -6,10 +6,25 @@
 // environment, so status reports that variable and enable never writes it
 // or a shell rc. Status also notes upstream #13438 and the non-model span
 // volume; those are observations, not keys the receipt restores.
+//
+// T6 owns the dash-CLI-managed plugin contract here beside the flag: the
+// plugin id and its `plugins` config keys are DECLARED (re-exported) so
+// capture owns the contract, but they are never written — local file
+// discovery installs the plugin by file, and `desiredKeys` stays the single
+// OTel flag. The endpoint likewise stays process-env-only.
 
 import { envJoin, type PathEnv } from '../paths.js'
 
 import type { ManagedHarnessWriter } from './registry.js'
+
+/**
+ * The plugin capture contract, declared here and never written (T6
+ * declare-only). The dash CLI installs the plugin file into opencode's own
+ * plugin directories (see `resolveOpencodePluginPaths`); capture manages
+ * only the OTel flag below. Re-exported so the writer module is the single
+ * ownership point for the plugin's capture keys.
+ */
+export { OPENCODE_PLUGIN_CONFIG_KEYS, OPENCODE_PLUGIN_ID } from './opencode-plugin/plugin.js'
 
 /** The only key enable writes. The value stays a JSON boolean. */
 const OPENCODE_OTEL_FLAG_KEY = 'experimental.openTelemetry'

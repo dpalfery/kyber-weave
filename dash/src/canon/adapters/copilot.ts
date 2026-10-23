@@ -253,8 +253,12 @@ function systemPromptText(attributes: Record<string, unknown>): string | undefin
  * Attribute values arrive either as JSON text (OTLP flattens structured
  * attributes to strings) or already decoded. Undecodable text is not an
  * error — it is content, and the caller stores it as such.
+ *
+ * Shared with the opencode adapter rather than duplicated there: one
+ * lenient JSON read for the whole adapter seam, so a strictness change
+ * lands everywhere at once.
  */
-function parseStructured(value: unknown): unknown {
+export function parseStructured(value: unknown): unknown {
   if (typeof value !== 'string') return value
   try {
     return JSON.parse(value)

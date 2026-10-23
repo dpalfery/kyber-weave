@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-22
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -58,6 +58,9 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - isOpencodeEnvelopeSpan
+  - OPENCODE_CONTRACT_VERSION
+  - createInstalledOpencodePlugin
   - ClaudeContentReader
   - ingestProviders
   - CompareRuns
@@ -279,6 +282,57 @@ flowchart TD
 
 Measured behaviour, residuals, and the counts behind them are in the
 [telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
+
+### OpenCode plugin span/turn envelope (`kyberdash-opencode`)
+
+The dash-CLI-managed plugin (`dash/src/capture/harnesses/opencode-plugin/`, one codebase
+for opencode Desktop and CLI v2 installed by file into opencode's plugin dirs) is a
+**sender**, not a surface: it emits span-anchored OTLP/HTTP spans to the loopback receiver
+(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline
+spool with retry, backoff, and drop-oldest accounting), and every hook is best-effort with
+a 250 ms delivery budget, so a delivery failure never fails the host session. It writes no
+database directly and serves no API: rows reach `canon.db` only through the receiver →
+`ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
+`/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
+`enable` writes only `experimental.openTelemetry`; the `plugins` registration key and
+`OTEL_EXPORTER_OTLP_ENDPOINT` never enter a receipt.
+
+The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
+
+- **Version key.** Every envelope span names its emitting contract under
+  `opencode.contract_version` (`OPENCODE_CONTRACT_VERSION`, currently `'1'`); a contract
+  bump invalidates stale checkpoints, following the parser-contract invalidation precedent.
+- **Version guard.** `ingestBatchWithAdapters` (`dash/src/canon/ingest.ts`) quarantines an
+  envelope span with an unknown or missing version under the fixed reason
+  `unknown opencode contract version` before the adapter vote, so no adapter claims it
+  and it is never misattributed to any harness. The decoded packet stays as the audit
+  evidence, as on every other quarantine path.
+- **Claim rule.** The `opencode` adapter claims only the supported envelope (a supported
+  envelope span scores 1; an envelope span under any other version scores 0). A bare
+  `opencode.session.id` with no turn/model/tool/prompt/call/message/hook marker is not
+  the envelope and keeps the legacy non-model path — that is why the envelope is opt-in
+  by marker rather than by namespace.
+- **Mapping.** Session identity rides verbatim and is never synthesized. A tool marker
+  (`opencode.tool.name`) wins over the model markers and maps to `tool.invoke`; model
+  markers map to `llm.invoke`. Prompt text (`opencode.prompt.text`) buckets as
+  conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
+  as non-model — the correct taxonomy for a boundary, not a rejection — with zero
+  fabricated counters and session anchoring.
+- **Assembly.** The installed entry (`plugin.ts`, reached via the `opencode.ts`
+  declare-only re-export) wires hook→mapper→turn→outbox→sender
+  (`createInstalledOpencodePlugin`): every hook boundary maps through the mapper and turn
+  stages onto bounded evidence, then delivers through the outbox (or the sender directly
+  when unspooled). Either way the never-fail-host contract holds, and one codebase serves
+  both Desktop and CLI v2 targets.
+
+Content follows the sender-opt-in rule: counters always flow; prompt text flows only
+under sender opt-in, and assembled text honors the 14-day content purge. Operator steps
+(enable, restart matrix, green-enable≠capture) are in the
+[runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
+T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
+verification on Desktop and CLI v2 (owner enablement, plugin install, live turn) is still
+open, tracked by [kyberdash-opencode-plugin-live-verification](../todo/kyberdash-opencode-plugin-live-verification.md) —
+nothing here is live-verified on this checkout.
 
 ## Local harness-source refresh
 

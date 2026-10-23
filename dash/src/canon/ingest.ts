@@ -35,6 +35,11 @@ import { copilotAdapter, UNKNOWN_TIMESTAMP } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
 import { opencodeAdapter } from './adapters/opencode.js'
+import {
+  UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON,
+  isOpencodeEnvelopeSpan,
+  isSupportedOpencodeEnvelope,
+} from './adapters/opencode-envelope.js'
 import { piAdapter } from './adapters/pi.js'
 import { derivePiToolRecords } from './adapters/pi-tools.js'
 import { AdapterRegistry } from './adapters/registry.js'
@@ -359,16 +364,38 @@ export function ingestBatchWithAdapters(
   const adapterByName = new Map(adapters.map((adapter) => [adapter.name, adapter]))
 
   const rawSpans = spans.map(toRawSpan)
-  const attributed = registry.attribute(rawSpans)
 
   // The exact incoming span for the quarantine detail route (v18 `raw_payload`).
   // Decoded-span JSON, not the normalized record: the record is what attribution made
   // of the span, and mislabeling it as the original message is forbidden.
   const rawPayloadOf = (index: number): string => boundRawPayload(JSON.stringify(spans[index]))
 
+  // T1 version guard: an envelope span naming an unknown or missing contract
+  // quarantines with its named reason before the vote, so no adapter can
+  // claim it and it is never misattributed to any harness. The row names no
+  // harness — attribution decided nothing for this span — and the decoded
+  // packet stays as the audit evidence, as on every other quarantine path.
+  const versionQuarantined = new Set<number>()
+  for (const [index, raw] of rawSpans.entries()) {
+    if (!isOpencodeEnvelopeSpan(raw) || isSupportedOpencodeEnvelope(raw)) continue
+    versionQuarantined.add(index)
+    store.quarantineAndDelete(
+      raw.spanId,
+      observedNamespaces(raw.attributes),
+      UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON,
+      {
+        source: raw.source,
+        name: raw.name,
+        timestamp: spans[index]?.timestamp ?? raw.timestamp,
+        rawPayload: rawPayloadOf(index),
+      },
+    )
+  }
+  const attributed = registry.attribute(rawSpans.filter((_, index) => !versionQuarantined.has(index)))
+
   const unclaimed: string[] = []
   for (const [index, raw] of rawSpans.entries()) {
-    if (attributed.has(raw.spanId)) continue
+    if (versionQuarantined.has(index) || attributed.has(raw.spanId)) continue
     unclaimed.push(raw.spanId)
     store.quarantineAndDelete(
       raw.spanId,
@@ -385,7 +412,7 @@ export function ingestBatchWithAdapters(
       },
     )
   }
-  let quarantined = unclaimed.length
+  let quarantined = unclaimed.length + versionQuarantined.size
   let rejected = 0
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()

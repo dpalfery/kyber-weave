@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-22
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -53,6 +53,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Command Code (`commandcode`) | JSONL counter ingest from `~/.commandcode/projects/<slugified-cwd>/<session-id>.jsonl` (`dash/src/providers/commandcode.ts`), with the format verified against the published `command-code` 1.84.0 package. Each assistant entry whose `usage` carries any non-zero counter becomes one call. The AI SDK's `inputTokens` includes both cache classes, so the provider subtracts `cacheReadTokens` and `cacheWriteTokens` to recover fresh input. Cost is the transcript's `costUsd` when it is positive (reported); otherwise it is priced from the model pricing table and marked `costIsEstimated`. The content reader (`commandcodeReader`, `dash/src/synth/readers/commandcode.ts`) yields one turn per assistant message, keyed by the message id as `nativeRecordId`, which the counter call carries as `pairingId`, so the two join by id; `turnId` stays unset, so record identity keeps its digest (envelopes carry no `nativeRecordId`). Assistant text becomes `conversation_history`, tool calls come from `tool_use` blocks, and tool results from the following user message attach to their turn. An assistant message without a `usage` object produces no counter call, so its text is dropped. The user prompt rides on the counter call as `userMessage`, not as a content part. The hyphenated `command-code` filter spelling folds to the stored id `commandcode` (`normalizeHarnessName`, `dash/src/canon/measurability.ts`), so `?harness=command-code` matches the stored rows. Provider and reader behaviour is pinned by unit tests on synthetic transcripts. | No OTLP adapter claims Command Code, so collection is file-source only, through `dash refresh`. Content is limited to what the transcript stores. The reader declares `schema_cost`, `system_prompt`, `instruction_context`, and `tool_definitions` not measurable (`READER_UNMEASURABLE`). `tool_result_content` is measured: it is not listed in `READER_UNMEASURABLE`, and paired tool-result text is written to its tool record without a not-measurable declaration. Tool records report `status: ok` for any paired result; a call with no following result reads `status: unset`. The reader sets `isError` only from an `is_error` flag on the tool-result block, and the `command-code` 1.84.0 writer persists no error flag, so an error call is indistinguishable from a successful one. Parser contract `2` (`COMMANDCODE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`): advancing it makes existing checkpoints stale. No live owner session is recorded. |
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. KyberDash can now set the `opencode.jsonc` OpenTelemetry flag from the Settings drawer or `kyberdash kyber capture enable --harness opencode` (see [in-app enablement](#in-app-collection-enablement)). | The endpoint is read from the process environment, not the file, so `OTEL_EXPORTER_OTLP_ENDPOINT` must still be set by the owner where OpenCode launches. Owner enablement and a live turn are required before collection can be verified. |
+| OpenCode plugin (`kyberdash-opencode`, T6) | Session/turn/span lifecycle hooks map to span-anchored OTLP/HTTP spans posted to the loopback receiver through the bounded outbox (offline spool, retry with backoff, drop-oldest accounting). Capture owns the keys declare-only: `enable` writes only `experimental.openTelemetry`; the `plugins` registration key and `OTEL_EXPORTER_OTLP_ENDPOINT` are never written. | The plugin file installs by file into opencode's plugin dirs (`~/.config/opencode/plugins/`, `.opencode/plugins/`); the endpoint stays process-env-only. Owner enablement, plugin install, and a live turn are all required before collection can be verified. Not live-verified on this checkout. |
 | Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 4). `kiloReader` (`dash/src/synth/readers/kilo.ts`) is the content half of the same store: one turn per token-bearing assistant message, `nativeRecordId` equal to the Kilo `message.id`, paired to the parser's calls by `pairingId` rather than by position. Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported, and the content buckets in [Kilo Code OTLP surface](#kilo-code-otlp-surface-documented-not-ingested) come from `message` and `part` rows. Its OTel surface is now documented and is **not ingested**: Kilo emits no model spans, usage or content. The Settings drawer row installs and removes the capture plugin (Enable and Disable), and usage collection is gated on folder import, which is scheduled off by default. |
 | Devin | File-source ingest reads CLI transcripts under `~/.local/share/devin/cli/transcripts/` and session metadata from `sessions.db`. Discovery and parse do not require `devin.acuUsdRate`; a missing or non-finite rate still yields token/tool calls with `costIsEstimated: true` (`costUSD: 0` is never a measured zero). Doctor names the missing rate when sessions exist. | Set `devin.acuUsdRate` in `~/.kyberdash/config.json` to price ACU usage; until then cost is unpriced, not absent. |
 | Warp | SQLite history under the Group Containers path opens through the read-only cache (`copyFileBestEffort`). Readable source bytes produce records even when copyfile(2) returns EPERM/EACCES; a true source EACCES/EPERM is surfaced to doctor as `permission-denied` (Full Disk Access on darwin) instead of empty sessions. Cache-dir write failures are not classified as source TCC denials. | Owner grants Full Disk Access (macOS) when the source path is TCC-denied; no fabricated rows. |
@@ -770,6 +771,71 @@ per-server schema bands.
    conversation and tool-result content. The kilo.db reader, the parser contract `4` bump and
    the folder-import route are fixture-verified only.
 
+## OpenCode Desktop + CLI v2 hook/plugin API addendum (T0 survey, not collected)
+
+**Survey only.** This addendum pins the external opencode contract for T1–T3. It changes
+no collector, resolver, or `/api/kyber/*` behavior. The OpenCode row above stays gated on
+an owner capture; nothing here is live-verified on this checkout. Skeleton fixtures that
+match this shape live under `dash/src/capture/harnesses/opencode-plugin/fixtures/`
+(`hook-catalog.json`, `span-payload-skeleton.json`, `install-targets.json`).
+
+**Hook names.** V1 legacy plugin hooks (`packages/plugin/src/index.ts`, `Hooks` type):
+`event`, `config`, `tool`, `auth`, `provider`, `chat.message`, `chat.params`,
+`chat.headers`, `permission.ask`, `command.execute.before`, `tool.execute.before`,
+`shell.env`, `tool.execute.after`, `tool.definition`,
+`experimental.chat.messages.transform`, `experimental.chat.system.transform`,
+`experimental.provider.small_model`, `experimental.session.compacting`,
+`experimental.compaction.autocontinue`, `experimental.text.complete`. V1 events
+(`opencode.ai/docs/plugins/`): `command.executed`; `file.edited`,
+`file.watcher.updated`; `installation.updated`; `lsp.client.diagnostics`, `lsp.updated`;
+`message.part.removed`, `message.part.updated`, `message.removed`, `message.updated`;
+`permission.asked`, `permission.replied`; `server.connected`; `session.created`,
+`session.compacted`, `session.deleted`, `session.diff`, `session.error`, `session.idle`,
+`session.status`, `session.updated`; `shell.env`; `tool.execute.after`,
+`tool.execute.before`; `tui.prompt.append`, `tui.command.execute`, `tui.toast.show`.
+V2 namespaced hooks (`opencode.ai/v2/docs/build/plugins`): session `prompt`, `context`,
+`compaction`, `generate`, `title`, `model.request`, `http.request`, `http.response`,
+`experimental.ws.handshake`, `experimental.ws.send`, `experimental.ws.receive`, `retry`;
+permission `evaluate`; shell `create.before`; tool `execute.before`, `execute.after`.
+
+**Span start/end + turn/session/tokens/tools/errors payload keys.** Span envelope:
+`trace_id`, `span_id`, `parent_span_id`, start/end timestamps, status code/message.
+Turn keys: `sessionID`, `messageID` (added to `tool.execute.before/after` per upstream
+feature request [#15933](https://github.com/anomalyco/opencode/issues/15933)), `callID`,
+prompt `text`/`files`/`agents`/`skills`, `metadata`, `delivery` (`steer` default,
+`queue` optional). Session keys: `sessionID`, `agent`, `model.providerID`,
+`model.id`. Request keys: `system`, `messages`, `options` (`maxTokens`, `temperature`,
+`topP`, `topK`, `frequencyPenalty`, `presencePenalty`, `seed`, `stop`, provider options),
+`tools`, `headers`, `kind` (`primary`/`compaction`/`title`/`generate`), `url`/`frame`
+for WebSocket hooks. Tool keys: `tool`, `sessionID`, `callID`, `messageID`, `args`,
+`title`/`output`/`metadata`, `status` (`completed`/`error`), `error.message`.
+Error/retry keys: `error.type`, `error.message`, `error.status`, `attempt`, `decision`
+(`{retry, delay}`). Token keys carried where the sender exports them: `input_tokens`,
+`output_tokens`, `cache_read_tokens`, `cache_creation_tokens`.
+
+**Install/packaging targets.** V1 (`opencode.ai/docs/plugins/`): project
+`.opencode/plugins/`, global `~/.config/opencode/plugins/`, npm `plugin` key in
+`opencode.json`, installer Bun at startup with cache `~/.cache/opencode/node_modules/`
+(corrected to `~/.cache/opencode/packages/<sanitized>/` via npm Arborist per
+[PR #44373](https://github.com/anomalyco/opencode/pull/44373)); load order global
+config → project config → global plugin dir → project plugin dir. V2
+(`opencode.ai/v2/docs/plugins/`): `Plugin.define({ id, setup })`, `plugins` key in
+`opencode.jsonc` (npm name, `name@version`, scoped, relative/absolute/`file:` paths,
+`{ package, options }` object form), discovery from every `.opencode/plugins/` plus
+`~/.config/opencode/plugins/`, CLI `opencode plugin add/list/check/update/remove`,
+watched-config reload with `opencode service restart`.
+
+**Desktop-vs-CLIv2 deltas.** Desktop runs a local OpenCode server (`opencode-cli`
+sidecar) in the background with the same plugin dirs and config keys (Windows:
+`%USERPROFILE%\.config\opencode`, `%USERPROFILE%\.cache\opencode`). Desktop v21
+loaded npm plugins from `~/.cache/opencode/node_modules/` instead of the config tree
+and broke data-file plugins ([issue #12222](https://github.com/anomalyco/opencode/issues/12222));
+the fix installs npm plugins into config directories
+([PR #12352](https://github.com/anomalyco/opencode/pull/12352)). Desktop sends
+automatic system notifications when a response is ready or a session errors; CLIv2 has
+no equivalent surface. Desktop troubleshooting is disable-plugins then clear-cache and
+restart; CLIv2 uses watched-config reload / `opencode service restart`.
+
 ## Sources
 
 - [Claude Code monitoring & usage](https://code.claude.com/docs/en/monitoring-usage)
@@ -784,3 +850,7 @@ per-server schema bands.
 - [Cline — architecture and session data storage](https://github.com/cline/cline)
 - [Roo Code — task data storage](https://github.com/RooVetGit/Roo-Cline)
 - [Windsurf — IDE and Cascade documentation](https://codeium.com/windsurf)
+- [OpenCode plugins (v1 hooks, events, install targets)](https://opencode.ai/docs/plugins/)
+- [OpenCode v2 build plugins (namespaced hooks)](https://opencode.ai/v2/docs/build/plugins)
+- [OpenCode v2 plugins (configure, discover, manage)](https://opencode.ai/v2/docs/plugins/)
+- [OpenCode legacy plugin Hooks source](https://github.com/anomalyco/opencode/blob/dev/packages/plugin/src/index.ts)
