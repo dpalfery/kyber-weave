@@ -145,6 +145,39 @@ describe('opencode plugin span mapper carries the T0 payload onto the T1 envelop
     expect(String(span.status.message ?? '')).toMatch(/upstream 500/)
     expect(span.attributes['opencode.session.id']).toBe('ses_t3_model')
   })
+
+  it('omits non-finite token counters instead of stamping NaN/Infinity', () => {
+    const attributes = mapOpencodePayloadToAttributes({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-t3-nan-tokens',
+      tokens: {
+        input_tokens: Number.NaN,
+        output_tokens: Number.POSITIVE_INFINITY,
+        cache_read_tokens: Number.NaN,
+        cache_creation_tokens: Number.POSITIVE_INFINITY,
+        reasoning_tokens: Number.NaN,
+      },
+    })
+
+    expect(attributes['llm.token_count.prompt']).toBeUndefined()
+    expect(attributes['llm.token_count.completion']).toBeUndefined()
+    expect(attributes['llm.token_count.prompt_details.cache_read']).toBeUndefined()
+    expect(attributes['llm.token_count.prompt_details.cache_write']).toBeUndefined()
+    expect(attributes['llm.token_count.completion_details.reasoning']).toBeUndefined()
+  })
+
+  it('never throws on junk timestamps, falling back to a valid span', () => {
+    const span = mapOpencodePayloadToOtlpSpan({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-t3-junk-time',
+      startTimeUnixNano: 'not-a-timestamp',
+      endTimeUnixNano: 'also-junk',
+    })
+
+    expect(span.startTimeUnixNano).toBe('not-a-timestamp')
+    expect(Number.isNaN(Date.parse(span.timestamp))).toBe(false)
+    expect(span.durationMs).toBeGreaterThanOrEqual(0)
+  })
 })
 
 describe('opencode plugin span mapper round-trips through the opencode adapter', () => {

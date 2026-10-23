@@ -80,9 +80,20 @@ function toNanoString(value: string | number | bigint): string {
   return typeof value === 'bigint' ? value.toString() : String(value)
 }
 
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+// Best-effort harness clock: a junk timestamp must never throw away the
+// span+log evidence for the hook. Unparseable input falls back to now,
+// matching the installed pipeline's hook-anchored fallback.
 function nanoToMs(timestampNano: string | number | bigint): number {
-  const start = BigInt(toNanoString(timestampNano))
-  return Number(start / 1_000_000n)
+  try {
+    const ms = Number(BigInt(toNanoString(timestampNano)) / 1_000_000n)
+    return Number.isFinite(ms) ? ms : Date.now()
+  } catch {
+    return Date.now()
+  }
 }
 
 function isErrorPayload(errors: OpencodePluginSpanError | undefined): boolean {
@@ -125,15 +136,21 @@ export function mapOpencodePayloadToAttributes(
   }
   if (nonEmpty(payload.hook)) attributes['opencode.hook'] = payload.hook
   if (payload.tokens !== undefined) {
-    attributes['llm.token_count.prompt'] = payload.tokens.input_tokens
-    attributes['llm.token_count.completion'] = payload.tokens.output_tokens
-    if (payload.tokens.cache_read_tokens !== undefined) {
+    // Non-finite counters are omitted, never stamped: NaN/Infinity would
+    // otherwise land as a confident measured value downstream.
+    if (finiteNumber(payload.tokens.input_tokens)) {
+      attributes['llm.token_count.prompt'] = payload.tokens.input_tokens
+    }
+    if (finiteNumber(payload.tokens.output_tokens)) {
+      attributes['llm.token_count.completion'] = payload.tokens.output_tokens
+    }
+    if (finiteNumber(payload.tokens.cache_read_tokens)) {
       attributes['llm.token_count.prompt_details.cache_read'] = payload.tokens.cache_read_tokens
     }
-    if (payload.tokens.cache_creation_tokens !== undefined) {
+    if (finiteNumber(payload.tokens.cache_creation_tokens)) {
       attributes['llm.token_count.prompt_details.cache_write'] = payload.tokens.cache_creation_tokens
     }
-    if (payload.tokens.reasoning_tokens !== undefined) {
+    if (finiteNumber(payload.tokens.reasoning_tokens)) {
       attributes['llm.token_count.completion_details.reasoning'] = payload.tokens.reasoning_tokens
     }
   }
