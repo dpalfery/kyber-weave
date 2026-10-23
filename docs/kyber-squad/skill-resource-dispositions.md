@@ -111,7 +111,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/maui-dev/references/theming.md` | technique | retain-in-place | rendered | — | MAUI platform technique; not a host-reversible policy (D2). |
 | `skills/pr-review-fix-comments/providers/azure-devops.md` | provider-guidance | retain-in-place | rendered | — | Provider-specific review-thread workflow; not a host-reversible policy (D2). |
 | `skills/pr-review-fix-comments/providers/github.md` | provider-guidance | retain-in-place | rendered | — | Provider-specific review-thread workflow; not a host-reversible policy (D2). |
-| `skills/product-owner/references/autonomy-decisions.md` | procedure | retain-in-place | rendered | — | Autonomous-mode decision rule and impactful-escalation marker; not a host-reversible policy (D2). |
+| `skills/product-owner/references/autonomy-decisions.md` | procedure | retain-in-place | rendered | — | Autonomous-mode decision rule and hard-block escalation marker; not a host-reversible policy (D2). |
 | `skills/product-owner/references/closeout-phase.md` | procedure | retain-in-place | rendered | — | Spec-closeout phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/design-phase.md` | procedure | retain-in-place | rendered | — | Spec-design phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/requirements-phase.md` | procedure | retain-in-place | rendered | — | Spec-requirements phase procedure; not a host-reversible policy (D2). |

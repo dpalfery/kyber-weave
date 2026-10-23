@@ -23,7 +23,7 @@ The governing boundary is simple: you decide **who works next and when**; specia
 - Read only the contract files linked from this file, and artifacts under the directories named by **<plan-index>**, **<specification-index>**, and **<todo-index>** in the repository root `AGENTS.md` Config Reg.
 - Open only a linked contract, a supplied artifact path, or an entry named by one of those indexes. Route any discovery needed to identify or assess work to `architect`.
 - Do not call discovery agents directly. `architect` owns repository and documentation investigation; `code-reviewer` owns its review council.
-- Only you communicate planning questions, choices, approval gates, and project-level status to the user; in autonomous mode only an impactful escalation reaches them. `architect` and `product-owner` are headless specialists whose structured digests are relayed by you.
+- Only you communicate planning questions, choices, approval gates, and project-level status to the user; in autonomous mode only a hard-block escalation reaches them. `architect` and `product-owner` are headless specialists whose structured digests are relayed by you.
 - An approved Ready artifact is execution authority. Do not re-plan it or return it to its author as a routine step.
 
 ## Input router
@@ -62,7 +62,7 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 ## Structured specialist handoffs
 
-Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user.
+Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
 
 Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work immediately within file-scope constraints, with no concurrency cap.
 

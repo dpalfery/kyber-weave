@@ -63,38 +63,39 @@ public sealed class SquadAutonomyContractTests
             "INTAKE_RECOMMENDATION",
             "autonomous: recommendation accepted",
             "`## Decisions`",
-            "ESCALATION: impactful",
+            "ESCALATION: hard_block",
             "SOURCES_SEARCHED",
             "COST_OF_WRONG",
             "RECOMMENDED",
             "approve and execute",
-            "rejects an impactful escalation",
+            "rejects a hard-block escalation",
             "same question-group shape");
     }
 
     [Fact]
-    public void ConductorKeepsTheFourHardStopsHumanInAutonomousMode()
+    public void ConductorKeepsOnlyTrueHardStopsHumanInAutonomousMode()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
 
         AssertAll(autonomy,
             "Hard stops",
-            "NEEDS_HUMAN",
-            "commit, push, publish, open a pull request",
-            "circuit-breaker",
+            "RECOMMENDED: none",
+            "merge, publish, delete, or spend",
             "STATUS: BLOCKED",
-            "write error");
+            "write error",
+            "draft** pull request",
+            "Never merge");
     }
 
     [Fact]
-    public void AutonomousNeedsHumanParksTheChangeAndFinishesUnaffectedWork()
+    public void AutonomousNeedsHumanAndCircuitBreakerParkTheChangeAndStillDeliverADraftPr()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
         string execution = Read("agents", "conductor", "references", "execution-and-review.md");
 
-        AssertAll(autonomy, "pending human review", "park", "never push");
+        AssertAll(autonomy, "pending human review", "Park that change or task", "Do not mark the pull request ready");
         Assert.Contains("is terminal", execution, StringComparison.Ordinal);
-        Assert.Contains("autonomy.md", execution, StringComparison.Ordinal);
+        Assert.Contains("autonomy contract", execution, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -123,7 +124,7 @@ public sealed class SquadAutonomyContractTests
             "cheap to reverse",
             "expensive to reverse",
             "already-accepted decision",
-            "ESCALATION: impactful",
+            "ESCALATION: hard_block",
             "SOURCES_SEARCHED",
             "COST_OF_WRONG",
             "RECOMMENDED",
@@ -142,7 +143,7 @@ public sealed class SquadAutonomyContractTests
         AssertAll(skill,
             "autonomy",
             "**<autonomy>**",
-            "ESCALATION: impactful",
+            "ESCALATION: hard_block",
             "autonomous: recommendation accepted",
             "approve and execute");
     }
@@ -169,7 +170,7 @@ public sealed class SquadAutonomyContractTests
     }
 
     [Fact]
-    public void MalformedImpactfulEscalationIsRepairedOnceNeverDecidedOrAskedOfTheUser()
+    public void MalformedHardBlockEscalationIsRepairedOnceNeverDecidedOrAskedOfTheUser()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
         string bug = Read("skills", "bug-crusher", "SKILL.md");
@@ -211,7 +212,7 @@ public sealed class SquadAutonomyContractTests
         string ownerRef = Read("skills", "product-owner", "references", "autonomy-decisions.md");
 
         AssertAll(planAuthoring,
-            "ESCALATION: impactful",
+            "ESCALATION: hard_block",
             "SOURCES_SEARCHED",
             "COST_OF_WRONG",
             "autonomy-decisions.md");

@@ -12,7 +12,7 @@ Use this path when the user supplies a specification or selects one from the dir
 
 `product-owner` never prompts the user. It writes only specification artifacts and returns a structured digest. The conductor handles each result:
 
-- `STATUS: REQUIREMENTS_GAP` or `STATUS: DESIGN_GAP` — relay `GAPS` and `OPEN_QUESTIONS`, obtain the user's decision, and resume the named earlier phase. In autonomous mode apply the autonomy contract: accept recommended options and relay only impactful escalations.
+- `STATUS: REQUIREMENTS_GAP` or `STATUS: DESIGN_GAP` — relay `GAPS` and `OPEN_QUESTIONS`, obtain the user's decision, and resume the named earlier phase. In autonomous mode apply the autonomy contract: accept recommended options and relay only hard blocks with `RECOMMENDED: none`.
 - `STATUS: READY_FOR_REVIEW` — present the artifact summary and its open questions. Ask for approval or concrete revision feedback, then send the answer back as a new phase invocation. In autonomous mode approve it by re-invoking `product-owner` with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input (provenance `autonomous: recommendation accepted`); `product-owner` records it, the conductor never writes the row.
 - `STATUS: PHASE_APPROVED` — advance to the next incomplete phase.
 - `STATUS: SPEC_READY` — verify all phases are approved, the task artifact persists `development-mode` and the matching Test or verification contract, and the specification index is synchronized as Draft awaiting final approval.

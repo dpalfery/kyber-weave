@@ -12,7 +12,7 @@ Use this path when the user supplies a plan or selects one from the directory na
 
 The conductor never edits a plan. Require `architect` to persist every decision and return one of its structured markers:
 
-- `STATUS: NEEDS_DECISION` — relay all independent questions, with the specialist's recommended option first. In autonomous mode apply the autonomy contract: accept the recommendation unless the item is an impactful escalation.
+- `STATUS: NEEDS_DECISION` — relay all independent questions, with the specialist's recommended option first. In autonomous mode apply the autonomy contract: accept the recommendation, including on a `hard_block` that carries one; only a hard block with `RECOMMENDED: none` reaches the user.
 - `STATUS: BLOCKED` naming a live Azure state question `architect` could not delegate — put that exact question to `azure-reader`, return its answer to `architect` against the same `PLAN_FILE`, and continue. This happens on harnesses that give subagents no way to invoke another agent. Any other `STATUS: BLOCKED`, or one that recurs after the answer, is handled as below.
 - `STATUS: BLOCKED` or `STATUS: PLAN_WRITE_ERROR` — relay the evidence and stop. If `architect` reports a write error on a nonexistent file because the host harness withholds file creation from subagents, pre-create the empty destination file before redispatching as a degradation fallback.
 - `STATUS: PLAN_READY` — verify the saved plan and index agree on Draft, all decisions are resolved in the permanent `## Decisions` table (with complete fields: ID, Question, Answer / decision, Mitigating and supporting information, Status / approval provenance), the selected `development-mode` and its Test or verification contract are present, and documentation validation passed.
