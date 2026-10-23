@@ -10,7 +10,7 @@ Persist the packet's `autonomy` in the plan next to `development-mode`. In auton
 2. **Cost of being wrong**, when nothing covers it:
    - cheap to reverse, or local to one task: decide, record, and set status `autonomous: low-confidence, no authoritative source`;
    - expensive to reverse (data-model or persistence shape, a public interface or contract, a dependency choice that spreads, a choice between architectures, anything whose wrong answer wastes the run): still decide when you can stand behind a recommended option, record it as `autonomous: low-confidence, no authoritative source`, and name the cost in the row. A wrong call is caught at pull request review. Escalate only when the cost is high AND you have no option you can recommend.
-3. **Conflict.** A choice that conflicts with an already-accepted decision or a documented constraint: prefer the option that honours the accepted decision and record the conflict. Escalate only when no such option exists.
+3. **Conflict.** A choice that conflicts with an already-accepted decision or a documented constraint: prefer the option that honours the accepted decision and record the conflict, unless that decision is itself `autonomous: low-confidence` and honouring it is expensive to reverse: then escalate as a hard block citing that row. Escalate also when no honouring option exists.
 
 Record the source in `Mitigating and supporting information`; `architect` sets the row's approval provenance when the conductor returns the answers, or the `AUTONOMOUS_APPROVAL` input, keyed by id.
 

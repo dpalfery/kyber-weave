@@ -41,7 +41,7 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 ## Delivery
 
-Autonomous runs deliver the work. After `code-reviewer` returns `APPROVE` (or `NEEDS_HUMAN`, below) and the applicable closeout is done, commit to a feature branch (never the default branch), push it, and open a **draft** pull request. The PR review is the human safety net. Put in the PR description every `autonomous: low-confidence` decision, the count of auto-approved gates, and any change flagged for review. Never merge.
+Autonomous runs deliver the work only when the final council ended in `APPROVE`, or in `NEEDS_HUMAN` or an exhausted `REQUEST_CHANGES` loop whose change is parked (below). Never deliver a change that still has open `REQUEST_CHANGES`; leave it unpushed and report it. Then, with the applicable closeout done, commit to a feature branch (never the default branch), push it, and open a **draft** pull request. The PR review is the human safety net, so assign the PR to the invoking user (and request reviewers when the repository names them) so it is notified. Put in the PR description every `autonomous: low-confidence` decision, the count of auto-approved gates, and any parked change. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
 
 ## Hard stops
 
@@ -53,7 +53,7 @@ These stay human in autonomous mode:
 
 ## NEEDS_HUMAN and circuit-breakers are non-fatal
 
-In autonomous mode a `NEEDS_HUMAN` from `code-reviewer`, and a circuit-breaker that `architect` mediation cannot resolve, do not stop the run. Park that change or task, finish every unaffected queued task and the closeout, then deliver as above. Flag each parked item as pending human review in the draft pull request description and the final report. Do not mark the pull request ready for review.
+In autonomous mode a `NEEDS_HUMAN` from `code-reviewer`, and a circuit-breaker that `architect` mediation cannot resolve, do not stop the run. Park that change or task, finish every unaffected queued task and the closeout, then deliver as above. Flag each parked item as pending human review in the draft pull request description and the final report, and assign the PR to the invoking user so the parked list is notified rather than buried in a draft. Do not mark the pull request ready for review.
 
 ## Final report
 

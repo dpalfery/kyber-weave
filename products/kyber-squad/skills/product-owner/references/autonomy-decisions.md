@@ -10,7 +10,7 @@ Persist the packet's `autonomy` in the task artifact next to `development-mode`.
 2. **Cost of being wrong**, when nothing covers it:
    - cheap to reverse, or local to one task: decide, record, and mark it `autonomous: low-confidence, no authoritative source`;
    - expensive to reverse (data-model or persistence shape, a public interface or contract, a dependency choice that spreads, a choice between architectures, anything whose wrong answer wastes the run): still decide when you can stand behind a recommended option, record it as `autonomous: low-confidence, no authoritative source`, and name the cost in the row. A wrong call is caught at pull request review. Escalate only when the cost is high AND you have no option you can recommend.
-3. **Conflict.** A choice that conflicts with an already-accepted decision or a documented constraint, including an approved earlier phase: prefer the option that honours it and record the conflict. Escalate only when no such option exists.
+3. **Conflict.** A choice that conflicts with an already-accepted decision or a documented constraint, including an approved earlier phase: prefer the option that honours it and record the conflict, unless that decision is itself `autonomous: low-confidence` and honouring it is expensive to reverse: then escalate as a hard block citing that row. Escalate also when no honouring option exists.
 
 ## Escalation (hard block)
 
