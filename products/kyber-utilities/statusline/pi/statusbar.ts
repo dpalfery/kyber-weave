@@ -94,7 +94,10 @@ interface SessionContextView {
 
 /** The slice of the pi extension host this artifact registers with. */
 interface ExtensionHostView {
-  on(event: string, handler: (...args: never[]) => void): () => void;
+  // any[] and not never[]: pi invokes handlers with arguments (the harness calls
+  // session_start with (event, ctx)), and a multi-parameter handler is not
+  // assignable to (...args: never[]) => void under strictFunctionTypes.
+  on(event: string, handler: (...args: any[]) => void): () => void;
 }
 
 /** Format a number in compact "k" notation. */
@@ -226,6 +229,16 @@ function modelLabel(model: SessionContextView['model']): string | undefined {
 }
 
 /**
+ * Coerce an untrusted usage number to a finite total. Transcript entries are host
+ * objects, not validated JSON, so NaN, Infinity, or a mis-typed string would sail
+ * through `?? 0` (which only guards null/undefined) and poison every total into
+ * NaN. Anything that is not a finite number counts as zero.
+ */
+function toFiniteNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
  * Fold a live pi session into the summary the segments render from.
  *
  * Token, cost, and turn counts come from the assistant entries on the current
@@ -248,10 +261,10 @@ export function summaryFromSession(
     turns += 1;
     const usage = entry.message.usage;
     if (!usage) continue;
-    freshInput += usage.input ?? 0;
-    output += usage.output ?? 0;
-    cache += (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
-    cost += usage.cost?.total ?? 0;
+    freshInput += toFiniteNumber(usage.input);
+    output += toFiniteNumber(usage.output);
+    cache += toFiniteNumber(usage.cacheRead) + toFiniteNumber(usage.cacheWrite);
+    cost += toFiniteNumber(usage.cost?.total);
   }
   return {
     repo: basename(cwd),
@@ -274,6 +287,19 @@ export function summaryFromSession(
  */
 export function createFooter(ctx: SessionContextView, footerData: FooterDataView, tui: TuiView): FooterComponent {
   let unsubscribe: (() => void) | undefined;
+  // The last successfully folded summary. render() runs on pi's repaint path with
+  // no host-side guard, so a throwing branch provider or session store must show a
+  // stale bar instead of taking the whole footer — and the whole view — down.
+  let lastGood: StatusLineSummary | undefined;
+  const empty: StatusLineSummary = {
+    freshInput: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreation: 0,
+    totalTokens: 0,
+    totalCostUsd: 0,
+    turnCount: 0,
+  };
   try {
     unsubscribe = footerData.onBranchChange(() => {
       try {
@@ -296,12 +322,20 @@ export function createFooter(ctx: SessionContextView, footerData: FooterDataView
     },
     render(width: number): string[] {
       const columns = typeof width === 'number' && width > 0 ? width : 80;
-      const summary = summaryFromSession(
-        ctx.cwd,
-        modelLabel(ctx.model),
-        footerData.getGitBranch(),
-        ctx.sessionManager?.getBranch(),
-      );
+      let summary: StatusLineSummary;
+      try {
+        summary = summaryFromSession(
+          ctx.cwd,
+          modelLabel(ctx.model),
+          footerData.getGitBranch(),
+          ctx.sessionManager?.getBranch(),
+        );
+        lastGood = summary;
+      } catch {
+        // Swallow — the bar is best-effort; a throwing store shows the last good
+        // summary (or an empty one) instead of failing pi's render loop.
+        summary = lastGood ?? empty;
+      }
       return renderStatusBarLines(summary, columns);
     },
   };
@@ -314,25 +348,48 @@ export function createFooter(ctx: SessionContextView, footerData: FooterDataView
  * the branch watcher fires, so the bar tracks the session without polling.
  */
 export default function (pi: ExtensionHostView): void {
+  // One entry per live session, keyed by the session context the host hands to
+  // session_start. A single shared TUI lets a second session steal re-renders and a
+  // shutdown for one session silence the other; activeTui stays only as the
+  // fallback for hosts that invoke session-scoped events without the context.
+  const tuiBySession = new WeakMap<object, TuiView>();
   let activeTui: TuiView | undefined;
-  const requestRender = () => {
+  const renderFor = (ctx: unknown) => {
+    const tui = typeof ctx === 'object' && ctx !== null ? tuiBySession.get(ctx) : undefined;
     try {
-      activeTui?.requestRender();
+      (tui ?? activeTui)?.requestRender();
     } catch {
       // Swallow — the status line is best-effort and must never fail the host.
     }
   };
   try {
-    pi.on('agent_end', requestRender);
-    pi.on('agent_settled', requestRender);
-    pi.on('session_shutdown', () => {
-      activeTui = undefined;
+    pi.on('agent_end', (_event: unknown, ctx: unknown) => renderFor(ctx));
+    pi.on('agent_settled', (_event: unknown, ctx: unknown) => renderFor(ctx));
+    pi.on('session_shutdown', (_event: unknown, ctx: unknown) => {
+      try {
+        if (typeof ctx === 'object' && ctx !== null && tuiBySession.has(ctx)) {
+          const finished = tuiBySession.get(ctx);
+          tuiBySession.delete(ctx);
+          if (finished !== undefined && finished === activeTui) activeTui = undefined;
+        } else if (ctx === undefined || ctx === null) {
+          // Single-session host shutting down THE session: clear the fallback.
+          // An unrecognized context shape clears nothing rather than nuking a live TUI.
+          activeTui = undefined;
+        }
+      } catch {
+        // Swallow — cleanup must never fail the host.
+      }
     });
     pi.on('session_start', (_event: unknown, ctx: SessionContextView) => {
       try {
         if (!ctx || ctx.mode !== 'tui') return;
         if (typeof ctx.ui?.setFooter !== 'function') return;
         ctx.ui.setFooter((tui: TuiView, _theme: unknown, footerData: FooterDataView) => {
+          try {
+            tuiBySession.set(ctx, tui);
+          } catch {
+            // Swallow — the WeakMap is an optimization; the fallback still works.
+          }
           activeTui = tui;
           return createFooter(ctx, footerData, tui);
         });
