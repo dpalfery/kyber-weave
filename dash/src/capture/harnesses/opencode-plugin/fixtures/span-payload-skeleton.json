@@ -1,0 +1,66 @@
+{
+  "t0": "opencode span/turn payload skeleton — survey only, no emission logic",
+  "span_start": {
+    "trace_id": "",
+    "span_id": "",
+    "parent_span_id": null,
+    "name": "",
+    "start_time_unix_nano": 0,
+    "attributes": {
+      "session.id": "",
+      "turn.index": 0,
+      "agent": "",
+      "model.providerID": "",
+      "model.id": "",
+      "hook": ""
+    }
+  },
+  "span_end": {
+    "trace_id": "",
+    "span_id": "",
+    "end_time_unix_nano": 0,
+    "status": { "code": "", "message": "" },
+    "attributes": {
+      "session.id": "",
+      "turn.index": 0
+    }
+  },
+  "turn": {
+    "sessionID": "",
+    "messageID": "",
+    "callID": "",
+    "prompt_text": "",
+    "prompt_files": [],
+    "prompt_agents": [],
+    "prompt_skills": [],
+    "prompt_metadata": {},
+    "delivery": "steer"
+  },
+  "session": {
+    "sessionID": "",
+    "agent": "",
+    "model": { "providerID": "", "modelID": "" }
+  },
+  "tokens": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "cache_read_tokens": null,
+    "cache_creation_tokens": null
+  },
+  "tools": {
+    "tool": "",
+    "callID": "",
+    "messageID": "",
+    "args": {},
+    "output_title": "",
+    "output_text": "",
+    "output_metadata": {}
+  },
+  "errors": {
+    "type": "",
+    "message": "",
+    "status": null,
+    "attempt": null,
+    "retry_decision": null
+  }
+}
