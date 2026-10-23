@@ -577,6 +577,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         AssertSucceeded(result, "Pi");
         string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the branch provider threw.");
+        Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -592,6 +594,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         AssertSucceeded(result, "Pi");
         string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the session store threw.");
+        Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -605,7 +609,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_SESSIONS=2");
 
         AssertSucceeded(result, "Pi");
-        Assert.Equal(["B"], ReportStrings(File.ReadAllText(reportPath), "renders"));
+        Assert.Equal(["A", "B", "B"], ReportStrings(File.ReadAllText(reportPath), "renders"));
     }
 
     [Fact]
@@ -1678,12 +1682,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                  Array.isArray(handlers['session_start']) && handlers['session_start'].length > 0,
                                                  'the extension must subscribe to session_start')
                                                if (process.env.PI_SESSIONS === '2') {
-                                                 // Two live TUI sessions: shutting down the first must not silence the second.
+                                                 // Two live TUI sessions: a host that fires without the session
+                                                 // context must repaint every live TUI, in join order — then
+                                                 // shutting down the first must not silence the second.
                                                  const contextA = makeContext('tui', makeTui('A'))
                                                  const contextB = makeContext('tui', makeTui('B'))
                                                  for (const handler of handlers['session_start'] ?? []) {
                                                    await handler({}, contextA)
                                                    await handler({}, contextB)
+                                                 }
+                                                 for (const handler of handlers['agent_end'] ?? []) {
+                                                   await handler({})
                                                  }
                                                  for (const handler of handlers['session_shutdown'] ?? []) {
                                                    await handler({}, contextA)
