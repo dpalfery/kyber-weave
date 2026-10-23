@@ -1210,6 +1210,16 @@ It is detected from any **one** of three traces, and nothing else counts as dete
 VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
 installed only there has none of the three traces, so the row says not detected while Kilo itself
 works — run the import above and ignore the row.
+**OpenCode plugin (`kyberdash-opencode`, T6).** The dash-CLI-managed plugin observes
+session/turn/span hooks from opencode's own plugin directories (`~/.config/opencode/plugins/`,
+`.opencode/plugins/`) and posts span-anchored OTLP/HTTP spans to the loopback receiver
+through the bounded outbox, which spools offline and retries with backoff. Capture owns
+the plugin keys declare-only: the writer declares the plugin id and its `plugins` config
+keys, but `enable` writes only `experimental.openTelemetry` — the registration installs by
+file and the endpoint stays process-env-only, so neither ever enters a receipt. After
+enabling, restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
+Desktop: disable plugins, clear cache, restart) with `OTEL_EXPORTER_OTLP_ENDPOINT` set
+where it launches, then emit a turn; a green enable is not capture.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows

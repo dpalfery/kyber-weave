@@ -1,0 +1,407 @@
+// Opencode plugin skeleton (T2): session/turn/span lifecycle hooks.
+//
+// One codebase serves both opencode targets — Desktop and CLI v2 — from the
+// dash-CLI-managed home `dash/src/capture/harnesses/opencode-plugin/`. There
+// is no standalone package: the dash CLI installs this file into opencode's
+// own plugin directories (see `resolveOpencodePluginPaths`), and opencode
+// loads it through its config `plugins` keys (see
+// `OPENCODE_PLUGIN_CONFIG_KEYS`). v1 hook names and v2 namespaced hooks
+// share the T0 catalog (`fixtures/hook-catalog.json`); both targets receive
+// the same function identities from `registerOpencodePlugin`.
+//
+// Every hook is best-effort and never fails the host — the CommandCode
+// `statusbar.ts` swallow-and-continue precedent. An emitter throw, an async
+// rejection, or a delivery timeout is recorded on `failures` (and offered to
+// `onError`) while the hook itself resolves quietly, so the session always
+// continues. The default emitter records in memory only; production
+// delivery arrives through the injected `emit` port, backed by the T5
+// transport outbox (`transport/outbox.ts`, OTLP/HTTP to 127.0.0.1:4318).
+//
+// T8 assembles the full pipeline in this installed entry: every hook boundary
+// runs hook→mapper→turn→outbox→sender in order. The hook stamps a
+// mapper-shaped payload (`mapper.ts`) onto an envelope span, the same identity
+// stamps a turn outcome (`turn.ts`) onto a `tool_result` log, and the event
+// spools through the bounded outbox to the live loopback sender
+// (`transport/outbox.ts` + `transport/otlp-sender.ts`). The mapping evidence
+// is recorded beside `events`/`failures`; the transport still never fails the
+// host. The entry ships as the plugin directory, so these relative imports
+// resolve in place wherever the dash CLI installs it.
+
+import { mapOpencodePayloadToOtlpSpan, type OpencodePluginSpanPayload } from './mapper.js'
+import { mapOpencodeTurnToOtlpLog, type OpencodeTurnOutcomePayload } from './turn.js'
+import { createOutbox, type Outbox } from './transport/outbox.js'
+import {
+  DEFAULT_OTLP_ENDPOINT,
+  createOtlpSender,
+  type OtlpFetch,
+  type OtlpSender,
+} from './transport/otlp-sender.js'
+
+/** The plugin id dash CLI writes into opencode's `plugins` config keys. */
+export const OPENCODE_PLUGIN_ID = 'kyberdash-opencode'
+
+/** The full lifecycle, in firing order. */
+export const OPENCODE_PLUGIN_HOOK_KINDS = [
+  'session.start',
+  'turn.start',
+  'span.start',
+  'span.end',
+  'turn.end',
+  'session.end',
+] as const
+
+export type OpencodeHookKind = (typeof OPENCODE_PLUGIN_HOOK_KINDS)[number]
+
+/** Opencode config keys the dash CLI manages for this plugin (never hand-edited paths). */
+export const OPENCODE_PLUGIN_CONFIG_KEYS = {
+  /** v2 `plugins` list in `opencode.jsonc`; v1 `plugin` entries resolve to the same file. */
+  plugins: 'plugins',
+} as const
+
+export type OpencodeHookPayload = {
+  sessionId: string
+  turnIndex?: number
+  spanId?: string
+}
+
+export type OpencodeHookEvent = OpencodeHookPayload & {
+  kind: OpencodeHookKind
+  timestamp: string
+}
+
+export type OpencodeHookFailure = {
+  kind: OpencodeHookKind
+  error: unknown
+}
+
+/** Delivery port; production posts to the local OTLP receiver through the T5 transport outbox, tests inject a fake. */
+export type OpencodePluginEmitter = (event: OpencodeHookEvent) => void | Promise<void>
+
+/**
+ * Adapt a T5 outbox spool to the delivery port. The plugin itself stays
+ * transport-agnostic: production passes `outbox.emit` (or this adapter over
+ * any `{ enqueue }` spool) as `emit`, and bounded offline spooling,
+ * backoff, and drop accounting happen behind the port.
+ */
+export function createOutboxEmitter(spool: {
+  enqueue: (event: OpencodeHookEvent) => void
+}): OpencodePluginEmitter {
+  return (event) => {
+    spool.enqueue(event)
+  }
+}
+
+export type OpencodePluginOptions = {
+  emit?: OpencodePluginEmitter
+  now?: () => string
+  /** Delivery budget per hook; expiry is swallowed, never thrown. Defaults to 250ms. */
+  timeoutMs?: number
+  /** Observability tap for swallowed failures; itself runs swallowed. */
+  onError?: (failure: OpencodeHookFailure) => void
+}
+
+/**
+ * The host surface the plugin attaches to. Desktop calls `hooks({...})`
+ * (v1 shape); CLI v2 exposes namespaced `session`/`tool` surfaces. Every
+ * member is optional — a host without a hook surface is tolerated, and the
+ * plugin still exposes its hook set.
+ */
+export type OpencodePluginHost = {
+  hooks?: (registered: Record<OpencodeHookKind, OpencodeHookHandler>) => void
+  session?: Record<string, OpencodeHookHandler>
+  tool?: Record<string, OpencodeHookHandler>
+}
+
+export type OpencodeHookHandler = (payload: OpencodeHookPayload) => Promise<void>
+
+export type OpencodePlugin = {
+  hooks: Record<OpencodeHookKind, OpencodeHookHandler>
+  /** Every boundary attempted, in firing order, whether or not delivery succeeded. */
+  events: OpencodeHookEvent[]
+  /** Every swallowed delivery failure, in order. */
+  failures: OpencodeHookFailure[]
+}
+
+const DEFAULT_TIMEOUT_MS = 250
+
+/**
+ * Create the skeleton plugin. Pure construction: no host is touched until
+ * `registerOpencodePlugin` runs, so tests can drive `hooks` directly.
+ */
+export function createOpencodePlugin(options: OpencodePluginOptions = {}): OpencodePlugin {
+  const emit = options.emit ?? ((): void => undefined)
+  const now = options.now ?? ((): string => new Date().toISOString())
+  const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? DEFAULT_TIMEOUT_MS))
+  const onError = options.onError
+
+  const plugin: OpencodePlugin = {
+    hooks: undefined as never,
+    events: [],
+    failures: [],
+  }
+
+  const deliver = async (kind: OpencodeHookKind, payload: OpencodeHookPayload): Promise<void> => {
+    const event: OpencodeHookEvent = { kind, ...payload, timestamp: now() }
+    plugin.events.push(event)
+    try {
+      await withTimeout(() => emit(event), timeoutMs)
+    } catch (error) {
+      plugin.failures.push({ kind, error })
+      try {
+        onError?.({ kind, error })
+      } catch {
+        // Swallow — a diagnostics tap must never fail the host either.
+      }
+    }
+  }
+
+  const hook =
+    (kind: OpencodeHookKind): OpencodeHookHandler =>
+    (payload) =>
+      deliver(kind, payload)
+
+  plugin.hooks = {
+    'session.start': hook('session.start'),
+    'turn.start': hook('turn.start'),
+    'span.start': hook('span.start'),
+    'span.end': hook('span.end'),
+    'turn.end': hook('turn.end'),
+    'session.end': hook('session.end'),
+  }
+  return plugin
+}
+
+/**
+ * Attach one plugin instance to a host. Desktop receives the full set
+ * through `hooks()`; CLI v2 receives the same identities on its namespaced
+ * `session` (session/turn) and `tool` (span) surfaces. Registration itself
+ * is best-effort: a host that rejects registration keeps running.
+ */
+export function registerOpencodePlugin(
+  host: OpencodePluginHost,
+  plugin: OpencodePlugin = createOpencodePlugin(),
+): OpencodePlugin {
+  try {
+    host.hooks?.({ ...plugin.hooks })
+  } catch {
+    // Swallow — a host that rejects hook registration must not take the session down.
+  }
+  try {
+    host.session = {
+      ...host.session,
+      'session.start': plugin.hooks['session.start'],
+      'session.end': plugin.hooks['session.end'],
+      'turn.start': plugin.hooks['turn.start'],
+      'turn.end': plugin.hooks['turn.end'],
+    }
+    host.tool = {
+      ...host.tool,
+      'span.start': plugin.hooks['span.start'],
+      'span.end': plugin.hooks['span.end'],
+    }
+  } catch {
+    // Swallow — a frozen host surface is not the session's problem.
+  }
+  return plugin
+}
+
+/**
+ * Transport options for the installed pipeline. The endpoint defaults to the
+ * live loopback OTLP receiver (Q2a); `spool` selects the bounded outbox
+ * (default, drop-oldest backpressure) or direct sender delivery.
+ */
+export type InstalledOpencodePluginTransport = {
+  /** OTLP/HTTP trace export endpoint. Defaults to the live loopback receiver. */
+  endpoint?: string
+  /** Injectable fetch for tests; defaults to the global fetch. */
+  fetchFn?: OtlpFetch
+  /**
+   * True (default) spools hook events through the bounded T5 outbox; false
+   * sends each hook straight through the T5 sender. The direct path still
+   * never fails the host, but it loses data while the receiver is down.
+   */
+  spool?: boolean
+  /** Maximum spooled events; beyond this the oldest is dropped. */
+  capacity?: number
+  /** Maximum events per POST; halved on 429 down to 1. */
+  batchSize?: number
+  /** First backoff delay after a failed attempt. */
+  baseBackoffMs?: number
+  /** Backoff ceiling. */
+  maxBackoffMs?: number
+  /** Injectable clock for tests; defaults to a real timer. */
+  sleepFn?: (ms: number) => Promise<void>
+  /** Injectable entropy for tests; defaults to `Math.random`. */
+  randomFn?: () => number
+  /**
+   * Maximum recorded mapper/turn evidence entries each; beyond it the oldest
+   * is dropped. The transport is the delivery record — evidence is a
+   * debugging tail — so a long session keeps the freshest boundaries instead
+   * of growing host memory without bound. Defaults to 500.
+   */
+  evidenceLimit?: number
+}
+
+export type InstalledOpencodePluginOptions = Omit<OpencodePluginOptions, 'emit'> &
+  InstalledOpencodePluginTransport
+
+/**
+ * The installed production pipeline: the lifecycle plugin plus the transport
+ * it delivers through and the per-hook mapping evidence it recorded. Evidence
+ * is bounded (drop-oldest at `evidenceLimit`): a long session must not grow
+ * host memory without bound, and the transport — not this tail — is the
+ * delivery record.
+ */
+export type InstalledOpencodePlugin = {
+  plugin: OpencodePlugin
+  outbox: Outbox
+  sender: OtlpSender
+  /** Freshest envelope spans, in firing order (mapper stage), at most `evidenceLimit`. */
+  mappedSpans: Array<ReturnType<typeof mapOpencodePayloadToOtlpSpan>>
+  /** Freshest `tool_result` logs, in firing order (turn stage), at most `evidenceLimit`. */
+  outcomeLogs: Array<ReturnType<typeof mapOpencodeTurnToOtlpLog>>
+}
+
+/** Default evidence cap: mirrors the outbox scale so one bound covers a long session. */
+const DEFAULT_EVIDENCE_LIMIT = 500
+
+/**
+ * Stamp a hook event onto a mapper-shaped payload. Session, turn, and span
+ * identity ride verbatim — never synthesized. The sender anchors every span
+ * on the session trace downstream (Q3a); when the hook observed no span, the
+ * mapped span takes the hook-anchored identity so the envelope still names
+ * the boundary it came from.
+ */
+function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload {
+  const atMs = Date.parse(event.timestamp)
+  const safeMs = Number.isFinite(atMs) ? atMs : Date.now()
+  const nanos = BigInt(safeMs) * 1_000_000n
+  return {
+    traceId: event.sessionId,
+    spanId: event.spanId ?? `${event.sessionId}:${event.kind}:${event.timestamp}`,
+    name: `opencode.${event.kind}`,
+    kind: 'internal',
+    sessionID: event.sessionId,
+    ...(event.turnIndex !== undefined ? { turnIndex: event.turnIndex } : {}),
+    startTimeUnixNano: nanos,
+    endTimeUnixNano: nanos,
+    hook: event.kind,
+  }
+}
+
+/**
+ * Stamp a hook event onto a turn outcome payload. The outcome fields stay
+ * unset — the hook observed the boundary, not the result — so the log carries
+ * the correlation identity (exact span when observed, session+bounds
+ * otherwise) under the `com.opencode` `tool_result` vocabulary.
+ */
+function stampTurnOutcome(event: OpencodeHookEvent): OpencodeTurnOutcomePayload {
+  return {
+    traceId: null,
+    spanId: event.spanId ?? null,
+    sessionID: event.sessionId,
+    ...(event.turnIndex !== undefined ? { turnIndex: event.turnIndex } : {}),
+    hook: event.kind,
+    timestamp: event.timestamp,
+  }
+}
+
+/**
+ * Assemble the installed production pipeline: hook→mapper→turn→outbox→sender.
+ * Every hook boundary maps through the T3 mapper and the T4 turn onto the
+ * recorded evidence, then delivers through the T5 transport — the bounded
+ * outbox by default, the sender directly when `spool` is false. Either way
+ * the skeleton contract holds: delivery is best-effort, failures are
+ * swallowed and recorded, the session always continues, and one codebase
+ * serves both Desktop and CLI v2 targets.
+ */
+export function createInstalledOpencodePlugin(
+  options: InstalledOpencodePluginOptions = {},
+): InstalledOpencodePlugin {
+  const {
+    endpoint = DEFAULT_OTLP_ENDPOINT,
+    fetchFn = (url, init) => fetch(url, init),
+    spool = true,
+    capacity,
+    batchSize,
+    baseBackoffMs,
+    maxBackoffMs,
+    sleepFn,
+    randomFn,
+    evidenceLimit: evidenceLimitOption,
+    ...pluginOptions
+  } = options
+
+  const outbox = createOutbox({
+    endpoint,
+    fetchFn,
+    capacity,
+    batchSize,
+    baseBackoffMs,
+    maxBackoffMs,
+    sleepFn,
+    randomFn,
+  })
+  const sender = createOtlpSender({ endpoint, fetchFn })
+
+  const evidenceLimit = Math.max(1, Math.floor(evidenceLimitOption ?? DEFAULT_EVIDENCE_LIMIT))
+
+  const mappedSpans: InstalledOpencodePlugin['mappedSpans'] = []
+  const outcomeLogs: InstalledOpencodePlugin['outcomeLogs'] = []
+
+  const recordEvidence = (event: OpencodeHookEvent): void => {
+    if (mappedSpans.length >= evidenceLimit) mappedSpans.shift()
+    mappedSpans.push(mapOpencodePayloadToOtlpSpan(stampMapperPayload(event)))
+    if (outcomeLogs.length >= evidenceLimit) outcomeLogs.shift()
+    outcomeLogs.push(mapOpencodeTurnToOtlpLog(stampTurnOutcome(event)))
+  }
+
+  const emit: OpencodePluginEmitter = spool
+    ? (event) => {
+        recordEvidence(event)
+        outbox.enqueue(event)
+      }
+    : async (event) => {
+        recordEvidence(event)
+        await sender.send([event])
+      }
+
+  const plugin = createOpencodePlugin({ ...pluginOptions, emit })
+  return { plugin, outbox, sender, mappedSpans, outcomeLogs }
+}
+
+export type OpencodePluginPaths = {
+  /** `~/.config/opencode/plugins/` — v1 global dir and v2 local discovery. */
+  globalPluginDir: string
+  /** `.opencode/plugins/` — v1 project dir and v2 local discovery. */
+  projectPluginDir: string
+}
+
+/**
+ * Where the dash CLI installs this plugin file. Derived from the T0
+ * `install-targets.json` survey; resolution takes HOME at call time so
+ * tests run under a temporary HOME.
+ */
+export function resolveOpencodePluginPaths(home: string): OpencodePluginPaths {
+  const root = home.replace(/\/+$/, '')
+  return {
+    globalPluginDir: `${root}/.config/opencode/plugins`,
+    projectPluginDir: '.opencode/plugins',
+  }
+}
+
+/** Run `work`, rejecting if it does not settle within `ms`. Sync throws become rejections. */
+function withTimeout(work: () => void | Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const guarded = (async (): Promise<void> => {
+    await work()
+  })()
+  const bounded = new Promise<void>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`opencode hook delivery timed out after ${ms}ms`))
+    }, ms)
+  })
+  return Promise.race([guarded, bounded]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
