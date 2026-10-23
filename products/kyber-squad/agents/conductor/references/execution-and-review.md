@@ -73,7 +73,7 @@ The per-cluster **dispatch tally** lives on the run's persisted execution artifa
 
 When the ready queue is empty and every task has cleared its exit gate, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
 
-With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green.
+With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green (in autonomous mode, deliver as the autonomy contract directs).
 
 ## Closeout
 
