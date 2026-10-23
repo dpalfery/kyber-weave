@@ -579,6 +579,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the branch provider threw.");
         Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
+        Assert.Contains("cache:--", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -596,6 +597,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the session store threw.");
         Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
+        Assert.Contains("cache:--", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1699,6 +1701,15 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                  }
                                                  for (const handler of handlers['agent_end'] ?? []) {
                                                    await handler({}, contextB)
+                                                 }
+                                                 // A context-less shutdown retires the session: the broadcast
+                                                 // set is cleared too, so a later context-less agent_end repaints
+                                                 // nothing instead of a session that no longer exists.
+                                                 for (const handler of handlers['session_shutdown'] ?? []) {
+                                                   await handler({})
+                                                 }
+                                                 for (const handler of handlers['agent_end'] ?? []) {
+                                                   await handler({})
                                                  }
                                                } else {
                                                  for (const handler of handlers['session_start'] ?? []) {
