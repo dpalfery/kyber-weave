@@ -94,10 +94,14 @@ interface SessionContextView {
 
 /** The slice of the pi extension host this artifact registers with. */
 interface ExtensionHostView {
-  // any[] and not never[]: pi invokes handlers with arguments (the harness calls
-  // session_start with (event, ctx)), and a multi-parameter handler is not
-  // assignable to (...args: never[]) => void under strictFunctionTypes.
-  on(event: string, handler: (...args: any[]) => void): () => void;
+  // A precise (event, ctx) signature, not (...args: any[]) and not
+  // (...args: unknown[]): the any[] escape hatch would accept a handler reading
+  // fields off thin air, while unknown[] would reject the required-ctx
+  // session_start handler under strictFunctionTypes (a two-required-parameter
+  // function is not assignable to a rest-unknown target that may pass zero
+  // arguments). Every handler below takes (unknown, unknown-or-SessionContextView),
+  // which this signature accepts and stringly handlers fail.
+  on(event: string, handler: (event: unknown, ctx: SessionContextView) => void): () => void;
 }
 
 /** Format a number in compact "k" notation. */
@@ -189,9 +193,19 @@ export function statusBarSegments(summary: StatusLineSummary): string[] {
   if (summary.branch) parts.push(`${GREEN}🌿 ${summary.branch}${RESET}`);
   if (summary.model) parts.push(`${MAGENTA}🤖 ${summary.model}${RESET}`);
 
-  const totalTokens = summary.totalTokens
-    ?? (summary.freshInput ?? 0) + (summary.cacheRead ?? 0)
-      + (summary.cacheCreation ?? 0) + (summary.output ?? 0);
+  // Absent is not zero: when no token datum exists at all (the guarded-render
+  // fallback), the total renders '--' rather than a confident-looking 0.
+  const hasTokenData =
+    summary.totalTokens !== undefined ||
+    summary.freshInput !== undefined ||
+    summary.output !== undefined ||
+    summary.cacheRead !== undefined ||
+    summary.cacheCreation !== undefined;
+  const totalTokens = hasTokenData
+    ? (summary.totalTokens
+      ?? (summary.freshInput ?? 0) + (summary.cacheRead ?? 0)
+        + (summary.cacheCreation ?? 0) + (summary.output ?? 0))
+    : undefined;
   const tokenBreak = `${GRAY}(in:${fmtK(summary.freshInput)} out:${fmtK(summary.output)} cache:${fmtK((summary.cacheRead ?? 0) + (summary.cacheCreation ?? 0))})${RESET}`;
   parts.push(`${YELLOW}⚡ ${fmtK(totalTokens)}${RESET} ${tokenBreak}`);
 
@@ -285,21 +299,20 @@ export function summaryFromSession(
  * the session live on every render, so tokens, cost, and turns stay current
  * without re-registration; branch changes arrive through the provider's watcher.
  */
-export function createFooter(ctx: SessionContextView, footerData: FooterDataView, tui: TuiView): FooterComponent {
+export function createFooter(
+  ctx: SessionContextView,
+  footerData: FooterDataView,
+  tui: TuiView,
+  onDispose?: () => void,
+): FooterComponent {
   let unsubscribe: (() => void) | undefined;
   // The last successfully folded summary. render() runs on pi's repaint path with
   // no host-side guard, so a throwing branch provider or session store must show a
   // stale bar instead of taking the whole footer — and the whole view — down.
+  // The fallback is honestly absent, not zeroed: unknown tokens render '--' and
+  // the turn count renders '--', so a dead store never looks like an idle session.
   let lastGood: StatusLineSummary | undefined;
-  const empty: StatusLineSummary = {
-    freshInput: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheCreation: 0,
-    totalTokens: 0,
-    totalCostUsd: 0,
-    turnCount: 0,
-  };
+  const empty: StatusLineSummary = {};
   try {
     unsubscribe = footerData.onBranchChange(() => {
       try {
@@ -316,6 +329,7 @@ export function createFooter(ctx: SessionContextView, footerData: FooterDataView
     dispose() {
       try {
         unsubscribe?.();
+        onDispose?.();
       } catch {
         // Swallow — cleanup must never fail the host.
       }
@@ -351,15 +365,20 @@ export default function (pi: ExtensionHostView): void {
   // One entry per live session, keyed by the session context the host hands to
   // session_start. A single shared TUI lets a second session steal re-renders and a
   // shutdown for one session silence the other; activeTui stays only as the
-  // fallback for hosts that invoke session-scoped events without the context.
+  // fallback for hosts that invoke session-scoped events without the context —
+  // and then every live TUI repaints, so the earlier session never fossilizes.
   const tuiBySession = new WeakMap<object, TuiView>();
+  const liveTuis = new Set<TuiView>();
   let activeTui: TuiView | undefined;
   const renderFor = (ctx: unknown) => {
     const tui = typeof ctx === 'object' && ctx !== null ? tuiBySession.get(ctx) : undefined;
-    try {
-      (tui ?? activeTui)?.requestRender();
-    } catch {
-      // Swallow — the status line is best-effort and must never fail the host.
+    const targets = tui !== undefined ? [tui] : liveTuis.size > 0 ? [...liveTuis] : activeTui !== undefined ? [activeTui] : [];
+    for (const target of targets) {
+      try {
+        target.requestRender();
+      } catch {
+        // Swallow — the status line is best-effort and must never fail the host.
+      }
     }
   };
   try {
@@ -370,7 +389,10 @@ export default function (pi: ExtensionHostView): void {
         if (typeof ctx === 'object' && ctx !== null && tuiBySession.has(ctx)) {
           const finished = tuiBySession.get(ctx);
           tuiBySession.delete(ctx);
-          if (finished !== undefined && finished === activeTui) activeTui = undefined;
+          if (finished !== undefined) {
+            liveTuis.delete(finished);
+            if (finished === activeTui) activeTui = undefined;
+          }
         } else if (ctx === undefined || ctx === null) {
           // Single-session host shutting down THE session: clear the fallback.
           // An unrecognized context shape clears nothing rather than nuking a live TUI.
@@ -387,11 +409,15 @@ export default function (pi: ExtensionHostView): void {
         ctx.ui.setFooter((tui: TuiView, _theme: unknown, footerData: FooterDataView) => {
           try {
             tuiBySession.set(ctx, tui);
+            liveTuis.add(tui);
           } catch {
-            // Swallow — the WeakMap is an optimization; the fallback still works.
+            // Swallow — the session maps are an optimization; the fallback still works.
           }
           activeTui = tui;
-          return createFooter(ctx, footerData, tui);
+          return createFooter(ctx, footerData, tui, () => {
+            liveTuis.delete(tui);
+            if (tui === activeTui) activeTui = undefined;
+          });
         });
       } catch {
         // Swallow — the status line is best-effort and must never fail the host.
