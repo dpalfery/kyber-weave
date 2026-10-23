@@ -231,4 +231,22 @@ describe('opencode turn session+bounds fallback (ADR 0009 rule)', () => {
 
     expect(target).toBeUndefined()
   })
+
+  it('never throws on garbage timestamps, falling back to now', () => {
+    const junkNanos = mapOpencodeTurnToOtlpLog({
+      sessionID: SESSION_ID,
+      tool: 'read',
+      success: true,
+      timestampNanos: 'not-a-timestamp',
+    })
+    expect(Number.isNaN(Date.parse(junkNanos.timestamp))).toBe(false)
+
+    const junkIso = mapOpencodeTurnToOtlpLog({
+      sessionID: SESSION_ID,
+      tool: 'read',
+      success: true,
+      timestamp: 'garbage-iso',
+    })
+    expect(Number.isNaN(Date.parse(junkIso.timestamp))).toBe(false)
+  })
 })

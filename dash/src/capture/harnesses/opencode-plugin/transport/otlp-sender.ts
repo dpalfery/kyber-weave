@@ -82,7 +82,10 @@ function hexId(input: string, hexChars: number): string {
 
 function nanosOf(timestamp: string): string {
   const millis = Date.parse(timestamp)
-  const safe = Number.isFinite(millis) ? millis : 0
+  // A malformed hook timestamp must never time-travel to the epoch: absent
+  // is not zero and broken is not 1970. Fall back to now, matching the
+  // installed pipeline's hook-anchored fallback.
+  const safe = Number.isFinite(millis) ? millis : Date.now()
   return (BigInt(safe) * 1_000_000n).toString()
 }
 

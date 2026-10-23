@@ -85,21 +85,29 @@ function toNanoString(value: string | number | bigint): string {
   return typeof value === 'bigint' ? value.toString() : String(value)
 }
 
-function nanoToMs(timestampNano: string | number | bigint): number {
-  const start = BigInt(toNanoString(timestampNano))
-  return Number(start / 1_000_000n)
-}
-
 function timeOrNow(timestampNanos: string | number | bigint | undefined, timestamp: string | undefined): {
   iso: string
   nanos: bigint
 } {
+  // Best-effort harness clock: junk input falls back to now rather than
+  // throwing the turn outcome away. Mirrors the mapper's safe fallback.
   if (timestampNanos !== undefined) {
-    const nanos = BigInt(toNanoString(timestampNanos))
-    return { iso: new Date(nanoToMs(nanos)).toISOString(), nanos }
+    try {
+      const nanos = BigInt(toNanoString(timestampNanos))
+      const ms = Number(nanos / 1_000_000n)
+      if (Number.isFinite(ms)) return { iso: new Date(ms).toISOString(), nanos }
+    } catch {
+      // Fall through to the ISO string, then to now.
+    }
   }
-  const iso = timestamp ?? new Date().toISOString()
-  return { iso, nanos: BigInt(Date.parse(iso) * 1_000_000) }
+  if (timestamp !== undefined) {
+    const ms = Date.parse(timestamp)
+    if (Number.isFinite(ms)) {
+      return { iso: new Date(ms).toISOString(), nanos: BigInt(ms) * 1_000_000n }
+    }
+  }
+  const nowMs = Date.now()
+  return { iso: new Date(nowMs).toISOString(), nanos: BigInt(nowMs) * 1_000_000n }
 }
 
 /**

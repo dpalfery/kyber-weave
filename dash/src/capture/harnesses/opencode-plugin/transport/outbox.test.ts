@@ -262,4 +262,12 @@ describe('Outbox offline spool and backpressure (T5)', () => {
       expect(span.spanId).toMatch(/^[0-9a-f]{16}$/)
     }
   })
+
+  it('neverTimeTravelsMalformedTimestampsToTheEpoch', () => {
+    const body = buildOtlpTracesBody([{ ...hookEvent('span.start', 'span-00c1'), timestamp: 'garbage' }])
+    const span = body.resourceSpans[0]?.scopeSpans[0]?.spans[0]
+    expect(span?.startTimeUnixNano).not.toBe('0')
+    const asMs = Number(BigInt(String(span?.startTimeUnixNano)) / 1_000_000n)
+    expect(Math.abs(Date.now() - asMs)).toBeLessThan(60_000)
+  })
 })
