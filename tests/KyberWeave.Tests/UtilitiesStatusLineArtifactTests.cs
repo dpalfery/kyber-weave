@@ -541,8 +541,71 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string report = File.ReadAllText(reportPath);
         string[] footerCalls = ReportStrings(report, "uiCalls");
         string[] stderr = ReportStrings(report, "stderr");
+        string[] stdout = ReportStrings(report, "stdout");
         Assert.DoesNotContain("setFooter", footerCalls);
         Assert.True(stderr.Length == 0, "The Pi extension wrote to stderr outside TUI mode.");
+        Assert.True(stdout.Length == 0, "The Pi extension wrote to stdout outside TUI mode.");
+    }
+
+    [Fact]
+    public void PiExtensionRendersFiniteTotalsForUntrustedUsage()
+    {
+        string artifact = RequireArtifact(PiArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-poison.json");
+
+        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_POISON=1");
+
+        AssertSucceeded(result, "Pi");
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        Assert.True(rendered.Length > 0, "The Pi extension rendered no footer for untrusted usage.");
+        Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("Infinity", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PiExtensionRendersABarWhenTheBranchProviderThrows()
+    {
+        string artifact = RequireArtifact(PiArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-throw-branch.json");
+
+        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_BRANCH=1");
+
+        AssertSucceeded(result, "Pi");
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the branch provider threw.");
+    }
+
+    [Fact]
+    public void PiExtensionRendersABarWhenTheSessionStoreThrows()
+    {
+        string artifact = RequireArtifact(PiArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-throw-entries.json");
+
+        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_ENTRIES=1");
+
+        AssertSucceeded(result, "Pi");
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the session store threw.");
+    }
+
+    [Fact]
+    public void PiExtensionScopesReRendersPerSession()
+    {
+        string artifact = RequireArtifact(PiArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-sessions.json");
+
+        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_SESSIONS=2");
+
+        AssertSucceeded(result, "Pi");
+        Assert.Equal(["B"], ReportStrings(File.ReadAllText(reportPath), "renders"));
     }
 
     [Fact]
@@ -988,7 +1051,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string node,
         string artifactPath,
         string reportPath,
-        string mode)
+        string mode,
+        string? extraEnvironment = null)
     {
         ProcessStartInfo startInfo = new(node)
         {
@@ -1006,6 +1070,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         startInfo.Environment["PI_FIXTURE"] = FixturePath(PiFixture);
         startInfo.Environment["PI_REPORT"] = reportPath;
         startInfo.Environment["PI_MODE"] = mode;
+        if (extraEnvironment is not null)
+            foreach (string pair in extraEnvironment.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = pair.Split('=', 2);
+                if (parts.Length == 2)
+                    startInfo.Environment[parts[0]] = parts[1];
+            }
         return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
@@ -1467,7 +1538,14 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     /// The stub pi extension host the Pi variant is driven through. It offers the host shape
     /// the artifact registers with (<c>pi.on</c>), a stub session context, and a stub
     /// footer-data provider; it records <c>ui</c> calls, renders the registered footer at 80
-    /// columns, captures stderr, and writes a JSON report the C# suite asserts against.
+    /// columns, captures the artifact's stdout and stderr, counts per-TUI re-renders, and
+    /// writes a JSON report the C# suite asserts against. Stdio is captured only while the
+    /// artifact's handlers run, so the runner's own TAP output passes through and a stdout
+    /// assertion cannot mistake the harness for the artifact. <c>PI_POISON</c> feeds the fold
+    /// transcript-shaped filth (non-finite numbers, a numeric string);
+    /// <c>PI_THROW_BRANCH</c>/<c>PI_THROW_ENTRIES</c> make the branch provider / session
+    /// store throw; <c>PI_SESSIONS=2</c> drives two TUI sessions so per-session TUI scoping
+    /// is observable.
     /// </summary>
     private const string PiHarnessScript = """
                                            import { after, test } from 'node:test'
@@ -1475,13 +1553,50 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                            import { readFileSync, writeFileSync } from 'node:fs'
                                            import { pathToFileURL } from 'node:url'
 
-                                           const report = { uiCalls: [], footer: [], stderr: [], error: null }
+                                           const report = { uiCalls: [], footer: [], stderr: [], stdout: [], renders: [], error: null }
 
                                            const fixture = JSON.parse(readFileSync(process.env.PI_FIXTURE, 'utf8'))
                                            const mode = process.env.PI_MODE
 
+                                           // Capture only what the artifact writes while its handlers run: the
+                                           // runner's own TAP output passes through, and console.log/console.error
+                                           // are covered because they funnel through these writes.
+                                           let capturing = false
+                                           const rawStdoutWrite = process.stdout.write.bind(process.stdout)
+                                           const rawStderrWrite = process.stderr.write.bind(process.stderr)
+                                           process.stdout.write = (chunk, ...args) => {
+                                             if (capturing) { report.stdout.push(String(chunk)); return true }
+                                             return rawStdoutWrite(chunk, ...args)
+                                           }
+                                           process.stderr.write = (chunk, ...args) => {
+                                             if (capturing) { report.stderr.push(String(chunk)); return true }
+                                             return rawStderrWrite(chunk, ...args)
+                                           }
+
                                            // One assistant entry per turn; the first carries the fixture usage so
-                                           // the rendered totals match the fixture exactly.
+                                           // the rendered totals match the fixture exactly — unless PI_POISON feeds
+                                           // the fold transcript-shaped filth instead.
+                                           function firstUsage() {
+                                             if (process.env.PI_POISON === '1') {
+                                               return {
+                                                 input: NaN,
+                                                 output: Infinity,
+                                                 cacheRead: '42',
+                                                 cacheWrite: NaN,
+                                                 totalTokens: NaN,
+                                                 cost: { total: Infinity },
+                                               }
+                                             }
+                                             return {
+                                               input: fixture.tokens.input,
+                                               output: fixture.tokens.output,
+                                               cacheRead: fixture.tokens.cache,
+                                               cacheWrite: 0,
+                                               totalTokens: fixture.tokens.total,
+                                               cost: { total: fixture.costUsd },
+                                             }
+                                           }
+
                                            const entries = []
                                            const turns = fixture.turns ?? 1
                                            for (let i = 0; i < turns; i++) {
@@ -1490,14 +1605,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                message: {
                                                  role: 'assistant',
                                                  usage: i === 0
-                                                   ? {
-                                                       input: fixture.tokens.input,
-                                                       output: fixture.tokens.output,
-                                                       cacheRead: fixture.tokens.cache,
-                                                       cacheWrite: 0,
-                                                       totalTokens: fixture.tokens.total,
-                                                       cost: { total: fixture.costUsd },
-                                                     }
+                                                   ? firstUsage()
                                                    : {
                                                        input: 0,
                                                        output: 0,
@@ -1519,29 +1627,41 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                            }
 
                                            const footerData = {
-                                             getGitBranch: () => fixture.branch,
+                                             getGitBranch: () => {
+                                               if (process.env.PI_THROW_BRANCH === '1') throw new Error('synthetic branch-provider failure')
+                                               return fixture.branch
+                                             },
                                              onBranchChange: () => () => {},
                                            }
 
-                                           const tui = { requestRender: () => {} }
-
-                                           const context = {
-                                             mode,
-                                             cwd: fixture.cwd,
-                                             model: { id: fixture.model },
-                                             sessionManager: { getBranch: () => entries },
-                                             ui: {
-                                               setFooter: (factory) => {
-                                                 report.uiCalls.push('setFooter')
-                                                 const component = factory(tui, {}, footerData)
-                                                 for (const line of component.render(80)) {
-                                                   report.footer.push(String(line))
-                                                 }
-                                               },
-                                             },
+                                           function makeTui(label) {
+                                             return { requestRender: () => { report.renders.push(label) } }
                                            }
 
-                                           process.stderr.write = (chunk) => { report.stderr.push(String(chunk)); return true }
+                                           function makeContext(contextMode, contextTui) {
+                                             return {
+                                               mode: contextMode,
+                                               cwd: fixture.cwd,
+                                               model: { id: fixture.model },
+                                               sessionManager: {
+                                                 getBranch: () => {
+                                                   if (process.env.PI_THROW_ENTRIES === '1') throw new Error('synthetic session-store failure')
+                                                   return entries
+                                                 },
+                                               },
+                                               ui: {
+                                                 setFooter: (factory) => {
+                                                   report.uiCalls.push('setFooter')
+                                                   const component = factory(contextTui, {}, footerData)
+                                                   for (const line of component.render(80)) {
+                                                     report.footer.push(String(line))
+                                                   }
+                                                 },
+                                               },
+                                             }
+                                           }
+
+                                           const context = makeContext(mode, makeTui(mode))
 
                                            after(() => {
                                              writeFileSync(process.env.PI_REPORT, JSON.stringify(report))
@@ -1551,12 +1671,33 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              const module = await import(pathToFileURL(process.env.PI_ARTIFACT).href)
                                              const factory = module.default
                                              assert.equal(typeof factory, 'function', 'the extension must default-export a factory function')
-                                             await factory(pi)
-                                             assert.ok(
-                                               Array.isArray(handlers['session_start']) && handlers['session_start'].length > 0,
-                                               'the extension must subscribe to session_start')
-                                             for (const handler of handlers['session_start'] ?? []) {
-                                               await handler({}, context)
+                                             capturing = true
+                                             try {
+                                               await factory(pi)
+                                               assert.ok(
+                                                 Array.isArray(handlers['session_start']) && handlers['session_start'].length > 0,
+                                                 'the extension must subscribe to session_start')
+                                               if (process.env.PI_SESSIONS === '2') {
+                                                 // Two live TUI sessions: shutting down the first must not silence the second.
+                                                 const contextA = makeContext('tui', makeTui('A'))
+                                                 const contextB = makeContext('tui', makeTui('B'))
+                                                 for (const handler of handlers['session_start'] ?? []) {
+                                                   await handler({}, contextA)
+                                                   await handler({}, contextB)
+                                                 }
+                                                 for (const handler of handlers['session_shutdown'] ?? []) {
+                                                   await handler({}, contextA)
+                                                 }
+                                                 for (const handler of handlers['agent_end'] ?? []) {
+                                                   await handler({}, contextB)
+                                                 }
+                                               } else {
+                                                 for (const handler of handlers['session_start'] ?? []) {
+                                                   await handler({}, context)
+                                                 }
+                                               }
+                                             } finally {
+                                               capturing = false
                                              }
                                            })
                                            """;
