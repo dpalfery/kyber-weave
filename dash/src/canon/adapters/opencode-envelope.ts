@@ -57,8 +57,13 @@ const ENVELOPE_TOOL_KEYS = ['opencode.tool.name'] as const
 export const OPENCODE_PROMPT_TEXT_KEY = 'opencode.prompt.text'
 
 function hasMarkerPrefix(attributes: Record<string, unknown>): boolean {
+  // A marker is the exact key or a dotted child of it: `opencode.hook`
+  // matches, `opencode.hook.name` matches, but `opencode.hookyMcHookface`
+  // must not. Prefixes that already end in a dot keep their verbatim match.
   return Object.keys(attributes).some((key) =>
-    ENVELOPE_MARKER_PREFIXES.some((prefix) => key === prefix || key.startsWith(prefix)),
+    ENVELOPE_MARKER_PREFIXES.some(
+      (prefix) => key === prefix || key.startsWith(prefix.endsWith('.') ? prefix : `${prefix}.`),
+    ),
   )
 }
 

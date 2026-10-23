@@ -138,6 +138,22 @@ describe('opencode envelope contract version key (T1)', () => {
     expect(isOpencodeEnvelopeSpan(rawSpan({ spanId: 'empty', attributes: {} }))).toBe(false)
   })
 
+  it('does not mistake opencode.hookyMcHookface for the opencode.hook marker', () => {
+    expect(
+      isOpencodeEnvelopeSpan(rawSpan({ spanId: 'hook-exact', attributes: { 'opencode.hook': 'turn.start' } })),
+    ).toBe(true)
+    expect(
+      isOpencodeEnvelopeSpan(
+        rawSpan({ spanId: 'hook-child', attributes: { 'opencode.hook.name': 'turn.start' } }),
+      ),
+    ).toBe(true)
+    expect(
+      isOpencodeEnvelopeSpan(
+        rawSpan({ spanId: 'hook-lookalike', attributes: { 'opencode.hookyMcHookface': 'turn.start' } }),
+      ),
+    ).toBe(false)
+  })
+
   it('supports only the current contract version, never an unknown or missing one', () => {
     const supported = rawSpan({
       spanId: 'supported',
