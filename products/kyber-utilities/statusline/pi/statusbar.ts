@@ -194,7 +194,8 @@ export function statusBarSegments(summary: StatusLineSummary): string[] {
   if (summary.model) parts.push(`${MAGENTA}🤖 ${summary.model}${RESET}`);
 
   // Absent is not zero: when no token datum exists at all (the guarded-render
-  // fallback), the total renders '--' rather than a confident-looking 0.
+  // fallback), the total and the cache slice render '--' rather than a
+  // confident-looking 0 manufactured out of ignorance.
   const hasTokenData =
     summary.totalTokens !== undefined ||
     summary.freshInput !== undefined ||
@@ -206,7 +207,9 @@ export function statusBarSegments(summary: StatusLineSummary): string[] {
       ?? (summary.freshInput ?? 0) + (summary.cacheRead ?? 0)
         + (summary.cacheCreation ?? 0) + (summary.output ?? 0))
     : undefined;
-  const tokenBreak = `${GRAY}(in:${fmtK(summary.freshInput)} out:${fmtK(summary.output)} cache:${fmtK((summary.cacheRead ?? 0) + (summary.cacheCreation ?? 0))})${RESET}`;
+  const hasCacheData = summary.cacheRead !== undefined || summary.cacheCreation !== undefined;
+  const cacheTotal = hasCacheData ? (summary.cacheRead ?? 0) + (summary.cacheCreation ?? 0) : undefined;
+  const tokenBreak = `${GRAY}(in:${fmtK(summary.freshInput)} out:${fmtK(summary.output)} cache:${fmtK(cacheTotal)})${RESET}`;
   parts.push(`${YELLOW}⚡ ${fmtK(totalTokens)}${RESET} ${tokenBreak}`);
 
   parts.push(`${GREEN}💰 ${fmtUsd(summary.totalCostUsd)}${RESET}`);
@@ -394,10 +397,14 @@ export default function (pi: ExtensionHostView): void {
             if (finished === activeTui) activeTui = undefined;
           }
         } else if (ctx === undefined || ctx === null) {
-          // Single-session host shutting down THE session: clear the fallback.
-          // An unrecognized context shape clears nothing rather than nuking a live TUI.
+          // Single-session host shutting down THE session: clear the fallback and
+          // the broadcast set, so a later context-less agent_end repaints nothing
+          // instead of a session that no longer exists.
           activeTui = undefined;
+          liveTuis.clear();
         }
+        // Any other shape falls through: an unrecognized context clears nothing
+        // rather than nuking a live TUI.
       } catch {
         // Swallow — cleanup must never fail the host.
       }
