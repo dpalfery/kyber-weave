@@ -117,10 +117,11 @@ public sealed class SquadSpecGateCollapseTests
     {
         string spec = SpecPath();
 
-        AssertAll(spec,
-            "consolidated review",
-            "SPEC_FINALIZED",
-            "validation evidence");
+        string collapsePath = Assert.Single(
+            spec.Split('\n'),
+            line => line.Contains("consolidated review", StringComparison.Ordinal) &&
+                    line.Contains("SPEC_FINALIZED", StringComparison.Ordinal));
+        Assert.Contains("validation evidence", collapsePath, StringComparison.Ordinal);
     }
 
     /// <summary>
