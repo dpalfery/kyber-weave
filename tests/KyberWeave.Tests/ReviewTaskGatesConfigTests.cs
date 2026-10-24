@@ -461,7 +461,7 @@ public sealed class ReviewTaskGatesConfigTests
                     continue;
 
                 total++;
-                if (!gate.Run.Contains("-nr:false") || !gate.Run.Contains("-p:UseSharedCompilation=false"))
+                if (!HasFlag(gate.Run, "nr:false") || !HasFlag(gate.Run, "p:UseSharedCompilation=false"))
                     offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
             }
         }
@@ -484,8 +484,8 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.True(result.Success, result.Error);
         ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
 
-        Assert.Contains("-nr:false", build.Run);
-        Assert.Contains("-p:UseSharedCompilation=false", build.Run);
+        Assert.True(HasFlag(build.Run, "nr:false"), "Review build gate lacks -nr:false (or /nr:false).");
+        Assert.True(HasFlag(build.Run, "p:UseSharedCompilation=false"), "Review build gate lacks -p:UseSharedCompilation=false.");
     }
 
     /// <summary>
@@ -565,6 +565,21 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.True(offenders.Count == 0,
             "dotnet-build task gates must keep --artifacts-path under .agent_scratchpad/{task}:\n" +
             string.Join("\n", offenders));
+    }
+
+    private static bool HasFlag(IReadOnlyList<string> run, string flag)
+    {
+        foreach (string element in run)
+        {
+            if (element.Length > 1 &&
+                (element[0] == '-' || element[0] == '/') &&
+                element[1..].Equals(flag, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDotnetCommand(string program)
