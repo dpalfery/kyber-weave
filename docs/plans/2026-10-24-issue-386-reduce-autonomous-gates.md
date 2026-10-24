@@ -116,7 +116,7 @@ When the council returns actionable Critical or Major findings (fixable by deter
 `ChangedLines` (the `max-reviewable-lines` numerator in `findings.json` → `ReviewScope`) excludes:
 
 - lockfiles: `*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock*`, `uv.lock`, `Cargo.lock`;
-- scratch output: `.agent_scratchpad/**` (and the configured scratchpad path where the repository declares one).
+- scratch output: `.agent_scratchpad/**` (and the `review.scratchpad-path` path where the repository declares one).
 
 `ChangedPaths` still includes them. Size never suppresses remediation: a size escalation (`KW-REVIEW-009` → `NEEDS_HUMAN`) parks the delivery but does not cancel an in-flight B remediation pass, and the remediation result is reported alongside the park. Never subdivide a review to slip under the ceiling (existing `code-reviewer` rule stays).
 
