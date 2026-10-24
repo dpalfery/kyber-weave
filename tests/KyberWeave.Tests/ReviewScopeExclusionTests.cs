@@ -125,7 +125,6 @@ public sealed class ReviewScopeExclusionTests
     }
 
     /// <summary>
-    /// <summary>
     /// Guard: per-path counts line up across separators and case — a producer reporting
     /// <c>SRC\Foo.cs</c> still scopes <c>src/Foo.cs</c> instead of falling through to
     /// the even-split heuristic (which would weigh half the 18,200 total here).
