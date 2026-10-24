@@ -125,6 +125,19 @@ public sealed class ReviewScopeExclusionTests
     }
 
     /// <summary>
+    /// <summary>
+    /// Guard: without per-path counts the fallback splits <c>ChangedLines</c> evenly across
+    /// paths with a ceiling, so excluded churn never pulls the numerator down. 100 lines over
+    /// three paths with one excluded scopes to 67 (ceil of 200/3), not 66.
+    /// </summary>
+    [Fact]
+    public void EvenSplitFallbackDividesWithACeilingTowardEscalation()
+    {
+        ReviewScope scope = new(["package-lock.json", "src/A.cs", "src/B.cs"], 100);
+
+        Assert.Equal(67, scope.EffectiveChangedLines);
+    }
+
     /// Guard: scoping must never become a way to slip under the ceiling — 21k lines of
     /// real source still escalates under the documented 20,000 host ceiling, with the
     /// <c>KW-REVIEW-009</c> diagnostic and the size-escalation exit code.

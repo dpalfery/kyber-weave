@@ -121,8 +121,9 @@ public sealed record ReviewScope(
     /// Lockfiles and scratch output are machine-generated churn, not human review load, so
     /// they are excluded from the <c>KW-REVIEW-009</c> numerator while staying listed in
     /// <see cref="ChangedPaths"/> for reviewers to see. When per-path counts are present
-    /// the numerator is their scoped sum; without them the even-split fallback overestimates
-    /// toward escalation rather than letting a change slip under the ceiling.
+    /// the numerator is their scoped sum; without them the even-split fallback divides with
+    /// a ceiling so it overestimates toward escalation rather than letting a change slip
+    /// under the ceiling.
     /// </remarks>
     public int EffectiveChangedLines => ComputeEffectiveChangedLines();
 
@@ -201,8 +202,9 @@ public sealed record ReviewScope(
                 return scoped;
             }
 
-            // Incomplete per-path counts fall through to the even-split heuristic below.
-            // Overestimating errs toward escalation, never toward slipping under the ceiling.
+            // Incomplete per-path counts fall through to the even-split heuristic below,
+            // which divides with a ceiling: overestimating errs toward escalation, never
+            // toward slipping under the ceiling.
         }
 
         if (ChangedPaths.Count == 0)
@@ -229,6 +231,7 @@ public sealed record ReviewScope(
             return 0;
         }
 
-        return (int)((long)ChangedLines * included / ChangedPaths.Count);
+        long evenSplit = (long)ChangedLines * included;
+        return (int)((evenSplit + ChangedPaths.Count - 1) / ChangedPaths.Count);
     }
 }
