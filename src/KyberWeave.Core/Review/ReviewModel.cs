@@ -110,4 +110,125 @@ public sealed record DroppedFinding(ReviewFinding Finding, string Code, string R
 /// <summary>The scope of the change under review.</summary>
 /// <param name="ChangedPaths">Repository-relative paths the diff touches.</param>
 /// <param name="ChangedLines">Total added and removed lines.</param>
-public sealed record ReviewScope(IReadOnlyList<string> ChangedPaths, int ChangedLines);
+/// <param name="PathLineCounts">Per-path added and removed lines, when the producer counted them.</param>
+public sealed record ReviewScope(
+    IReadOnlyList<string> ChangedPaths,
+    int ChangedLines,
+    IReadOnlyDictionary<string, int>? PathLineCounts = null)
+{
+    /// <summary>Lines that count toward the reviewable ceiling after generated churn is ignored.</summary>
+    /// <remarks>
+    /// Lockfiles and scratch output are machine-generated churn, not human review load, so
+    /// they are excluded from the <c>KW-REVIEW-009</c> numerator while staying listed in
+    /// <see cref="ChangedPaths"/> for reviewers to see. When per-path counts are present
+    /// the numerator is their scoped sum; without them the even-split fallback overestimates
+    /// toward escalation rather than letting a change slip under the ceiling.
+    /// </remarks>
+    public int EffectiveChangedLines => ComputeEffectiveChangedLines();
+
+    /// <summary>Whether a repository-relative path is excluded from the size numerator.</summary>
+    /// <param name="path">Repository-relative path with forward slashes.</param>
+    public static bool IsExcludedPath(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        string normalized = path.Replace('\\', '/');
+        if (normalized.Equals(".agent_scratchpad", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith(".agent_scratchpad/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        int slash = normalized.LastIndexOf('/');
+        string fileName = slash >= 0 ? normalized.Substring(slash + 1) : normalized;
+        if (fileName.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (fileName.StartsWith("bun.lock", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return fileName.Equals("package-lock.json", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("pnpm-lock.yaml", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("yarn.lock", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("Cargo.lock", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Equals("uv.lock", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private int ComputeEffectiveChangedLines()
+    {
+        if (ChangedLines <= 0)
+        {
+            return ChangedLines;
+        }
+
+        if (PathLineCounts is not null && PathLineCounts.Count > 0)
+        {
+            bool complete = true;
+            foreach (string path in ChangedPaths)
+            {
+                if (IsExcludedPath(path))
+                {
+                    continue;
+                }
+
+                if (!PathLineCounts.ContainsKey(path))
+                {
+                    complete = false;
+                    break;
+                }
+            }
+
+            if (complete)
+            {
+                int scoped = 0;
+                foreach (string path in ChangedPaths)
+                {
+                    if (IsExcludedPath(path))
+                    {
+                        continue;
+                    }
+
+                    if (PathLineCounts.TryGetValue(path, out int lines) && lines > 0)
+                    {
+                        scoped += lines;
+                    }
+                }
+
+                return scoped;
+            }
+
+            // Incomplete per-path counts fall through to the even-split heuristic below.
+            // Overestimating errs toward escalation, never toward slipping under the ceiling.
+        }
+
+        if (ChangedPaths.Count == 0)
+        {
+            return ChangedLines;
+        }
+
+        int included = 0;
+        foreach (string path in ChangedPaths)
+        {
+            if (!IsExcludedPath(path))
+            {
+                included++;
+            }
+        }
+
+        if (included == ChangedPaths.Count)
+        {
+            return ChangedLines;
+        }
+
+        if (included == 0)
+        {
+            return 0;
+        }
+
+        return (int)((long)ChangedLines * included / ChangedPaths.Count);
+    }
+}
