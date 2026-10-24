@@ -25,6 +25,11 @@ ontology:
 # part of a command. The cost is that a pipeline or a redirect cannot be expressed here; that
 # is the trade, and it is the right way round.
 review:
+  # Item E (issue #386, Q4 reversal of the 2026-10-14 "no max concurrency" directive):
+  # the ready-queue dispatcher caps concurrent workers at this value. Default 4 bounds
+  # MSBuild node and shared-compilation contention while keeping parallelism; a host that
+  # names another positive value gets that value instead.
+  max-concurrent-workers: 4
   gates:
     # Format is a required local check in AGENTS.md. Without these two gates, `review
     # gates` can pass a change that `dotnet format --verify-no-changes` would reject,
@@ -43,7 +48,7 @@ review:
     # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
     # test gate that follows it from running against binaries no longer executable.
     - id: build
-      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental]
+      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
@@ -173,18 +178,18 @@ review:
       - &fmt-whitespace
         id: format-whitespace
         include: &net-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
-        run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}"]
-        fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}"]
+        run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
       - &fmt-style
         id: format-style
         include: *net-paths
-        run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, --include, "{changed}"]
-        fix: [dotnet, format, KyberWeave.sln, style, --severity, warn, --include, "{changed}"]
+        run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, style, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
       - &fmt-analyzers
         id: format-analyzers
         include: *net-paths
-        run: [dotnet, format, KyberWeave.sln, analyzers, --verify-no-changes, --severity, warn, --include, "{changed}"]
-        fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}"]
+        run: [dotnet, format, KyberWeave.sln, analyzers, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
       - &dotnet-build
         id: dotnet-build
         # The build is the one gate a solution-only change must reach: a .sln, NuGet.config, or
@@ -192,7 +197,7 @@ review:
         # source-only *net-paths, because `dotnet format` given a solution in --include checks
         # nothing and exits 0.
         include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
-        run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
     dal-dev:
       - *fmt-whitespace
       - *fmt-style

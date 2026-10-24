@@ -13,6 +13,9 @@ internal sealed class ReviewYamlSection
     public ReviewDuplicatesYaml? Duplicates { get; init; }
 
     public ReviewPolicyYaml? Policy { get; init; }
+
+    /// <summary>Maximum concurrent workers the ready-queue dispatcher may run.</summary>
+    public int? MaxConcurrentWorkers { get; init; }
 }
 
 /// <summary>The <c>review.duplicates</c> mapping.</summary>

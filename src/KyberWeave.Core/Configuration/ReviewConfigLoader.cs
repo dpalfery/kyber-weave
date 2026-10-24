@@ -26,6 +26,8 @@ public static class ReviewConfigLoader
             TaskGates = section.TaskGates is null ? defaults.TaskGates : ParseTaskGates(section.TaskGates),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
+            MaxConcurrentWorkers =
+                ParseMaxConcurrentWorkers(section.MaxConcurrentWorkers, defaults.MaxConcurrentWorkers),
             Policy = ParsePolicy(section.Policy, defaults.Policy)
         };
     }
@@ -309,6 +311,17 @@ public static class ReviewConfigLoader
         if (minimum <= 1)
             throw new YamlException("review.duplicates.minimum-lines must be greater than one.");
         return new ReviewDuplicates(minimum);
+    }
+
+    private static int ParseMaxConcurrentWorkers(int? configured, int defaults)
+    {
+        if (configured is not { } workers)
+            return defaults;
+
+        if (workers <= 0)
+            throw new YamlException("review.max-concurrent-workers must be greater than zero.");
+
+        return workers;
     }
 
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)

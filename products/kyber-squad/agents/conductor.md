@@ -64,7 +64,7 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
 
-Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work immediately within file-scope constraints, with no concurrency cap.
+Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work within file-scope constraints, up to `review.max-concurrent-workers` (default 4, host-configurable). (Q4 reversal, issue #386.)
 
 ## Completion
 

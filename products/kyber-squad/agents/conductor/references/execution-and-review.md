@@ -4,7 +4,7 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 ## Ready queue
 
-A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately with no concurrency cap; when file scope is uncertain, favor parallelism and accept the conflict risk. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
+A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Dispatch ready tasks up to `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); when file scope is uncertain, favor parallelism within the cap and accept the conflict risk. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive, which predated per-task artifacts-path isolation.) Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
 Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope; a plan or spec path in the packet is routing metadata marked not for reading.
 
