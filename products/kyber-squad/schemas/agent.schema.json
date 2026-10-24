@@ -24,6 +24,18 @@
     "capability-profile": { "type": "string", "minLength": 1 },
     "copilot-capability-profile": { "type": "string", "minLength": 1 },
     "devin-capability-profile": { "type": "string", "minLength": 1 },
+    "pi-extensions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+$" }
+    },
+    "pi-tools": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "pattern": "^ext:[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$" }
+    },
     "copilot-tools": {
       "type": "array",
       "minItems": 1,
