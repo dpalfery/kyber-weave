@@ -30,6 +30,9 @@ A **model preset** is a named, user-owned override of that map. Squad applies it
 renders, inside the normal install and update transaction, so deployed files stay
 receipt-owned. "Preset" is used because "model profile" already names the category.
 
+Presets and project selections live in the user's home, never in a project's tree, for the
+reason [ADR 0037](../../adr/0037-squad-state-in-user-home.md) moved Squad state there.
+
 Slice 1 is Requirements 1–6. Slice 2 is Requirement 7.
 
 ## Requirements
@@ -41,14 +44,11 @@ models per harness, so that I can keep one per provider or plan.
 
 #### Acceptance Criteria
 
-1.1. Squad SHALL read user presets from a file under `~/.kyber-weave/` and project presets
-from a file under `<project>/.kyber-weave/`.
+1.1. Squad SHALL read presets from a file under `~/.kyber-weave/`.
 1.2. A preset SHALL use the shape of a `models.yml` profile entry: category → harness →
 model token.
 1.3. WHEN a preset omits a category or harness THEN Squad SHALL use the bundled
 `models.yml` value for it.
-1.4. WHEN a project and the user define a preset with the same name THEN the project
-definition SHALL win.
 
 ### Requirement 2 — Apply a preset
 
@@ -108,34 +108,33 @@ category, marking values that came from the bundled map.
 
 ### Requirement 6 — Project selection
 
-**User Story:** As a developer, I want a project to pick its own preset, so that its
-project-scope install uses the right provider without flags.
+**User Story:** As a developer, I want a project to pick its own preset, so that I don't
+pass flags every time.
 
 #### Acceptance Criteria
 
-6.1. WHEN a project's `.kyber-weave/` selects a preset THEN a project-scope install or
-update SHALL apply it unless `preset use` overrides it.
-6.2. A project selection SHALL NOT change a global install.
+6.1. Squad SHALL store a project's preset selection under `~/.kyber-weave/`, keyed by the
+project's canonical path, as it keys project state today.
+6.2. Squad SHALL NOT write a preset or selection file into the project's tree.
+6.3. A project selection SHALL NOT change a global install.
 
-### Requirement 7 — Per-project override of global agents (slice 2)
+### Requirement 7 — Concurrent presets across projects (slice 2)
 
-**User Story:** As a developer whose agents are installed globally, I want one project to
-use a different provider, so that other projects keep theirs.
+**User Story:** As a developer, I want two projects on one machine to run the same harness
+at the same time on different presets, so that neither needs agents deployed into its
+source tree.
 
 #### Acceptance Criteria
 
-7.1. WHEN `preset use` runs with a per-project override flag for target `claude` THEN Squad
-SHALL write the preset's Claude models as `ANTHROPIC_DEFAULT_*_MODEL` entries in the `env`
-block of the project's `.claude/settings.local.json`, and SHALL leave the global files
-unchanged.
-7.2. IF two categories that share one Claude alias resolve to different models THEN Squad
-SHALL fail and name the categories that collide.
-7.3. WHEN the same flag is used for target `opencode` THEN Squad SHALL write
-`agent.<name>.model` for each agent into the project's `opencode.json`.
-7.4. Squad SHALL preserve every other key in those files and SHALL remove only the entries
-it wrote when the override is cleared.
-7.5. IF the target has no per-project override mechanism THEN Squad SHALL exit non-zero
-and say so.
+7.1. WHEN two projects select different presets for the same harness THEN sessions in both
+SHALL be able to run at the same time, each with its agents on its own preset.
+7.2. Squad SHALL NOT write agent, skill or preset files into either project's tree to
+achieve 7.1.
+7.3. Each session SHALL keep the user's sign-in, settings and history for that harness.
+7.4. The mechanism SHALL be harness-neutral: one Squad command per project, whatever the
+harness.
+7.5. IF a harness has no way to meet 7.1–7.3 THEN Squad SHALL say so, name the harness,
+and SHALL NOT fall back to a project deploy.
 
 ## Success criteria
 
@@ -143,12 +142,15 @@ and say so.
   `--replace-managed`.
 - After `squad update` to a new release, `squad status` still shows the same preset and the
   rendered models match it.
+- Two projects run the same harness at once on different presets, and `git status` in both
+  shows nothing from Squad.
 
 ## Open questions
 
-1. Claude aliases give four slots (`opus`, `sonnet`, `haiku`, `fable`) for six categories.
-   Slice 2 needs global Claude agents rendered with aliases, and 7.2 then restricts which
-   presets can apply per project. Accept that limit, or render categories to aliases
-   differently?
-2. OpenCode's docs do not say whether a project `opencode.json` agent model beats a global
-   markdown agent's frontmatter. Verify in design before committing to 7.3.
+1. Slice 2 mechanism. Recommended for design: render each preset into its own harness home
+   under `~/.kyber-weave/` and start the harness with its home-folder variable pointing
+   there. Squad already honours that variable for 9 of the 12 agent harnesses (`claude`,
+   `codex`, `cursor`, `copilot`, `opencode`, `kilo`, `pi`, `zcode`, `devin`); `antigravity`,
+   `factory` and `commandcode` have none. Design must verify per harness that a preset home
+   can share sign-in, settings and history with the real one (7.3).
+2. How the variable reaches the session: a `kyber-weave` launcher, a shell hook, or both.
