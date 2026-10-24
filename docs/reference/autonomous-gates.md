@@ -76,7 +76,7 @@ flowchart LR
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
 | `intake choice` — `STATUS: INTAKE_RECOMMENDATION` (`PLAN` vs `SPEC`) in the intake-path assessment | `architect` (assessment), `conductor` (routing) | `auto-approve with provenance` — the architect's `RECOMMENDED` choice is recorded as the choice; `AUTONOMOUS_APPROVAL` provenance per the autonomy contract | keep | Choosing the wrong artifact type wastes the run and orphans downstream approvals. The choice is cheap to record but expensive to redo, so the recommendation is accepted with provenance rather than silently routed. Supervised mode asks the user. |
-| Defect diagnosis — `TRIAL \| NEEDS_ARCHITECT` before promotion | `bug-crusher-investigator`, `architect` | `auto-approve with provenance` for `TRIVIAL`; `NEEDS_ARCHITECT` routes per contract | keep | Diagnosis gates implementation authority. Skipping it would authorize work from symptoms. Irreversible in the sense of wasted execution and scope creep — keep the ordering. |
+| Defect diagnosis — `TRIVIAL \| NEEDS_ARCHITECT` before promotion | `bug-crusher-investigator`, `architect` | `auto-approve with provenance` for `TRIVIAL`; `NEEDS_ARCHITECT` routes per contract | keep | Diagnosis gates implementation authority. Skipping it would authorize work from symptoms. Irreversible in the sense of wasted execution and scope creep — keep the ordering. |
 | Promotion — pre-create empty plan/spec file on harnesses that withhold file creation | `conductor` | `auto-approve with provenance` — mechanical step, no decision | keep | File-system write that enables the author. No human judgement involved; keep as automatic. |
 
 ## 2. Plan-path gates
