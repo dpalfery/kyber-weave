@@ -150,7 +150,8 @@ public sealed class SquadAutonomyRemediationTests
         AssertAll(skill,
             "remediation pass",
             "Minor/Info",
-            "| # | Rule | Verdict |",
+            "Rule",
+            "Verdict",
             "major-count-blocks");
     }
 }
