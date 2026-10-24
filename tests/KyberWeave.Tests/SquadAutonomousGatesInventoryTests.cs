@@ -121,6 +121,6 @@ public sealed class SquadAutonomousGatesInventoryTests
     [Fact]
     public void InventoryMarksRemovalsFromPullRequest424()
     {
-        AssertInventoryContains(ReadInventory(), "#424");
+        AssertInventoryContains(ReadInventory(), "Removed by #424");
     }
 }
