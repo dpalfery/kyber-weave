@@ -147,7 +147,10 @@ public sealed record ReviewScope(
             return true;
         }
 
-        if (fileName.StartsWith("bun.lock", StringComparison.OrdinalIgnoreCase))
+        if (fileName.Equals("bun.lock", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Equals("bun.lockb", StringComparison.OrdinalIgnoreCase) ||
+            fileName.StartsWith("bun.lock.", StringComparison.OrdinalIgnoreCase) ||
+            fileName.StartsWith("bun.lock-", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

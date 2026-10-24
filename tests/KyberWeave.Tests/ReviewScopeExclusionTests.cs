@@ -126,6 +126,16 @@ public sealed class ReviewScopeExclusionTests
 
     /// <summary>
     /// <summary>
+    /// Guard: the <c>bun.lock*</c> exclusion stops at a boundary — <c>bun.lockdown.json</c>
+    /// is a real source file, not a bun lockfile, so it still counts.
+    /// </summary>
+    [Fact]
+    public void BunLockdownJsonIsNotABunLockfile()
+    {
+        Assert.False(ReviewScope.IsExcludedPath("bun.lockdown.json"));
+    }
+
+    /// <summary>
     /// Guard: without per-path counts the fallback splits <c>ChangedLines</c> evenly across
     /// paths with a ceiling, so excluded churn never pulls the numerator down. 100 lines over
     /// three paths with one excluded scopes to 67 (ceil of 200/3), not 66.
