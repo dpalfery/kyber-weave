@@ -67,10 +67,13 @@ public sealed class SquadSpecGateCollapseTests
     {
         string spec = SpecPath();
 
-        AssertAll(spec,
+        string disableClause = Assert.Single(
+            spec.Split('\n'),
+            line => line.Contains("disables the collapse", StringComparison.Ordinal));
+        AssertAll(disableClause,
             "Any gap",
             "separate gates");
-        Assert.Contains("OPEN_QUESTIONS", spec, StringComparison.Ordinal);
+        Assert.Contains("OPEN_QUESTIONS", disableClause, StringComparison.Ordinal);
     }
 
     /// <summary>
