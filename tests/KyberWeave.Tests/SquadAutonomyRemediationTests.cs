@@ -51,9 +51,9 @@ public sealed class SquadAutonomyRemediationTests
         string execution = ExecutionAndReview();
 
         AssertAll(execution,
-            "actionable",
             "one bounded remediation pass",
             "before park");
+        Assert.Matches(@"\bactionable\b", execution);
         Assert.True(
             execution.IndexOf("one bounded remediation pass", StringComparison.Ordinal) <
             execution.IndexOf("before park", StringComparison.Ordinal),
