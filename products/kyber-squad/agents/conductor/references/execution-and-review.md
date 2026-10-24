@@ -73,7 +73,17 @@ The per-cluster **dispatch tally** lives on the run's persisted execution artifa
 
 When the ready queue is empty and every task has cleared its exit gate, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
 
-With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green (in autonomous mode, deliver as the autonomy contract directs).
+With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the bounded auto-remediation loop below; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green (in autonomous mode, deliver as the autonomy contract directs).
+
+### Bounded council remediation loop (Critical/Major only, per Q3)
+
+When the council returns actionable Critical or Major findings fixable within the approved scope, the conductor routes them to the owning worker session for one bounded remediation pass before park: a single same session continuation in the same file scope, ending with a fresh task-gate re-run against the current tree so evidence is current instead of remembered. Remediation rework uses the same queue and scope rules as any rework; the rework dispatch counts in the per-cluster tally and the worker's inner iteration cap applies to the remediation pass.
+
+Unactionable, out-of-scope, or second failure findings park immediately with their finding ids in the parked list instead of earning another worker dispatch: Unactionable findings (no deterministic fix within scope), findings outside the authorized file scope, and any finding that survives the one bounded remediation pass and fails a second council review park immediately — record the finding ids and continue unaffected work per the autonomy contract.
+
+Minor/Info findings never trigger remediation and never park: a Minor-only council reports its findings and moves on without a remediation loop and without parking the change or task.
+
+The following verdict paths are not findings for this loop and bypass remediation entirely: KW-REVIEW-008 reserved-path escalation (always-human paths), size escalation over max-reviewable-lines (KW-REVIEW-009), and any blocking-gate failure (blocking-gate verdict rule 3, including docs validate, docs drift, build, test, and analyzers). Each keeps its escalation and REQUEST_CHANGES path as written; a size escalation parks delivery but never cancels an in-flight remediation pass already dispatched.
 
 ## Closeout
 
