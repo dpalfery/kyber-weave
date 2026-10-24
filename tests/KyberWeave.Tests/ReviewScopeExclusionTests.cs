@@ -126,6 +126,24 @@ public sealed class ReviewScopeExclusionTests
 
     /// <summary>
     /// <summary>
+    /// Guard: per-path counts line up across separators and case — a producer reporting
+    /// <c>SRC\Foo.cs</c> still scopes <c>src/Foo.cs</c> instead of falling through to
+    /// the even-split heuristic (which would weigh half the 18,200 total here).
+    /// </summary>
+    [Fact]
+    public void PathLineCountsMatchAcrossSeparatorsAndCase()
+    {
+        Dictionary<string, int> pathLineCounts = new()
+        {
+            ["SRC\\Foo.cs"] = SourceOnlyLines,
+            ["package-lock.json"] = ExcludedLines
+        };
+        ReviewScope scope = new(["src/Foo.cs", "package-lock.json"], ExcludedLines + SourceOnlyLines, pathLineCounts);
+
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
+    }
+
+    /// <summary>
     /// Guard: the <c>bun.lock*</c> exclusion stops at a boundary — <c>bun.lockdown.json</c>
     /// is a real source file, not a bun lockfile, so it still counts.
     /// </summary>

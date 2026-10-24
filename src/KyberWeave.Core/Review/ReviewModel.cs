@@ -171,6 +171,15 @@ public sealed record ReviewScope(
 
         if (PathLineCounts is not null && PathLineCounts.Count > 0)
         {
+            // Lookups use the same separator- and case-normalized form IsExcludedPath
+            // matches on, so a producer that reports 'SRC\\Foo.cs' still lines up with
+            // the 'src/Foo.cs' change entry instead of falling through to the heuristic.
+            Dictionary<string, int> normalizedCounts = new(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, int> entry in PathLineCounts)
+            {
+                normalizedCounts[entry.Key.Replace('\\', '/')] = entry.Value;
+            }
+
             bool complete = true;
             foreach (string path in ChangedPaths)
             {
@@ -179,7 +188,7 @@ public sealed record ReviewScope(
                     continue;
                 }
 
-                if (!PathLineCounts.ContainsKey(path))
+                if (!normalizedCounts.ContainsKey(path.Replace('\\', '/')))
                 {
                     complete = false;
                     break;
@@ -196,7 +205,7 @@ public sealed record ReviewScope(
                         continue;
                     }
 
-                    if (PathLineCounts.TryGetValue(path, out int lines) && lines > 0)
+                    if (normalizedCounts.TryGetValue(path.Replace('\\', '/'), out int lines) && lines > 0)
                     {
                         scoped += lines;
                     }
