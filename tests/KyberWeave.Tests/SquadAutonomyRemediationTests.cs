@@ -86,7 +86,7 @@ public sealed class SquadAutonomyRemediationTests
 
         AssertAll(execution,
             "Unactionable",
-            "second failure",
+            "second-failure",
             "park immediately",
             "finding ids");
     }
