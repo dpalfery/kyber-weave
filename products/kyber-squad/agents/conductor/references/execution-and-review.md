@@ -77,7 +77,7 @@ With the collection empty, dispatch `code-reviewer` exactly once over the accumu
 
 ### Bounded council remediation loop (Critical/Major only, per Q3)
 
-When the council returns actionable Critical or Major findings fixable within the approved scope, the conductor routes them to the owning worker session for one bounded remediation pass before park: a single same session continuation in the same file scope, ending with a fresh task-gate re-run against the current tree so evidence is current instead of remembered. Remediation rework uses the same queue and scope rules as any rework; the rework dispatch counts in the per-cluster tally and the worker's inner iteration cap applies to the remediation pass.
+When the council returns actionable Critical or Major findings fixable within the approved scope, the conductor routes each finding to its owning worker session for one bounded remediation pass before park: a single same session continuation in the same file scope, ending with a fresh task-gate re-run against the current tree so evidence is current instead of remembered. Remediation rework uses the same queue and scope rules as any rework; the rework dispatch counts in the per-cluster tally and the worker's inner iteration cap applies to the remediation pass.
 
 Unactionable, out-of-scope, or second failure findings park immediately with their finding ids in the parked list instead of earning another worker dispatch: Unactionable findings (no deterministic fix within scope), findings outside the authorized file scope, and any finding that survives the one bounded remediation pass and fails a second council review park immediately — record the finding ids and continue unaffected work per the autonomy contract.
 
