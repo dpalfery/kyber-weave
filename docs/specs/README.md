@@ -4,7 +4,7 @@ title: Specifications
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-10-10
 ---
 
 # Specifications
@@ -28,4 +28,5 @@ A specification is open only while it is built. The pull request that finishes i
 
 | Spec | Component | Status | Date | Archive Date | Canonical Docs / Reference | Description |
 |---|---|---|---|---|---|---|
+| [Kyber Arbiter](../archive/specs/kyber-arbiter/README.md) | KyberSquad | Archived | 2026-10-02 | 2026-10-10 | None — no ADR, decisions recorded in the plan and specification | A three-step rule engine for delegations and review, invoked by harness hooks, with plain code, model judgment, and reasoning agent escalation. Enforces delegation scope, ready queue, rosters, and review applicability. Complete specification covering all three delivery phases. |
 | [KyberDash context surfaces](../archive/specs/kyberdash-context-surfaces/README.md) | KyberDash | Archived | 2026-09-18 | 2026-09-24 | [KyberDash](../dash/README.md), [ADR 0020](../adr/0020-kyberdash-one-time-fork.md), [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) | One-time fork of codeburn, removal of non-context features, a Tauri tray for macOS and Windows, deep-linkable dashboard views, and a context-troubleshooting CLI report. |
