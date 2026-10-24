@@ -85,9 +85,10 @@ public sealed class SquadSpecGateCollapseTests
     {
         string spec = SpecPath();
 
-        AssertAll(spec,
-            "Supervised",
-            "separate gates");
+        string supervisedLine = Assert.Single(
+            spec.Split('\n'),
+            line => line.Contains("Supervised", StringComparison.Ordinal));
+        Assert.Contains("separate gates", supervisedLine, StringComparison.Ordinal);
     }
 
     /// <summary>
