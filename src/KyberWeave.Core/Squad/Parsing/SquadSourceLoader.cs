@@ -575,7 +575,7 @@ public static class SquadSourceLoader
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "devin-capability-profile", "delegates-to", "fallback", "aliases"],
+            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "pi-extensions", "pi-tools", "devin-capability-profile", "delegates-to", "fallback", "aliases"],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -592,6 +592,8 @@ public static class SquadSourceLoader
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
         EnsureDistinct(copilotTools, "Copilot tool", file.RelativePath);
+        IReadOnlyList<string> piExtensions = ParseOptionalPiExtensions(root, file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> piTools = ParseOptionalPiTools(root, file.RelativePath, frontmatter.LineOffset);
 
         if (copilotTools.Count == 0)
         {
@@ -632,6 +634,8 @@ public static class SquadSourceLoader
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,
+            piExtensions,
+            piTools,
             TryGetScalar(root, "devin-capability-profile", file.RelativePath, frontmatter.LineOffset),
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
@@ -640,6 +644,113 @@ public static class SquadSourceLoader
             Sha256(frontmatter.Body),
             file.RelativePath,
             LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
+    }
+
+    /// <summary>
+    /// Parses the optional <c>pi-extensions</c> overlay key: the Pi extension ids whose
+    /// tools an agent may carry. When present it must be a non-empty sequence of distinct,
+    /// portable ids. The id charset reuses <see cref="IsPortableMcpNamePart"/>: <c>/</c>
+    /// is the <c>ext:</c> separator, so it can never appear inside an id.
+    /// </summary>
+    private static IReadOnlyList<string> ParseOptionalPiExtensions(
+        YamlMappingNode root,
+        string sourcePath,
+        int lineOffset)
+    {
+        if (!root.Children.ContainsKey(new YamlScalarNode("pi-extensions")))
+        {
+            return [];
+        }
+
+        IReadOnlyList<string> extensions = RequireStringSequence(root, "pi-extensions", sourcePath, lineOffset);
+        if (extensions.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'pi-extensions' must declare at least one extension id.",
+                "pi-extensions",
+                sourcePath,
+                "Add the Pi extension ids this agent loads, or remove 'pi-extensions'.");
+        }
+
+        EnsureDistinct(extensions, "pi-extensions entry", sourcePath);
+        foreach (string extension in extensions)
+        {
+            if (!IsPortableMcpNamePart(extension))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi extension id '{extension}' in 'pi-extensions' is not portable: use only " +
+                    "letters, digits, underscore, and hyphen ('/' is the 'ext:' separator).",
+                    "pi-extensions",
+                    sourcePath,
+                    "Rename the extension id to the portable charset or remove it.");
+            }
+        }
+
+        return extensions;
+    }
+
+    /// <summary>
+    /// Parses the optional <c>pi-tools</c> overlay key: additional Pi tool names appended
+    /// after the capability-derived <c>tools</c> CSV. Entries are restricted to the
+    /// <c>ext:&lt;extension&gt;/&lt;tool&gt;</c> form so a canonical file cannot smuggle a
+    /// built-in past the capability lattice (least-privilege by construction). The tool part
+    /// reuses the <see cref="IsPortableMcpNamePart"/> charset a qualified
+    /// <c>mcp__server__tool</c> name survives. Membership of the extension in
+    /// <c>pi-extensions</c> is enforced by <c>SquadSourceValidator</c>, next to the
+    /// Copilot tool cross-checks.
+    /// </summary>
+    private static IReadOnlyList<string> ParseOptionalPiTools(
+        YamlMappingNode root,
+        string sourcePath,
+        int lineOffset)
+    {
+        if (!root.Children.ContainsKey(new YamlScalarNode("pi-tools")))
+        {
+            return [];
+        }
+
+        IReadOnlyList<string> tools = RequireStringSequence(root, "pi-tools", sourcePath, lineOffset);
+        if (tools.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'pi-tools' must declare at least one tool.",
+                "pi-tools",
+                sourcePath,
+                "Add the 'ext:<extension>/<tool>' entries this agent carries, or remove 'pi-tools'.");
+        }
+
+        EnsureDistinct(tools, "pi-tools entry", sourcePath);
+        foreach (string tool in tools)
+        {
+            if (!tool.StartsWith("ext:", StringComparison.Ordinal))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi tool '{tool}' in 'pi-tools' must use the 'ext:<extension>/<tool>' form: " +
+                    "bare built-in names derive solely from the capability lattice.",
+                    "pi-tools",
+                    sourcePath,
+                    "Rewrite the entry as 'ext:<extension>/<tool>' naming an extension from 'pi-extensions'.");
+            }
+
+            string remainder = tool["ext:".Length..];
+            int separator = remainder.IndexOf('/', StringComparison.Ordinal);
+            string extension = separator < 0 ? string.Empty : remainder[..separator];
+            string toolPart = separator < 0 ? string.Empty : remainder[(separator + 1)..];
+            if (string.IsNullOrEmpty(extension) ||
+                string.IsNullOrEmpty(toolPart) ||
+                !IsPortableMcpNamePart(extension) ||
+                !IsPortableMcpNamePart(toolPart))
+            {
+                SquadSourceValidator.Throw(
+                    $"Pi tool '{tool}' in 'pi-tools' is not a well-formed 'ext:<extension>/<tool>' " +
+                    "reference with portable name parts.",
+                    "pi-tools",
+                    sourcePath,
+                    "Use 'ext:<extension>/<tool>' with letters, digits, underscore, and hyphen only.");
+            }
+        }
+
+        return tools;
     }
 
     private static IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)

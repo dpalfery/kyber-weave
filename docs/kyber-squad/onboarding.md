@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-24
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -241,6 +241,18 @@ higher in `.pi/subagents.json` for full capability.
 `general-purpose` agent (all tools). To enforce strict dispatch of Squad agents only, set
 `fallbackSubagent: none` in the project's `.pi/subagents.json`; Squad does not write this file, so
 the operator manages it.
+
+**Tool vocabulary**: Pi renders a seven-tool vocabulary (`read, grep, find, ls, edit, write,
+bash`). `network.read: allow` has no expressible built-in Pi tool — bare `mcp` in `tools:` is
+refused by the loader (plain names must be built-ins) — so it still records
+`permission-not-expressible` on the renderer alone. Read-only web access arrives via the
+canonical per-target overlay: `research-agent` declares `pi-extensions: [pi-mcp-adapter]` and
+the verified `pi-tools` `ext:` entries, which render as `extensions: [pi-mcp-adapter]` plus
+those `ext:` tool names appended to its capability-derived `tools` CSV. That agent requires
+the `pi-mcp-adapter` extension in the deployment harness. `network.publish` still has no
+built-in Pi tool and still records `permission-not-expressible`.
+The next `squad update` / `squad install --target pi` re-renders receipt-managed agent files
+with the overlay wiring and overwrites them, superseding any manual patch of those files.
 
 **Coexistence with Antigravity**: `--target antigravity,pi` produces disjoint output trees —
 `.agents/` (Antigravity agents and skills) and `.pi/` (Pi) — so neither target overwrites or orphans the
