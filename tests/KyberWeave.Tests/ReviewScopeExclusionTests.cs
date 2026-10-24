@@ -44,6 +44,16 @@ public sealed class ReviewScopeExclusionTests
         return VerdictEngine.Evaluate(scope, [], [], config, Today);
     }
 
+    private static ReviewScope ScopeWithExcludedCounts(string excludedPath)
+    {
+        Dictionary<string, int> pathLineCounts = new()
+        {
+            [excludedPath] = ExcludedLines,
+            ["src/Foo.cs"] = SourceOnlyLines
+        };
+        return new ReviewScope([excludedPath, "src/Foo.cs"], ExcludedLines + SourceOnlyLines, pathLineCounts);
+    }
+
     /// <summary>
     /// RED: 18k lockfile lines plus 200 source lines scopes to ~200, which approves
     /// under the ceiling. Fails today — the full 18,200 is weighed and escalates.
@@ -59,10 +69,11 @@ public sealed class ReviewScopeExclusionTests
     [InlineData("frontend/pnpm-lock.yaml")]
     public void LockfileLinesDoNotCountTowardTheSizeCeiling(string lockfile)
     {
-        ReviewScope scope = new([lockfile, "src/Foo.cs"], ExcludedLines + SourceOnlyLines);
+        ReviewScope scope = ScopeWithExcludedCounts(lockfile);
 
         ReviewOutcome outcome = Evaluate(scope, ConfigWithCeiling(10_000));
 
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
         Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == VerdictEngine.ChangeTooLarge);
         Assert.Contains(lockfile, scope.ChangedPaths);
@@ -77,10 +88,11 @@ public sealed class ReviewScopeExclusionTests
     [InlineData(".agent_scratchpad/task-1/artifacts/build.log")]
     public void ScratchpadLinesDoNotCountTowardTheSizeCeiling(string scratchPath)
     {
-        ReviewScope scope = new([scratchPath, "src/Foo.cs"], ExcludedLines + SourceOnlyLines);
+        ReviewScope scope = ScopeWithExcludedCounts(scratchPath);
 
         ReviewOutcome outcome = Evaluate(scope, ConfigWithCeiling(10_000));
 
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
         Assert.DoesNotContain(outcome.Diagnostics, d => d.Code == VerdictEngine.ChangeTooLarge);
         Assert.Contains(scratchPath, scope.ChangedPaths);
@@ -94,14 +106,22 @@ public sealed class ReviewScopeExclusionTests
     [Fact]
     public void ExcludedPathsRemainListedInChangedPaths()
     {
+        Dictionary<string, int> pathLineCounts = new()
+        {
+            ["package-lock.json"] = ExcludedLines / 2,
+            [".agent_scratchpad/notes.md"] = ExcludedLines / 2,
+            ["src/Foo.cs"] = SourceOnlyLines
+        };
         ReviewScope scope = new(
             ["package-lock.json", ".agent_scratchpad/notes.md", "src/Foo.cs"],
-            ExcludedLines + SourceOnlyLines);
+            ExcludedLines + SourceOnlyLines,
+            pathLineCounts);
 
         Assert.Equal(3, scope.ChangedPaths.Count);
         Assert.Contains("package-lock.json", scope.ChangedPaths);
         Assert.Contains(".agent_scratchpad/notes.md", scope.ChangedPaths);
         Assert.Contains("src/Foo.cs", scope.ChangedPaths);
+        Assert.Equal(SourceOnlyLines, scope.EffectiveChangedLines);
     }
 
     /// <summary>
@@ -112,7 +132,12 @@ public sealed class ReviewScopeExclusionTests
     [Fact]
     public void SourceOnlyOverflowStillNeedsHumanReview()
     {
-        ReviewScope scope = new(["src/A.cs", "src/B.cs"], 21_000);
+        Dictionary<string, int> pathLineCounts = new()
+        {
+            ["src/A.cs"] = 10_500,
+            ["src/B.cs"] = 10_500
+        };
+        ReviewScope scope = new(["src/A.cs", "src/B.cs"], 21_000, pathLineCounts);
 
         ReviewOutcome outcome = Evaluate(scope, ConfigWithCeiling(20_000));
 
