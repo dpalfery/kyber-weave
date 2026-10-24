@@ -54,3 +54,7 @@ COVERAGE: <all requirement ids covered, or list gaps>
 ```
 
 On conductor-supplied explicit approval, record `Phase status: Approved` and return `STATUS: PHASE_APPROVED`. When all three phases are approved, synchronize the spec index as Draft awaiting final approval and return `STATUS: SPEC_READY`. Only a later finalization invocation carrying explicit **approve and execute** authorization records Ready and returns `STATUS: SPEC_FINALIZED`.
+
+## Consolidated review recording
+
+When the conductor presents a consolidated review for a tasks `STATUS: READY_FOR_REVIEW` with no gaps and no open questions, this phase permits the combined recording: one presentation carries both the tasks approval and the execute approval as two AUTONOMOUS_APPROVAL rows. The conductor supplies each approval explicitly; the owner records them and returns the normal `STATUS: PHASE_APPROVED` / `STATUS: SPEC_FINALIZED` progression.
