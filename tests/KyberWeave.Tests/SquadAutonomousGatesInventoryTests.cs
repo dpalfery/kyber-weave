@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -20,6 +21,11 @@ public sealed class SquadAutonomousGatesInventoryTests
     private static void AssertInventoryContains(string text, string phrase)
     {
         Assert.Contains(phrase, text, StringComparison.Ordinal);
+    }
+
+    private static void AssertInventoryMatchesWord(string text, string word)
+    {
+        Assert.Matches($"\\b{Regex.Escape(word)}\\b", text);
     }
 
     [Fact]
@@ -101,9 +107,9 @@ public sealed class SquadAutonomousGatesInventoryTests
     {
         string text = ReadInventory();
 
-        AssertInventoryContains(text, "keep");
-        AssertInventoryContains(text, "reduce");
-        AssertInventoryContains(text, "collapse");
+        AssertInventoryMatchesWord(text, "keep");
+        AssertInventoryMatchesWord(text, "reduce");
+        AssertInventoryMatchesWord(text, "collapse");
     }
 
     [Fact]
