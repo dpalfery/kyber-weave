@@ -28,4 +28,5 @@ A specification is open only while it is built. The pull request that finishes i
 
 | Spec | Component | Status | Date | Archive Date | Canonical Docs / Reference | Description |
 |---|---|---|---|---|---|---|
+| [Squad model presets](squad-model-presets/README.md) | KyberSquad | Draft | 2026-10-24 | — | [Kyber-Squad](../kyber-squad/onboarding.md) | Named, user-owned model presets applied at render time by `squad install`/`update`, plus a per-project override for Claude Code and OpenCode. |
 | [KyberDash context surfaces](../archive/specs/kyberdash-context-surfaces/README.md) | KyberDash | Archived | 2026-09-18 | 2026-09-24 | [KyberDash](../dash/README.md), [ADR 0020](../adr/0020-kyberdash-one-time-fork.md), [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) | One-time fork of codeburn, removal of non-context features, a Tauri tray for macOS and Windows, deep-linkable dashboard views, and a context-troubleshooting CLI report. |
