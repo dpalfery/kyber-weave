@@ -438,6 +438,159 @@ public sealed class ReviewTaskGatesConfigTests
         }
     }
 
+    /// <summary>
+    /// T5 RED (issue #386 item E): concurrent workers share nothing when no MSBuild node is
+    /// reused and no Roslyn server is shared across them. Every <c>dotnet-build</c> task gate
+    /// therefore carries <c>-nr:false -p:UseSharedCompilation=false</c>. Only the build gates
+    /// are pinned: the format gates do not compile, so node reuse and shared compilation do not
+    /// apply to them. The repository gates below name neither flag yet, so this fails until T5
+    /// GREEN adds both flags to the task-gate build argv.
+    /// </summary>
+    [Fact]
+    public void DotnetBuildTaskGatesCarryNoNodeReuseAndNoSharedCompilation()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        List<string> offenders = [];
+        int total = 0;
+        foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
+        {
+            foreach (ReviewTaskGate gate in entry.Value)
+            {
+                if (gate.Id != "dotnet-build")
+                    continue;
+
+                total++;
+                if (!gate.Run.Contains("-nr:false") || !gate.Run.Contains("-p:UseSharedCompilation=false"))
+                    offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
+            }
+        }
+
+        Assert.True(total > 0, "Expected at least one dotnet-build task gate in the repository config.");
+        Assert.True(offenders.Count == 0,
+            "T5 RED (issue #386 item E): these dotnet-build task gates lack -nr:false or -p:UseSharedCompilation=false:\n" +
+            string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// The review <c>build</c> gate compiles the same solution the task gates compile, so it
+    /// carries the same two flags. The checked-in gate below names neither yet.
+    /// </summary>
+    [Fact]
+    public void ReviewBuildGateCarriesNoNodeReuseAndNoSharedCompilation()
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+
+        Assert.True(result.Success, result.Error);
+        ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
+
+        Assert.Contains("-nr:false", build.Run);
+        Assert.Contains("-p:UseSharedCompilation=false", build.Run);
+    }
+
+    /// <summary>
+    /// T5 RED (issue #386 item E): every task gate that runs <c>dotnet</c> isolates its build
+    /// output under a per-task path, so two agents building at once never share one
+    /// <c>obj/</c> tree. A gate qualifies with <c>--artifacts-path</c> naming <c>{task}</c>, or
+    /// with <c>-p:BaseOutputPath=</c> / <c>-p:BaseIntermediateOutputPath=</c> naming
+    /// <c>{task}</c> where the command takes no <c>--artifacts-path</c>. The format gates below
+    /// name neither yet, so this fails until T5 GREEN isolates them.
+    /// </summary>
+    [Fact]
+    public void EveryDotnetTaskGateUsesAPerTaskArtifactsPath()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        List<string> offenders = [];
+        int total = 0;
+        foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
+        {
+            foreach (ReviewTaskGate gate in entry.Value)
+            {
+                if (gate.Run.Count == 0 || gate.Run[0] != "dotnet")
+                    continue;
+
+                total++;
+                if (!HasPerTaskIsolation(gate))
+                    offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
+            }
+        }
+
+        Assert.True(total > 0, "Expected at least one dotnet task gate in the repository config.");
+        Assert.True(
+            offenders.Count == 0,
+            "T5 RED (issue #386 item E): these dotnet task gates share one obj/ tree — " +
+            "give each a per-task --artifacts-path or -p:Base*Path naming {task}:\n" +
+            string.Join("\n", offenders));
+    }
+
+    /// <summary>
+    /// The build gate already isolates: it writes under the task scratchpad with the
+    /// <c>{task}</c> token the runner expands per task. This pins that contract so the flag
+    /// work above cannot regress it.
+    /// </summary>
+    [Fact]
+    public void DotnetBuildTaskGatesIsolateUnderTheTaskScratchpad()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        List<string> offenders = [];
+        foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
+        {
+            foreach (ReviewTaskGate gate in entry.Value)
+            {
+                if (gate.Id != "dotnet-build")
+                    continue;
+
+                int artifacts = -1;
+                for (int i = 0; i < gate.Run.Count; i++)
+                {
+                    if (gate.Run[i] == "--artifacts-path")
+                    {
+                        artifacts = i;
+                        break;
+                    }
+                }
+
+                bool isolated = artifacts >= 0 &&
+                                artifacts + 1 < gate.Run.Count &&
+                                gate.Run[artifacts + 1].Contains("{task}", StringComparison.Ordinal) &&
+                                gate.Run[artifacts + 1].Contains(".agent_scratchpad/", StringComparison.Ordinal);
+
+                if (!isolated)
+                    offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "dotnet-build task gates must keep --artifacts-path under .agent_scratchpad/{task}:\n" +
+            string.Join("\n", offenders));
+    }
+
+    private static bool HasPerTaskIsolation(ReviewTaskGate gate)
+    {
+        for (int i = 0; i < gate.Run.Count; i++)
+        {
+            string element = gate.Run[i];
+
+            if (element == "--artifacts-path" &&
+                i + 1 < gate.Run.Count &&
+                gate.Run[i + 1].Contains("{task}", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if ((element.StartsWith("-p:BaseOutputPath=", StringComparison.Ordinal) ||
+                 element.StartsWith("-p:BaseIntermediateOutputPath=", StringComparison.Ordinal)) &&
+                element.Contains("{task}", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTaskGates()
     {
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
