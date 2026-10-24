@@ -10,6 +10,9 @@
 
 import type { OpencodeHookEvent } from '../plugin.js'
 import {
+  OPENCODE_CONTEXT_SKILLS_KEY,
+  OPENCODE_CONTEXT_SYSTEM_KEY,
+  OPENCODE_CONTEXT_TOOLS_KEY,
   OPENCODE_CONTRACT_VERSION,
   OPENCODE_CONTRACT_VERSION_KEY,
   OPENCODE_SESSION_ID_KEY,
@@ -102,11 +105,39 @@ function eventToSpan(event: OpencodeHookEvent, index: number): OtlpWireSpan {
     { key: OPENCODE_SESSION_ID_KEY, value: { stringValue: event.sessionId } },
     { key: 'opencode.hook', value: { stringValue: event.kind } },
   ]
-  if (event.turnIndex !== undefined) {
+  // Only genuine strings ride the wire: a non-string value (number,
+  // object, boolean) is dropped, never coerced into `{ stringValue }`.
+  const wireString = (value: unknown): value is string =>
+    typeof value === 'string' && value !== ''
+  if (typeof event.turnIndex === 'number' && Number.isFinite(event.turnIndex)) {
     attributes.push({ key: 'turn.index', value: { intValue: String(event.turnIndex) } })
   }
-  if (event.spanId !== undefined) {
+  if (wireString(event.spanId)) {
     attributes.push({ key: 'span.id', value: { stringValue: event.spanId } })
+  }
+  // T4 context content (envelope v2): carried only when the event names it,
+  // so absent fields stay absent — never empty-string padding.
+  if (wireString(event.systemPrompt)) {
+    attributes.push({ key: OPENCODE_CONTEXT_SYSTEM_KEY, value: { stringValue: event.systemPrompt } })
+  }
+  if (wireString(event.toolsText)) {
+    attributes.push({ key: OPENCODE_CONTEXT_TOOLS_KEY, value: { stringValue: event.toolsText } })
+  }
+  if (
+    Array.isArray(event.skills) &&
+    event.skills.length > 0 &&
+    event.skills.every((skill) => typeof skill === 'string')
+  ) {
+    attributes.push({
+      key: OPENCODE_CONTEXT_SKILLS_KEY,
+      value: { stringValue: JSON.stringify(event.skills) },
+    })
+  }
+  if (wireString(event.model)) {
+    attributes.push({ key: 'opencode.model.id', value: { stringValue: event.model } })
+  }
+  if (wireString(event.agent)) {
+    attributes.push({ key: 'opencode.agent', value: { stringValue: event.agent } })
   }
 
   const started = nanosOf(event.timestamp)

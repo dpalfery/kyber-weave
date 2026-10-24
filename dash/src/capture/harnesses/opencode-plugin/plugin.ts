@@ -50,7 +50,12 @@ export const OPENCODE_PLUGIN_HOOK_KINDS = [
   'session.end',
 ] as const
 
-export type OpencodeHookKind = (typeof OPENCODE_PLUGIN_HOOK_KINDS)[number]
+/** v2 `ctx.session.hook("context")` kind per the T0 pin (fixtures/context-payload.json @opencode/plugin 2.1.4). Not a lifecycle boundary. */
+export const OPENCODE_CONTEXT_HOOK_KIND = 'session.context' as const
+
+export type OpencodeLifecycleKind = (typeof OPENCODE_PLUGIN_HOOK_KINDS)[number]
+
+export type OpencodeHookKind = OpencodeLifecycleKind | typeof OPENCODE_CONTEXT_HOOK_KIND
 
 /** Opencode config keys the dash CLI manages for this plugin (never hand-edited paths). */
 export const OPENCODE_PLUGIN_CONFIG_KEYS = {
@@ -62,6 +67,18 @@ export type OpencodeHookPayload = {
   sessionId: string
   turnIndex?: number
   spanId?: string
+  /** v2 SessionContext.request message identity (chat.params message.id on the v1 ladder). */
+  messageId?: string
+  /** Assembled system prompt (v2 SessionContext.system; v1 experimental.chat.system.transform output). */
+  systemPrompt?: string
+  /** JSON-serialized tool definitions (v2 SessionContext.tools; v1 tool.definition output). */
+  toolsText?: string
+  /** Skill names listed for the session (v2 SessionContext extension per the T0 pin). */
+  skills?: readonly string[]
+  /** Model identity (v2 SessionContext.model; v1 chat.params model.id). */
+  model?: string
+  /** Agent identity (v2 SessionContext.agent; v1 chat.params agent). */
+  agent?: string
 }
 
 export type OpencodeHookEvent = OpencodeHookPayload & {
@@ -115,7 +132,9 @@ export type OpencodePluginHost = {
 export type OpencodeHookHandler = (payload: OpencodeHookPayload) => Promise<void>
 
 export type OpencodePlugin = {
-  hooks: Record<OpencodeHookKind, OpencodeHookHandler>
+  hooks: Record<OpencodeLifecycleKind, OpencodeHookHandler>
+  /** v2 session.context handler (content payload); same never-fail-host contract as hooks. */
+  context: OpencodeHookHandler
   /** Every boundary attempted, in firing order, whether or not delivery succeeded. */
   events: OpencodeHookEvent[]
   /** Every swallowed delivery failure, in order. */
@@ -136,6 +155,7 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
 
   const plugin: OpencodePlugin = {
     hooks: undefined as never,
+    context: undefined as never,
     events: [],
     failures: [],
   }
@@ -168,6 +188,7 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     'turn.end': hook('turn.end'),
     'session.end': hook('session.end'),
   }
+  plugin.context = hook('session.context')
   return plugin
 }
 
@@ -182,7 +203,7 @@ export function registerOpencodePlugin(
   plugin: OpencodePlugin = createOpencodePlugin(),
 ): OpencodePlugin {
   try {
-    host.hooks?.({ ...plugin.hooks })
+    host.hooks?.({ ...plugin.hooks, 'session.context': plugin.context })
   } catch {
     // Swallow — a host that rejects hook registration must not take the session down.
   }
@@ -193,6 +214,10 @@ export function registerOpencodePlugin(
       'session.end': plugin.hooks['session.end'],
       'turn.start': plugin.hooks['turn.start'],
       'turn.end': plugin.hooks['turn.end'],
+      // v1 dotted kind + v2 namespaced `ctx.session.hook("context")` per the T0 pin
+      // (fixtures/context-payload.json @opencode/plugin 2.1.4); same identity.
+      'session.context': plugin.context,
+      context: plugin.context,
     }
     host.tool = {
       ...host.tool,
@@ -283,6 +308,19 @@ function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload
     kind: 'internal',
     sessionID: event.sessionId,
     ...(event.turnIndex !== undefined ? { turnIndex: event.turnIndex } : {}),
+    // T2 context content (T0 SessionContext pin): forwarded only when
+    // present, so absent stays absent — never empty-string padding (T4
+    // semantics). The mapper drops empties again; the stamper keeps the
+    // payload itself free of content keys it was never given.
+    ...(event.systemPrompt !== undefined && event.systemPrompt !== ''
+      ? { systemPrompt: event.systemPrompt }
+      : {}),
+    ...(event.toolsText !== undefined && event.toolsText !== ''
+      ? { toolsText: event.toolsText }
+      : {}),
+    ...(event.skills !== undefined && event.skills.length > 0 ? { skills: [...event.skills] } : {}),
+    ...(event.model !== undefined && event.model !== '' ? { modelId: event.model } : {}),
+    ...(event.agent !== undefined && event.agent !== '' ? { agent: event.agent } : {}),
     startTimeUnixNano: nanos,
     endTimeUnixNano: nanos,
     hook: event.kind,

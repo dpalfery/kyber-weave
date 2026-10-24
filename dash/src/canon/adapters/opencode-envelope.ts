@@ -23,7 +23,7 @@
 import type { RawSpan } from './base.js'
 
 /** The plugin contract this build claims. A bump invalidates stale checkpoints. */
-export const OPENCODE_CONTRACT_VERSION = '1'
+export const OPENCODE_CONTRACT_VERSION = '2'
 
 /** The attribute an envelope span names its emitting contract under. */
 export const OPENCODE_CONTRACT_VERSION_KEY = 'opencode.contract_version'
@@ -47,6 +47,7 @@ const ENVELOPE_MARKER_PREFIXES = [
   'opencode.call.',
   'opencode.message.',
   'opencode.hook',
+  'opencode.context.',
 ] as const
 
 /** Envelope operation markers. A tool marker wins over a model marker. */
@@ -55,6 +56,22 @@ const ENVELOPE_TOOL_KEYS = ['opencode.tool.name'] as const
 
 /** The envelope prompt text, bucketed as conversation history when present. */
 export const OPENCODE_PROMPT_TEXT_KEY = 'opencode.prompt.text'
+
+/**
+ * Envelope v2 context keys (plan 2026-10-23 §3.3, D3). The T0-pinned
+ * `SessionContext` (fixtures/context-payload.json: `system`, `tools`, plus
+ * the skills listing) maps onto these attributes; see mapper (T4) and the
+ * adapter bucketing (T5).
+ */
+export const OPENCODE_CONTEXT_SYSTEM_KEY = 'opencode.context.system'
+export const OPENCODE_CONTEXT_TOOLS_KEY = 'opencode.context.tools'
+export const OPENCODE_CONTEXT_SKILLS_KEY = 'opencode.context.skills'
+
+const ENVELOPE_CONTEXT_KEYS = [
+  OPENCODE_CONTEXT_SYSTEM_KEY,
+  OPENCODE_CONTEXT_TOOLS_KEY,
+  OPENCODE_CONTEXT_SKILLS_KEY,
+] as const
 
 function hasMarkerPrefix(attributes: Record<string, unknown>): boolean {
   // A marker is the exact key or a dotted child of it: `opencode.hook`
@@ -95,9 +112,19 @@ export function isOpencodeEnvelopeTool(attributes: Record<string, unknown>): boo
   return hasNonEmptyString(attributes, ENVELOPE_TOOL_KEYS)
 }
 
-/** True when the envelope span carries a model call. */
+/** True when the envelope span carries context content (D3 marker prefix). */
+export function isOpencodeEnvelopeContext(attributes: Record<string, unknown>): boolean {
+  return hasNonEmptyString(attributes, ENVELOPE_CONTEXT_KEYS)
+}
+
+/**
+ * True when the envelope span carries a model call (D4). Model markers are
+ * model-call evidence, and so is a context span on its own: a context event
+ * is pre-LLM-call request assembly. Counters are never fabricated here —
+ * tokens stay unset until a vocabulary with real counters is read.
+ */
 export function isOpencodeEnvelopeModel(attributes: Record<string, unknown>): boolean {
-  return hasNonEmptyString(attributes, ENVELOPE_MODEL_KEYS)
+  return hasNonEmptyString(attributes, ENVELOPE_MODEL_KEYS) || isOpencodeEnvelopeContext(attributes)
 }
 
 /** The envelope session id, or undefined. Never synthesized. */
@@ -110,4 +137,26 @@ export function opencodeEnvelopeSessionId(attributes: Record<string, unknown>): 
 export function opencodeEnvelopePromptText(attributes: Record<string, unknown>): string | undefined {
   const value = attributes[OPENCODE_PROMPT_TEXT_KEY]
   return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+function contextText(attributes: Record<string, unknown>, key: string): string | undefined {
+  const value = attributes[key]
+  // The mapper (T4) stamps strings; a non-string value is never synthesized
+  // into text here — T5 bucketing reads only what the span carries.
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** The envelope v2 assembled system prompt, or undefined. Never synthesized. */
+export function opencodeEnvelopeContextSystem(attributes: Record<string, unknown>): string | undefined {
+  return contextText(attributes, OPENCODE_CONTEXT_SYSTEM_KEY)
+}
+
+/** The envelope v2 JSON-serialized tool definitions, or undefined. Never synthesized. */
+export function opencodeEnvelopeContextTools(attributes: Record<string, unknown>): string | undefined {
+  return contextText(attributes, OPENCODE_CONTEXT_TOOLS_KEY)
+}
+
+/** The envelope v2 JSON skills listing, or undefined. Never synthesized. */
+export function opencodeEnvelopeContextSkills(attributes: Record<string, unknown>): string | undefined {
+  return contextText(attributes, OPENCODE_CONTEXT_SKILLS_KEY)
 }

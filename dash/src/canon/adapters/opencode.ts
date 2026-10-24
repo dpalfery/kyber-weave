@@ -44,6 +44,8 @@ import {
   isOpencodeEnvelopeSpan,
   isOpencodeEnvelopeTool,
   isSupportedOpencodeEnvelope,
+  opencodeEnvelopeContextSystem,
+  opencodeEnvelopeContextTools,
   opencodeEnvelopePromptText,
   opencodeEnvelopeSessionId,
 } from './opencode-envelope.js'
@@ -395,12 +397,30 @@ function applyEnvelope(record: ReturnType<typeof baseRecord>, raw: RawSpan): voi
   }
   const prompt = opencodeEnvelopePromptText(raw.attributes)
   if (prompt !== undefined) {
-    const existing = record.parts ?? []
-    const order = existing.reduce((max, part) => Math.max(max, (part.order ?? 0) + 1), 0)
-    const parts: ContentPart[] = [...existing, { part: 'conversation_history', text: prompt, order }]
-    record.parts = parts
-    record.content = contentFromParts(parts)
+    appendPart(record, { part: 'conversation_history', text: prompt })
   }
+  // Envelope v2 context content (plan 2026-10-23 §5-T5, D4): the assembled
+  // system prompt buckets as `system_prompt` and the serialized tool
+  // definitions as `tool_definitions`, the `legacyAiParts` pattern, ordered
+  // after every existing part. Counters are never fabricated here — a context
+  // span with no usage keys keeps zero tokens with not-measurable cache classes.
+  const system = opencodeEnvelopeContextSystem(raw.attributes)
+  if (system !== undefined) {
+    appendPart(record, { part: 'system_prompt', text: system })
+  }
+  const tools = opencodeEnvelopeContextTools(raw.attributes)
+  if (tools !== undefined) {
+    appendPart(record, { part: 'tool_definitions', text: tools })
+  }
+}
+
+/** Appends a content part after every existing part, recomputing order and content. */
+function appendPart(record: ReturnType<typeof baseRecord>, part: Omit<ContentPart, 'order'>): void {
+  const existing = record.parts ?? []
+  const order = existing.reduce((max, entry) => Math.max(max, (entry.order ?? 0) + 1), 0)
+  const parts: ContentPart[] = [...existing, { ...part, order }]
+  record.parts = parts
+  record.content = contentFromParts(parts)
 }
 
 export const opencodeAdapter: HarnessAdapter = {

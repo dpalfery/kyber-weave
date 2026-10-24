@@ -35,6 +35,14 @@ const OPENCODE_OTEL_FLAG_KEY = 'experimental.openTelemetry'
  */
 const STATUS_ENV_KEY = 'OTEL_EXPORTER_OTLP_ENDPOINT'
 
+/**
+ * D5 consent (T3): sender-owned, off by default. Content (system prompt,
+ * tool definitions, skills listing) rides only when this is `1`.
+ * Declare-only: reported on status like the endpoint above, never written
+ * or receipted by enable — the `OTEL_EXPORTER_OTLP_ENDPOINT` pattern.
+ */
+const CONTEXT_CONSENT_ENV_KEY = 'KYBERDASH_OPENCODE_CONTEXT'
+
 export const opencodeHarness: ManagedHarnessWriter = {
   kind: 'managed',
   id: 'opencode',
@@ -52,6 +60,6 @@ export const opencodeHarness: ManagedHarnessWriter = {
   statusEnvSnippet: {
     label:
       'process env (upstream #13438; non-model spans are emitted with model spans and are not written here)',
-    envKeys: [STATUS_ENV_KEY],
+    envKeys: [STATUS_ENV_KEY, CONTEXT_CONSENT_ENV_KEY],
   },
 }

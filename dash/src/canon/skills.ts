@@ -26,6 +26,8 @@ import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from 
 const COPILOT_LISTING_KEY = 'github.copilot.context.skills'
 /** Antigravity's listing: `Active Skills: a, b` on the model-call span. */
 const ANTIGRAVITY_LISTING_KEY = 'gen_ai.skills'
+/** OpenCode's listing: a JSON-array string of skill names on the context span (plan 2026-10-23 §5-T5, D6). */
+const OPENCODE_LISTING_KEY = 'opencode.context.skills'
 const ANTIGRAVITY_LISTING_PREFIX = 'Active Skills: '
 /** Harness per-turn resident skill-token counter; never summed, never split across skills. */
 const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
@@ -133,12 +135,13 @@ export function readListingOf(
   if (raw[SKILLS_LISTED_KEY] !== undefined) return readClaudeListing(record, raw[SKILLS_LISTED_KEY])
   if (raw[COPILOT_LISTING_KEY] !== undefined) return readCopilotListing(record, raw[COPILOT_LISTING_KEY], parts)
   if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
+  if (raw[OPENCODE_LISTING_KEY] !== undefined) return readOpencodeListing(record, raw[OPENCODE_LISTING_KEY])
   const fromPrompt = readSystemPromptListing(record, parts)
   if (fromPrompt !== undefined) return fromPrompt
   const fromBody = readRequestBodyListing(record, parts)
   if (fromBody !== undefined) return fromBody
   return notMeasurable(
-    `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY} or ${ANTIGRAVITY_LISTING_KEY}, so the skills listed are not measurable.`,
+    `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY}, ${ANTIGRAVITY_LISTING_KEY} or ${OPENCODE_LISTING_KEY}, so the skills listed are not measurable.`,
   )
 }
 
@@ -455,6 +458,33 @@ function readCopilotListing(
   const skills = (parsed as string[])
     .filter((name) => name !== '')
     .map((name) => listedSkill(record, name, descriptions.get(name)))
+  return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+}
+
+/**
+ * The opencode context listing (D6): a JSON array of skill names, the Copilot
+ * `github.copilot.context.skills` pattern. The context span is a request-assembly
+ * event, so its listing is the session's initial list. A malformed value names
+ * its key in the not-measurable reason, never an empty list.
+ */
+function readOpencodeListing(record: CanonicalRecord, value: unknown): ListingResult {
+  if (typeof value !== 'string') {
+    return notMeasurable(`${OPENCODE_LISTING_KEY} is not a string, so the opencode skill listing is not measurable.`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return notMeasurable(`${OPENCODE_LISTING_KEY} is not valid JSON, so the opencode skill listing is not measurable.`)
+  }
+  if (!Array.isArray(parsed) || !parsed.every((name) => typeof name === 'string')) {
+    return notMeasurable(
+      `${OPENCODE_LISTING_KEY} is not a JSON array of skill names, so the opencode skill listing is not measurable.`,
+    )
+  }
+  const skills = (parsed as string[])
+    .filter((name) => name !== '')
+    .map((name) => listedSkill(record, name))
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 

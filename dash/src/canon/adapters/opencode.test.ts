@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 import { ADAPTERS, ingestBatch } from '../ingest.js'
 import { CanonStore } from '../store.js'
 import { opencodeAdapter } from './opencode.js'
+import { OPENCODE_CONTRACT_VERSION_KEY } from './opencode-envelope.js'
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 import type { OtlpSpan } from '../../otel/receiver.js'
@@ -283,5 +284,39 @@ describe('AdapterRegistry — OpenInference spans do not steal other harnesses',
       }),
     ]
     expect(registry.attribute(spans).get('copilot-vote')).toBe('copilot')
+  })
+})
+
+describe('opencode envelope v2 context bucketing (plan 2026-10-23 §5-T5, D4)', () => {
+  // T5 RED: the envelope carries context content, but applyEnvelope buckets
+  // nothing — these fail until the adapter maps context keys to parts.
+  const contextAttributes = (): Record<string, unknown> => ({
+    'opencode.session.id': 'ses_t5_ctx',
+    [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+    'opencode.model.id': 'claude-opus-4-6',
+    'opencode.model.provider': 'anthropic',
+    'opencode.context.system': 'you are a build agent',
+    'opencode.context.tools': JSON.stringify([{ name: 'read', description: 'read a file' }]),
+    'opencode.context.skills': JSON.stringify(['review']),
+  })
+
+  it('buckets context system text as system_prompt and tools JSON as tool_definitions', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'ctx-bucket', attributes: contextAttributes() }),
+    )
+    expect(record.op).toBe('llm.invoke')
+    const byPart = new Map((record.parts ?? []).map((part) => [part.part, part.text]))
+    expect(byPart.get('system_prompt')).toBe('you are a build agent')
+    expect(byPart.get('tool_definitions')).toContain('read')
+  })
+
+  it('maps a context span with no model markers as llm.invoke with zero fabricated counters', () => {
+    const { 'opencode.model.id': _id, 'opencode.model.provider': _provider, ...contextOnly } =
+      contextAttributes()
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'ctx-alone', attributes: contextOnly }))
+    expect(record.op).toBe('llm.invoke')
+    expect(record.tokens.freshInput).toBe(0)
+    expect(record.tokens.output).toBe(0)
+    expect(record.measurability?.cache_read).toMatchObject({ availability: 'not_measurable' })
   })
 })

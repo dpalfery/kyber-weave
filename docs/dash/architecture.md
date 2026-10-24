@@ -300,13 +300,34 @@ database directly and serves no API: rows reach `canon.db` only through the rece
 The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
 
 - **Version key.** Every envelope span names its emitting contract under
-  `opencode.contract_version` (`OPENCODE_CONTRACT_VERSION`, currently `'1'`); a contract
+  `opencode.contract_version` (`OPENCODE_CONTRACT_VERSION`, currently `'2'`); a contract
   bump invalidates stale checkpoints, following the parser-contract invalidation precedent.
 - **Version guard.** `ingestBatchWithAdapters` (`dash/src/canon/ingest.ts`) quarantines an
   envelope span with an unknown or missing version under the fixed reason
   `unknown opencode contract version` before the adapter vote, so no adapter claims it
-  and it is never misattributed to any harness. The decoded packet stays as the audit
+  and it is never misattributed to any harness. Spans stamped `'1'` by a pre-upgrade
+  plugin quarantine after the bump — intended; stale checkpoints invalidate and re-emit
+  under `'2'`. The decoded packet stays as the audit
   evidence, as on every other quarantine path.
+- **Context keys (contract `'2'`).** New marker prefix `opencode.context.` with
+  `opencode.context.system` (string), `opencode.context.tools` (JSON-serialized tool
+  definitions array), and `opencode.context.skills` (JSON array of skill names). A span
+  carrying any `opencode.context.*` key is the envelope. The v2 `session.context` hook
+  payload (system, tools, skills, session/model identity, pinned in
+  `fixtures/context-payload.json` at `@opencode/plugin` 2.1.4) rides these attributes
+  via the mapper; `eventToSpan` includes them on the wire span. Model markers map when
+  the payload names them.
+- **Entry.** The loadable entry (`entry.ts`) exports both the v2 CLI shape
+  (`Plugin.define({ id, setup })` registering `ctx.session.hook("context", …)`) and the
+  v1 Desktop default-export hooks map (including `session.context`), both bridging to
+  `createInstalledOpencodePlugin` + `registerOpencodePlugin`. `session.context` is
+  registered on both the v2 namespaced and v1 dotted host surfaces; lifecycle kinds are
+  unchanged.
+- **Consent.** System prompt, tool definitions, and the skills listing are content and
+  flow only under the sender-owned env consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
+  default; true only for exactly `1`). With consent absent the context event still emits
+  identity/markers with content fields dropped pre-emit. Capture never writes or receipts
+  the key (declare-only, the `OTEL_EXPORTER_OTLP_ENDPOINT` pattern).
 - **Claim rule.** The `opencode` adapter claims only the supported envelope (a supported
   envelope span scores 1; an envelope span under any other version scores 0). A bare
   `opencode.session.id` with no turn/model/tool/prompt/call/message/hook marker is not
@@ -314,7 +335,11 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   by marker rather than by namespace.
 - **Mapping.** Session identity rides verbatim and is never synthesized. A tool marker
   (`opencode.tool.name`) wins over the model markers and maps to `tool.invoke`; model
-  markers map to `llm.invoke`. Prompt text (`opencode.prompt.text`) buckets as
+  markers map to `llm.invoke`. A context span with context markers but no model identity
+  still maps `llm.invoke` (a context event is pre-LLM-call request assembly), never
+  fabricating counters. Context content buckets after every existing part: system text
+  as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
+  Prompt text (`opencode.prompt.text`) buckets as
   conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
   as non-model — the correct taxonomy for a boundary, not a rejection — with zero
   fabricated counters and session anchoring.

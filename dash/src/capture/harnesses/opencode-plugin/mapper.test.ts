@@ -241,3 +241,65 @@ describe('opencode plugin span mapper round-trips through the opencode adapter',
     store.close()
   })
 })
+
+// T4 (plan 2026-10-23 §6-T4 RED): the T0 context fixture
+// (`fixtures/context-payload.json`: system, tools, skills, model/agent
+// identity) must round-trip onto envelope v2 attributes
+// (`opencode.context.system/.tools/.skills`, model markers when named).
+// Absent fields stay absent — never empty-string padding.
+
+describe('opencode plugin span mapper carries T0 context fields onto envelope v2 (T4)', () => {
+  const CONTEXT_PAYLOAD: OpencodePluginSpanPayload = {
+    ...MODEL_PAYLOAD,
+    traceId: 'trace-t4-context',
+    spanId: 'span-t4-context',
+    systemPrompt: 'T4 assembled system prompt',
+    toolsText: '[{"name":"read","description":"read a file"}]',
+    skills: ['plan', 'review'],
+  }
+
+  it('maps system prompt, tool definitions, and skills onto opencode.context.* keys', () => {
+    const attributes = mapOpencodePayloadToAttributes(CONTEXT_PAYLOAD)
+
+    expect(attributes['opencode.context.system']).toBe('T4 assembled system prompt')
+    expect(attributes['opencode.context.tools']).toBe(
+      '[{"name":"read","description":"read a file"}]',
+    )
+    expect(attributes['opencode.context.skills']).toBe('["plan","review"]')
+  })
+
+  it("drops an empty skills array and its '[]' serialization alike (review PR #425 finding 3, RED)", () => {
+    const fromArray = mapOpencodePayloadToAttributes({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-skills-empty-array',
+      skills: [],
+    })
+    expect('opencode.context.skills' in fromArray).toBe(false)
+    const fromString = mapOpencodePayloadToAttributes({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-skills-empty-string',
+      skills: '[]',
+    })
+    expect('opencode.context.skills' in fromString).toBe(false)
+  })
+
+  it('keeps malformed skills stamped for the named not-measurable path (review PR #425 finding 3, RED)', () => {
+    const attributes = mapOpencodePayloadToAttributes({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-skills-malformed',
+      skills: 'not-json',
+    })
+    expect(attributes['opencode.context.skills']).toBe('not-json')
+  })
+
+  it('leaves context keys absent when the payload names no content', () => {
+    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
+
+    expect(attributes['opencode.context.system']).toBeUndefined()
+    expect(attributes['opencode.context.tools']).toBeUndefined()
+    expect(attributes['opencode.context.skills']).toBeUndefined()
+    expect('opencode.context.system' in attributes).toBe(false)
+    expect('opencode.context.tools' in attributes).toBe(false)
+    expect('opencode.context.skills' in attributes).toBe(false)
+  })
+})

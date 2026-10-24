@@ -9,12 +9,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  OPENCODE_CONTEXT_HOOK_KIND,
   OPENCODE_PLUGIN_CONFIG_KEYS,
   OPENCODE_PLUGIN_HOOK_KINDS,
   OPENCODE_PLUGIN_ID,
+  createInstalledOpencodePlugin,
   createOpencodePlugin,
   registerOpencodePlugin,
   resolveOpencodePluginPaths,
+  type OpencodeHookKind,
   type OpencodePluginHost,
 } from './plugin.js'
 
@@ -165,5 +168,131 @@ describe('Opencode plugin skeleton hook lifecycle', () => {
     })
     expect(OPENCODE_PLUGIN_ID).toBe('kyberdash-opencode')
     expect(OPENCODE_PLUGIN_CONFIG_KEYS).toMatchObject({ plugins: expect.any(String) })
+  })
+})
+
+describe('Opencode plugin session.context hook (T2, fixture: fixtures/context-payload.json @opencode/plugin 2.1.4)', () => {
+  it('fires session.context with the pinned payload shape', async () => {
+    const kind: OpencodeHookKind = 'session.context'
+    expect(kind).toBe(OPENCODE_CONTEXT_HOOK_KIND)
+    // Lifecycle kinds unchanged: the context kind rides beside them, not among them.
+    expect(OPENCODE_PLUGIN_HOOK_KINDS).not.toContain('session.context')
+    const plugin = createOpencodePlugin({ now: () => '2026-10-23T00:00:00.000Z' })
+    await plugin.context({
+      sessionId: SESSION_ID,
+      messageId: 'msg-01',
+      turnIndex: TURN_INDEX,
+      systemPrompt: 'system text',
+      toolsText: '[{"name":"read"}]',
+      skills: ['skill-a'],
+      model: 'model-x',
+      agent: 'agent-y',
+    })
+    expect(plugin.events.at(-1)).toMatchObject({
+      kind: 'session.context',
+      sessionId: SESSION_ID,
+      messageId: 'msg-01',
+      systemPrompt: 'system text',
+      toolsText: '[{"name":"read"}]',
+      skills: ['skill-a'],
+      model: 'model-x',
+      agent: 'agent-y',
+    })
+  })
+
+  it('registers session.context on the v2 namespaced and v1 dotted host surfaces', () => {
+    const plugin = createOpencodePlugin({ now: () => '2026-10-23T00:00:00.000Z' })
+    const desktopRegistered: Record<string, unknown> = {}
+    const desktopHost: OpencodePluginHost = {
+      hooks: (registered: Record<string, unknown>) => {
+        Object.assign(desktopRegistered, registered)
+      },
+    }
+    const cliHost: OpencodePluginHost = {}
+    registerOpencodePlugin(desktopHost, plugin)
+    registerOpencodePlugin(cliHost, plugin)
+    expect(desktopRegistered).toHaveProperty('session.context', expect.any(Function))
+    expect(desktopRegistered['session.context']).toBe(plugin.context)
+    expect(cliHost.session).toHaveProperty('context', expect.any(Function))
+    expect(cliHost.session?.['context']).toBe(plugin.context)
+    expect(cliHost.session?.['session.context']).toBe(plugin.context)
+  })
+
+  it('never fails the host when the session.context handler throws or times out', async () => {
+    const throwing = createOpencodePlugin({
+      emit: () => {
+        throw new Error('receiver down')
+      },
+      now: () => '2026-10-23T00:00:00.000Z',
+    })
+    await expect(
+      throwing.context({ sessionId: SESSION_ID, systemPrompt: 's' }),
+    ).resolves.toBeUndefined()
+    expect(throwing.failures).toHaveLength(1)
+
+    const hanging = createOpencodePlugin({
+      emit: () => new Promise<void>(() => {}),
+      now: () => '2026-10-23T00:00:00.000Z',
+      timeoutMs: 5,
+    })
+    await expect(
+      hanging.context({ sessionId: SESSION_ID }),
+    ).resolves.toBeUndefined()
+    expect(hanging.failures).toHaveLength(1)
+  })
+})
+
+describe('Opencode installed pipeline stamper forwards session.context content (T2 missing link)', () => {
+  it('stamps context content onto the mapper payload when present', async () => {
+    const installed = createInstalledOpencodePlugin({ spool: true })
+    await installed.plugin.context({
+      sessionId: SESSION_ID,
+      turnIndex: TURN_INDEX,
+      systemPrompt: 'system text',
+      toolsText: '[{"name":"read"}]',
+      skills: ['skill-a'],
+      model: 'model-x',
+      agent: 'agent-y',
+    })
+    const span = installed.mappedSpans.at(-1)
+    expect(span?.attributes['opencode.context.system']).toBe('system text')
+    expect(span?.attributes['opencode.context.tools']).toBe('[{"name":"read"}]')
+    expect(span?.attributes['opencode.context.skills']).toBe('["skill-a"]')
+    expect(span?.attributes['opencode.model.id']).toBe('model-x')
+    expect(span?.attributes['opencode.agent']).toBe('agent-y')
+  })
+
+  it('leaves content keys absent when the event names no content (lifecycle stamps byte-unchanged)', async () => {
+    const installed = createInstalledOpencodePlugin({ spool: true })
+    await installed.plugin.context({ sessionId: SESSION_ID })
+    const contextSpan = installed.mappedSpans.at(-1)
+    for (const key of [
+      'opencode.context.system',
+      'opencode.context.tools',
+      'opencode.context.skills',
+      'opencode.model.id',
+      'opencode.agent',
+    ]) {
+      expect(key in (contextSpan?.attributes ?? {})).toBe(false)
+    }
+
+    await installed.plugin.hooks['turn.start']({
+      sessionId: SESSION_ID,
+      turnIndex: TURN_INDEX,
+    })
+    const lifecycleSpan = installed.mappedSpans.at(-1)
+    expect(lifecycleSpan).toMatchObject({
+      traceId: SESSION_ID,
+      name: 'opencode.turn.start',
+    })
+    for (const key of [
+      'opencode.context.system',
+      'opencode.context.tools',
+      'opencode.context.skills',
+      'opencode.model.id',
+      'opencode.agent',
+    ]) {
+      expect(key in (lifecycleSpan?.attributes ?? {})).toBe(false)
+    }
   })
 })

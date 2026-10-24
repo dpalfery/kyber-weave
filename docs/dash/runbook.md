@@ -1210,16 +1210,25 @@ It is detected from any **one** of three traces, and nothing else counts as dete
 VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
 installed only there has none of the three traces, so the row says not detected while Kilo itself
 works — run the import above and ignore the row.
-**OpenCode plugin (`kyberdash-opencode`, T6).** The dash-CLI-managed plugin observes
-session/turn/span hooks from opencode's own plugin directories (`~/.config/opencode/plugins/`,
-`.opencode/plugins/`) and posts span-anchored OTLP/HTTP spans to the loopback receiver
+**OpenCode plugin (`kyberdash-opencode`).** The dash-CLI-managed plugin observes
+session/turn/span hooks plus the `session.context` hook (system prompt, tool definitions,
+skills listing, session/model identity) from opencode's own plugin directories (`~/.config/opencode/plugins/`,
+`.opencode/plugins/`; loadable entry `entry.ts` covers both the v2 CLI `Plugin.define` shape
+and the v1 Desktop hooks map) and posts span-anchored OTLP/HTTP spans to the loopback receiver
 through the bounded outbox, which spools offline and retries with backoff. Capture owns
 the plugin keys declare-only: the writer declares the plugin id and its `plugins` config
 keys, but `enable` writes only `experimental.openTelemetry` — the registration installs by
-file and the endpoint stays process-env-only, so neither ever enters a receipt. After
-enabling, restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
+file and the endpoint stays process-env-only, so neither ever enters a receipt. Context
+content rides only under the sender-owned consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
+default; unset or any other value drops content pre-emit while identity/markers still flow).
+After enabling, install/upgrade the plugin file, set the consent where opencode launches,
+and restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
 Desktop: disable plugins, clear cache, restart) with `OTEL_EXPORTER_OTLP_ENDPOINT` set
-where it launches, then emit a turn; a green enable is not capture.
+where it launches, then emit a turn; a green enable is not capture. Restart-to-upgrade note:
+spans stamped contract `'1'` by a pre-upgrade plugin quarantine under `unknown opencode
+contract version` after the `'2'` bump — reinstall the plugin file and re-emit so the turn
+is stamped `'2'`. Live check: emit one opencode turn and confirm the session's Context view
+shows the system prompt and tool definitions and the Skills view shows the listing.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows

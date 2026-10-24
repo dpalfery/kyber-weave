@@ -1248,3 +1248,36 @@ describe('extractListedSkills, request-body entry grammar', () => {
     expect((result as { skills: unknown[] }).skills).toHaveLength(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// extractListedSkills: opencode context listing (plan 2026-10-23 §5-T5, D6)
+// ---------------------------------------------------------------------------
+
+describe('extractListedSkills, opencode context listing', () => {
+  const OPENCODE_LISTING_KEY = 'opencode.context.skills'
+
+  // T5 RED: no listing source reads this key — these fail until skills.ts
+  // gains the opencode.context.skills source (the Copilot pattern).
+  it('reads the JSON-array skill listing as an initial measurable list', () => {
+    const record = modelTurn('opencode', 'opencode-ctx-turn', {
+      source: 'opencode',
+      raw: { [OPENCODE_LISTING_KEY]: JSON.stringify(['review', 'build']) },
+    })
+    const result = extractListedSkills(record) as ListedResult
+
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['review', 'build'])
+  })
+
+  it('a malformed value is not measurable with a reason naming the key', () => {
+    const record = modelTurn('opencode', 'opencode-ctx-malformed', {
+      source: 'opencode',
+      raw: { [OPENCODE_LISTING_KEY]: '["review",' },
+    })
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toContain(OPENCODE_LISTING_KEY)
+    expect(result).not.toHaveProperty('skills')
+  })
+})

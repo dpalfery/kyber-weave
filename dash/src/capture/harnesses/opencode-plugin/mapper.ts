@@ -21,6 +21,9 @@
 // outbox, receiver, web, tray, resolver, or API change lives here.
 
 import {
+  OPENCODE_CONTEXT_SKILLS_KEY,
+  OPENCODE_CONTEXT_SYSTEM_KEY,
+  OPENCODE_CONTEXT_TOOLS_KEY,
   OPENCODE_CONTRACT_VERSION,
   OPENCODE_CONTRACT_VERSION_KEY,
 } from '../../../canon/adapters/opencode-envelope.js'
@@ -65,6 +68,14 @@ export type OpencodePluginSpanPayload = {
   model?: { providerID: string; modelID: string }
   prompt_text?: string
   tool?: string
+  /** Assembled system prompt (T4, T0 `SessionContext.system`); carried only when non-empty. */
+  systemPrompt?: string
+  /** JSON-serialized tool definitions (T4, T0 `SessionContext.tools`); carried only when non-empty. */
+  toolsText?: string
+  /** Skill names listed for the session (T4, T0 pin); serialized as a JSON array, carried only when non-empty. */
+  skills?: string[] | string
+  /** Plain model identity from a context event (T4); carried only when non-empty. */
+  modelId?: string
   tokens?: OpencodePluginSpanTokens
   errors?: OpencodePluginSpanError
   startTimeUnixNano: string | number | bigint
@@ -128,6 +139,29 @@ export function mapOpencodePayloadToAttributes(
     if (nonEmpty(payload.model.modelID)) attributes['opencode.model.id'] = payload.model.modelID
   }
   if (nonEmpty(payload.prompt_text)) attributes['opencode.prompt.text'] = payload.prompt_text
+  // T4 context content (envelope v2): carried only when named, so absent
+  // fields stay absent — never empty-string padding.
+  if (nonEmpty(payload.systemPrompt)) attributes[OPENCODE_CONTEXT_SYSTEM_KEY] = payload.systemPrompt
+  if (nonEmpty(payload.toolsText)) attributes[OPENCODE_CONTEXT_TOOLS_KEY] = payload.toolsText
+  if (typeof payload.skills === 'string') {
+    if (nonEmpty(payload.skills)) {
+      // A serialized empty list measures the same none as an absent list:
+      // drop it so `[]` and `'[]'` stay one measurability. Malformed text
+      // stays stamped — the adapter reports it under its named reason.
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(payload.skills)
+      } catch {
+        parsed = undefined
+      }
+      if (!(Array.isArray(parsed) && parsed.length === 0)) {
+        attributes[OPENCODE_CONTEXT_SKILLS_KEY] = payload.skills
+      }
+    }
+  } else if (Array.isArray(payload.skills) && payload.skills.length > 0) {
+    attributes[OPENCODE_CONTEXT_SKILLS_KEY] = JSON.stringify(payload.skills)
+  }
+  if (nonEmpty(payload.modelId)) attributes['opencode.model.id'] = payload.modelId
   if (nonEmpty(payload.tool)) attributes['opencode.tool.name'] = payload.tool
   if (nonEmpty(payload.messageID)) attributes['opencode.message.id'] = payload.messageID
   if (nonEmpty(payload.callID)) {

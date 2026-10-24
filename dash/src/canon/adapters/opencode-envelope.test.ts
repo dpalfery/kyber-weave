@@ -20,8 +20,12 @@ import {
   OPENCODE_CONTRACT_VERSION,
   OPENCODE_CONTRACT_VERSION_KEY,
   UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON,
+  isOpencodeEnvelopeModel,
   isOpencodeEnvelopeSpan,
   isSupportedOpencodeEnvelope,
+  opencodeEnvelopeContextSkills,
+  opencodeEnvelopeContextSystem,
+  opencodeEnvelopeContextTools,
 } from './opencode-envelope.js'
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
@@ -351,6 +355,66 @@ describe('opencode contract bump invalidates stale checkpoints (T1)', () => {
     expect(store.get('ckpt-model')?.spanId).toBe('ckpt-model')
     expect(store.getRecordProvenance('ckpt-model')?.spanId).toBe('ckpt-model')
     store.close()
+  })
+})
+
+describe('opencode envelope v2 context markers (plan 2026-10-23 §3.3/§5-T1, D3/D4)', () => {
+  // T0 pin: dash/src/capture/harnesses/opencode-plugin/fixtures/context-payload.json
+  // (SessionContext: system/messages/tools + sessionID/model/agent) maps onto
+  // envelope v2 attributes opencode.context.system/.tools/.skills.
+  const contextAttributes = (): Record<string, unknown> => ({
+    'opencode.session.id': 'ses_t1_ctx',
+    [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+    'opencode.context.system': 'you are a build agent',
+    'opencode.context.tools': JSON.stringify([{ name: 'read', description: 'read a file' }]),
+    'opencode.context.skills': JSON.stringify(['review']),
+  })
+
+  it("stamps contract '2'", () => {
+    expect(OPENCODE_CONTRACT_VERSION).toBe('2')
+  })
+
+  it('supports a 2-stamped context span and reads its content accessors', () => {
+    const span = rawSpan({ spanId: 'ctx-v2', attributes: contextAttributes() })
+    expect(isOpencodeEnvelopeSpan(span)).toBe(true)
+    expect(isSupportedOpencodeEnvelope(span)).toBe(true)
+    expect(opencodeEnvelopeContextSystem(span.attributes)).toBe('you are a build agent')
+    expect(opencodeEnvelopeContextTools(span.attributes)).toContain('read')
+    expect(opencodeEnvelopeContextSkills(span.attributes)).toContain('review')
+  })
+
+  it('treats context markers as model-call evidence without fabricating counters', () => {
+    // D4: context alone maps llm.invoke; model markers agree; tool marker still wins elsewhere.
+    expect(isOpencodeEnvelopeModel(contextAttributes())).toBe(true)
+    expect(
+      isOpencodeEnvelopeModel({
+        ...contextAttributes(),
+        'opencode.model.id': 'claude-opus-4-6',
+        'opencode.model.provider': 'anthropic',
+      }),
+    ).toBe(true)
+    expect('llm.token_count.prompt' in contextAttributes()).toBe(false)
+  })
+
+  it("quarantines a '1'-stamped span under the unknown-version reason", () => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch(
+      [otlpSpan({ ...contextAttributes(), [OPENCODE_CONTRACT_VERSION_KEY]: '1' }, { spanId: 'ctx-v1' })],
+      store,
+    )
+    expect(outcome).toEqual({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.get('ctx-v1')).toBeUndefined()
+    expect(store.getQuarantine('ctx-v1')?.reason).toBe(UNKNOWN_OPENCODE_CONTRACT_VERSION_REASON)
+    store.close()
+  })
+
+  it("leaves a checkpoint written under '1' unreusable under '2'", () => {
+    expect(
+      checkpointIsReusable(checkpoint({ parserContractVersion: '1' }), {
+        revisionToken: 'rev:t1',
+        parserContractVersion: OPENCODE_CONTRACT_VERSION,
+      }),
+    ).toBe(false)
   })
 })
 
