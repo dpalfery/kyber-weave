@@ -507,7 +507,7 @@ public sealed class ReviewTaskGatesConfigTests
         {
             foreach (ReviewTaskGate gate in entry.Value)
             {
-                if (gate.Run.Count == 0 || gate.Run[0] != "dotnet")
+                if (gate.Run.Count == 0 || !IsDotnetCommand(gate.Run[0]))
                     continue;
 
                 total++;
@@ -565,6 +565,16 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.True(offenders.Count == 0,
             "dotnet-build task gates must keep --artifacts-path under .agent_scratchpad/{task}:\n" +
             string.Join("\n", offenders));
+    }
+
+    private static bool IsDotnetCommand(string program)
+    {
+        string name = program.Replace('\\', '/');
+        int slash = name.LastIndexOf('/');
+        if (slash >= 0)
+            name = name[(slash + 1)..];
+        return string.Equals(name, "dotnet", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(name, "dotnet.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasPerTaskIsolation(ReviewTaskGate gate)
