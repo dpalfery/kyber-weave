@@ -72,6 +72,7 @@ public sealed class TaskGateSelectionTests
         Assert.Contains("'dotnet-build'", refusal, StringComparison.Ordinal);
         Assert.Contains("{task}", refusal, StringComparison.Ordinal);
         Assert.Contains("--task", refusal, StringComparison.Ordinal);
+        Assert.Empty(plan.Gates);
     }
 
     /// <summary>
