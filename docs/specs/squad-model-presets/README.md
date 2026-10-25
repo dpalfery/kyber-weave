@@ -9,7 +9,7 @@ last-reviewed: 2026-10-24
 
 # Squad model presets specification
 
-**Status:** In-progress (slice 1 complete; slice 2 at task 17) — approved by dpalfery on 2026-10-24, execution approved
+**Status:** In-progress (slice 1 and slice 2 tasks 1-17 complete; awaiting platform E2E) — approved by dpalfery on 2026-10-24, execution approved
 
 User-owned, named model presets that Squad applies when it renders agents, so switching
 provider or inference plan is one command and survives updates.

@@ -1240,16 +1240,16 @@ public sealed class SquadTransaction
         // them.
         HashSet<(string PhysicalRoot, string RelativeDirectory)> seenDirs = [];
         foreach (IntentFile file in intent.Files)
-        foreach (string relativeDirectory in file.MissingParentDirectories)
-        {
-            if (!seenDirs.Add((file.PhysicalRoot, relativeDirectory)))
-                continue;
+            foreach (string relativeDirectory in file.MissingParentDirectories)
+            {
+                if (!seenDirs.Add((file.PhysicalRoot, relativeDirectory)))
+                    continue;
 
-            string directory = SquadPathPolicy.ResolveFile(file.PhysicalRoot, relativeDirectory);
-            DeleteEmptyDirectory(directory);
-            if (GetEntryKind(directory) != OriginalEntryKind.Missing)
-                conflicts.Add(relativeDirectory);
-        }
+                string directory = SquadPathPolicy.ResolveFile(file.PhysicalRoot, relativeDirectory);
+                DeleteEmptyDirectory(directory);
+                if (GetEntryKind(directory) != OriginalEntryKind.Missing)
+                    conflicts.Add(relativeDirectory);
+            }
 
         CompareAndRestoreEntry(
             intent,
@@ -1689,10 +1689,10 @@ public sealed class SquadTransaction
                 area,
                 relativePath,
                 ArtifactLifecycleState.ActiveTransition) with
-            {
-                ActiveTransitions =
+        {
+            ActiveTransitions =
                 [new IntentTransition(ArtifactIdentity(area, relativePath), ArtifactLifecycleState.PreOperation)]
-            };
+        };
         PublishIntentGeneration(intentPath, intent, lease);
     }
 

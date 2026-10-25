@@ -69,8 +69,30 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
+        IReadOnlyList<(string TargetPreset, string Version)> instances = scope == SquadDeploymentScope.Global
+            ? GetDeployedInstances(stateStore)
+            : [];
+
         if (receipt is null)
         {
+            if (scope == SquadDeploymentScope.Global && instances.Count > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]global[/]):");
+                AnsiConsole.MarkupLine("  [grey]none[/]");
+
+                WriteInstances(instances);
+                bool registryFailed = !WriteRegisteredProjects(stateStore);
+                if (registryFailed)
+                {
+                    AnsiConsole.WriteLine();
+                    AnsiConsole.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
+                    return 1;
+                }
+
+                return 0;
+            }
+
             AnsiConsole.MarkupLine($"[red]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/].[/]");
             AnsiConsole.MarkupLine("Run [bold]kyber-weave squad install[/] to deploy agents and skills.");
             return 1;
@@ -129,6 +151,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
 
         bool hasMissingPreset = WriteModelPresets(stateStore, targetRoot, scope);
+
+        if (scope == SquadDeploymentScope.Global) WriteInstances(instances);
 
         bool registryUnreadable = scope == SquadDeploymentScope.Global && !WriteRegisteredProjects(stateStore);
 
@@ -212,7 +236,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             }
             else
             {
-                AnsiConsole.MarkupLine($"  [green]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)}[/]");
+                AnsiConsole.MarkupLine(
+                    $"  [green]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)}[/]");
             }
         }
 
@@ -286,6 +311,79 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
 
         return true;
+    }
+
+    /// <summary>
+    ///     Inspects and returns the deployed harness instances recorded in the instance state directory.
+    /// </summary>
+    private static List<(string TargetPreset, string Version)> GetDeployedInstances(SquadStateStore stateStore)
+    {
+        string home = stateStore.UserPaths.HomeDirectory;
+        string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
+
+        List<(string TargetPreset, string Version)> instances = [];
+
+        if (!Directory.Exists(instanceStateBase)) return instances;
+
+        DirectoryInfo baseDir = new(instanceStateBase);
+        EnumerationOptions options = new()
+        {
+            RecurseSubdirectories = false,
+            AttributesToSkip = 0
+        };
+
+        foreach (FileSystemInfo targetEntry in baseDir.EnumerateFileSystemInfos("*", options))
+        {
+            if (targetEntry is not DirectoryInfo targetDir || targetEntry.LinkTarget is not null) continue;
+
+            string targetToken = targetDir.Name;
+
+            foreach (FileSystemInfo presetEntry in targetDir.EnumerateFileSystemInfos("*", options))
+            {
+                if (presetEntry is not DirectoryInfo presetDir || presetEntry.LinkTarget is not null) continue;
+
+                string receiptPath = Path.Combine(presetDir.FullName, "squad.receipt.json");
+                if (!File.Exists(receiptPath)) continue;
+
+                string version = "unknown";
+                string lockPath = Path.Combine(presetDir.FullName, "squad.lock.yml");
+                if (File.Exists(lockPath))
+                    try
+                    {
+                        SquadLock? squadLock = stateStore.DeserializeLock(File.ReadAllText(lockPath));
+                        if (!string.IsNullOrWhiteSpace(squadLock?.SquadVersion))
+                            version = squadLock.SquadVersion;
+                        else if (!string.IsNullOrWhiteSpace(squadLock?.CliVersion)) version = squadLock.CliVersion;
+                    }
+                    catch (Exception)
+                    {
+                        // Treat unreadable lock as unknown version
+                    }
+
+                instances.Add(($"{targetToken}/{presetDir.Name}", version));
+            }
+        }
+
+        return instances;
+    }
+
+    /// <summary>
+    ///     Inspects and renders the deployed harness instances recorded in the instance state directory.
+    /// </summary>
+    private static void WriteInstances(IReadOnlyList<(string TargetPreset, string Version)> instances)
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("Instances:");
+
+        if (instances.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [grey]none[/]");
+            return;
+        }
+
+        foreach ((string targetPreset, string version) in instances.OrderBy(static i => i.TargetPreset,
+                     StringComparer.Ordinal))
+            AnsiConsole.MarkupLine($"  {Markup.Escape(targetPreset)}  {Markup.Escape(version)}");
     }
 
     /// <summary>

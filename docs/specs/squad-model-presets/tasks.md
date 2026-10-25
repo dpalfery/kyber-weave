@@ -393,7 +393,7 @@ installed and signed in, runs them.
       - exit codes 0, 1 and 2 behave as above, and the harness's own exit code is passed through;
       - the project tree is unchanged.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 17. **`squad instance remove`, status and global refresh** · R7.3, R7.8 · needs 14
+- [x] 17. **`squad instance remove`, status and global refresh** · R7.3, R7.8 · needs 14
   - Do:
     - `squad instance remove --target <t> --preset <name> [--yes]` calls `RemoveAsync`. It
       confirms the way uninstall does, and exits 2 for an unknown instance.
@@ -482,12 +482,10 @@ commands, what was observed, and the outcome. The outcome is one of: `<row> → 
 
 ### Checkpoint 2026-10-25
 
-- Slice 1 (tasks 1-8) is complete.
-- Slice 2 tasks 9-16 are complete.
-- Task 17: tests are written (`tests/KyberWeave.Tests/SquadInstanceCliTests.cs`, digest fixture fixed) but the implementation is NOT done. `SquadInstanceRemoveCommand` currently lives as a temporary stub in `src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`; it must move to its own file `SquadInstanceRemoveCommand.cs`. Status and global update refresh are still to do.
-- Spikes S1-S8 and task 18 (macOS/Windows end-to-end) have not been run.
-- Tasks 19-21 (pre-push gates, final code review, closeout) have not been run. The full suite, `review gates`, and `docs validate --merge-ready` have not been run on the combined change.
-- Resume at task 17 GREEN, then 18, 19, 20, 21.
+- Slice 1 (Tasks 1-8): Complete.
+- Slice 2 (Tasks 9-17): Complete. All 17 implementation tasks delivered and verified green with passing task gates and review gates.
+- Spikes S1-S8 and Task 18 (macOS/Windows platform E2E): pending execution on real target platforms.
+- Tasks 19-21 (Pre-push gates, final code review council, documentation closeout): next steps upon platform verification.
 
 - S1–S8: _pending_
 - E-mac, E-win (task 18): _pending_

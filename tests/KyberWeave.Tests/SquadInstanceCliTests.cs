@@ -274,13 +274,14 @@ public sealed class SquadInstanceCliTests : IDisposable
 
     /// <summary>
     ///     Verifies that <c>squad status --global</c> displays <c>none</c> under the Instances heading when
-    ///     no harness instances have been deployed.
+    ///     a global deployment exists but no harness instances have been deployed.
     /// </summary>
     [Fact]
     public void StatusGlobalShowsNoneUnderInstancesHeadingWhenNoInstancesExist()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
+        SeedGlobalDeployment(userPaths);
 
         SquadStatusCommand command = new(userPaths, stateStore);
 
@@ -297,6 +298,29 @@ public sealed class SquadInstanceCliTests : IDisposable
         int instancesIndex = execution.Output.IndexOf("Instances:", StringComparison.Ordinal);
         string outputAfterInstances = execution.Output[instancesIndex..];
         Assert.Contains("none", outputAfterInstances, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Verifies that <c>squad status --global</c> exits 1 with a no-deployment message when neither
+    ///     a global deployment receipt nor any harness instances exist.
+    /// </summary>
+    [Fact]
+    public void StatusGlobalWithNeitherDeploymentNorInstancesKeepsNoDeploymentExitOne()
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SquadStatusCommand command = new(userPaths, stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("No Kyber-Squad deployment found", execution.Output, StringComparison.Ordinal);
     }
 
     #endregion
@@ -412,6 +436,46 @@ public sealed class SquadInstanceCliTests : IDisposable
             instanceService,
             isInteractive,
             readAnswer);
+    }
+
+    private static void SeedGlobalDeployment(
+        ISquadUserPaths userPaths,
+        string version = "1.2.3")
+    {
+        string home = userPaths.HomeDirectory;
+        string globalStateDir = Path.Combine(home, ".kyber-weave", "squad", "global");
+        Directory.CreateDirectory(globalStateDir);
+
+        SquadReceipt receipt = new(
+            SquadStateStore.ReceiptSchemaV1,
+            SquadDeploymentScope.Global,
+            ".",
+            DateTimeOffset.UtcNow,
+            [],
+            []);
+
+        SquadLock squadLock = new(
+            SquadStateStore.LockSchemaV1,
+            version,
+            version,
+            version,
+            "full",
+            ["codex"],
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        SquadStateStore stateStore = new(userPaths);
+        File.WriteAllText(
+            Path.Combine(globalStateDir, "squad.receipt.json"),
+            stateStore.SerializeReceipt(receipt),
+            Encoding.UTF8);
+        File.WriteAllText(
+            Path.Combine(globalStateDir, "squad.lock.yml"),
+            stateStore.SerializeLock(squadLock),
+            Encoding.UTF8);
     }
 
     private static void SeedInstance(
