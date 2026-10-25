@@ -10,6 +10,7 @@ code-refs:
   - OntologyConfig
   - SquadConfig
   - ConfigRegConfig
+  - ReviewConfig
 ---
 
 # Configuration
@@ -329,6 +330,31 @@ The `squad:` section governs agent and skill deployment via `kyber-weave squad`.
 - **Exclusions**: Configured exclusions and CLI `--exclude` arguments are combined (unioned) after expanding `all`. Exclusion can only narrow the deployed target set.
 - **Version**: When omitted, installation uses the running CLI version. When specified, `squad.version` must match the CLI's semantic `X.Y.Z` version.
 - **Validation**: Unrecognized bundles, invalid target tokens, or unsupported translation modes fail immediately with `KW-CONFIG-001`.
+
+## Review
+
+The `review:` section declares the deterministic gates and the ready-queue
+concurrency cap (see `ReviewConfig`):
+
+| Key | Default | Effect |
+|---|---|---|
+| `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
+| `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
+| `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+
+Every .NET `dotnet build` invocation in the gate path carries
+`-nr:false -p:UseSharedCompilation=false` (no MSBuild node reuse, no shared
+Roslyn compilation across workers). Every `dotnet` task gate isolates its build
+output under a per-task path: `--artifacts-path .agent_scratchpad/{task}/artifacts`
+where the command accepts it, otherwise
+`-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/` and
+`-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/`. A gate
+that names `{task}` refuses the run when no `--task` slug was given.
+
+```yaml
+review:
+  max-concurrent-workers: 4
+```
 
 ## Harness profiles
 

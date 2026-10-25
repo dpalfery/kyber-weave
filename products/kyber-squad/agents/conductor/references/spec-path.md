@@ -20,6 +20,14 @@ Use this path when the user supplies a specification or selects one from the dir
 
 After `SPEC_READY`, ask the final blocking question as **approve and execute** (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence.
 
+## Gate collapse in autonomous mode
+
+When a tasks-phase digest returns `STATUS: READY_FOR_REVIEW` with `GAPS: none` and `OPEN_QUESTIONS: none`, the conductor may present one consolidated review covering both tasks approval and the final approve and execute question, instead of two separate gates. The consolidated review records two AUTONOMOUS_APPROVAL rows (tasks plus execute) from one presentation within max 2 gates, then follows the normal finalization path: it still ends at `STATUS: SPEC_FINALIZED` with validation evidence before execution begins.
+
+Any gap or open question disables the collapse: when `GAPS` names a blocking gap or `OPEN_QUESTIONS` is non-empty, fall back to separate gates so each question gets its own answer.
+
+Supervised mode never collapses: Supervised runs always present separate gates, even when there is nothing to ask.
+
 ## Revisions and mode changes
 
 Revision feedback reopens only the affected phase and all downstream phases. Preserve approved upstream artifacts unless a reported gap requires changing them. Omission of `development-mode` means `test-first`; `standard` requires an explicit user opt-out. A post-approval mode change reopens the task artifact and the affected Test contract or verification contract for user approval.

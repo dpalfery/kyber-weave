@@ -172,6 +172,8 @@ The two escalation rules run **before** any finding is weighed, because a reserv
 an unreviewable diff both say the same thing: this change is not the engine's to settle,
 however clean or filthy the council's report was.
 
+**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids. Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
+
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
 regeneration of a generated client.
@@ -194,7 +196,7 @@ Procedure above and the host's declared gates.
    head and base branch are reachable from your local `HEAD` before pushing.
 2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
    accumulated diff against its base, not just the last files touched. Fix every
-   major-or-worse finding before pushing, then re-run steps 1–5 over the updated
+   major-or-worse finding before pushing — Minor/Info findings never block the push gate; only major-or-worse block — then re-run steps 1–5 over the updated
    diff and use that second verdict. A verdict computed before a fix is void. If the
    re-run still returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or
    report the blocker.
