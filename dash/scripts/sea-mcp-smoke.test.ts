@@ -72,6 +72,36 @@ describe('sea-mcp-smoke - staged binary MCP release contract', () => {
     await expectChildHasExited()
   }, TEST_TIMEOUT_MS)
 
+  it('fails fast with the controlled message when the MCP peer exits before answering', async () => {
+    // WHY exit-immediately instead of a slow peer: the hang this guards is in
+    // the shutdown path — awaiting a `close` event that already fired — so
+    // only a peer that is already gone when `finally` runs can prove the
+    // controlled failure instead of a hang.
+    await writeStandIn('exit-immediately')
+    const startedAt = Date.now()
+    const result = runSmoke()
+    const output = `${result.stdout}\n${result.stderr}`
+
+    expect(result.error, output).toBeUndefined()
+    expect(result.status, output).not.toBe(0)
+    expect(output).toContain('child exited before answering')
+    expect(Date.now() - startedAt).toBeLessThan(SMOKE_TIMEOUT_MS)
+    await expectChildHasExited()
+  }, TEST_TIMEOUT_MS)
+
+  it('attaches a stdin error handler and never awaits an already-fired close', async () => {
+    // EPIPE from an early peer exit cannot be simulated without flakiness,
+    // so besides the exit-immediately behavioral test this pins the handler
+    // attachment and the closed-state guard by inspection.
+    const script = await readFile(join(scriptDir, 'sea-mcp-smoke.mjs'), 'utf8')
+    const code = script.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n')
+
+    expect(code).toContain(`stdin.on('error'`)
+    const finallyIndex = code.indexOf('child.once(\'close\'')
+    expect(finallyIndex).toBeGreaterThanOrEqual(0)
+    expect(code.slice(0, finallyIndex)).toContain('closed')
+  }, TEST_TIMEOUT_MS)
+
   it('is wired into the local release build after the SEA blob injection', async () => {
     const local = await readFile(join(scriptDir, '..', '..', 'scripts', 'release-local.sh'), 'utf8')
     const code = local.split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
@@ -111,6 +141,14 @@ describe('sea-mcp-smoke - staged binary MCP release contract', () => {
 })
 
 function standInSource(mode: string): string {
+  if (mode === 'exit-immediately') {
+    return `
+import { writeFileSync } from 'node:fs'
+const pidFile = process.env.SEA_MCP_CHILD_PID_FILE
+writeFileSync(pidFile, String(process.pid))
+process.exit(1)
+`
+  }
   return `
 import { writeFileSync } from 'node:fs'
 import readline from 'node:readline'

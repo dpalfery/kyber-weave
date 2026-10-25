@@ -61,7 +61,7 @@ async function startFixture() {
 
 function closeChild(child) {
   if (child.exitCode !== null || child.signalCode !== null) return
-  child.stdin.end()
+  if (!child.stdin.destroyed) child.stdin.end()
   const grace = setTimeout(() => child.kill('SIGKILL'), 1_000)
   grace.unref()
 }
@@ -74,6 +74,11 @@ async function main() {
   let fixture
   let child
   let timer
+  // WHY hoisted: the shutdown path below must know whether `close` already
+  // fired — awaiting `once('close')` after it fired hangs forever and masks
+  // the protocol error the request loop already reported.
+  let closed = false
+  let stdinFailed = false
   try {
     fixture = await startFixture()
     child = spawn(binary, ['mcp', '--server-url', fixture.url, '--state-dir', join(tempRoot, 'state')], {
@@ -92,8 +97,12 @@ async function main() {
     const lines = []
     let stdout = ''
     let stderr = ''
-    let closed = false
     let closeError
+    // WHY tracked, not thrown: an early peer exit breaks the pipe while a
+    // request is still polling. Recording it steers the next poll into the
+    // controlled "child exited before answering" failure instead of an
+    // out-of-band EPIPE crash.
+    child.stdin.on('error', () => { stdinFailed = true })
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8')
       for (;;) {
@@ -110,9 +119,18 @@ async function main() {
     timer = setTimeout(() => closeChild(child), TIMEOUT_MS)
     timer.unref()
     let nextId = 1
+    function peerGoneMessage() {
+      return closeError instanceof Error ? closeError.message : `child exited before answering (${stderr.trim() || 'no stderr'})`
+    }
     async function request(method, params) {
       const id = nextId++
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+      if (closed || stdinFailed) fail(peerGoneMessage())
+      try {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+      } catch {
+        stdinFailed = true
+        fail(peerGoneMessage())
+      }
       const deadline = Date.now() + TIMEOUT_MS
       for (;;) {
         const line = lines.shift()
@@ -123,7 +141,7 @@ async function main() {
           if ('error' in reply) fail(`peer returned JSON-RPC error ${JSON.stringify(reply.error)}`)
           return reply.result
         }
-        if (closed) fail(closeError instanceof Error ? closeError.message : `child exited before answering (${stderr.trim() || 'no stderr'})`)
+        if (closed || stdinFailed) fail(peerGoneMessage())
         if (Date.now() >= deadline) fail(`timed out waiting for ${method}`)
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
@@ -152,7 +170,12 @@ async function main() {
     clearTimeout(timer)
     if (child) {
       closeChild(child)
-      await new Promise((resolve) => child.once('close', resolve))
+      // WHY the guard: `once('close')` only fires for a future close. When
+      // the peer already exited, `close` fired long ago — awaiting it hangs
+      // here and masks the protocol error the request loop already reported.
+      if (!closed && child.exitCode === null && child.signalCode === null) {
+        await new Promise((resolve) => child.once('close', resolve))
+      }
     }
     if (fixture) await new Promise((resolve, reject) => fixture.server.close((error) => error ? reject(error) : resolve()))
     await rm(tempRoot, { recursive: true, force: true })
