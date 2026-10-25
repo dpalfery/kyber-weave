@@ -243,34 +243,99 @@ status and print a `FAILED` line.
 
 ## The SBOM: what each release ships
 
-Every release also publishes `kyber-weave-sbom-<version>.cdx.json` — a **Software Bill of
-Materials** in [CycloneDX](https://cyclonedx.org/) JSON, format version 1.6. It is a
-machine-readable inventory of the third-party components the release depends on, across
-the three ecosystems this repository ships:
+Every release publishes `kyber-weave-sbom-<version>.cdx.json` — a **Software Bill of
+Materials** in [CycloneDX](https://cyclonedx.org/) JSON, format version 1.6 — plus
+one per-artifact SBOM per published archive (`<archive-stem>.cdx.json`, 20 in
+total). Both shapes are CycloneDX 1.6. The aggregate is a machine-readable
+inventory of the third-party components the release depends on, across
+the three ecosystems this repository ships; each per-artifact SBOM is a
+byte-level file inventory of one archive:
 
-| Ecosystem | What the SBOM covers | Where it comes from |
+| Ecosystem | What the aggregate SBOM covers | Where it comes from |
 |---|---|---|
 | .NET (NuGet) | `KyberWeave.Cli`, `KyberWeave.Mcp`, `KyberWeave.Core` | the resolved `*.deps.json` of a throwaway publish |
 | Node (npm) | KyberDash, the web dashboard, the tray UI, the npm wrapper | `package-lock.json` |
 | Rust (Cargo) | the KyberDash tray | `Cargo.lock` |
 
-It exists so that the inventory can be fed to a vulnerability scanner or a licence audit
-without unpacking every binary. See
-[issue #383](https://github.com/dpalfery/kyber-weave/issues/383) for the rationale.
+The aggregate exists so that the inventory can be fed to a vulnerability scanner
+or a licence audit without unpacking every binary. The per-artifact SBOMs exist
+so that each archive's shipped bytes are listed even where no package cataloger
+can read a runtime closure. See
+[issue #383](https://github.com/dpalfery/kyber-weave/issues/383) for the
+aggregate rationale and
+[issue #417](https://github.com/dpalfery/kyber-weave/issues/417) for the
+per-artifact follow-up.
+
+### Per-artifact SBOMs
+
+Each published archive ships beside a sibling named by stripping its archive
+suffix and appending `.cdx.json` (`artifact_sbom_name` in
+`scripts/syft-bootstrap.sh`, so the generator and the checksum manifest share
+one mapping): `kyber-weave-linux-x64.tar.gz` →
+`kyber-weave-linux-x64.cdx.json`, `kyberdash-tray-win-x64-setup.exe` →
+`kyberdash-tray-win-x64-setup.cdx.json`, `kyber-squad-<version>.zip` →
+`kyber-squad-<version>.cdx.json`. The aggregate keeps its versioned name and is
+built by `scripts/generate-sbom.sh` instead.
+
+Each one is produced by unpacking its archive into a throwaway directory and
+scanning the extracted tree with the pinned Syft (`scripts/generate-artifact-sboms.sh`,
+Syft 1.55.0 via `scripts/syft-bootstrap.sh`) with the file cataloger enabled
+(`SYFT_FILE_METADATA_SELECTION=all`), so every shipped byte is listed as a file
+component even when no lockfile or binary cataloger fires.
+
+What a per-artifact SBOM covers is exactly that file list: which bytes shipped
+in that archive. What it does not cover is the runtime closure those bytes may
+hide. A single-file .NET publish folds its dependency closure into the
+executable, a Node single-executable bundles the runtime and the dashboard, and
+a Tauri bundle/installer is an opaque binary — none of them leaves anything for
+a package cataloger to read. Those archives therefore carry a loud
+`kyber-weave:sbom:not-measured` marker rather than a quietly incomplete package
+list:
+
+- `kyber-weave-*` / `kyber-weave-mcp-*` — `dotnet-single-file`
+- `kyberdash-*` (the Node single-executables) — `node-sea`, carrying **both**
+  the file catalogue entry **and** the not-measured marker: the bytes are
+  listed, and the document states that runtime coverage was not measurable
+- `kyberdash-tray-*` — `tauri-bundle`
+- `kyber-squad-*.zip` — no marker: a skill bundle's file list *is* its content,
+  with no hidden runtime closure to disclaim
 
 ### Verifying the SBOM
 
-The SBOM is listed in `SHA256SUMS.txt` like every other asset, so the same command that
-verifies the binaries verifies it — there is nothing extra to download or trust:
+The aggregate SBOM and every per-artifact SBOM are listed in `SHA256SUMS.txt`
+like every other asset, so the same command that verifies the binaries verifies
+them — there is nothing extra to download or trust:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS.txt
 ```
 
-### What the SBOM does and does not tell you
+### Verifying SBOM attestations
 
-It is a dependency inventory, not a statement about what is running on your machine, and
-not a scan of the published archives. Four limits are worth stating plainly.
+Every SBOM is attested at release time with its archive as the subject and the
+SBOM as the predicate (`actions/attest` in SBOM mode, predicate type
+`https://cyclonedx.org/bom`). To verify that a downloaded archive is the one
+its SBOM was attested against:
+
+```bash
+gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://cyclonedx.org/bom
+```
+
+For example:
+
+```bash
+gh attestation verify kyber-weave-linux-x64.tar.gz -R dpalfery/kyber-weave --predicate-type https://cyclonedx.org/bom
+```
+
+The aggregate SBOM is attested once against all archives; each per-artifact
+SBOM is attested against its own archive. See
+[the SBOM asset](distribution.md#the-sbom-asset) for the maintainer view.
+
+### What the SBOMs do and do not tell you
+
+The aggregate SBOM is a dependency inventory, not a statement about what is
+running on your machine, and not a scan of the published archives. Four limits
+are worth stating plainly.
 
 - **It describes the repository's dependency closure, not any individual RID's binary.**
   Every asset in a release is built from the same locked dependency set, so the closure
@@ -288,10 +353,12 @@ not a scan of the published archives. Four limits are worth stating plainly.
 - **Test-only dependencies are not in it.** The SBOM covers what the release ships,
   not the test suite.
 
-So: the SBOM answers *"which third-party libraries does this release depend on?"*. It
-does not answer *"what is in this archive?"*, and in particular it does not account
-for the two runtimes the release embeds. For a byte-level inventory, scan the published
-archives themselves.
+So: the aggregate SBOM answers *"which third-party libraries does this release depend on?"*.
+A per-artifact SBOM answers *"which files are in this archive?"* — and states
+plainly, via `kyber-weave:sbom:not-measured`, where the embedded runtime it
+cannot measure begins. Neither answers *"what is running on your machine?"*.
+For the runtimes themselves, the file inventory is the provenance; the runtime
+closure remains not-measured by design.
 
 ## Windows: unsigned binaries and SmartScreen
 
@@ -406,6 +473,47 @@ a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc
 Global `kyber-weave --version` still prints the running binary; pinning is a positional
 argument so the two do not collide.
 
+## Upgrading
+
+### Retired skills
+
+Two renames ship in this release: `kyber-weave-docs` is now `kyber-docs-authoring`,
+`doc-corpus-integrity-review` is now `kyber-docs-integrity-review`, and the Squad
+`second-brain` skill moved to Kyber-Docs as `kyber-docs-onboarding-and-assessment`
+(deployed by `docs init`). The old copies keep working, so the upgrade is cleanup,
+not repair — but remove them so the stale copy is not the one an agent finds.
+
+APM prunes a retired skill only when a lockfile records the install. That
+lockfile-gated pruning was observed on both 0.28.0 and 0.35.0: with a lockfile
+present, a plain `apm install` pruned the stale directory; without a lockfile,
+both versions left it standing. No version gate is encoded — neither a minimum
+APM version nor a "this version never prunes" rule — because none was observed.
+If the stale directory is still there after the deploy step, delete it by hand.
+
+Kyber-Docs skills (default `agent-skills` target, `.agents/skills/` root):
+
+```bash
+rm -rf ".agents/skills/kyber-weave-docs" ".agents/skills/doc-corpus-integrity-review"
+kyber-weave docs init .   # deploys kyber-docs-authoring, kyber-docs-integrity-review, kyber-docs-onboarding-and-assessment
+```
+
+For a `claude` target the roots are `.claude/skills/kyber-weave-docs` and
+`.claude/skills/doc-corpus-integrity-review`; the `rm -rf` shape is the same.
+`docs init` warns when a retired directory is still present after the deploy
+step and prints the exact removal command.
+
+Squad `second-brain` (retired from `products/kyber-squad/`):
+
+```bash
+rm -rf ".claude/skills/second-brain" ".agents/skills/second-brain"
+kyber-weave squad update   # reconcile the receipt once the stale directory is gone
+```
+
+`kyber-weave squad doctor` warns about a stale `second-brain` directory in a
+deployed target tree, and about a deployment receipt that still claims its
+files, in both cases printing the delete-then-`squad update` steps and pointing
+at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
+
 ## Then initialize your repository
 
 ```bash
@@ -414,7 +522,7 @@ kyber-weave docs init .
 
 This scaffolds host config, the catalog, and the ontology reference; safely merges the
 narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deploys the
-`kyber-weave-docs` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
+`kyber-docs-authoring` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
 of 11 Kyber Squad coding standards templates. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
 
@@ -431,7 +539,7 @@ installed on your machine behind your back.
 
 ### APM
 
-The Agent Package Manager distributes the `kyber-weave-docs` authoring skill, resolves
+The Agent Package Manager distributes the `kyber-docs-authoring` authoring skill, resolves
 the harness layout for each runtime, and powers target compilation for `kyber-weave squad`.
 Install it once:
 

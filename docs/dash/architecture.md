@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-22
+last-reviewed: 2026-10-25
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -23,6 +23,7 @@ decided-by:
   - adr/0035-kyberdash-quarantine-raw-packet-evidence
   - adr/0038-post-run-transcript-sync-subagent-hierarchy
   - adr/0041-kyberdash-retire-legacy-context-schema-routes
+  - adr/0043-kyberdash-analysis-mcp-read-only-boundary
 keywords:
   - dashboard
   - codeburn
@@ -88,6 +89,9 @@ code-refs:
   - segmentTranscript
   - antigravitySkillDescription
   - readAntigravityMcpCatalogue
+  - createAnalyticsMcpServer
+  - resolveAnalyticsServerUrl
+  - handleAnalyticsRequest
 ---
 
 # KyberDash architecture
@@ -322,7 +326,9 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   v1 Desktop default-export hooks map (including `session.context`), both bridging to
   `createInstalledOpencodePlugin` + `registerOpencodePlugin`. `session.context` is
   registered on both the v2 namespaced and v1 dotted host surfaces; lifecycle kinds are
-  unchanged.
+  unchanged. Context capture extends this in-repo envelope plugin; a standalone plugin
+  POSTing raw JSON is rejected — the wrong port and body bypass the version guard, the
+  bounded outbox, and the never-fail-host contract.
 - **Consent.** System prompt, tool definitions, and the skills listing are content and
   flow only under the sender-owned env consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
   default; true only for exactly `1`). With consent absent the context event still emits
@@ -339,6 +345,9 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   still maps `llm.invoke` (a context event is pre-LLM-call request assembly), never
   fabricating counters. Context content buckets after every existing part: system text
   as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
+  The skills listing reads from raw `opencode.context.skills` (the `skills.ts` listing
+  source, measurable only under consent; a malformed value yields a named
+  `notMeasurable` reason).
   Prompt text (`opencode.prompt.text`) buckets as
   conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
   as non-model — the correct taxonomy for a boundary, not a rejection — with zero
@@ -356,8 +365,7 @@ under sender opt-in, and assembled text honors the 14-day content purge. Operato
 [runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
 T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
 verification on Desktop and CLI v2 (owner enablement, plugin install, live turn) is still
-open, tracked by [kyberdash-opencode-plugin-live-verification](../todo/kyberdash-opencode-plugin-live-verification.md) —
-nothing here is live-verified on this checkout.
+open — [NOT LIVE-VERIFIED]: nothing here is live-verified on this checkout.
 
 ## Local harness-source refresh
 
@@ -1284,7 +1292,7 @@ detector declares its numerator, denominator, measurement class, and explicit un
 - `oversizedResultShare`: Proportion of turn input consumed by large tool output blocks.
 - `compactionPressure`: Rate of context window growth relative to model context limits.
 - `delegationOverhead`: Percentage of run tokens spent on parent-child coordination.
-- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16). Its listed and invoked sets come from `dash/src/canon/skills.ts`, not from tool names or text matching. A `Skill` tool call credits the skill it loads, never a skill named `Skill`. When invocations are not measurable (Copilot, Antigravity) or no listing is measurable (Pi, OpenCode, unknown harnesses), the signal is reported as not measurable and no finding is raised. See the [skills view contract](#skills-view-contract).
+- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16). Its listed and invoked sets come from `dash/src/canon/skills.ts`, not from tool names or text matching. A `Skill` tool call credits the skill it loads, never a skill named `Skill`. When invocations are not measurable (Copilot, Antigravity) or no listing is measurable (Pi, unknown harnesses — and OpenCode absent the `KYBERDASH_OPENCODE_CONTEXT` consent, whose listing then reads from raw `opencode.context.skills`), the signal is reported as not measurable and no finding is raised. See the [skills view contract](#skills-view-contract).
 - `inactive-skill-reference` (finding detector): A listed skill with no observed invocation. It is a low-confidence, heuristic finding ranked last, worded as "listed with N recorded turns and 0 invocations". It states what was observed and does not use deletion or waste wording (ADR 0013 D15/D16). The same measurability rule applies: no finding when either side is not measured.
 
 ### Context-Item Classification (Decision D15)
@@ -1710,6 +1718,100 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed. `GET /api/kyber/context` and `GET /api/kyber/schema` are gone — deleted with no live caller ([ADR 0041](../adr/0041-kyberdash-retire-legacy-context-schema-routes.md)) — and answer this generic 404 like any unknown path; a non-GET on either answers 404 rather than 405.
+
+### Conversational analytics over MCP (`kyberdash mcp`)
+
+An assistant can interrogate the same engine through a read-only MCP surface instead of
+the dashboard. `kyberdash mcp` speaks stdio with the installed MCP SDK
+(`createAnalyticsMcpServer` in `dash/src/mcp/server.ts`) and reaches the engine only
+through eight additive routes under `/api/kyber/analytics/` (`handleAnalyticsRequest` in
+`dash/src/server/analytics-routes.ts`). Computation stays in the shared engine service
+(`dash/src/analysis/query/`); the adapter never opens SQLite and never derives a domain
+figure. The HTTP routes and the MCP tools share the same schemas, results, and errors,
+so identical scoped requests through either path return identical domain data and
+measurement/coverage/evidence, apart from transport timing metadata.
+
+| Tool | Route | What it answers |
+|---|---|---|
+| `dash_status` | `GET /api/kyber/analytics/status` | Connection, analytics contract/catalog identity, available derived capabilities, recorded freshness, and coverage limitations. Callable with no corpus scan, and the only tool that reports `engine_unavailable` with startup guidance when no engine is attached. |
+| `dash_catalog` | `GET /api/kyber/analytics/catalog` | The authoritative machine-readable vocabulary: entity grains, metric and dimension ids, filter operators, compatible combinations, units, aggregation operators, measurability rules, supported comparison forms, content/retention policy, and every limit below. A mismatched catalog version requires rediscovery. |
+| `dash_query` | `POST /api/kyber/analytics/query` | Catalog-driven typed aggregates over the session grain with own-session figures (never sums of parent totals that include children). No SQL, expressions, arbitrary columns, filesystem paths, or script execution in inputs. |
+| `dash_search_sessions` | `POST /api/kyber/analytics/search-sessions` | Metadata-only search: matches label, agent name, repo, and branch against literal text (max 200 characters — no regex, SQL wildcards, embeddings, or transcript text). Never returns captured text. |
+| `dash_inspect` | `POST /api/kyber/analytics/inspect` | One body shared with MCP: `mode: 'manifest' \| 'content'` plus an explicit `target` (`run` / `session` / `turn`); no `includeContent` flag and no extra approval. `manifest` discovers without text bodies — run executions with parent/child/session linkage and `isSubagent`, turn identities, part/block identities with `role` and `origin`; `content` returns `chunks` (`partId`, `blockId`, `sessionId`, `turnIndex`, `spanId`, `origin`, `text`, `byteOffset`, `complete`, `role`, `order`, `resident`) paged by `pagination.nextCursor` / `hasMore`, following continuations to reach all retained context. `limit` (manifest only; default 25, max 100) and `byteLimit` (content only; default and max 16384) bound a page and working memory, never the total retrievable transcript. `coverage.completeness` is `captured_only` with `coverage.gaps` naming what is missing; `representation: 'assembled_turn'` (turn targets only) is a labelled reconstruction, never the exact model input. `run` scope includes child/subagent sessions; `session` scope stays local. Cursors bind target, representation, limits, and projection generation: a reused, tampered, cross-target, or post-purge cursor answers `stale_cursor`; capacity answers `budget_exceeded`; cancellation answers `cancelled`. The historical `includeContent: true` turn/block form and the metadata-only session inspection are retained legacy forms, not the way to retrieve context. A field outside the recognized set for its form answers `invalid_request`, never a silent drop: the manifest/content form allows `mode`, `target`, `representation`, `cursor`, `limit`, `byteLimit`, `scope`; the legacy turn form allows `kind`, `includeContent`, `sessionId`, `turnIndex`, `blockId`, `byteLimit`, `cursor`, `scope`; the legacy session form allows `kind`, `id`, `scope`. Never silently returns a neighboring turn or dumps a whole payload. |
+| `dash_findings` | `POST /api/kyber/analytics/findings` | The canonical ranked findings with mechanism, evidence rows, confidence basis, recommendations, risk, and expected improvement. `model_review` prose is never promoted into canonical findings. |
+| `dash_compare` | `POST /api/kyber/analytics/compare` | Exactly two explicit run ids, or two query scopes using identical metrics, grain, units, and grouping, reusing run pairing where runs are compared. Reports per-side availability, sample sizes, grouping basis, and confounders. Relative deltas with a zero/missing denominator are unavailable, and no causal or automatic before/after-change claim is made. |
+| `dash_outcomes` | `POST /api/kyber/analytics/outcomes` | The existing observed outcome signals with status distribution including unavailable and inconclusive, observable denominators, and supporting ids. No success inferred from silence, cost, or speed, and regex corrections or a clean tool exit are never read as proof of task quality. |
+
+Every response uses the versioned common envelope (`contractVersion: 1`): `scope` (echoed
+filters, normalized UTC `[from,to)` interval, grouping timezone — unsupported filters are
+rejected, never silently dropped), `data` (typed result or null; a measured empty result
+is distinguishable from unavailable data), `measurement` (definitions, units,
+numerator/denominator for ratios, measured/derived/inferred/unavailable classification,
+cost basis and currency partitions — never blended across bases or currencies, no
+composite score), `coverage` (candidate, included, and eligible counts, exclusion and
+linkage reasons; unknown counts stay null with a reason), `freshness` (generated-at,
+engine instance and store/projection generation, last ingest/projection timestamps when
+recorded — request time is never substituted), `evidence` (stable session/run/execution/
+turn/finding/span references; aggregates carry a bounded deterministic sample with a
+contributor count, not an exhaustive claim), `pagination` (deterministic ordering, limit,
+cursor or null, truncation flags; totals describe the whole admitted scope), and `error`
+(stable code, safe message, hint; never raw DB payloads or credentials). Cursors bind the
+contract/catalog version, normalized query, ordering key, engine instance, and projection
+generation: a changed projection, replaced server, or changed query rejects the cursor
+rather than continuing across a changed snapshot. The HTTP status follows the envelope
+error code: 200 when `error` is null; 400 for `invalid_request` and `unsupported_query`;
+404 for `not_found`; 409 for `stale_cursor`; 413 for `budget_exceeded`; 503 for
+`engine_unavailable`, `incompatible_engine`, and `cancelled`; 500 for `internal_error`
+and any code the route does not know.
+
+Bounds are published in the catalog and enforced by schema and engine together — no
+silent clamping, sampling, or partial totals. Scope defaults to the previous seven days
+on an engine-injected clock; explicit windows run to 365 days. `windowDays` (an integer
+from 1 to 365) is the MCP-surface convenience advertised by `dash_query`,
+`dash_search_sessions`, `dash_findings`, and `dash_outcomes`: a valid value fills an
+absent `scope.from`/`scope.to` pair with a window ending now while an explicit scope
+range wins, the key is always stripped before the engine sees it, and a non-integer or
+out-of-range value answers `invalid_request` instead of being silently dropped. Row limits default to 25
+and cap at 100; at most 8 metrics and 2 grouping dimensions per query. At most 10,000
+sessions are admitted per request (candidates are counted to 10,001 first), derived
+summaries are scanned in batches of at most 100, a single decoded summary over 256 KiB
+and cumulative decoded input over 16 MiB are refused, and budget failure returns no
+partial total. The request body cap is 64 KiB, the encoded MCP reply cap is 64 KiB (an
+oversized reply becomes a `budget_exceeded` envelope, not a truncation), and each content
+page is at most 16 KiB UTF-8 — a page and working-memory bound, not a transcript total
+(`byteLimit` caps content pages; `limit` caps manifest rows). Unknown session timestamps are excluded from time-scoped
+results and counted, never assigned to today; missing counters exclude that row only
+from that metric and appear in its denominator/coverage, and per-session ratios are
+never averaged.
+
+Attach-only lifecycle: the adapter discovers the running engine through the
+`server.json` receipt in the standard configuration directory (or an explicit
+`--server-url`, or `--state-dir` naming another directory holding an existing receipt)
+and never launches or stops it — starting `web` can start jobs and a receiver, which a
+read-only attachment must not do. Only literal loopback origins are contacted
+(`http://127.0.0.1:<port>` or `http://[::1]:<port>`, no userinfo/query/fragment, no
+redirects); the explicit URL wins over the receipt, and DNS names or a guessed port
+fallback are refused. The analytics contract identity/version and the engine
+instance/store-generation identity are verified before any data call; a missing or stale
+receipt yields actionable `engine_unavailable` ("run `kyberdash web --no-open`"), and an
+unknown analytics contract version yields `incompatible_engine`, never an empty corpus.
+Client cancellation aborts active fetches; EOF/SIGTERM drains accepted requests within a
+bounded deadline and exits without stopping the shared engine, and a client closing its
+read end does not produce an unhandled EPIPE. Stdout carries only JSON-RPC once
+connected; logs and diagnostics use stderr. The tool declarations carry
+read-only/idempotent/non-destructive/closed-world hints, but allowlisting — not the
+annotations — is the enforcement: the adapter can reach only its eight analytics routes
+and never passes user-provided URLs or route names to fetch.
+
+The content and outcome caveats of the engine apply unchanged: content coverage is
+`captured_only` (retained evidence, never a claim that all provider input was
+observed), `assembled_turn` is a labelled reconstruction rather than the exact model
+input, plaintext older than the
+14-day rolling retention window reads as absent/expired (raw packets outlive assembled
+turn text until a harness wipe), conflicting or missing outcome signals stay explicit,
+and every recommendation traces to stable evidence ids plus the limitations that qualify
+it. Lower cost or fewer tokens alone never establish better work. Retrieval never
+recaptures or manufactures absent text.
 
 ### User-initiated database clean (ADR 0032)
 

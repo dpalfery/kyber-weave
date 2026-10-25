@@ -43,8 +43,8 @@ public sealed partial class DocumentLoader
     /// </remarks>
     public DocumentSet Load()
     {
-        List<DocumentModel> documents = new List<DocumentModel>();
-        HashSet<string> visited = new HashSet<string>(PathComparer);
+        List<DocumentModel> documents = new();
+        HashSet<string> visited = new(PathComparer);
 
         foreach (string docsRoot in _docsRoots)
         {
@@ -122,10 +122,12 @@ public sealed partial class DocumentLoader
         return longest is null ? relativePath : relativePath[longest.Length..];
     }
 
-    private string Absolute(string relativePath) =>
-        relativePath == "."
+    private string Absolute(string relativePath)
+    {
+        return relativePath == "."
             ? _repoRoot
             : Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    }
 
     /// <summary>
     /// Path identity follows the same rules as <see cref="DocsRootPath.PathComparer"/>,
@@ -137,8 +139,26 @@ public sealed partial class DocumentLoader
     /// True when the configured catalog exists and neither it nor a directory beneath its
     /// root is a symbolic link; see <see cref="DocsRootPath.IsContainedFile"/>.
     /// </summary>
-    private bool IsCatalogContained() =>
-        DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
+    private bool IsCatalogContained()
+    {
+        return DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
+    }
+
+    /// <summary>
+    /// Reads one Markdown file into a <see cref="DocumentModel"/>, with its frontmatter when it
+    /// has any; a file without frontmatter keeps its whole text as the body.
+    /// </summary>
+    /// <remarks>
+    /// The corpus walk excludes the archive subtree, so the closeout gate reads an archived
+    /// entry through this narrow entry point instead: one named file, no directory walk,
+    /// no exclusion bypass beyond that file.
+    /// </remarks>
+    internal DocumentModel LoadArchivedDocument(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        string absolute = Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return Parse(absolute, relativePath.Replace('\\', '/'));
+    }
 
     /// <summary>
     /// Reads one Markdown file into a <see cref="DocumentModel"/>, with its frontmatter when it
@@ -203,12 +223,12 @@ public sealed partial class DocumentLoader
     /// </summary>
     internal static IReadOnlyList<DocumentSection> SplitSections(string body)
     {
-        List<DocumentSection> sections = new List<DocumentSection>();
+        List<DocumentSection> sections = new();
         string[] lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
         string? heading = null;
         int headingLine = 1;
-        List<string> buffer = new List<string>();
+        List<string> buffer = new();
         bool inFence = false;
 
         void Flush()
@@ -250,12 +270,15 @@ public sealed partial class DocumentLoader
     }
 
     /// <summary>True when the lines contain something other than headings and blanks.</summary>
-    private static bool HasProse(IEnumerable<string> lines) =>
-        lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'));
+    private static bool HasProse(IEnumerable<string> lines)
+    {
+        return lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'));
+    }
 
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-    private static DocType ParseDocType(string? value) =>
-        value?.Trim().ToLowerInvariant() switch
+    private static DocType ParseDocType(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
         {
             "architecture" => DocType.Architecture,
             "onboarding" => DocType.Onboarding,
@@ -272,6 +295,7 @@ public sealed partial class DocumentLoader
             "coding-standard" => DocType.CodingStandard,
             _ => DocType.Unknown
         };
+    }
 
     private static DocStatus ParseStatus(string? value) =>
         value?.Trim().ToLowerInvariant() switch
@@ -284,12 +308,14 @@ public sealed partial class DocumentLoader
             _ => DocStatus.Unknown
         };
 
-    private string ToRelative(string absolutePath) =>
-        Path.GetRelativePath(_repoRoot, absolutePath).Replace('\\', '/');
+    private string ToRelative(string absolutePath)
+    {
+        return Path.GetRelativePath(_repoRoot, absolutePath).Replace('\\', '/');
+    }
 
     internal static IReadOnlyList<string> ExtractRelativeLinks(string markdown)
     {
-        List<string> links = new List<string>();
+        List<string> links = new();
         foreach (Match match in LinkPattern().Matches(markdown))
         {
             string target = match.Groups[1].Value.Trim().Trim('<', '>');
@@ -318,8 +344,8 @@ public sealed partial class DocumentLoader
     /// </remarks>
     private (IReadOnlySet<string> Components, IReadOnlySet<string> Owners) ReadCatalogVocabularies()
     {
-        HashSet<string> components = new HashSet<string>(StringComparer.Ordinal);
-        HashSet<string> owners = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> components = new(StringComparer.Ordinal);
+        HashSet<string> owners = new(StringComparer.Ordinal);
 
         // Skip reading vocabularies from a catalog that is, or sits beneath, a symlink
         // (D3: never follow a link).

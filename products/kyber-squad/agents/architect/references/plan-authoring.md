@@ -16,9 +16,10 @@ Open only active Draft, Ready, In progress, or Blocked plans. Draft supports pla
 
 Every plan contains:
 
-- governed frontmatter including `development-mode: test-first | standard`;
+- governed frontmatter including `development-mode: test-first | standard`, `documentation-impact: new-component | extends-component | no-design-change`, and `impact-components` (catalog component names; required and non-empty for `new-component` and `extends-component`);
 - problem and goal;
 - a permanent Decisions section recording all material choices, alternatives, questions, and approvals;
+- the declared scale (`documentation-impact` plus `impact-components`) and a `Design harvest` table keyed by Target component and Target doc type (one row per durable design, contract, interface, behaviour, or operations section; a `no-design-change` scale carries `Documentation waiver: <reason>` instead of rows);
 - investigation findings;
 - the mode-specific Test contract or verification contract;
 - dispatchable tasks with objective, exact files or symbols, acceptance criteria, dependencies, and required skills;
@@ -55,7 +56,7 @@ If no interactive questions were needed during planning, the plan must still car
 
 ## Ready and finalization
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, has a schedulable dependency graph, and both documentation checks pass:
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass:
 
 ```text
 STATUS: PLAN_READY
@@ -65,7 +66,7 @@ DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```
 
-The conductor presents **approve and execute**. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, rerun both documentation checks, and return:
+The conductor presents **approve and execute**, stating the declared scale and components so the owner confirms scale before execution. Proceed at high confidence only when the scale and harvest targets are unambiguous. On a `FINALIZE` invocation carrying explicit approval, record that approval in the decision rows, preserve the permanent `## Decisions` section intact (do NOT delete it), set the plan and index to Ready, rerun both documentation checks, and return:
 
 ```text
 STATUS: PLAN_FINALIZED

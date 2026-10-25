@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-25
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -112,8 +112,8 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
-  identities. The canonical tree separately retains 82 supplemental files, giving 110 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 27 top-level `SKILL.md`
+  identities. The canonical tree separately retains 81 supplemental files, giving 108 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -549,6 +549,17 @@ and validates.
   and a primary agent naming one is rejected because Devin lowers primaries to
   skills with no tool allow-list
   ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
+- **Pi per-target overlay (`pi-extensions` / `pi-tools`)**: a canonical agent may declare
+  two optional flat frontmatter keys — `pi-extensions` (array of Pi extension ids) and
+  `pi-tools` (array of additional Pi tool names). `pi-tools` entries must use the
+  `ext:<extension>/<tool>` form; bare names are rejected so the overlay cannot smuggle a
+  built-in past the capability lattice (read-only roles keep `process.execute: deny`),
+  and every `ext:` entry's extension must be declared in `pi-extensions`. `PiRenderer`
+  appends the declared `pi-tools` after the capability-derived `tools` CSV and emits the
+  declared extensions as a YAML sequence (the live-verified form); agents without an
+  overlay render `extensions: false` exactly as before. Only `research-agent` carries the
+  overlay today, with the live-verified `pi-mcp-adapter` wiring
+  ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
@@ -692,7 +703,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 140 files — 24 agents, 28 skills, plus projected
+  the principal. A fresh Copilot render is 138 files — 24 agents, 27 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -701,10 +712,10 @@ and validates.
   behaviour.
 - **Skill canonical bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad.
   Every imported canonical raw `SKILL.md` except the
-  six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+  five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 82 skill resources (110 files under
+  recursive package formats retain all 81 skill resources (108 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -853,6 +864,84 @@ Operational contracts remain in
 `products/kyber-squad/agents/github-devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
+
+## 10. Plan and specification lifecycle: documentation impact, design harvest, every-change review, closeout
+
+Plans and specifications declare their documentation footprint at authoring time, every
+completed change passes a `docs-dev` documentation-impact review, and plan/spec-backed
+work additionally completes a closeout that migrates durable content into canonical
+documentation before archival. The portable contract lives in the canonical agent and
+skill sources; this section states what the engine's host documentation records.
+
+### Scale and Design harvest declared at authoring time
+
+Every plan and specification carries `documentation-impact: new-component |
+extends-component | no-design-change` with `impact-components` naming the affected
+catalog components (required and non-empty for the first two scales), plus a `Design
+harvest` table mapping each durable design item to its target component and target doc
+type. Plans declare it in governed frontmatter (`architect` plan-authoring); the design
+phase carries the permanent `## Decisions` table (ID, Question, Answer / decision,
+Mitigating and supporting information, Status / approval provenance), the scale, and the
+`Design harvest` requirement-group it must satisfy. `PLAN_READY` and `SPEC_READY` verify
+the scale and harvest alongside the mode contract and documentation checks, and
+approve-and-execute restates the scale and components so the owner confirms them before
+execution. The tasks-phase final task names the harvest and the scale it was declared
+at, so the closeout task carries the authoring-time decisions.
+
+### Every completed change gets a documentation-impact review
+
+The conductor no longer limits `docs-dev` to plans and specifications: every completed
+change receives a `docs-dev` review, and plan/spec-backed work additionally completes
+closeout before the objective is reported complete. The review examines what it is sent
+— the packet diff, not the plan or spec behind it — keeps a run record of
+asked/decided+why/files changed, and returns machine-readable rows (`DOCS_REVIEW` with
+the verdict, `RECOMMENDATIONS` naming the canonical documents to create or update).
+Recommendations route by component and doc type, placing each update beside the
+component's existing docs. The bar is high confidence with human approval before
+anything is written; the review never adds ontology vocabulary (the best existing home
+wins when nothing fits) and files a todo only if the owner accepts it.
+
+The execution-and-review contract records the run record, the `DOCS_REVIEW` rows, the Q2
+`CLOSEOUT_COMPLETE` marker, and carries the outcome in the PR description. Autonomous
+delivery requires `DOCS_REVIEW` rows and, for plan/spec-backed work, `CLOSEOUT_COMPLETE`
+evidence, and the draft PR carries both. The one-defect path is not exempt: `bug-crusher`
+keeps a run record, routes the fix through a `docs-dev` review (`docs-dev` joins its
+delegation roster), and reports the outcome in the report and the pull request. The
+pull-request description states its Documentation impact verbatim (heading fallback when
+the host supplies no template), and closeout is required before delivery rather than
+after merge. The `code-reviewer` intent-alignment lens pins the archived-specification
+contract: the D22 documentation items, and a critical finding for a missing or false PR
+documentation section or an unjustified no-doc-change claim.
+
+### Closeout migrates, then archives
+
+Plan closeout keeps its mapping table and both waiver categories (ADR waiver,
+Documentation waiver) and gains the harvest: every `Design harvest` requirement-group at
+its declared scale migrates into canonical documentation alongside the decisions, each
+item recorded with its documentation-impact, impact-components, last-reviewed date, and
+a status-archived row; the artifact header reads `Status: Archived` only when the
+mapping is complete. Specification closeout migrates durable architecture, behavior,
+operations, configuration, interfaces, and consequential decisions — including the
+declared `Design harvest` — into the component's detailed documentation, runbooks,
+references, ADRs, and catalog entries, then moves the specification to the archive
+register and runs the documentation validation and drift checks. The closeout digest
+reports `MAPPED:`, `IMPACT:`, and `DOCS_REVIEW:` rows; a plan or specification closeout
+ends in `STATUS: CLOSEOUT_COMPLETE`, or `STATUS: BLOCKED` naming what stopped the
+archive.
+
+### Host documentation side
+
+The plans index policy section and the specifications index carry the same
+authoring-time policy (scale declared, `Design harvest` and documentation-impact mapping
+required before archival), and the host pull-request template carries a Documentation
+impact section so the skill has a host heading to fill. The always-on change-scoped
+merge gate `KW-DOC-LIFECYCLE-004` (`ArchiveCloseoutValidator`, diffed against `--base`
+via `ChangedFiles.ResolveSinceMergeBase` per-path change kinds) requires that an archive
+touching governed documents names its closeout evidence; the harvest declaration binds
+off the document model (`documentation-impact`, `impact-components`). Portable contract
+files never embed a literal `docs/` path: every documentation location resolves through
+Config Reg properties such as `<docs-root>`, so a host that mounts documentation
+elsewhere keeps working.
 
 ---
 

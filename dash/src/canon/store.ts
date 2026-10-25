@@ -2242,10 +2242,15 @@ export type SessionSummaryFigureFields = {
   turnCount?: number
   totalInput?: number
   totalOutput?: number
+  totalCacheRead?: number
+  totalCacheCreation?: number
+  durationMs?: number
+  costBasis?: string
   costStatus?: string
   costValue?: number
   costCurrency?: string
   costUsdLegacy?: number
+  includedInParent?: boolean
 }
 
 /** One session's measured figures, with the session they belong to. */
@@ -2264,10 +2269,15 @@ const SESSION_FIGURE_FIELDS = [
   { alias: 'turn_count', path: 'turn_count' },
   { alias: 'total_input', path: 'total_input' },
   { alias: 'total_output', path: 'total_output' },
+  { alias: 'total_cache_read', path: 'total_cache_read' },
+  { alias: 'total_cache_creation', path: 'total_cache_creation' },
+  { alias: 'duration_ms', path: 'duration_ms' },
+  { alias: 'cost_basis', path: 'cost.basis' },
   { alias: 'cost_status', path: 'cost.status' },
   { alias: 'cost_value', path: 'cost.value' },
   { alias: 'cost_currency', path: 'cost.currency' },
   { alias: 'cost_usd', path: 'cost.usd' },
+  { alias: 'included_in_parent', path: 'included_in_parent' },
 ] as const
 
 /**
@@ -2312,10 +2322,15 @@ type SessionFigureDbRow = {
   turn_count?: unknown
   total_input?: unknown
   total_output?: unknown
+  total_cache_read?: unknown
+  total_cache_creation?: unknown
+  duration_ms?: unknown
+  cost_basis?: unknown
   cost_status?: unknown
   cost_value?: unknown
   cost_currency?: unknown
   cost_usd?: unknown
+  included_in_parent?: unknown
 }
 
 /**
@@ -2344,16 +2359,24 @@ function sessionFigureFields(row: SessionFigureDbRow): SessionSummaryFigureField
   const turnCount = figure(row.turn_count)
   const totalInput = figure(row.total_input)
   const totalOutput = figure(row.total_output)
+  const totalCacheRead = figure(row.total_cache_read)
+  const totalCacheCreation = figure(row.total_cache_creation)
+  const durationMs = figure(row.duration_ms)
   const costValue = figure(row.cost_value)
   const costUsdLegacy = figure(row.cost_usd)
   return {
     ...(turnCount !== undefined ? { turnCount } : {}),
     ...(totalInput !== undefined ? { totalInput } : {}),
     ...(totalOutput !== undefined ? { totalOutput } : {}),
+    ...(totalCacheRead !== undefined ? { totalCacheRead } : {}),
+    ...(totalCacheCreation !== undefined ? { totalCacheCreation } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(typeof row.cost_basis === 'string' ? { costBasis: row.cost_basis } : {}),
     ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
     ...(costValue !== undefined ? { costValue } : {}),
     ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
     ...(costUsdLegacy !== undefined ? { costUsdLegacy } : {}),
+    ...(row.included_in_parent === true ? { includedInParent: true as const } : {}),
   }
 }
 

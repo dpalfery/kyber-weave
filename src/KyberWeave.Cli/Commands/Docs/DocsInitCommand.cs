@@ -55,10 +55,12 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             DeploySkill(settings);
         }
 
+        ReportRetiredSkills(settings);
+
         AnsiConsole.MarkupLine("[bold]Next:[/]");
         AnsiConsole.MarkupLine($"  1. Replace the example row in [grey]{Markup.Escape(result.DocsRoot)}/catalog.md[/] with your real components and owners.");
         AnsiConsole.MarkupLine($"  2. Run [grey]kyber-weave docs validate {Markup.Escape(settings.Path)}[/] to see what the corpus needs.");
-        AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-weave-docs[/] skill to the failing documents.");
+        AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-docs-authoring[/] skill to the failing documents.");
         AnsiConsole.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
 
         return 0;
@@ -137,7 +139,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
             if (result.ExitCode == 0)
             {
-                AnsiConsole.MarkupLine($"  [green]deployed[/] kyber-weave-docs skill → target [bold]{Markup.Escape(settings.Target)}[/]");
+                AnsiConsole.MarkupLine($"  [green]deployed[/] kyber-docs-authoring skill → target [bold]{Markup.Escape(settings.Target)}[/]");
                 AnsiConsole.WriteLine();
                 return;
             }
@@ -164,11 +166,84 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private static void SkillUnavailable(string command, string reason)
     {
-        AnsiConsole.MarkupLine($"  [yellow]skipped[/]  kyber-weave-docs skill — {Markup.Escape(reason)}.");
+        AnsiConsole.MarkupLine($"  [yellow]skipped[/]  kyber-docs-authoring skill — {Markup.Escape(reason)}.");
         AnsiConsole.MarkupLine("           APM is an expected dependency; Kyber-Weave does not install it for you.");
         AnsiConsole.MarkupLine("           Install it ([grey]https://microsoft.github.io/apm[/]), then run:");
         AnsiConsole.MarkupLine($"             [grey]{Markup.Escape(command)}[/]");
         AnsiConsole.MarkupLine("           Or re-run with [grey]--no-skill[/] to skip this step.");
         AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Warns about retired Kyber-Docs skill directories the APM install leaves behind.
+    /// </summary>
+    /// <remarks>
+    /// APM prunes a retired skill only when a lockfile records the install. That
+    /// lockfile-gated pruning was observed on both 0.28.0 and 0.35.0: without a
+    /// lockfile both versions leave the stale directory behind, so the warning fires
+    /// on directory presence rather than on any one version's behaviour. No 0.34.0
+    /// behaviour is pinned because none was observed. A warning rather than a
+    /// failure: the stale copy still works, but it is no longer deployed.
+    /// </remarks>
+    private static void ReportRetiredSkills(DocsInitSettings settings)
+    {
+        string repoRoot = Path.GetFullPath(settings.Path);
+        string[] targets = settings.Target.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[] retired = ["kyber-weave-docs", "doc-corpus-integrity-review"];
+        foreach (string target in targets)
+        {
+            string? skillsRoot = target.Trim().ToUpperInvariant() switch
+            {
+                "AGENT-SKILLS" => Path.Combine(repoRoot, ".agents", "skills"),
+                "CLAUDE" => Path.Combine(repoRoot, ".claude", "skills"),
+                _ => null,
+            };
+            if (skillsRoot is null)
+            {
+                continue;
+            }
+
+            foreach (string name in retired)
+            {
+                string staleDir = Path.Combine(skillsRoot, name);
+                if (!Directory.Exists(staleDir))
+                {
+                    continue;
+                }
+
+                WriteUnfolded(() =>
+                {
+                    AnsiConsole.MarkupLine(
+                        $"  [yellow]warn[/] Retired skill '{Markup.Escape(name)}' still present at [bold]{Markup.Escape(staleDir)}[/]. " +
+                        "APM prunes retired skills only when a lockfile records the install (observed on 0.28.0 and 0.35.0); " +
+                        "without a lockfile the stale directory is left behind.");
+                    AnsiConsole.MarkupLine(
+                        $"         Remove it with: [grey]rm -rf \"{Markup.Escape(staleDir)}\"[/]");
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// </summary>
+    /// <remarks>
+    /// A redirected console folds at 80 columns, splitting a long path across lines and
+    /// corrupting the copy-pastable cleanup command the warning exists for. The same
+    /// unfolded-write pattern lives in <c>SquadCommandComposition</c> for the same reason;
+    /// it is repeated here so the Docs branch does not depend on the Squad branch.
+    /// </remarks>
+    private static void WriteUnfolded(Action write)
+    {
+        int originalWidth = AnsiConsole.Profile.Width;
+        AnsiConsole.Profile.Width = int.MaxValue;
+        try
+        {
+            write();
+        }
+        finally
+        {
+            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : 80;
+        }
     }
 }

@@ -94,7 +94,7 @@ kyber-weave docs export-graph . --out ./build/doc-graph
 `docs init` does the mechanical half — host config, the catalog that supplies the
 component and owner vocabularies, the ontology reference every diagnostic points at, and
 the narrow ignored cache path analysis needs before it can persist verdicts or vectors.
-It then deploys the **`kyber-weave-docs` skill** through
+It then deploys the **`kyber-docs-authoring` skill** through
 [APM](https://microsoft.github.io/apm), defaulting to `.agents/skills/` so every
 APM-supported client picks it up.
 
@@ -173,12 +173,12 @@ that was fixed in `.claude` and left broken in `.cursor`.
 ## Feature 3 — Kyber-Squad
 
 Kyber-Squad is the portable agent team at the center of the framework: 24 specialist agents
-and 28 reusable skills, coordinated by a primary conductor and deployed consistently across
+and 27 reusable skills, coordinated by a primary conductor and deployed consistently across
 13 coding harnesses. The workflow carries work from planning through specialist
 implementation, testing, review, and documentation closeout. The same canonical definitions
 and capability rules keep that team recognizable across harnesses.
 
-**The canonical tree.** Maintains 24 canonical agent bodies and 28 canonical skills under
+**The canonical tree.** Maintains 24 canonical agent bodies and 27 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
@@ -235,14 +235,34 @@ Doctor down to the individual context item: per-turn token breakdown (fresh inpu
 read, cache creation, output), context composition by part type, ranked tool-schema cost with unused-schema waste,
 hierarchical execution timelines, and an inspector that shows the unclipped assembled turn.
 
-**Three local surfaces.** Terminal report (`kyberdash report`), browser dashboard (`kyberdash web`), and a
-macOS/Windows tray (Tauri 2) — all reading the same store.
+**Four local views.** Use the terminal report (`kyberdash report`), browser dashboard
+(`kyberdash web`), macOS/Windows tray (Tauri 2), or a chat app connected to `kyberdash mcp`
+as an MCP client. The chat app is the fourth view; KyberDash supplies the MCP adapter and
+shared engine, not the chat app. The adapter exposes eight read-only analytics tools through
+the shared `/api/kyber/analytics/*` API and canonical store. It attaches to the running engine
+and does not start or stop it or read the store directly.
+
+Ask which sessions were most expensive, what filled their context, which tool schemas had
+high measured cost, or how cache use and delegation changed over time. Compare periods and
+inspect observed outcomes with supporting evidence; when data is missing or unavailable,
+the tools report that limitation. Search is metadata-only, and captured text requires an
+explicit content opt-in. Lower cost alone does not establish better work.
 
 ```bash
 kyberdash kyber otel        # OTLP receiver on 127.0.0.1:4318
 kyberdash web               # browser dashboard on :4747
 kyberdash report            # terminal report
+kyberdash web --no-open     # start or attach to the engine for MCP
+kyberdash mcp               # configure the MCP client to launch this stdio server
 ```
+
+The MCP tools are `dash_status`, `dash_catalog`, `dash_query`,
+`dash_search_sessions`, `dash_inspect`, `dash_findings`, `dash_compare`, and
+`dash_outcomes`. Register `kyberdash mcp` in the client’s own MCP configuration; KyberDash
+does not edit client configuration. Host-client integration remains
+**[not live-verified](docs/dash/onboarding.md#3-what-is-and-is-not-validated)**. See the
+[client setup guide](docs/dash/onboarding.md#ask-kyberdash-from-an-mcp-client) and
+[MCP architecture and tool contract](docs/dash/architecture.md#conversational-analytics-over-mcp-kyberdash-mcp).
 
 Installed by the same one-line installer as the CLI, from releases that publish it.
 KyberDash began as a fork of the MIT-licensed CodeBurn project and is now first-party code
@@ -275,12 +295,12 @@ src/
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 24 agents, 28 skills, profiles, and schemas
+  kyber-squad/            canonical 24 agents, 27 skills, profiles, and schemas
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store
 tests/KyberWeave.Tests/
-.apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package
+.apm/skills/              kyber-docs-authoring — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set
 templates/github-actions/ host gate workflows
 docs/                     this project's own governed corpus

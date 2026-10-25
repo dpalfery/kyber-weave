@@ -38,6 +38,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history: --base resolves through git merge-base, which a
+          # single-commit checkout cannot answer.
+          fetch-depth: 0
 
       - name: Install Kyber-Weave
         run: |
@@ -49,9 +53,14 @@ jobs:
           sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Pull-request gate: --merge-ready fails the build on open work
+      # (KW-DOC-LIFECYCLE-003) and on archived entries without closeout evidence
+      # (KW-DOC-LIFECYCLE-004), scoped to the PR diff via --base. On push events
+      # use --base ${{ github.event.before }} instead.
       - name: Validate documentation frontmatter
         run: >
           kyber-weave docs validate "${{ env.PROJECT_ROOT }}"
+          --merge-ready --base origin/${{ github.base_ref }}
           --format table
 
   docs-drift:

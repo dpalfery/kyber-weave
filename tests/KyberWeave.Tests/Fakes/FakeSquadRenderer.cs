@@ -57,7 +57,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "product-owner",
         "python-dev",
         "resharper-clt",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
         "task-gate",

@@ -882,7 +882,7 @@ public static class DocsScaffolder
 
         Fill the mechanical keys in bulk with `status: draft`, get `docs validate` clean,
         then add `code-refs` selectively and promote to `current` as each component is
-        reviewed. The `kyber-weave-docs` skill covers the whole procedure.
+        reviewed. The `kyber-docs-authoring` skill covers the whole procedure.
 
         """;
     }

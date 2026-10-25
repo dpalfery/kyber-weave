@@ -66,6 +66,12 @@ public sealed class DocumentFrontmatter
 
     /// <summary>Synonym for keywords, accepted for backwards compatibility.</summary>
     public Collection<string>? Aliases { get; init; }
+
+    /// <summary>How this document is affected by the change under review, when declared.</summary>
+    public string? DocumentationImpact { get; init; }
+
+    /// <summary>Components this document's change touches, for closeout evidence.</summary>
+    public Collection<string>? ImpactComponents { get; init; }
 }
 
 /// <summary>One <c>##</c> section of a document body.</summary>

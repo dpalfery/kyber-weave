@@ -513,6 +513,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history: the 004 closeout gate resolves its scope through
+          # git merge-base, which a single-commit checkout cannot answer.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -535,7 +539,7 @@ jobs:
           # Every skill directory is gated under the same three verbs. Add a path here
           # AND a matching upload step below when a new skill lands, or the suite covers it
           # zero times / its SARIF never reaches code scanning.
-          skills_dirs=(.apm/skills/kyber-weave-docs .apm/skills/kyber-weave-cli)
+          skills_dirs=(.apm/skills/kyber-docs-authoring .apm/skills/kyber-docs-integrity-review .apm/skills/kyber-docs-onboarding-and-assessment .apm/skills/kyber-weave-cli)
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
           for skills_dir in "${skills_dirs[@]}"; do
             # Path-derived, not basename: two skills whose leaf directories share a name
@@ -558,12 +562,33 @@ jobs:
       # determine the alerts introduced by this pull request". Do not "tidy" it to match the
       # file name or the cli category below.
       # Intentional github/codeql-action v4 pin
-      - name: Upload skill scan SARIF (kyber-weave-docs, legacy category)
+      - name: Upload skill scan SARIF (kyber-docs-authoring, legacy category)
         if: always()
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-docs.sarif
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-authoring.sarif
           category: kyber-weave-skills
+
+      # The integrity-review and onboarding-and-assessment skills are new names on
+      # this branch, so they take path-derived categories like the cli skill.
+      # A separate upload step, not one directory upload: the action applies a
+      # single `category` to every run that has no automationDetails of its own,
+      # and refuses two runs that share a category.
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-docs-integrity-review)
+        if: always()
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-integrity-review.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-docs-integrity-review
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-docs-onboarding-and-assessment)
+        if: always()
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-onboarding-and-assessment.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-docs-onboarding-and-assessment
 
       # The cli skill is new on this branch, so it has no prior configuration to preserve
       # and takes a path-derived category. A separate upload step, not one directory upload:
@@ -577,12 +602,31 @@ jobs:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
           category: kyber-weave-skills-_apm_skills_kyber-weave-cli
 
-      # --merge-ready adds KW-DOC-LIFECYCLE-003: a plan or specification still open fails
-      # the build. Open work is correct on a branch while it is built, never in a merge.
+      # --merge-ready adds KW-DOC-LIFECYCLE-003 (a plan or specification still open
+      # fails the build) and KW-DOC-LIFECYCLE-004 (an archived entry the change
+      # touches must carry its closeout evidence). Open work is correct on a branch
+      # while it is built, never in a merge. --base scopes 004 to the change under
+      # review: the PR target on pull_request, the pushed range on push, and the
+      # remote default branch elsewhere (schedule, dispatch). Full history
+      # (fetch-depth: 0 above) is what lets git merge-base resolve that scope.
       - name: Docs validate
-        run: >
-          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
-          docs validate . --merge-ready --format table
+        env:
+          # Event values travel through env, never interpolated into run:,
+          # so a hostile ref cannot reach the shell.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            BASE="origin/${BASE_REF}"
+          elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${EVENT_BEFORE}"
+          else
+            BASE="origin/HEAD"
+          fi
+          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} -- \
+            docs validate . --merge-ready --base "$BASE" --format table
 
       # docs drift needs a host-owned CodeGraph index (.codegraph/codegraph.db).
       # Kyber-Weave does not create that index; without a CI indexer/cache the gate would

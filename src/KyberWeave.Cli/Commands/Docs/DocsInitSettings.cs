@@ -24,7 +24,7 @@ public sealed class DocsInitSettings : CommandSettings
     public string Target { get; set; } = "agent-skills";
 
     [CommandOption("--no-skill")]
-    [Description("Scaffold the corpus only; do not deploy the kyber-weave-docs authoring skill via APM.")]
+    [Description("Scaffold the corpus only; do not deploy the kyber-docs-authoring authoring skill via APM.")]
     public bool NoSkill { get; set; }
 
     [CommandOption("--force")]

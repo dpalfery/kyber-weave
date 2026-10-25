@@ -33,9 +33,9 @@ dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v mini
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn --no-restore -v minimal
 dotnet build KyberWeave.sln -c Release --no-restore
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-weave-docs
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-weave-docs --min-desc-score 70
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-weave-docs --fail-on critical
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-docs-authoring
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-docs-authoring --min-desc-score 70
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-docs-authoring --fail-on critical
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 ```
@@ -133,7 +133,11 @@ repository — do not treat those results as this checkout, and stop using that 
 
 **Persisted plans belong in docs.** When a durable plan artifact is warranted, store it under
 `<docs-root>/plans`, the directory indexed by `<plan-index>`. Do not put plans in hidden tool
-folders or create a plan file for an otherwise ephemeral execution plan.
+folders or create a plan file for an otherwise ephemeral execution plan. A plan artifact must be
+committed, not merely written to disk: an untracked plan is not persisted, it is lost to a checkout,
+a clean, or another machine. This holds for the plan's whole life — an active plan under `<plan-index>`
+and an archived plan under `<docs-root>/archive/plans` are both tracked. Creating the file without
+staging it is an incomplete plan write, not a finished one.
 
 **`TreatWarningsAsErrors` is on, with `AnalysisMode=all`.** A warning fails the build.
 Fix the cause; do not add to the `NoWarn` list in `Directory.Build.props` without a reason
@@ -181,7 +185,7 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
 | KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it. Editing `dash/tray` or `dash/web` — a display layer — also read [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
-| Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
+| Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-docs-authoring` skill in [`.apm/skills/`](.apm/skills/kyber-docs-authoring/SKILL.md) |
 
 ## House style
 
@@ -220,6 +224,7 @@ references that belong to this repository.
 - **<standards-root>**: `docs/standards`
 - **<csharp-coding-standard>**: `docs/standards/csharp/README.md`
 - **<test-coding-standard>**: `docs/standards/test/README.md`
+- **<typescript-coding-standard>**: `docs/standards/typescript/README.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`

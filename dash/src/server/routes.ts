@@ -27,6 +27,7 @@ import type { SourceCheckpoint } from '../canon/source-state.js'
 import type { CleanRequest } from '../clean/clean.js'
 import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
 import { handleCaptureRequest, type CaptureRouteSettings } from './capture-routes.js'
+import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -532,6 +533,8 @@ export const cleanBodyParser: { parse(bodyText: string): CleanRequest | undefine
  */
 export type KyberRouteDeps = {
   readonly store: CanonStore
+  /** Shared analytics engine; the transport routes never open a second store. */
+  readonly analyticsService?: AnalyticsService
   /**
    * Absent only while the host pair is still coming up. The store is resolved before the
    * socket binds (the settings routes work from the first accepted connection), the
@@ -840,6 +843,8 @@ export function handleKyberRequest(
   if (!url.pathname.startsWith('/api/kyber/') && url.pathname !== '/api/kyber') {
     return false
   }
+
+  if (handleAnalyticsRequest(req, res, url, deps?.analyticsService)) return true
 
   // Kyber agent session analysis endpoints
   if (url.pathname === '/api/kyber/sessions') {

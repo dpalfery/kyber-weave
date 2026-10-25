@@ -692,3 +692,41 @@ public class DiagnosticSubjectTests
         Assert.Null(typeof(Diagnostic).GetProperty("SkillName"));
     }
 }
+
+/// <summary>
+/// The closeout gate reads the harvest declaration off the model, so the hyphenated
+/// frontmatter keys must bind to it: documentation-impact names the authoring scale and
+/// impact-components names the components it touches. Selected by the closeout runner
+/// as the DocGovernanceTests suite.
+/// </summary>
+public sealed class DocGovernanceTests
+{
+    [Fact]
+    public void DocumentationImpactAndImpactComponentsBindToTheModel()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
+            .Write("6-Docs/api/architecture.md", """
+                ---
+                id: api/architecture
+                title: API Architecture
+                doc-type: architecture
+                status: current
+                component: MotorcycleRAG API
+                source-root: 1-Presentation/Api
+                owner: API maintainers
+                last-reviewed: 2026-07-21
+                code-refs:
+                  - SomeService
+                documentation-impact: extends-component
+                impact-components:
+                  - MotorcycleRAG API
+                ---
+                """);
+
+        DocumentModel doc = Assert.Single(fixture.LoadSubjects());
+
+        Assert.Equal("extends-component", doc.Frontmatter.DocumentationImpact);
+        Assert.NotNull(doc.Frontmatter.ImpactComponents);
+        Assert.Equal(["MotorcycleRAG API"], doc.Frontmatter.ImpactComponents);
+    }
+}

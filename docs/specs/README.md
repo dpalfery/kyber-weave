@@ -24,6 +24,10 @@ A specification is used at the start of a greenfield project or a large, complex
 
 A specification is open only while it is built. The pull request that finishes it archives it: CI runs `docs validate --merge-ready`, which fails on any specification still in this folder (`KW-DOC-LIFECYCLE-003`).
 
+## Specification Decisions, Design Harvest and Closeout Policy
+
+Every specification maintains a permanent `## Decisions` section (ID, Question, Answer / decision, Mitigating and supporting information, Status / approval provenance), preserved intact across all lifecycle transitions. Every specification declares its scale at authoring time via `documentation-impact` (`new-component` | `extends-component` | `no-design-change`) with `impact-components`, plus a `Design harvest` table mapping each durable design item to its target component and doc type. During closeout, durable content is harvested into canonical documentation and/or ADRs before archival.
+
 ## Specification inventory
 
 | Spec | Component | Status | Date | Archive Date | Canonical Docs / Reference | Description |

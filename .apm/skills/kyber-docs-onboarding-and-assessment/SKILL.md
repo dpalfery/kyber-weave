@@ -1,26 +1,28 @@
 ---
-name: second-brain
-description: Bootstrap or audit a repository's documentation architecture — root AGENTS.md, a canonical documentation tree (system/component docs, ADRs, plans, catalog, config registry), and the plan lifecycle that keeps agent and human context durable instead of drifting. Use whenever the user wants to set up a documentation structure for a new or existing repo, audit whether current docs match a standard, mentions "second brain", "config registry", "documentation architecture", "ADR", "plan lifecycle", "catalog", or has skills/agent instructions with project-specific facts hardcoded instead of living in canonical docs. Also trigger when onboarding a repo that has AGENTS.md/CLAUDE.md files but no structured doc tree behind them.
+name: kyber-docs-onboarding-and-assessment
+description: "Bootstraps or audits a repository's documentation architecture — root AGENTS.md, canonical tree, catalog, config registry, and plan lifecycle. Also runs owner-started assessment and remediation of archived plans and specs, classifying each as harvested, partial, or not harvested and grouping docs-dev fixes into a batch delivered as a pull request. Use when setting up documentation for a new or existing repo, auditing whether docs match a standard, mentioning config registry, documentation architecture, ADR, plan lifecycle, or catalog, when project facts are hardcoded in skills instead of canonical docs, or when the owner asks to assess archived plans and specs for harvest gaps. Not for authoring a single governed document — that is kyber-docs-authoring."
 license: MIT
 ---
 
-# Second Brain: Documentation Architecture
+# Documentation architecture, onboarding, and assessment
 
 Sets up or audits the *system* that keeps a repo's documentation trustworthy for both humans and agents: one canonical home per fact, a lookup layer so instructions don't hardcode project details, and a lifecycle that migrates in-progress decisions into permanent docs instead of losing them.
 
 This is architecture-level. If the task is writing or updating one component's actual docs (README, onboarding, architecture, requirements), that's a narrower job — check whether this repo already has an `app-docs-standard`-style skill for that and use it instead of duplicating its content here.
 
-## Two modes
+## Three modes
 
 **Bootstrap** — the repo has little or no structured documentation. Scaffold the minimum viable version of the architecture below, adapted to this project's name and stack. Read [references/templates.md](references/templates.md) for the file skeletons; don't write 300-line documents on day one — start minimal and let it grow.
 
 **Audit** — the repo already has some of this. Walk the checklist below, report what's missing or drifted (a fact duplicated in two places, a skill hardcoding something the registry should own, a plan sitting `Completed` but never archived), and fix only what you're authorized to fix. Don't rewrite what's already correct.
 
+**Assessment and remediation** — owner-started: assess archived plans and specs for harvest gaps, report for owner picks, then remediate in batches. See below.
+
 Ask the user which mode applies if it isn't obvious from the request.
 
 ## The architecture
 
-Documentation paths below are relative to **<docs-root>**, resolved through the Config Reg in the repository root `AGENTS.md`. Never assume a fixed documentation root. When bootstrapping a repo that has no registry yet, agree the root with the user (e.g. `docs/` or `6-Docs/`) and declare it as **<docs-root>** in the registry you create.
+Documentation paths below are relative to **<docs-root>**, resolved through the Config Reg in the repository root `AGENTS.md`. Never assume a fixed documentation root. When bootstrapping a repo that has no registry yet, agree the root with the user and declare it as **<docs-root>** in the registry you create.
 
 | Layer | Purpose | Lives at |
 |---|---|---|
@@ -53,7 +55,16 @@ Each layer answers a different question. An agent or human should be able to wal
 - Does any ADR-worthy decision exist only inside a plan that's about to be archived? Flag it for promotion before the plan goes stale.
 - Is anything in `<docs-root>/archive/` being linked to or treated as current guidance elsewhere? That's a correctness bug, not a style nit.
 
-## Plan lifecycle (reference for both modes)
+## Assessment and remediation mode (owner-started)
+
+Runs only when the owner asks for it. Assesses archived plans and specs for harvest gaps, reports, waits for owner picks, then remediates in batches.
+
+1. Read each archived plan and spec in scope through its governed identity or path, with enough character budget for the complete file.
+2. Classify each as harvested, partial, or not harvested using the `KW-DOC-LIFECYCLE-004` `C0`–`C9` conditions as the rubric. The mechanical half may come from `kyber-weave docs validate . --merge-ready --base <first commit>`: a clean 004 result is evidence toward harvested, a finding is evidence toward partial or not harvested, and the semantic half (whether the mapped content truly describes the shipped design) is judged by reading, never by the gate alone.
+3. Report one row per plan or spec with its state and evidence, and stop. The owner picks which gaps to fix and in what order. Do not edit, re-archive, or open a pull request until the owner decides.
+4. `docs-dev` fixes the picked gaps in batches, each batch landing as one pull request. Keep each batch reviewable on its own: one pull request per coherent group of plans or specs, with closeout evidence and validation (`docs validate`, `docs drift`) per batch.
+
+## Plan lifecycle (reference for all modes)
 
 `Draft → Ready → In progress → Blocked → Review required → Completed/Superseded → Archived`. Only `Ready`, `In progress`, and `Blocked` are implementation-actionable; `Draft` is planning-only; everything after `Review required` is historical. A plan does not archive itself — closing it out means verifying its acceptance criteria against what was actually built, promoting anything durable (a new convention, a registry entry, an ADR-worthy decision) into canonical docs, and only then moving it to `<docs-root>/archive/plans/` with status `Archived`. See [references/templates.md](references/templates.md) for a minimal plan template if bootstrapping.
 

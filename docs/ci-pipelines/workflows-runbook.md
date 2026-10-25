@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-10-25
 ---
 
 # Wiring Kyber-Weave into CI
@@ -82,6 +82,22 @@ Running `kyber-weave --version` (or `kyber-weave -v`) outputs `kyber-weave <vers
 
 Each pins its version, sets `permissions: contents: read`, and cancels superseded
 pull-request runs through a concurrency group.
+
+## Merge-ready in pull-request CI
+
+The docs gate template runs `docs validate --merge-ready --base origin/${{ github.base_ref }}`
+on pull requests. `--merge-ready` adds the two merge gates — open work
+(`KW-DOC-LIFECYCLE-003`, whole corpus) and archive closeout (`KW-DOC-LIFECYCLE-004`,
+change-scoped). `--base` names the ref the closeout scope is diffed against; the default
+is `origin/HEAD`, which the template overrides with the PR base ref. On `push` events
+there is no base ref, so pass `--base ${{ github.event.before }}` instead.
+
+Full history is a hard requirement, not an optimization: the template checks out with
+`fetch-depth: 0` because the scope resolves through `git merge-base`, which a
+single-commit checkout cannot answer. A shallow checkout fails closed as `C0`
+(`Archive closeout scope is unknown`) with a fetch hint, rather than reporting a clean
+run. See [governance](../docgraph/governance.md) for the `C0`–`C9` conditions and the
+gate-vs-lens split.
 
 ## `docs drift` needs a CodeGraph index
 

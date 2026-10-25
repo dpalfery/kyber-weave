@@ -92,4 +92,14 @@ After approval, assign `docs-dev` the closeout named by the execution artifact:
 - Plan-backed work migrates durable facts, synchronizes the plan index, and archives the plan.
 - Spec-backed work verifies requirements, migrates durable facts, synchronizes the specification index, and archives the specification.
 
-Only a successful closeout completes the objective.
+### Documentation-impact review
+
+Before closeout completes, run the documentation-impact review step:
+
+- Keep a run record of asked/decided+why/files changed; no transcripts.
+- Dispatch docs-dev with that run record.
+- Require DOCS_REVIEW rows in the closeout evidence before proceeding.
+
+### Closeout completion
+
+Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE in the execution artifact and carry the outcome in the PR description.

@@ -5,12 +5,15 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-10-25
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
   - PlanInventoryValidator
   - TodoInventoryValidator
+  - ArchiveCloseoutValidator
+  - OpenWorkValidator
+  - ChangedFiles
 ---
 
 # Documentation governance gates
@@ -47,7 +50,8 @@ Needs no code index. Exits non-zero on any error.
 | `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
 | `KW-DOC-LIFECYCLE-002` | A `todo` document sits in the todo folder but the todo index does not reach it |
-| `KW-DOC-LIFECYCLE-003` | A plan or specification is still open when `--merge-ready` is given |
+| `KW-DOC-LIFECYCLE-003` | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-004` | An archived entry the change touches without closeout evidence (C0–C9) — raised only by `docs validate --merge-ready` |
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
 `AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that
@@ -69,7 +73,8 @@ active folder only while it is being built, and the change that finishes it arch
 a merge that still carries one either merges unfinished work or leaves finished work looking
 live. Note that `KW-DOC-LIFECYCLE-003` is a mechanical location check verifying that no active
 artifacts remain under the plans or specs folders; it is not semantic proof that durable
-decisions were harvested into canonical documentation. The review council's `intent-alignment`
+decisions were harvested into canonical documentation — that proof is `KW-DOC-LIFECYCLE-004`
+below, and beyond the gate, the review council's `intent-alignment`
 lens independently audits that durable decisions were migrated or carry explicit documentation
 waivers. Open work is correct on a branch, so the rule runs only under
 `docs validate --merge-ready`, which pull-request CI passes. Each plan file, and each folder
@@ -77,6 +82,39 @@ under the plans or specs folder, is one finding however many documents it holds.
 are those of the `plan-index` and `specification-index` registry properties, and an entry
 counts only when it holds a `plan`, `spec` or `requirements` document, so an index pointed at
 a shared folder does not flag its neighbours.
+
+`KW-DOC-LIFECYCLE-004` (Error, opt-in via the same `--merge-ready`) is the archive-closeout
+gate. Each archived entry the change touches is one finding when its closeout evidence is
+incomplete. Scope is the working tree, not the last commit: `--base` (default
+`origin/HEAD`) is resolved through `git merge-base` against `HEAD`, and the diff to the
+files on disk selects the entries — staged renames, uncommitted edits, and untracked files
+are all in scope. A newly archived entry (`Added`, `Renamed`, `Copied`, `Untracked`) is
+always checked; a `Modified` entry is re-checked only when its frontmatter declares
+`documentation-impact`, so a touch to someone else's legacy archive does not select it;
+`Deleted` and `Unknown` paths carry no document to check. Entries the change does not touch
+are never checked. Scope that cannot resolve fails closed as `C0` — an invalid `--base` or
+an unresolvable merge base (shallow checkout, missing fetch) reports
+`Archive closeout scope is unknown (C0)` with a fetch hint instead of a clean run.
+
+| Condition | Fails when |
+|---|---|
+| `C0` | closeout scope is unknown: invalid `--base`, or no merge base resolves |
+| `C1` | frontmatter `status` is not closed work (`archived`, `complete`, `superseded`) |
+| `C2` | the body still reports a live implementation status |
+| `C3` | no `Decisions` table, or no valid decision id |
+| `C4` | no `Closeout mapping` table mapping every decision and harvest id |
+| `C5` | `documentation-impact` names no authoring scale, a component scale names no components, or `no-design-change` records no waiver reason |
+| `C6` | no `Design harvest` table (or no waiver section for `no-design-change`) |
+| `C7` | a decision or harvest id is not mapped to a live governed document or a documentation waiver |
+| `C8` | an impact component is not a catalog row, or no freshly reviewed mapped document carries it |
+| `C9` | `RESIDUAL` links nothing in the todo-index folder |
+
+The gate checks `C0`–`C9` structure only. Whether the mapped content truly describes the
+shipped design, whether the harvest list is complete, whether the scale, component,
+doc-type, and location are right, whether a waiver is valid, whether a `no-design-change`
+outcome is justified, and whether the PR documentation section is present and true are
+judged by the `intent-alignment` review lens, not the gate. The gate has no folder or
+doc-type rules beyond the archive-container scope above.
 
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A

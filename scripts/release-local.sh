@@ -9,6 +9,7 @@
 #   kyber-weave-<rid>.tar.gz    kyber-weave-mcp-<rid>.tar.gz
 #   kyber-squad-<version>.zip   kyber-squad-plugin-<version>.zip
 #   kyberdash-<node-rid>.tar.gz kyber-weave-sbom-<version>.cdx.json SHA256SUMS.txt
+#   <archive-stem>.cdx.json     (one per-artifact SBOM per archive above)
 #
 # The publish flags are kept identical to .github/workflows/release.yml. Single-file
 # packaging is the whole point: the self-update failure this exists to catch only
@@ -311,6 +312,11 @@ EOF
     # "not built" page, now that the blob above is injected and runnable.
     quietly node "${dash}/scripts/sea-web-smoke.mjs" "$binary"
 
+    # The MCP command is a second released-shape entry point. It must load the
+    # SDK from the SEA rather than a checkout's node_modules, and its fixture
+    # stays on loopback with an isolated HOME/state directory.
+    quietly node "${dash}/scripts/sea-mcp-smoke.mjs" "$binary"
+
     cp "${dash}/THIRD_PARTY_NOTICES.md" "${stage}/out/THIRD_PARTY_NOTICES.md"
     tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
 }
@@ -344,6 +350,14 @@ restore_locks
 # released rather than whatever is in the working tree.
 log "generating the SBOM for ${VERSION}"
 bash "${SOURCE_ROOT}/scripts/generate-sbom.sh" "$DEST" "$VERSION"
+
+# Per-artifact SBOMs (issue #417): one <archive-stem>.cdx.json per published
+# archive in DEST, via the shared pinned-Syft generator. Runs after the
+# aggregate SBOM and before the manifest below, so `$SHA_CMD *` covers both
+# the aggregate and the per-artifact SBOMs. Single-file .NET and Node SEA
+# not-measured markers stay in the generator; nothing is special-cased here.
+log "generating per-artifact SBOMs for ${VERSION}"
+bash "${SOURCE_ROOT}/scripts/generate-artifact-sboms.sh" "$DEST" "$VERSION"
 
 # Hash into a temp file: redirecting straight to SHA256SUMS.txt inside the same directory
 # creates it before the glob expands, so the manifest would list itself.

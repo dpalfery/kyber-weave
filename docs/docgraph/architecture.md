@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-09-03
+last-reviewed: 2026-10-25
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 code-refs:
@@ -70,6 +70,17 @@ without it. The cache exists only when the narrow path is safely ignored; see
 The one database in play is **CodeGraph's**, at `.codegraph/codegraph.db`. Kyber-Weave
 opens it read-only and issues nothing but `SELECT`. It does not create it, write to it, or
 place documentation nodes in it — see [the code graph join](#the-code-graph-join).
+
+## Change-scoped archive reading
+
+The live corpus walk excludes the archive subtree (`archive` is an excluded path segment
+by default), so archived plans and specifications are not retrievable documents. The
+archive-closeout gate (`KW-DOC-LIFECYCLE-004`) still reads the entries the change touches,
+but through a narrow entry point — `DocumentLoader.LoadArchivedDocument` reads one named
+file, with no directory walk and no exclusion bypass beyond that file. Retrieval,
+ranking, and the two clocks above never see the archive; only the gate does, and only for
+the entries the diff selects. See [governance](governance.md) for the scope and the
+`C0`–`C9` conditions.
 
 ## Two inputs, two clocks
 
