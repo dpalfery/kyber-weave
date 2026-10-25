@@ -147,4 +147,21 @@ describe('analytics MCP engine client', () => {
     }
     expect(calls).toBe(0)
   })
+
+  it('answers corrupt UTF-8 with an error envelope instead of mangled text', async () => {
+    // WHY invalid bytes inside a string value: corrupt bytes at the top level
+    // already fail JSON.parse, but bytes inside a string decode to U+FFFD and
+    // parse fine — that is the silent-mangling hole fatal decoding closes.
+    const prefix = Buffer.from('{"contractVersion":1,"scope":{},"data":{"text":"', 'utf8')
+    const suffix = Buffer.from('"},"measurement":{},"coverage":{},"freshness":{},"evidence":[],"pagination":{},"error":null}', 'utf8')
+    const body = Buffer.concat([prefix, Buffer.from([0xff, 0xfe]), suffix])
+    const fetchImpl: typeof fetch = async () => new Response(body)
+    const client = createAnalyticsClient({ serverUrl: 'http://127.0.0.1:4747', fetchImpl })
+
+    const result = await client.callTool('dash_status', {})
+
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent.error).toMatchObject({ code: 'incompatible_engine' })
+    expect(JSON.stringify(result)).not.toContain('�')
+  })
 })

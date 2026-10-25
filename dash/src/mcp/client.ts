@@ -165,7 +165,14 @@ export function createAnalyticsClient(options: { serverUrl?: string; stateDir?: 
       try {
         const body = await response.arrayBuffer()
         if (body.byteLength > MAX_REPLY_BYTES) throw new Error('budget_exceeded: engine response exceeded 64 KiB.')
-        rawText = new TextDecoder().decode(body)
+        // WHY fatal decoding: corrupt bytes inside a JSON string value decode
+        // to U+FFFD and still parse, so a lenient decode returns mangled data
+        // as a success. A body that is not UTF-8 is not a compatible reply.
+        try {
+          rawText = new TextDecoder('utf-8', { fatal: true }).decode(body)
+        } catch {
+          return textResult({ contractVersion: 1, scope: {}, data: null, measurement: {}, coverage: {}, freshness: {}, evidence: [], pagination: {}, error: { code: 'incompatible_engine', message: 'The analytics engine returned a response that is not valid UTF-8.', hint: 'Retry the request and report the engine build if it recurs.' } })
+        }
       } catch (error: unknown) {
         if (signal?.aborted) return textResult({ contractVersion: 1, scope: {}, data: null, measurement: {}, coverage: {}, freshness: {}, evidence: [], pagination: {}, error: { code: 'cancelled', message: 'The analytics request was cancelled.' } })
         throw toStableError(error, 'engine_unavailable')
