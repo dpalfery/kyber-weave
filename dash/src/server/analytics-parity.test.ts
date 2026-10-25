@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { closeSync, openSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Server } from 'node:http'
@@ -9,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { dataOf, makeAnalyticsSource, makeService, makeSession } from '../analysis/query/fixtures/analytics-source.js'
 import { runWebDashboard } from '../cli/web.js'
+import type { JobHost } from '../jobs/host.js'
+import { JOBS_LOCK_FILE } from '../jobs/lease.js'
 import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
 
 const WRAPPERS = [
@@ -50,10 +53,42 @@ function statusFor(error: unknown): number {
   return 200
 }
 
+function probeExists(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function stopServer(
+  server: Server | undefined,
+  getHostClose?: () => Promise<void> | undefined,
+): Promise<void> {
+  if (server?.listening) {
+    server.closeAllConnections?.()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+  const hostClose = getHostClose?.()
+  if (hostClose) await hostClose
+}
+
+async function removeTempStateDir(dir: string | undefined): Promise<void> {
+  if (!dir) return
+  const lock = join(dir, JOBS_LOCK_FILE)
+  const deadline = Date.now() + 3_000
+  while (probeExists(lock) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+}
+
 describe('analytics HTTP and engine parity', () => {
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
   const service = makeService()
 
   beforeAll(async () => {
@@ -65,14 +100,18 @@ describe('analytics HTTP and engine parity', () => {
       stateDir,
       singleInstance: false,
       analyticsService: service,
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it.each(WRAPPERS)('$method $path returns the exact shared engine envelope', async ({
@@ -190,6 +229,7 @@ describe('existing report, findings and turn values survive the scoped wrappers'
     const scopedSource = makeAnalyticsSource({ readFindings: async () => [finding] })
     const scopedService = makeService(scopedSource)
     const dir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-findings-'))
+    let scopedHostClose: Promise<void> | undefined
     const scoped = await runWebDashboard({
       port: 0,
       open: false,
@@ -197,6 +237,10 @@ describe('existing report, findings and turn values survive the scoped wrappers'
       stateDir: dir,
       singleInstance: false,
       analyticsService: scopedService,
+      closeJobHost: (host: JobHost) => {
+        scopedHostClose = host.close()
+        return scopedHostClose
+      },
     } as Parameters<typeof runWebDashboard>[0])
     try {
       const url = `http://127.0.0.1:${(scoped.address() as AddressInfo).port}`
@@ -210,8 +254,8 @@ describe('existing report, findings and turn values survive the scoped wrappers'
       expect(response.status).toBe(200)
       expect(body.data.items[0]).toEqual(expect.objectContaining({ id: 'finding-1', mechanism: finding.mechanism }))
     } finally {
-      if (scoped.listening) await new Promise<void>((resolve) => scoped.close(() => resolve()))
-      await rm(dir, { recursive: true, force: true })
+      await stopServer(scoped, () => scopedHostClose)
+      await removeTempStateDir(dir)
     }
   })
 })
@@ -220,6 +264,7 @@ describe('legacy routes keep their shapes beside the new scoped wrappers', () =>
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
   const service = makeService()
 
   beforeAll(async () => {
@@ -231,14 +276,18 @@ describe('legacy routes keep their shapes beside the new scoped wrappers', () =>
       stateDir,
       singleInstance: false,
       analyticsService: service,
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it('keeps the report document on its schemaVersion while analytics answers carry contractVersion 1', async () => {
@@ -357,12 +406,17 @@ describe('an unwired analytics engine fails parity with a stable 503 (RED seam)'
 
   it('leaves the legacy report usable while the analytics engine is absent', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-absent-'))
+    let bareHostClose: Promise<void> | undefined
     const bare = await runWebDashboard({
       port: 0,
       open: false,
       writeStdout: () => {},
       stateDir: dir,
       singleInstance: false,
+      closeJobHost: (host: JobHost) => {
+        bareHostClose = host.close()
+        return bareHostClose
+      },
     } as Parameters<typeof runWebDashboard>[0])
     try {
       const url = `http://127.0.0.1:${(bare.address() as AddressInfo).port}`
@@ -370,8 +424,8 @@ describe('an unwired analytics engine fails parity with a stable 503 (RED seam)'
 
       expect(legacy.status).toBe(200)
     } finally {
-      if (bare.listening) await new Promise<void>((resolve) => bare.close(() => resolve()))
-      await rm(dir, { recursive: true, force: true })
+      await stopServer(bare, () => bareHostClose)
+      await removeTempStateDir(dir)
     }
   })
 })
