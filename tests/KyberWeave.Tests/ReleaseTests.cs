@@ -672,6 +672,44 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// Reads one job section from release.yml: from
+    /// <c>\n  {jobName}:\n</c> to the next two-space-indented key, so a
+    /// permission or step assertion cannot match a later job's text.
+    /// </summary>
+    /// <remarks>
+    /// A slice to EOF proves nothing about the named job: the next job's text
+    /// would satisfy the assertion. Scoping to the job block keeps each pin on
+    /// the job that owns it.
+    /// </remarks>
+    private static string ReadReleaseJob(string jobName)
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        int start = workflow.IndexOf("\n  " + jobName + ":\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no " + jobName + " job.");
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        return next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+    }
+
+    /// <summary>
+    /// Parses a job's <c>needs: [...]</c> list as a set. GitHub schedules from
+    /// the DAG, not file order, so text position proves nothing and an
+    /// exact-string pin fails on a correct reorder.
+    /// </summary>
+    private static HashSet<string> ParseNeedsSet(string jobText)
+    {
+        Match match = Regex.Match(jobText, @"needs:\s*\[(.*?)\]");
+        Assert.True(match.Success, "the job has no needs: [...].");
+        string[] parts = match.Groups[1].Value.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        HashSet<string> needs = new(StringComparer.Ordinal);
+        foreach (string part in parts)
+        {
+            needs.Add(part.Trim());
+        }
+
+        return needs;
+    }
+
+    /// <summary>
     /// Extracts the build_kyberdash() function from release-local.sh, then strips comments.
     /// Scoped from "\nbuild_kyberdash() {\n" to the following "\nif [ -z \"$NO_KYBERDASH\" ]".
     /// Both markers must exist.
@@ -1057,10 +1095,14 @@ public sealed class ReleaseTests
         // that published without one would fail the post-publish inventory check.
         // Issue #417: the per-artifact SBOMs and their attestations gate the
         // release the same way, so the release job waits for both new jobs.
-        Assert.Contains(
-            "needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]",
-            workflow,
-            StringComparison.Ordinal);
+        // The needs list is a set: GitHub runs jobs from the DAG, not file order,
+        // so a reorder must stay green while a dropped edge must go red.
+        string releaseJob = ReadReleaseJob("release");
+        HashSet<string> needs = ParseNeedsSet(releaseJob);
+        HashSet<string> expectedNeeds = new(
+            ["version", "build", "build-kyberdash", "build-tray", "pack-squad", "sbom", "artifact-sboms", "attest-sbom"],
+            StringComparer.Ordinal);
+        Assert.Equal(expectedNeeds, needs);
     }
 
     /// <summary>
@@ -1224,9 +1266,7 @@ public sealed class ReleaseTests
     /// archive, derived by <c>artifact_sbom_name</c> as
     /// <c>&lt;archive-stem&gt;.cdx.json</c> (strip <c>.tar.gz</c> /
     /// <c>.zip</c> / <c>.exe</c>, append <c>.cdx.json</c>). The aggregate
-    /// SBOM keeps its versioned name. A release whose manifest lacks a
-    /// per-artifact SBOM must fail verification the same way a missing
-    /// archive does.
+    /// SBOM keeps its versioned name.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsListModeEmitsEveryPerArtifactSbomName()
@@ -1287,6 +1327,56 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// Issue #417: a release whose manifest lacks a per-artifact SBOM fails
+    /// verification the same way a missing archive does.
+    /// </summary>
+    /// <remarks>
+    /// The per-artifact SBOM is a release asset like any other, so the
+    /// pre-publish check is fail-closed on it: omitting
+    /// <c>kyber-weave-linux-x64.cdx.json</c> must exit non-zero, name the
+    /// missing SBOM, and write no manifest.
+    /// </remarks>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsMissingPerArtifactSbom()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+        const string missingSbom = "kyber-weave-linux-x64.cdx.json";
+
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(CultureInfo.InvariantCulture, assetTemplate, version);
+            if (string.Equals(asset, missingSbom, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(missingSbom, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
     /// Issue #417: the per-artifact SBOM name mapping lives in one shared
     /// shell function so the generator and the checksum manifest cannot
     /// drift apart. The function strips the archive suffix and appends
@@ -1304,51 +1394,94 @@ public sealed class ReleaseTests
             Path.Combine(scriptsDir, "generate-artifact-sboms.sh")
         ];
 
+        // A bare mention in a comment is not the mapping: verify-release-checksums.sh:49-50
+        // names artifact_sbom_name so the manifest and the generator cannot drift apart,
+        // while the definition lives in syft-bootstrap.sh:82. Pin the definition itself
+        // so deleting it goes red even though the comment still mentions the name.
+        const string definition = "artifact_sbom_name() {";
         bool defined = false;
         foreach (string candidate in candidates)
         {
             if (File.Exists(candidate)
-                && File.ReadAllText(candidate).Contains("artifact_sbom_name", StringComparison.Ordinal))
+                && File.ReadAllText(candidate).Contains(definition, StringComparison.Ordinal))
             {
                 defined = true;
                 break;
             }
         }
 
-        Assert.True(defined, "no script defines artifact_sbom_name; the generator and the checksum manifest share no mapping.");
+        Assert.True(defined, "no script defines artifact_sbom_name() {; the generator and the checksum manifest share no mapping.");
     }
 
     /// <summary>
     /// Issue #417: the release pipeline generates one SBOM per published
     /// archive and attests each one. The <c>artifact-sboms</c> job runs the
-    /// per-artifact generator, the <c>attest-sbom</c> job attests the SBOMs,
-    /// and the <c>release</c> job waits for both before publishing anything.
+    /// per-artifact generator, the <c>attest-sbom</c> job attests the 20
+    /// per-artifact SBOMs plus the aggregate, and the <c>release</c> job waits
+    /// for both before publishing anything and verifies each attestation with
+    /// a bounded retry. Ordering is the needs DAG, not file order: GitHub runs
+    /// jobs from needs, so text position proves nothing and a dropped edge
+    /// must go red.
     /// </summary>
+    /// <remarks>
+    /// The retry lives in the release job's verify step (Sigstore propagation
+    /// lag after publish), not in the attest job, so this pins retry only there.
+    /// </remarks>
     [Fact]
     public void ReleaseWorkflowGeneratesPerArtifactSbomsAndAttestsThemBeforeRelease()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
-
-        int artifactSboms = workflow.IndexOf("  artifact-sboms:", StringComparison.Ordinal);
-        Assert.True(artifactSboms >= 0, "release.yml has no artifact-sboms job.");
+        string artifactSbomsJob = ReadReleaseJob("artifact-sboms");
         Assert.Contains(
             "scripts/generate-artifact-sboms.sh",
-            workflow[artifactSboms..],
+            artifactSbomsJob,
             StringComparison.Ordinal);
 
-        int attest = workflow.IndexOf("  attest-sbom:", StringComparison.Ordinal);
-        Assert.True(attest >= 0, "release.yml has no attest-sbom job.");
-        Assert.True(attest > artifactSboms, "the attest-sbom job must come after the artifact-sboms job.");
+        string attestJob = ReadReleaseJob("attest-sbom");
+        Assert.Contains("actions/attest", attestJob, StringComparison.Ordinal);
 
-        int releaseJob = workflow.IndexOf("  release:", StringComparison.Ordinal);
-        Assert.True(releaseJob > attest, "the release job must come after the attest-sbom job.");
+        // 20 per-archive sbom-path entries. The 21st sbom-path is the aggregate
+        // (kyber-weave-sbom-*), which is attested once against the archive glob below.
+        // The character class stops at the line end so the versioned squad paths,
+        // which contain spaces inside ${{ ... }}, still match.
+        MatchCollection sbomPaths = Regex.Matches(attestJob, @"sbom-path:\s*attest-assets/[^\n]+\.cdx\.json");
+        List<string> perArchiveSbomPaths = [];
+        foreach (Match sbomPath in sbomPaths)
+        {
+            if (!sbomPath.Value.Contains("kyber-weave-sbom-", StringComparison.Ordinal))
+            {
+                perArchiveSbomPaths.Add(sbomPath.Value);
+            }
+        }
 
-        string releaseJobText = workflow[releaseJob..];
-        int needs = releaseJobText.IndexOf("needs:", StringComparison.Ordinal);
-        Assert.True(needs >= 0, "the release job has no needs:.");
-        string needsLine = releaseJobText[needs..];
-        Assert.Contains("artifact-sboms", needsLine, StringComparison.Ordinal);
-        Assert.Contains("attest-sbom", needsLine, StringComparison.Ordinal);
+        Assert.Equal(20, perArchiveSbomPaths.Count);
+        Assert.Contains("sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json", attestJob, StringComparison.Ordinal);
+        Assert.Contains("sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json", attestJob, StringComparison.Ordinal);
+
+        // The aggregate covers the whole closure, so it is attested once against
+        // every published archive. The glob matches only archives, never the predicates.
+        Assert.Contains(
+            "subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe",
+            attestJob,
+            StringComparison.Ordinal);
+        Assert.Contains("sbom-path: attest-assets/kyber-weave-sbom-", attestJob, StringComparison.Ordinal);
+
+        // The DAG, not text order: attest waits for the per-artifact scan,
+        // release waits for both. Dropping artifact-sboms from either needs set goes red.
+        HashSet<string> attestNeeds = ParseNeedsSet(attestJob);
+        Assert.Contains("sbom", attestNeeds);
+        Assert.Contains("artifact-sboms", attestNeeds);
+
+        string releaseJob = ReadReleaseJob("release");
+        HashSet<string> releaseNeeds = ParseNeedsSet(releaseJob);
+        Assert.Contains("artifact-sboms", releaseNeeds);
+        Assert.Contains("attest-sbom", releaseNeeds);
+
+        // The release job verifies each published archive against its SBOM attestation
+        // with the CycloneDX predicate type and a bounded retry for Sigstore lag.
+        Assert.Contains("gh attestation verify", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("--predicate-type \"https://cyclonedx.org/bom\"", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("for attempt in 1 2 3", releaseJob, StringComparison.Ordinal);
+        Assert.Contains("sleep 15", releaseJob, StringComparison.Ordinal);
     }
 
     /// <summary>
