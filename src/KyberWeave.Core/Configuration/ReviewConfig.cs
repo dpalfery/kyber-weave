@@ -124,6 +124,14 @@ public sealed class ReviewConfig
     /// <summary>The duplicate-detection threshold.</summary>
     public ReviewDuplicates Duplicates { get; init; } = ReviewDuplicates.Default;
 
+    /// <summary>Maximum concurrent workers the ready-queue dispatcher may run.</summary>
+    /// <remarks>
+    /// Bounds MSBuild node and Roslyn server contention across parallel workers. The default
+    /// of four keeps parallelism while giving each worker its own <c>obj/</c> tree through
+    /// per-task artifacts paths; a host that names another value gets that value instead.
+    /// </remarks>
+    public int MaxConcurrentWorkers { get; init; } = 4;
+
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;
 

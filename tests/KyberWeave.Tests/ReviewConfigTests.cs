@@ -139,6 +139,64 @@ public class ReviewConfigTests
             StringComparison.Ordinal);
 
     /// <summary>
+    /// The ready-queue dispatcher caps concurrent workers from this value, so an operator who
+    /// writes nothing still gets the product default rather than unbounded parallelism.
+    /// </summary>
+    [Fact]
+    public void AbsentMaxConcurrentWorkersDefaultsToFour()
+    {
+        ReviewConfig config = Load("ontology:\n  docs-root: docs\n");
+
+        object? workers = MaxConcurrentWorkersOrNull(config);
+
+        Assert.True(
+            workers is not null,
+            "T5 RED (issue #386 item E): ReviewConfig.MaxConcurrentWorkers does not exist yet; " +
+            "T5 GREEN adds review.max-concurrent-workers with default 4.");
+        Assert.Equal((object)4, workers);
+    }
+
+    /// <summary>
+    /// A host that names a cap gets that cap: the value is read where the operator wrote it,
+    /// not replaced by the default.
+    /// </summary>
+    [Fact]
+    public void SetMaxConcurrentWorkersIsHonored()
+    {
+        ReviewConfig config = Load("review:\n  max-concurrent-workers: 8\n");
+
+        object? workers = MaxConcurrentWorkersOrNull(config);
+
+        Assert.True(
+            workers is not null,
+            "T5 RED (issue #386 item E): review.max-concurrent-workers is not read yet; " +
+            "T5 GREEN binds it to ReviewConfig.MaxConcurrentWorkers.");
+        Assert.Equal((object)8, workers);
+    }
+
+    /// <summary>
+    /// Zero workers would run nothing and a negative count is meaningless, so either is refused
+    /// where the operator wrote it rather than stalling the ready queue at runtime.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void NonPositiveMaxConcurrentWorkersIsRejected(int workers) =>
+        Assert.Contains(
+            "max-concurrent-workers",
+            Invalid($"review:\n  max-concurrent-workers: {workers}\n").Message,
+            StringComparison.Ordinal);
+
+    /// <summary>
+    /// ASSUMED API (T5 RED, issue #386 item E): <c>review.max-concurrent-workers</c> reads as
+    /// <c>ReviewConfig.MaxConcurrentWorkers</c> (default 4). T5 GREEN provides the member; until
+    /// then the value is observed through reflection so the suite still builds and the RED is a
+    /// failing assertion rather than a broken assembly.
+    /// </summary>
+    private static object? MaxConcurrentWorkersOrNull(ReviewConfig config) =>
+        typeof(ReviewConfig).GetProperty("MaxConcurrentWorkers")?.GetValue(config);
+
+    /// <summary>
     /// This repository runs its own review through this configuration, so the checked-in file
     /// has to actually parse — a broken one would otherwise only be discovered by a reviewer
     /// mid-review.
