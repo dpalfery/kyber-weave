@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { closeSync, openSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -11,8 +10,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { dataOf, makeAnalyticsSource, makeService, makeSession } from '../analysis/query/fixtures/analytics-source.js'
 import { runWebDashboard } from '../cli/web.js'
 import type { JobHost } from '../jobs/host.js'
-import { JOBS_LOCK_FILE } from '../jobs/lease.js'
 import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
+import { removeTempStateDir, stopServer } from './testing.js'
 
 const WRAPPERS = [
   { operation: 'status', method: 'GET', path: '/api/kyber/analytics/status', request: {} },
@@ -53,36 +52,7 @@ function statusFor(error: unknown): number {
   return 200
 }
 
-function probeExists(path: string): boolean {
-  try {
-    closeSync(openSync(path, 'r'))
-    return true
-  } catch {
-    return false
-  }
-}
 
-async function stopServer(
-  server: Server | undefined,
-  getHostClose?: () => Promise<void> | undefined,
-): Promise<void> {
-  if (server?.listening) {
-    server.closeAllConnections?.()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
-  }
-  const hostClose = getHostClose?.()
-  if (hostClose) await hostClose
-}
-
-async function removeTempStateDir(dir: string | undefined): Promise<void> {
-  if (!dir) return
-  const lock = join(dir, JOBS_LOCK_FILE)
-  const deadline = Date.now() + 3_000
-  while (probeExists(lock) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-}
 
 describe('analytics HTTP and engine parity', () => {
   let server: Server

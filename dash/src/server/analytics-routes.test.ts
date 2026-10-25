@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -10,7 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AnalyticsEnvelope } from '../analysis/query/service.js'
 import { makeAnalyticsSource, makeService } from '../analysis/query/fixtures/analytics-source.js'
 import { runWebDashboard } from '../cli/web.js'
+import type { JobHost } from '../jobs/host.js'
 import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
+import { removeTempStateDir, stopServer } from './testing.js'
 
 const POST_ROUTES = [
   '/api/kyber/analytics/query',
@@ -128,6 +130,7 @@ describe('analytics HTTP routes', () => {
   let base: string
   let stateDir: string
   let source: ReturnType<typeof makeAnalyticsSource>
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     stateDir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-http-'))
@@ -139,6 +142,10 @@ describe('analytics HTTP routes', () => {
       stateDir,
       singleInstance: false,
       analyticsService: makeService(source),
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     // RED seam for the server wrapper: the analytics service is injected instead of
     // opening a second store or deriving results inside the HTTP layer.
@@ -147,8 +154,8 @@ describe('analytics HTTP routes', () => {
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it('serves status and catalog as versioned analytics envelopes without changing legacy meta', async () => {
@@ -256,6 +263,7 @@ describe('every analytics route speaks the shared versioned envelope', () => {
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     stateDir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-envelope-'))
@@ -266,14 +274,18 @@ describe('every analytics route speaks the shared versioned envelope', () => {
       stateDir,
       singleInstance: false,
       analyticsService: makeService(),
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it.each(EIGHT)('$method $path carries contractVersion 1, the R1 identity and every required key', async ({
@@ -331,6 +343,7 @@ describe('analytics routes bound their bodies and results', () => {
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     stateDir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-bounds-'))
@@ -341,14 +354,18 @@ describe('analytics routes bound their bodies and results', () => {
       stateDir,
       singleInstance: false,
       analyticsService: makeService(),
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it('refuses a body larger than 65536 bytes with a 413 budget error and closes the connection', async () => {
@@ -452,6 +469,7 @@ describe('analytics routes map stable error codes to transport statuses', () => 
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     stateDir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-status-'))
@@ -462,14 +480,18 @@ describe('analytics routes map stable error codes to transport statuses', () => 
       stateDir,
       singleInstance: false,
       analyticsService: makeService(),
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it.each([
@@ -593,6 +615,7 @@ describe('legacy kyber routes keep their shapes beside the analytics routes', ()
   let server: Server
   let base: string
   let stateDir: string
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     stateDir = await mkdtemp(join(tmpdir(), 'kyberdash-analytics-legacy-'))
@@ -603,14 +626,18 @@ describe('legacy kyber routes keep their shapes beside the analytics routes', ()
       stateDir,
       singleInstance: false,
       analyticsService: makeService(),
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     }
     server = await runWebDashboard(options as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (stateDir) await rm(stateDir, { recursive: true, force: true })
+    await stopServer(server, () => hostClose)
+    await removeTempStateDir(stateDir)
   })
 
   it('keeps serving meta with its apiVersion beside versioned analytics envelopes', async () => {

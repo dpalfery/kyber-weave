@@ -3,7 +3,9 @@ import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AnalyticsEnvelope } from '../analysis/query/service.js'
 import { runWebDashboard } from '../cli/web.js'
+import type { JobHost } from '../jobs/host.js'
 import type { AnalyticsService } from './analytics-routes.js'
+import { stopServer } from './testing.js'
 
 const inspectRequest = {
   mode: 'content',
@@ -54,6 +56,7 @@ describe('analytics HTTP complete-context parity', () => {
   let server: Server
   let base: string
   let execute: ReturnType<typeof vi.fn<AnalyticsService['execute']>>
+  let hostClose: Promise<void> | undefined
 
   beforeAll(async () => {
     const service = {
@@ -67,12 +70,16 @@ describe('analytics HTTP complete-context parity', () => {
       stateDir: undefined,
       singleInstance: false,
       analyticsService: service,
+      closeJobHost: (host: JobHost) => {
+        hostClose = host.close()
+        return hostClose
+      },
     } as Parameters<typeof runWebDashboard>[0])
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
   afterAll(async () => {
-    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
+    await stopServer(server, () => hostClose)
   })
 
   it('forwards the new request and returns the exact bounded context envelope', async () => {
