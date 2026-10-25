@@ -2,7 +2,7 @@
 id: specs/squad-model-presets/tasks
 title: Squad model presets tasks
 doc-type: spec
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-24
 component: KyberSquad
@@ -10,6 +10,7 @@ component: KyberSquad
 
 # Implementation Tasks
 
+**Status:** In-progress — approved by dpalfery on 2026-10-24, execution approved
 **Phase status:** Approved (dpalfery, 2026-10-24), test contract included
 **Development mode:** test-first
 
@@ -90,7 +91,7 @@ installed and signed in, runs them.
 
 ## Slice 1 — Presets (R1–R6, shippable alone)
 
-- [ ] 1. **Preset parsing and store** · R1.1, R1.2, R4.1, R4.2, R4.3 · needs none
+- [x] 1. **Preset parsing and store** · R1.1, R1.2, R4.1, R4.2, R4.3 · needs none
   - Do:
     - Add record `SquadModelPreset(Name, SourcePath, Digest, Profiles)`. `Digest` is the lowercase
       SHA-256 hex of the file's bytes.
@@ -114,7 +115,7 @@ installed and signed in, runs them.
         exception naming the file and line;
       - a bad name throws, a missing file returns `null`, and `List` is sorted.
     - RED: the types do not exist, so the build fails. GREEN: every case passes.
-- [ ] 2. **Merge, validation and model diff** · R1.3, R2.4, R4.1, R4.3 · needs 1
+- [x] 2. **Merge, validation and model diff** · R1.3, R2.4, R4.1, R4.3 · needs 1
   - Do:
     - Add `SquadModelPreset.ApplyTo(SquadModelProfiles)`, following the design's merge rule.
     - Add `SquadModelPresetValidator.Validate(preset, bundled)`. An unknown category throws
@@ -133,7 +134,7 @@ installed and signed in, runs them.
       - `inherit` resolves to `null`;
       - the diff lists only the agents that changed.
     - RED: the members are missing. GREEN: every case passes.
-- [ ] 3. **Render seam across the 13 renderers** · R2.2, R2.3 · needs 2
+- [x] 3. **Render seam across the 13 renderers** · R2.2, R2.3 · needs 2
   - Do: add `ModelPresets` to `SquadRenderRequest` as its last parameter, defaulting to `null`.
     Add `SquadRenderSource.Load(request, target)`, as the design's render seam describes. Use it in
     the 13 renderers: Antigravity, Claude, CommandCode, Codex, Copilot, Cursor, Devin, Factory,
@@ -150,7 +151,7 @@ installed and signed in, runs them.
       - every target except `warp` changes at least one file;
       - a file contains `preset-probe-model` exactly when `ResolveToken` returns it.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 4. **Lock v2** · R3.1 · needs none
+- [x] 4. **Lock v2** · R3.1 · needs none
   - Do: add `SquadAppliedPreset(Name, Digest)` and the optional `SquadLock.ModelPresets`. Implement
     the design's lock rule in `SerializeLock`, `DeserializeLock` and `ValidateLock`:
     - `model-presets` is written last, in ordinal order;
@@ -162,14 +163,14 @@ installed and signed in, runs them.
       - v2 round-trips;
       - an empty v2 map, a v1 lock carrying `model-presets`, and a bad digest are each rejected.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 5. **Lifecycle applies and records presets** · R2.1, R2.2, R3.1, R3.2, R3.4 · needs 3, 4
+- [x] 5. **Lifecycle applies and records presets** · R2.1, R2.2, R3.1, R3.2, R3.4 · needs 3, 4
   - Do: add `ModelPresets` (target to name) to both `SquadInstallRequest` and `SquadUpdateRequest`.
     `null` keeps the previous lock's map; an empty map means none. Give `SquadLifecycleService`
     an optional `SquadModelPresetStore` (default: built over `stateStore.UserPaths`). Then:
     1. Read the previous lock.
     2. Before the download, check each named file exists. A missing one throws
-       `SquadDeploymentConflictException` naming the target, the preset, the path and the fix
-       `kyber-weave squad preset clear --target <t>`.
+      `SquadDeploymentConflictException` naming the target, the preset, the path and the fix
+      `kyber-weave squad preset clear --target <t>`.
     3. After extraction, load the source once, validate, and pass the presets to the render.
     4. Have `BuildLock` record each name and digest. Entries for targets that were not rendered
        are dropped.
@@ -186,7 +187,7 @@ installed and signed in, runs them.
       - a dry run returns `ModelChanges` and writes nothing;
       - two project roots keep their own maps.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 6. **Project selection** · R6.1, R6.2, R6.3 · needs 5
+- [x] 6. **Project selection** · R6.1, R6.2, R6.3 · needs 5
   - Do: add `SquadModelPresetSelectionStore(ISquadUserPaths)` with `Read`, `Set` and `Clear`.
     - The file format is the design's project selection. The file is named by
       `SquadPhysicalRootIdentity.Key`.
@@ -203,7 +204,7 @@ installed and signed in, runs them.
       - nothing is written under the project root;
       - a global install ignores the selection, and a project install applies it.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 7. **`squad preset` verbs** · R2.1, R2.4, R3.3, R4.1, R5.1, R5.2 · needs 5, 6
+- [x] 7. **`squad preset` verbs** · R2.1, R2.4, R3.3, R4.1, R5.1, R5.2 · needs 5, 6
   - Do: add `squad.AddBranch("preset", …)` in `src/KyberWeave.Cli/Program.cs`, with
     `SquadPreset{Use,Clear,List,Show}Command.cs` and settings in `SquadSettings.cs`. Compose them
     the way `SquadUpdateCommand` is composed. Behavior follows the design's `squad preset` verbs,
@@ -226,7 +227,7 @@ installed and signed in, runs them.
       - `show` marks bundled values;
       - `list` shows usage.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 8. **Status and doctor** · R3.4, R5.3 · needs 5
+- [x] 8. **Status and doctor** · R3.4, R5.3 · needs 5
   - Do: the design's status lines in `SquadStatusCommand`. `(missing)` exits 1;
     `(changed since applied)` only warns. `SquadDoctorCommand` passes the lock's presets into its
     comparison render.
@@ -237,7 +238,7 @@ installed and signed in, runs them.
 
 ## Slice 2 — Instances (R7)
 
-- [ ] 9. **Instance catalog** · R7.4a, R7.6, R7.7 · needs none (update it after each spike)
+- [x] 9. **Instance catalog** · R7.4a, R7.6, R7.7 · needs none (update it after each spike)
   - Do: add `SquadInstanceCatalog` with
     `SquadInstanceRow(Target, Executable, Kind, Variable, ExtraLinks, NeverLinked, Status, Reason)`.
     - `Kind` is HomeReplace, ConfigLayer or None.
@@ -251,7 +252,7 @@ installed and signed in, runs them.
       - every Unsupported row has a reason;
       - the statuses match a table kept in step with Evidence.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 10. **Instance scope and state** · R7.3 · needs 5
+- [x] 10. **Instance scope and state** · R7.3 · needs 5
   - Do: add `SquadDeploymentScope.Instance`. It behaves exactly like `Project` (one root, receipt
     v1, a mutex keyed by the root key), with these exceptions:
     - the root must be `<home>/.kyber-weave/squad/instances/<target>/<preset>/`, otherwise
@@ -272,7 +273,7 @@ installed and signed in, runs them.
       - a bad root throws;
       - Copilot's absolute links point inside the instance.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 11. **Link planner (pure)** · R7.4, R7.4a · needs 9
+- [x] 11. **Link planner (pure)** · R7.4, R7.4a · needs 9
   - Do: add `SquadInstanceLinkPlanner.Plan(mainListing, renderedPaths, row, recordedLinks, instanceListing)`,
     returning `Add`, `Remove` and `Keep(warning)` actions. It follows the design's "What is
     linked" rule, then:
@@ -289,7 +290,7 @@ installed and signed in, runs them.
     - Behavior: one case per rule, including that a personal agent inside `agents/` is linked, a
       rendered file is not, and a never-linked file is skipped.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 12. **Platform link layer** · R7.5, R7.8 · needs none · macOS and Windows evidence
+- [x] 12. **Platform link layer** · R7.5, R7.8 · needs none · macOS and Windows evidence
   - Do: add the port `ISquadLinkFileSystem` with `CreateFileLink`, `CreateFolderLink`, `IsLink`,
     `IsLinkTo` and `DeleteTreeNoFollow`. `SquadCommandComposition` picks the implementation with
     `OperatingSystem.IsWindows()`.
@@ -320,7 +321,7 @@ installed and signed in, runs them.
       - `DeleteTreeNoFollow` leaves every target file and byte intact;
       - a cross-volume hard link names both paths (skipped when there is no second volume).
     - RED: the build fails. GREEN: the class passes on Linux CI, macOS and Windows.
-- [ ] 13. **Launch-time link sync and split check** · R7.4, R7.4a, R7.8 · needs 11, 12 · macOS and Windows evidence
+- [x] 13. **Launch-time link sync and split check** · R7.4, R7.4a, R7.8 · needs 11, 12 · macOS and Windows evidence
   - Do: add `SquadInstanceLinkSync.Sync(instanceRoot, mainHome, row, renderedPaths)`. It runs under
     the instance's mutex (`kyber-weave-squad-<root-key>`):
     1. List both trees, plan, and apply the actions.
@@ -337,7 +338,7 @@ installed and signed in, runs them.
       - a differing split is warned about;
       - the main home is never written.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 14. **Instance service** · R7.1, R7.3, R7.8 · needs 10, 13
+- [x] 14. **Instance service** · R7.1, R7.3, R7.8 · needs 10, 13
   - Do: add `SquadInstanceService`, taking the lifecycle service, the preset store, the link port
     and the main `ISquadGlobalRootResolver`.
     - **`EnsureAsync(target, preset)`:**
@@ -354,13 +355,13 @@ installed and signed in, runs them.
       - a version change or a preset edit triggers a refresh that keeps the path and links;
       - removing an instance leaves the main home unchanged.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 15. **Refuse overrides into instances** · R7.3, R7.8 · needs none
+- [x] 15. **Refuse overrides into instances** · R7.3, R7.8 · needs none
   - Do: in `SquadGlobalRoots`, any override value under `<home>/.kyber-weave/squad/instances/`
     throws `ArgumentException` naming the variable and the value. This covers the plain
     overrides and the OpenCode, ZCode and XDG paths.
   - Test: add cases to `SquadGlobalRootTests` for `CLAUDE_CONFIG_DIR` and `OPENCODE_CONFIG_DIR`.
     - RED: no exception is thrown. GREEN: both cases pass.
-- [ ] 16. **`squad run`** · R7.1, R7.2, R7.6, R7.7 · needs 6, 9, 14, 15
+- [x] 16. **`squad run`** · R7.1, R7.2, R7.6, R7.7 · needs 6, 9, 14, 15
   - Do: implement the design's `squad run` steps.
     - **`SquadHarnessLauncher.BuildStartInfo(row, instanceRoot, args, getEnv, findOnPath, isWindows)`**
       (pure):
@@ -478,6 +479,15 @@ installed and signed in, runs them.
 Each entry starts with `<id> · <OS and version> · <harness and version> · <date>`, then gives the
 commands, what was observed, and the outcome. The outcome is one of: `<row> → Ready`,
 `<row> → Unsupported`, `7.4a on <file>`, or `escalated`.
+
+### Checkpoint 2026-10-25
+
+- Slice 1 (tasks 1-8) is complete.
+- Slice 2 tasks 9-16 are complete.
+- Task 17: tests are written (`tests/KyberWeave.Tests/SquadInstanceCliTests.cs`, digest fixture fixed) but the implementation is NOT done. `SquadInstanceRemoveCommand` currently lives as a temporary stub in `src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`; it must move to its own file `SquadInstanceRemoveCommand.cs`. Status and global update refresh are still to do.
+- Spikes S1-S8 and task 18 (macOS/Windows end-to-end) have not been run.
+- Tasks 19-21 (pre-push gates, final code review, closeout) have not been run. The full suite, `review gates`, and `docs validate --merge-ready` have not been run on the combined change.
+- Resume at task 17 GREEN, then 18, 19, 20, 21.
 
 - S1–S8: _pending_
 - E-mac, E-win (task 18): _pending_

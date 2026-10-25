@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -75,7 +74,7 @@ public sealed class FactoryRenderer : ISquadRenderer
         ("filesystem.search", ["LS", "Grep", "Glob"]),
         ("filesystem.write", ["Create", "Edit", "ApplyPatch"]),
         ("process.execute", ["Execute"]),
-        ("network.read", ["WebSearch", "FetchUrl"]),
+        ("network.read", ["WebSearch", "FetchUrl"])
     ];
 
     /// <summary>
@@ -147,7 +146,7 @@ public sealed class FactoryRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Factory);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -195,7 +194,7 @@ public sealed class FactoryRenderer : ISquadRenderer
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
                                 $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
-                                reusedCanonicalSkill: true));
+                                true));
                         }
                         else
                         {
@@ -413,12 +412,14 @@ public sealed class FactoryRenderer : ISquadRenderer
 
         if (profile.HarnessModels.TryGetValue("factory", out string? factoryModel))
         {
-            return string.Equals(factoryModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(factoryModel)
+            return string.Equals(factoryModel, "inherit", StringComparison.Ordinal) ||
+                   string.IsNullOrWhiteSpace(factoryModel)
                 ? null
                 : factoryModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(profile.Default)
             ? null
             : profile.Default;
     }
@@ -471,31 +472,30 @@ public sealed class FactoryRenderer : ISquadRenderer
     {
         string entryPointDetails = reusedCanonicalSkill
             ? $"The same-name canonical skill at {entryPointSkillPath} is the entry point and " +
-                "carries the role; no duplicate entry-point skill is emitted, because the " +
-                "canonical skill already occupies that identity."
+              "carries the role; no duplicate entry-point skill is emitted, because the " +
+              "canonical skill already occupies that identity."
             : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
-                $"skill at {entryPointSkillPath}.";
+              $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
+              $"skill at {entryPointSkillPath}.";
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "The Factory app dispatches custom droids as subagents and exposes no " +
-                "session-parent selector to start a conversation as one. " + entryPointDetails +
-                " The entry point runs in the main session under the session's permissions — " +
-                "the droid's explicit tools allow-list does not apply to it. The droid file is " +
-                "kept for Task dispatch.");
+            SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "The Factory app dispatches custom droids as subagents and exposes no " +
+            "session-parent selector to start a conversation as one. " + entryPointDetails +
+            " The entry point runs in the main session under the session's permissions — " +
+            "the droid's explicit tools allow-list does not apply to it. The droid file is " +
+            "kept for Task dispatch.");
 
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
-            agent,
-            capabilityProfiles,
-            entryPointSkillNote:
-                $"The same-name entry point at {entryPointSkillPath} runs under the " +
-                "session's permissions; the droid's explicit tools allow-list and " +
-                "mcpServers: [] do not apply to it."))
+                     agent,
+                     capabilityProfiles,
+                     $"The same-name entry point at {entryPointSkillPath} runs under the " +
+                     "session's permissions; the droid's explicit tools allow-list and " +
+                     "mcpServers: [] do not apply to it."))
         {
             yield return record;
         }
@@ -520,14 +520,14 @@ public sealed class FactoryRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Factory subagents disable AskUser, so these " +
-                    "narrow to deny and the corresponding tools are withheld from the droid's tools list.");
+                SquadTargetCatalog.GetToken(SquadTarget.Factory),
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Factory subagents disable AskUser, so these " +
+                "narrow to deny and the corresponding tools are withheld from the droid's tools list.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -555,29 +555,31 @@ public sealed class FactoryRenderer : ISquadRenderer
         }
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: string.Join(" ", notExpressibleDetails));
+            SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            string.Join(" ", notExpressibleDetails));
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: SquadTargetCatalog.GetToken(SquadTarget.Factory),
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["Execute"],
-            withheldWriteTools: ["ApplyPatch", "Create", "Edit"]);
+            SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["Execute"],
+            ["ApplyPatch", "Create", "Edit"]);
 
         if (notIsolable is not null)
         {
@@ -597,7 +599,10 @@ public sealed class FactoryRenderer : ISquadRenderer
     /// </summary>
     private sealed class FactoryYamlFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(FactoryYamlFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(FactoryYamlFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -611,7 +616,7 @@ public sealed class FactoryRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string item in items)
             {
                 emitter.Emit(new Scalar(
@@ -619,8 +624,8 @@ public sealed class FactoryRenderer : ISquadRenderer
                     TagName.Empty,
                     item,
                     ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
+                    true,
+                    true));
             }
 
             emitter.Emit(new SequenceEnd());

@@ -1,5 +1,6 @@
 using JetBrains.Annotations;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -35,6 +36,9 @@ public interface ISquadRenderer
 /// Resolves each target's real per-user global root; required only by renderers whose
 /// global-scope output embeds that root.
 /// </param>
+/// <param name="ModelPresets">
+/// Optional model presets to apply per target during rendering.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -52,7 +56,28 @@ public sealed record SquadRenderRequest(
     SquadDeploymentScope Scope,
     string? UserScopeDirectory = null,
     string TranslationMode = "best-effort",
-    ISquadGlobalRootResolver? GlobalRoots = null);
+    ISquadGlobalRootResolver? GlobalRoots = null,
+    IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null)
+{
+    /// <summary>
+    /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
+    /// </summary>
+    public SquadRenderRequest(
+        string SourceDirectory,
+        IReadOnlyList<SquadTarget> Targets,
+        SquadDeploymentScope Scope,
+        SquadModelPreset? ModelPresets)
+        : this(
+            SourceDirectory,
+            Targets,
+            Scope,
+            null,
+            "best-effort",
+            null,
+            ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets))
+    {
+    }
+}
 
 /// <summary>The structured result of a Squad render operation.</summary>
 public sealed record SquadRenderResult(

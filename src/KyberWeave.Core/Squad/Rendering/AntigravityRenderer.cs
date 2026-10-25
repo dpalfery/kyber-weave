@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 
@@ -84,7 +83,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Antigravity);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -133,12 +132,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
             {
                 string roster = string.Join(", ", agent.DelegatesTo.Order(StringComparer.Ordinal));
                 degradations.Add(new SquadDegradationRecord(
-                    Target: "antigravity",
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: agent.Name,
-                    Code: "permission-not-expressible",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: $"Antigravity does not restrict delegates-to roster enforcement; this agent may invoke agents outside its declared roster [{roster}]."));
+                    "antigravity",
+                    agent.Name,
+                    agent.Name,
+                    "permission-not-expressible",
+                    agent.BodyDigest,
+                    $"Antigravity does not restrict delegates-to roster enforcement; this agent may invoke agents outside its declared roster [{roster}]."));
             }
         }
 
@@ -233,10 +232,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
 
         // enable_write_tools: true when filesystem.write or process.execute is allowed (ADR 0022 section 4, D4)
-        bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                                    writeDecision == SquadPermissionDecision.Allow;
-        bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
-                                   execDecision == SquadPermissionDecision.Allow;
+        bool filesystemWriteAllow =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+            writeDecision == SquadPermissionDecision.Allow;
+        bool processExecuteAllow =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
+            execDecision == SquadPermissionDecision.Allow;
         bool enableWriteTools = filesystemWriteAllow || processExecuteAllow;
         frontmatter.Add("enable_write_tools", enableWriteTools ? "true" : "false");
 
@@ -309,10 +310,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         // filesystem.write - D4/D10: narrowed by XOR with process.execute
         // Note: replace_file_content and multi_replace_file_content are withheld per D12 pending live verification.
-        bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
-                                   execDecision == SquadPermissionDecision.Allow;
-        bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                                    writeDecision == SquadPermissionDecision.Allow;
+        bool processExecuteAllow =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
+            execDecision == SquadPermissionDecision.Allow;
+        bool filesystemWriteAllow =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+            writeDecision == SquadPermissionDecision.Allow;
 
         if (filesystemWriteAllow && !processExecuteAllow)
         {
@@ -348,18 +351,22 @@ public sealed class AntigravityRenderer : ISquadRenderer
         return tools.OrderBy(t => t, StringComparer.Ordinal).ToArray();
     }
 
-    private static string? ResolveReasoningEffort(string modelProfile) => modelProfile switch
+    private static string? ResolveReasoningEffort(string modelProfile)
     {
-        "architect" => "high",
-        "deep-planning" => "high",
-        "reviewer" => "high",
-        "general" => "medium",
-        "fast" => "low",
-        "orchestration" => "minimal",
-        _ => null
-    };
+        return modelProfile switch
+        {
+            "architect" => "high",
+            "deep-planning" => "high",
+            "reviewer" => "high",
+            "general" => "medium",
+            "fast" => "low",
+            "orchestration" => "minimal",
+            _ => null
+        };
+    }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody, SquadDeploymentScope scope)
+    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody,
+        SquadDeploymentScope scope)
     {
         ValidateCanonicalName(name);
 
@@ -419,22 +426,24 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // D10: Check for capability-not-isolable: process.execute allow + filesystem.write
         // not-allow means write is reachable through shell redirection. This is recorded
         // via the shared CapabilityDegradations helper.
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision)
-            ? execDecision
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision declaredWrite)
-            ? declaredWrite
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision)
+                ? execDecision
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision declaredWrite)
+                ? declaredWrite
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: "antigravity",
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["run_command"],
-            withheldWriteTools: ["write_to_file", "replace_file_content", "multi_replace_file_content"]);
+            "antigravity",
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["run_command"],
+            ["write_to_file", "replace_file_content", "multi_replace_file_content"]);
 
         if (notIsolable is not null)
         {
@@ -455,24 +464,26 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
 
         return new SquadDegradationRecord(
-            Target: "antigravity",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: $"Capability profile '{agent.CapabilityProfile}' constrains " +
-                $"{string.Join(", ", constrained)} but Antigravity agent frontmatter cannot fully express " +
-                "permission boundaries; the deployed agent's behaviour is governed by the capability " +
-                "profile and the harness default interaction model.");
+            "antigravity",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            $"Capability profile '{agent.CapabilityProfile}' constrains " +
+            $"{string.Join(", ", constrained)} but Antigravity agent frontmatter cannot fully express " +
+            "permission boundaries; the deployed agent's behaviour is governed by the capability " +
+            "profile and the harness default interaction model.");
     }
 
     /// <summary>
     /// YAML frontmatter scalars must stay single-line; a folded canonical description
     /// would otherwise emit a block scalar and break consumers that expect a plain string.
     /// </summary>
-    private static string ToSingleLineScalar(string value) =>
-        string.Join(
+    private static string ToSingleLineScalar(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 }

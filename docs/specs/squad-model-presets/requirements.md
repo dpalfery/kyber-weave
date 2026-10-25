@@ -2,7 +2,7 @@
 id: specs/squad-model-presets/requirements
 title: Squad model presets requirements
 doc-type: requirements
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-24
 component: KyberSquad
@@ -16,6 +16,7 @@ keywords:
 
 # Requirements Document
 
+**Status:** In-progress — approved by dpalfery on 2026-10-24, execution approved
 **Phase status:** Approved (dpalfery, 2026-10-24; Requirement 7 revised at the owner's direction)
 
 ## Introduction

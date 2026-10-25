@@ -2,7 +2,7 @@
 id: specs/squad-model-presets/design
 title: Squad model presets design
 doc-type: spec
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-24
 component: KyberSquad
@@ -15,6 +15,7 @@ keywords:
 
 # Design Document
 
+**Status:** In-progress — approved by dpalfery on 2026-10-24, execution approved
 **Phase status:** Approved (dpalfery, 2026-10-24, on starting the tasks phase)
 
 ## Overview

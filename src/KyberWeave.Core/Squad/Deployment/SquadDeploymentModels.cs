@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -6,7 +7,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 public enum SquadDeploymentScope
 {
     Project,
-    Global
+    Global,
+    Instance
 }
 
 /// <summary>The upstream APM build pinned by a Squad release.</summary>
@@ -17,17 +19,20 @@ public sealed record SquadApmIdentity(
 {
     /// <summary>The value recorded in every field when no upstream build is pinned.</summary>
     /// <remarks>
-    /// Canonical <c>toolchain.yml</c> declares <c>validated-release: null</c> since rendering
-    /// stopped shelling out to an external toolchain, so this is the value a real install
-    /// writes today — not an edge case. It is a sentinel rather than a null identity because
-    /// the lock schema carries the three fields unconditionally, and dropping them would be a
-    /// schema bump for a field that is already vestigial.
+    ///     Canonical <c>toolchain.yml</c> declares <c>validated-release: null</c> since rendering
+    ///     stopped shelling out to an external toolchain, so this is the value a real install
+    ///     writes today — not an edge case. It is a sentinel rather than a null identity because
+    ///     the lock schema carries the three fields unconditionally, and dropping them would be a
+    ///     schema bump for a field that is already vestigial.
     /// </remarks>
     public const string Unverified = "unverified";
 
     /// <summary>The identity written when a release pins no upstream build.</summary>
     public static SquadApmIdentity None { get; } = new(Unverified, Unverified, Unverified);
 }
+
+/// <summary>An applied preset and its digest recorded in a deployment lock.</summary>
+public sealed record SquadAppliedPreset(string Name, string Digest);
 
 /// <summary>The reproducible inputs used for a Squad deployment.</summary>
 public sealed record SquadLock(
@@ -41,7 +46,59 @@ public sealed record SquadLock(
     string Translation,
     string BundleDigest,
     string AssetDigest,
-    SquadApmIdentity Apm);
+    SquadApmIdentity Apm,
+    IReadOnlyDictionary<SquadTarget, SquadAppliedPreset>? ModelPresets = null);
+
+/// <summary>Parameters for a Kyber-Squad install lifecycle operation.</summary>
+public sealed record SquadInstallRequest(
+    string TargetRoot,
+    SquadDeploymentScope Scope,
+    IReadOnlyList<SquadTarget> Targets,
+    IReadOnlyList<string>? Exclusions = null,
+    string? Version = null,
+    string Bundle = "full",
+    string Translation = "best-effort",
+    bool Adopt = false,
+    bool DryRun = false,
+    string Repository = "dpalfery/kyber-weave",
+    IReadOnlyDictionary<SquadTarget, string>? ModelPresets = null);
+
+/// <summary>Parameters for a Kyber-Squad update lifecycle operation.</summary>
+public sealed record SquadUpdateRequest(
+    string TargetRoot,
+    SquadDeploymentScope Scope,
+    IReadOnlyList<SquadTarget>? Targets = null,
+    IReadOnlyList<string>? Exclusions = null,
+    string? Version = null,
+    string Bundle = "full",
+    string Translation = "best-effort",
+    bool ReplaceManaged = false,
+    bool DryRun = false,
+    string Repository = "dpalfery/kyber-weave",
+    IReadOnlyDictionary<SquadTarget, string>? ModelPresets = null);
+
+/// <summary>Parameters for a Kyber-Squad uninstall lifecycle operation.</summary>
+public sealed record SquadUninstallRequest(
+    string TargetRoot,
+    SquadDeploymentScope Scope,
+    bool DryRun = false);
+
+/// <summary>The result of executing a Kyber-Squad lifecycle operation.</summary>
+/// <remarks>
+///     <see cref="Warnings" /> carries what a committed transaction could not finish, such as a registry
+///     write that failed after the deployment itself committed. The deployment is never rolled back for
+///     them, so a caller that prints only success has hidden the problem.
+/// </remarks>
+public sealed record SquadLifecycleResult(
+    bool Success,
+    SquadDeploymentPlan? Plan = null,
+    SquadReceipt? Receipt = null,
+    SquadLock? Lock = null,
+    IReadOnlyList<SquadDegradation>? Degradations = null,
+    IReadOnlyList<string>? Errors = null,
+    bool DryRun = false,
+    IReadOnlyList<string>? Warnings = null,
+    IReadOnlyList<SquadModelDiffItem>? ModelChanges = null);
 
 /// <summary>A documented loss of native harness behavior in a rendered deployment.</summary>
 public sealed record SquadDegradation(
@@ -76,12 +133,12 @@ public sealed record SquadReceipt(
     IReadOnlyList<SquadOwnedFile> Files)
 {
     /// <summary>
-    /// How this receipt's owned files map onto physical roots. Meaningful only for
-    /// <see cref="SquadDeploymentScope.Global"/>; a project receipt never reads or writes it.
-    /// Additive so every existing positional construction of <see cref="SquadReceipt"/> keeps
-    /// compiling: it defaults to <see cref="SquadReceiptLayout.PerTargetRoots"/>, the layout
-    /// every deployment has used since #91, and a legacy receipt read from v1 JSON gets this
-    /// overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt"/>.
+    ///     How this receipt's owned files map onto physical roots. Meaningful only for
+    ///     <see cref="SquadDeploymentScope.Global" />; a project receipt never reads or writes it.
+    ///     Additive so every existing positional construction of <see cref="SquadReceipt" /> keeps
+    ///     compiling: it defaults to <see cref="SquadReceiptLayout.PerTargetRoots" />, the layout
+    ///     every deployment has used since #91, and a legacy receipt read from v1 JSON gets this
+    ///     overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt" />.
     /// </summary>
     public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
 }
@@ -111,17 +168,17 @@ public interface ISquadUserPaths
     string ApplicationDataDirectory { get; }
 
     /// <summary>
-    /// The user's home directory. Home-level Squad state lives beneath it at
-    /// <c>.kyber-weave/squad</c>, so it does not depend on the platform application data folder.
+    ///     The user's home directory. Home-level Squad state lives beneath it at
+    ///     <c>.kyber-weave/squad</c>, so it does not depend on the platform application data folder.
     /// </summary>
     string HomeDirectory { get; }
 }
 
 /// <summary>One project that has registered itself in the home-level Squad registry.</summary>
 /// <remarks>
-/// <see cref="Stale"/> records that the registered root no longer carries a deployment, or no
-/// longer exists. A stale entry is reported rather than silently dropped, so an operator can
-/// see what was registered before deciding to unregister it.
+///     <see cref="Stale" /> records that the registered root no longer carries a deployment, or no
+///     longer exists. A stale entry is reported rather than silently dropped, so an operator can
+///     see what was registered before deciding to unregister it.
 /// </remarks>
 public sealed record SquadProjectRegistryEntry(
     string RootKey,
@@ -139,8 +196,8 @@ public sealed record SquadUnmigratedLegacyRoot(string Root, string Reason, strin
 
 /// <summary>The outcome of moving legacy Squad state into the home-level layout.</summary>
 /// <remarks>
-/// Immutable so a caller can render it, log it, or assert on it without the migration still
-/// being able to change it afterwards.
+///     Immutable so a caller can render it, log it, or assert on it without the migration still
+///     being able to change it afterwards.
 /// </remarks>
 public sealed record SquadMigrationReport(
     IReadOnlyList<string> MigratedItems,

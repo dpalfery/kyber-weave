@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -165,7 +164,7 @@ public sealed class DevinRenderer : ISquadRenderer
         ("filesystem.search", ["grep", "glob"]),
         ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
         ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
-        ("network.read", ["webfetch", "web_search"]),
+        ("network.read", ["webfetch", "web_search"])
     ];
 
     /// <summary>
@@ -219,7 +218,7 @@ public sealed class DevinRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Devin);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -282,7 +281,7 @@ public sealed class DevinRenderer : ISquadRenderer
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
                             capabilityVocabulary,
-                            reusedCanonicalSkill: true));
+                            true));
                         continue;
                     }
 
@@ -297,7 +296,7 @@ public sealed class DevinRenderer : ISquadRenderer
                     agent.Name,
                     agent.Description,
                     agent.InstructionBody,
-                    userInvokedOnly: true,
+                    true,
                     request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -311,14 +310,14 @@ public sealed class DevinRenderer : ISquadRenderer
             else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
             {
                 degradations.Add(new SquadDegradationRecord(
-                    Target: TargetToken,
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: agent.Name,
-                    Code: "omitted",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                        "omit; Devin has no primary-agent primitive for this agent to render " +
-                        "onto, so no file is emitted."));
+                    TargetToken,
+                    agent.Name,
+                    agent.Name,
+                    "omitted",
+                    agent.BodyDigest,
+                    $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
+                    "omit; Devin has no primary-agent primitive for this agent to render " +
+                    "onto, so no file is emitted."));
             }
             else
             {
@@ -342,7 +341,7 @@ public sealed class DevinRenderer : ISquadRenderer
                 skill.Name,
                 skill.Description,
                 skill.InstructionBody,
-                userInvokedOnly: false,
+                false,
                 request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
@@ -418,10 +417,12 @@ public sealed class DevinRenderer : ISquadRenderer
     /// Global scope writes beneath the Devin user configuration directory itself, so the
     /// project's <c>.devin/</c> prefix is dropped there.
     /// </summary>
-    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope) =>
-        scope == SquadDeploymentScope.Project
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        return scope == SquadDeploymentScope.Project
             ? baseDirectory
             : baseDirectory[".devin/".Length..];
+    }
 
     /// <summary>
     /// The <c>devin</c> harness value when the model profile declares one, otherwise the
@@ -510,17 +511,17 @@ public sealed class DevinRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: TargetToken,
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{profileName}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Devin prompts for a subagent's tool call " +
-                    "only in the foreground and only when the session's permission mode has not " +
-                    "already approved it, a background subagent never prompts, and a subagent " +
-                    "profile cannot force the prompt, so these narrow to withheld: the " +
-                    "corresponding tools are absent from the agent's 'allowed-tools' list.");
+                TargetToken,
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{profileName}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Devin prompts for a subagent's tool call " +
+                "only in the foreground and only when the session's permission mode has not " +
+                "already approved it, a background subagent never prompts, and a subagent " +
+                "profile cannot force the prompt, so these narrow to withheld: the " +
+                "corresponding tools are absent from the agent's 'allowed-tools' list.");
         }
 
         List<string> notExpressible = [];
@@ -553,30 +554,32 @@ public sealed class DevinRenderer : ISquadRenderer
         if (notExpressible.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: TargetToken,
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressible));
+                TargetToken,
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressible));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: TargetToken,
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["exec"],
-            withheldWriteTools: ["edit", "write", "apply_patch", "notebook_edit"]);
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["exec"],
+            ["edit", "write", "apply_patch", "notebook_edit"]);
 
         if (notIsolable is not null)
         {
@@ -593,37 +596,37 @@ public sealed class DevinRenderer : ISquadRenderer
     {
         string projectionText = reusedCanonicalSkill
             ? "this agent reuses the same-name canonical skill as its entry point, because the " +
-                "canonical skill already occupies that identity; no separate lowered skill is emitted"
+              "canonical skill already occupies that identity; no separate lowered skill is emitted"
             : "this agent renders as a Devin skill instead of a '.devin/agents/' profile";
 
         yield return new SquadDegradationRecord(
-            Target: TargetToken,
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Devin has no primary-agent primitive: Devin Local is the only top-level " +
-                "agent, and a custom profile is always dispatched as a subagent. Fallback profile " +
-                $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent}, " +
-                "so " + projectionText + ".");
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "Devin has no primary-agent primitive: Devin Local is the only top-level " +
+            "agent, and a custom profile is always dispatched as a subagent. Fallback profile " +
+            $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent}, " +
+            "so " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
         yield return new SquadDegradationRecord(
-            Target: TargetToken,
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Capability decisions " +
-                $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
-                "are not enforced: a Devin skill runs under the session's permissions. Its " +
-                "'allowed-tools' and 'permissions.allow' would pre-approve rather than restrict, " +
-                "and 'permissions.deny' is not emitted because Devin does not document whether " +
-                "it reaches the subagents the skill dispatches, which need the tools this " +
-                $"profile denies. Its delegates-to roster ({rosterText}) is instruction-only.");
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            "Capability decisions " +
+            $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
+            "are not enforced: a Devin skill runs under the session's permissions. Its " +
+            "'allowed-tools' and 'permissions.allow' would pre-approve rather than restrict, " +
+            "and 'permissions.deny' is not emitted because Devin does not document whether " +
+            "it reaches the subagents the skill dispatches, which need the tools this " +
+            $"profile denies. Its delegates-to roster ({rosterText}) is instruction-only.");
     }
 
     /// <summary>
@@ -631,18 +634,23 @@ public sealed class DevinRenderer : ISquadRenderer
     /// server-then-tool order, in the <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> form Devin's
     /// permission rules use.
     /// </summary>
-    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source) =>
-    [
-        .. source.Toolchain.RequiredMcpTools
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .SelectMany(entry => entry.Value
-                .OrderBy(tool => tool, StringComparer.Ordinal)
-                .Select(tool => $"mcp__{entry.Key}__{tool}"))
-    ];
+    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source)
+    {
+        return
+        [
+            .. source.Toolchain.RequiredMcpTools
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .SelectMany(entry => entry.Value
+                    .OrderBy(tool => tool, StringComparer.Ordinal)
+                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
+        ];
+    }
 
     /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source) =>
-        [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    {
+        return [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+    }
 
     private static string DescribeWithheldMcp(
         SquadAgent agent,
@@ -650,8 +658,8 @@ public sealed class DevinRenderer : ISquadRenderer
     {
         string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
         return $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
-            $"profile '{profileName}' does not allow 'filesystem.read', or is the pure " +
-            "orchestrator profile that routes work rather than researching it.";
+               $"profile '{profileName}' does not allow 'filesystem.read', or is the pure " +
+               "orchestrator profile that routes work rather than researching it.";
     }
 
     /// <summary>
@@ -664,14 +672,16 @@ public sealed class DevinRenderer : ISquadRenderer
     {
         string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
         return !string.Equals(profileName, PureOrchestratorProfile, StringComparison.Ordinal) &&
-            capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile) &&
-            profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-            decision == SquadPermissionDecision.Allow;
+               capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile) &&
+               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+               decision == SquadPermissionDecision.Allow;
     }
 
-    private static string CollapseToSingleLine(string value) =>
-        string.Join(
+    private static string CollapseToSingleLine(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 }

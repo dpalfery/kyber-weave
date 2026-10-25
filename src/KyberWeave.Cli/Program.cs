@@ -12,7 +12,7 @@ using Spectre.Console.Cli;
 
 ConsoleWidth.EnsureUsable(AnsiConsole.Console);
 
-CommandApp app = new CommandApp();
+CommandApp app = new();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
@@ -90,7 +90,8 @@ app.Configure(config =>
         docs.SetDescription("Validate documentation frontmatter and its joins to the code graph.");
 
         docs.AddCommand<DocsInitCommand>("init")
-            .WithDescription("Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
+            .WithDescription(
+                "Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
             .WithExample("docs", "init", ".")
             .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
 
@@ -177,6 +178,43 @@ app.Configure(config =>
         squad.AddCommand<SquadPackCommand>("pack")
             .WithDescription("Package canonical agents and skills into APM and plugin distribution archives.")
             .WithExample("squad", "pack", "--format", "all", "--out", "./dist");
+
+        squad.AddCommand<SquadRunCommand>("run")
+            .WithDescription("Launch an isolated harness instance configured with the active project preset.")
+            .WithExample("squad", "run", "claude")
+            .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
+
+        squad.AddBranch("instance", instance =>
+        {
+            instance.SetDescription("Manage harness preset instance folders.");
+
+            instance.AddCommand<SquadInstanceRemoveCommand>("remove")
+                .WithDescription("Remove an instance folder and its recorded state.")
+                .WithExample("squad", "instance", "remove", "--target", "claude", "--preset", "fast");
+        });
+
+        squad.AddBranch("preset", preset =>
+        {
+            preset.SetDescription("Manage model preset profiles for harness deployments.");
+
+            preset.AddCommand<SquadPresetUseCommand>("use")
+                .WithDescription("Apply a model preset profile to target harnesses.")
+                .WithExample("squad", "preset", "use", "fast", "--target", "claude")
+                .WithExample("squad", "preset", "use", "fast", "--global");
+
+            preset.AddCommand<SquadPresetClearCommand>("clear")
+                .WithDescription("Clear model preset overrides and restore bundled models.")
+                .WithExample("squad", "preset", "clear", "--target", "claude")
+                .WithExample("squad", "preset", "clear", "--global");
+
+            preset.AddCommand<SquadPresetListCommand>("list")
+                .WithDescription("List available model preset profiles and their active usages.")
+                .WithExample("squad", "preset", "list");
+
+            preset.AddCommand<SquadPresetShowCommand>("show")
+                .WithDescription("Show resolved model profiles for a preset and target harness.")
+                .WithExample("squad", "preset", "show", "fast", "--target", "claude");
+        });
     });
 
     // Kyber Utilities Command Branch — deploys Kyber-owned per-harness utility artifacts to
@@ -252,10 +290,7 @@ static string GetVersion()
     }
 
     Version? nameVersion = assembly.GetName().Version;
-    if (nameVersion is not null)
-    {
-        return nameVersion.ToString();
-    }
+    if (nameVersion is not null) return nameVersion.ToString();
 
     return "0.0.0";
 }

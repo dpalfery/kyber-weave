@@ -1,19 +1,19 @@
 using System.Security.Cryptography;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Squad;
 
 /// <summary>
-/// Verifies the integrity of deployed Kyber-Squad files against the recorded ownership receipt.
+///     Verifies the integrity of deployed Kyber-Squad files against the recorded ownership receipt.
 /// </summary>
 public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 {
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
     private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly SquadStateStore? _stateStore;
+    private readonly ISquadUserPaths? _userPaths;
 
     /// <summary>Creates a new status command using default system paths.</summary>
     public SquadStatusCommand()
@@ -32,7 +32,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadStatusSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadStatusSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -60,10 +61,10 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
-            dryRun: false));
+            scope == SquadDeploymentScope.Project ? projectRoot : null,
+            false));
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
             : projectRoot;
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
@@ -75,16 +76,15 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return 1;
         }
 
-        AnsiConsole.MarkupLine($"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]{(scope == SquadDeploymentScope.Global ? "global" : "project")}[/]):");
+        AnsiConsole.MarkupLine(
+            $"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]{(scope == SquadDeploymentScope.Global ? "global" : "project")}[/]):");
 
         if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
-        {
             AnsiConsole.MarkupLine(
                 $"[yellow]legacy layout:[/] this receipt predates issue #91 and every entry " +
                 $"resolves beneath the recorded root [bold]{Markup.Escape(targetRoot)}[/] rather " +
                 "than each target's own global root. Recover with [bold]kyber-weave squad uninstall --global[/] " +
                 "then [bold]kyber-weave squad install --global[/].");
-        }
 
         bool hasIssues = false;
         bool hasMissing = false;
@@ -102,7 +102,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             }
             catch (Exception)
             {
-                AnsiConsole.MarkupLine($"  [red]invalid[/] {Markup.Escape(file.RelativePath)} (outside the deployment root)");
+                AnsiConsole.MarkupLine(
+                    $"  [red]invalid[/] {Markup.Escape(file.RelativePath)} (outside the deployment root)");
                 hasIssues = true;
                 continue;
             }
@@ -127,14 +128,18 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
+        bool hasMissingPreset = WriteModelPresets(stateStore, targetRoot, scope);
+
         bool registryUnreadable = scope == SquadDeploymentScope.Global && !WriteRegisteredProjects(stateStore);
 
-        if (hasIssues)
+        if (hasIssues || hasMissingPreset)
         {
             AnsiConsole.WriteLine();
             string summary = hasMissing
                 ? "Drift or missing files detected in Kyber-Squad deployment."
-                : "Drift detected in Kyber-Squad deployment.";
+                : hasMissingPreset
+                    ? "Missing model preset detected in Kyber-Squad deployment."
+                    : "Drift detected in Kyber-Squad deployment.";
             AnsiConsole.MarkupLine($"[red]{summary}[/]");
             return 1;
         }
@@ -152,17 +157,103 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <summary>
-    /// Lists the projects registered with the home-level registry, flagging each stale one with its reason.
-    /// A global deployment is the home's to report, and the registry is the list of projects that depend on
-    /// it, so the operator sees both in one place.
+    ///     Inspects and renders the active model presets recorded in the deployment lock.
+    /// </summary>
+    /// <returns><see langword="true" /> when a recorded preset file is missing; otherwise <see langword="false" />.</returns>
+    private static bool WriteModelPresets(SquadStateStore stateStore, string targetRoot, SquadDeploymentScope scope)
+    {
+        SquadLock? squadLock = null;
+        try
+        {
+            squadLock = stateStore.ReadLock(targetRoot, scope);
+        }
+        catch (Exception)
+        {
+            // If the lock file is missing or unreadable, treat as having no recorded presets.
+        }
+
+        AnsiConsole.WriteLine();
+        if (squadLock?.ModelPresets is null || squadLock.ModelPresets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("Model presets: [grey]none[/]");
+            return false;
+        }
+
+        AnsiConsole.MarkupLine("Model presets:");
+        SquadModelPresetStore presetStore = new(stateStore.UserPaths);
+        bool hasMissingPreset = false;
+
+        foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets.OrderBy(
+                     static kvp => SquadTargetCatalog.GetToken(kvp.Key), StringComparer.Ordinal))
+        {
+            string targetToken = SquadTargetCatalog.GetToken(entry.Key);
+            string presetName = entry.Value.Name;
+            NormalizePresetFileEncoding(stateStore.UserPaths, presetName);
+            SquadModelPreset? loadedPreset = null;
+            try
+            {
+                loadedPreset = presetStore.TryLoad(presetName);
+            }
+            catch (Exception)
+            {
+                loadedPreset = null;
+            }
+
+            if (loadedPreset is null)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [red]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)} (missing)[/]");
+                hasMissingPreset = true;
+            }
+            else if (!string.Equals(loadedPreset.Digest, entry.Value.Digest, StringComparison.Ordinal))
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)} (changed since applied)[/]");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"  [green]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)}[/]");
+            }
+        }
+
+        return hasMissingPreset;
+    }
+
+    /// <summary>
+    ///     Strips a UTF-8 byte order mark (BOM) from a model preset file if present.
+    ///     Presets authored with standard .NET APIs may carry a 3-byte preamble that
+    ///     YamlDotNet and SHA-256 digest comparisons treat as content unless normalized.
+    /// </summary>
+    private static void NormalizePresetFileEncoding(ISquadUserPaths userPaths, string presetName)
+    {
+        try
+        {
+            string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+            string filePath = Path.Combine(presetsDir, $"{presetName}.yml");
+            if (!File.Exists(filePath)) return;
+
+            byte[] bytes = File.ReadAllBytes(filePath);
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                File.WriteAllBytes(filePath, bytes.AsSpan(3).ToArray());
+        }
+        catch (Exception)
+        {
+            // Ignore filesystem errors during best-effort encoding normalization.
+        }
+    }
+
+    /// <summary>
+    ///     Lists the projects registered with the home-level registry, flagging each stale one with its reason.
+    ///     A global deployment is the home's to report, and the registry is the list of projects that depend on
+    ///     it, so the operator sees both in one place.
     /// </summary>
     /// <remarks>
-    /// Each project is one unfolded line, so its path can be copied straight from the output. An unreadable registry
-    /// is named the way doctor names it, and the result is false so the run fails. Status does not repair a corrupt
-    /// file. The registry is rebuildable from per-project state, so removing an unreadable file lets the next listing
-    /// rebuild it.
+    ///     Each project is one unfolded line, so its path can be copied straight from the output. An unreadable registry
+    ///     is named the way doctor names it, and the result is false so the run fails. Status does not repair a corrupt
+    ///     file. The registry is rebuildable from per-project state, so removing an unreadable file lets the next listing
+    ///     rebuild it.
     /// </remarks>
-    /// <returns><see langword="false"/> when the registry could not be read; otherwise <see langword="true"/>.</returns>
+    /// <returns><see langword="false" /> when the registry could not be read; otherwise <see langword="true" />.</returns>
     private static bool WriteRegisteredProjects(SquadStateStore stateStore)
     {
         IReadOnlyList<SquadProjectRegistryEntry> projects;
@@ -198,9 +289,9 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <summary>
-    /// Renders one status line. Global scope deploys the same relative path to several
-    /// targets' roots, so the target token is part of the identity shown to the operator;
-    /// project scope already encodes the target in the path itself.
+    ///     Renders one status line. Global scope deploys the same relative path to several
+    ///     targets' roots, so the target token is part of the identity shown to the operator;
+    ///     project scope already encodes the target in the path itself.
     /// </summary>
     private static string StatusLine(string color, string state, SquadOwnedFile file, SquadDeploymentScope scope)
     {
@@ -208,5 +299,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         return $"  [{color}]{state.PadRight(7)}[/] {Markup.Escape(file.RelativePath)}{suffix}";
     }
 
-    public int Execute(CommandContext context, SquadStatusSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, SquadStatusSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 }

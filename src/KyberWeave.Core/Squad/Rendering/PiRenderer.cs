@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -137,7 +136,7 @@ public sealed class PiRenderer : ISquadRenderer
         ("filesystem.read", ["read"]),
         ("filesystem.search", ["grep", "find", "ls"]),
         ("filesystem.write", ["edit", "write"]),
-        ("process.execute", ["bash"]),
+        ("process.execute", ["bash"])
     ];
 
     /// <summary>
@@ -197,7 +196,7 @@ public sealed class PiRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Pi);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -254,7 +253,7 @@ public sealed class PiRenderer : ISquadRenderer
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
                             capabilityVocabulary,
-                            reusedCanonicalSkill: true));
+                            true));
                         continue;
                     }
 
@@ -266,7 +265,8 @@ public sealed class PiRenderer : ISquadRenderer
                         "collision this renderer can resolve on its own.");
                 }
 
-                SquadDeploymentFile principal = RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope);
+                SquadDeploymentFile principal =
+                    RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -279,14 +279,14 @@ public sealed class PiRenderer : ISquadRenderer
             else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
             {
                 degradations.Add(new SquadDegradationRecord(
-                    Target: "pi",
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: agent.Name,
-                    Code: "omitted",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: $"Fallback profile '{agent.Fallback}' declares " +
-                        "no-primary-agent: omit; Pi has no primary-agent primitive for this " +
-                        "agent to render onto, so no file is emitted."));
+                    "pi",
+                    agent.Name,
+                    agent.Name,
+                    "omitted",
+                    agent.BodyDigest,
+                    $"Fallback profile '{agent.Fallback}' declares " +
+                    "no-primary-agent: omit; Pi has no primary-agent primitive for this " +
+                    "agent to render onto, so no file is emitted."));
             }
             else
             {
@@ -308,7 +308,8 @@ public sealed class PiRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope);
+            SquadDeploymentFile principal =
+                RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -328,7 +329,7 @@ public sealed class PiRenderer : ISquadRenderer
             ["description"] = CollapseToSingleLine(agent.Description)
         };
 
-        var (model, thinkingLevel) = ResolvePiModelAndThinking(agent, modelProfiles);
+        (string? model, string? thinkingLevel) = ResolvePiModelAndThinking(agent, modelProfiles);
         if (model is not null)
         {
             frontmatter["model"] = model;
@@ -370,7 +371,8 @@ public sealed class PiRenderer : ISquadRenderer
             "pi");
     }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody, SquadDeploymentScope scope)
+    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -470,7 +472,9 @@ public sealed class PiRenderer : ISquadRenderer
         }
         else
         {
-            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
+            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
+                ? null
+                : profile.Default;
         }
 
         if (resolvedModel is null)
@@ -514,10 +518,12 @@ public sealed class PiRenderer : ISquadRenderer
 
     private static bool IsDelegateAllowed(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
-        profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision decision) &&
-        decision == SquadPermissionDecision.Allow;
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        return capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+               profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision decision) &&
+               decision == SquadPermissionDecision.Allow;
+    }
 
     private static IEnumerable<SquadDegradationRecord> BuildSubagentDegradations(
         SquadAgent agent,
@@ -539,15 +545,15 @@ public sealed class PiRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: "pi",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Pi has no per-capability permission prompt, " +
-                    "and the 'tools' key is binary, so these narrow to withheld: the " +
-                    "corresponding tools are absent from the agent's 'tools' list.");
+                "pi",
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Pi has no per-capability permission prompt, " +
+                "and the 'tools' key is binary, so these narrow to withheld: the " +
+                "corresponding tools are absent from the agent's 'tools' list.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -582,30 +588,32 @@ public sealed class PiRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: "pi",
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressibleDetails));
+                "pi",
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: "pi",
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["bash"],
-            withheldWriteTools: ["edit", "write"]);
+            "pi",
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["bash"],
+            ["edit", "write"]);
 
         if (notIsolable is not null)
         {
@@ -622,43 +630,45 @@ public sealed class PiRenderer : ISquadRenderer
     {
         string projectionText = reusedCanonicalSkill
             ? "this agent reuses the same-name canonical skill as its entry point, because the " +
-                "canonical skill already occupies that identity; no separate lowered skill is emitted"
+              "canonical skill already occupies that identity; no separate lowered skill is emitted"
             : "this agent renders as a top-level Pi skill instead of a '.pi/agents/' file";
 
         yield return new SquadDegradationRecord(
-            Target: "pi",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Pi core has no primary-agent selection primitive: '.pi/SYSTEM.md' and " +
-                "'--system-prompt' replace the whole session prompt, not a per-agent one. " +
-                $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, so " + projectionText + ".");
+            "pi",
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "Pi core has no primary-agent selection primitive: '.pi/SYSTEM.md' and " +
+            "'--system-prompt' replace the whole session prompt, not a per-agent one. " +
+            $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
+            $"{fallbackProfile.NoPrimaryAgent}, so " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
         yield return new SquadDegradationRecord(
-            Target: "pi",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Capability decisions " +
-                $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
-                "are not enforced: a top-level Pi skill runs under the harness default tool " +
-                "set, not the canonical capability lattice, and its delegates-to roster " +
-                $"({rosterText}) is instruction-only, not a runtime-enforced " +
-                "'allowed_subagents' list.");
+            "pi",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            "Capability decisions " +
+            $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
+            "are not enforced: a top-level Pi skill runs under the harness default tool " +
+            "set, not the canonical capability lattice, and its delegates-to roster " +
+            $"({rosterText}) is instruction-only, not a runtime-enforced " +
+            "'allowed_subagents' list.");
     }
 
-    private static string CollapseToSingleLine(string value) =>
-        string.Join(
+    private static string CollapseToSingleLine(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     /// <summary>
     /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
@@ -673,7 +683,10 @@ public sealed class PiRenderer : ISquadRenderer
     /// </summary>
     private sealed class PiExtensionsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(PiExtensionsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(PiExtensionsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -687,7 +700,7 @@ public sealed class PiRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string extension in extensions)
             {
                 emitter.Emit(new Scalar(
@@ -695,8 +708,8 @@ public sealed class PiRenderer : ISquadRenderer
                     TagName.Empty,
                     extension,
                     ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
+                    true,
+                    true));
             }
 
             emitter.Emit(new SequenceEnd());
