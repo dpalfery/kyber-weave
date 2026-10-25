@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-25
 code-refs:
   - SkillLoader
   - RoutingLinter

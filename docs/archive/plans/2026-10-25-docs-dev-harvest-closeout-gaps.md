@@ -2,7 +2,7 @@
 id: plans/2026-10-25-docs-dev-harvest-closeout-gaps
 title: "docs-dev design harvest: authoring scale, closeout contract, every-change docs review, change-scoped merge gate, Kyber-Docs skill renames, three backfills"
 doc-type: plan
-status: draft
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-25
@@ -13,7 +13,9 @@ impact-components: [DocGraph, KyberSquad, CI Pipelines, ContextHygiene, Distribu
 
 # docs-dev design harvest
 
-**Status: Ready — approved at the approve-and-execute gate 2026-10-25 (AP1): the owner chose
+**Status: Archived 2026-10-25 — T20 dogfood closeout complete: H1–H10 and every decision ID (G1–G19, D1–D38, Q1–Q4, AP1) mapped in `## Closeout mapping` below to live governed docs or explicit Documentation waivers, with no open tracking markers; one mapped doc per impact component re-verified with `last-reviewed` 2026-10-25; the deployment gap and owner live gates stay open owner items.**
+
+**Pre-closeout status (preserved as history):** Ready — approved at the approve-and-execute gate 2026-10-25 (AP1): the owner chose
 "approve and execute this plan" and confirmed the documentation-impact scales (D23, D24
 `extends-component`). Rewritten 2026-10-25 from the owner's alignment record (G1–G19); Q4 was
 answered by the owner 2026-10-25. `docs validate` and `docs drift` are outstanding for this
@@ -686,3 +688,113 @@ dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.
    documentation-impact outcome and the full cleanup commands (Q4).
 
 The permanent `## Decisions` table is preserved through archive.
+
+## Completion summary (T20 2026-10-25)
+
+Dogfood closeout of this plan under the rules it creates. Shipped across T1–T19, both
+phases: the `KW-DOC-LIFECYCLE-004` gate (`ArchiveCloseoutValidator`, merge-base scope via
+`ChangedFiles.ResolveSinceMergeBase`, `--base` on `docs validate --merge-ready`, full-history
+CI checkout in `ci.yml` and the host template); the `docs-dev` every-change review and
+closeout contract (run record, `DOCS_REVIEW:` / `RECOMMENDATIONS:`, `STATUS:
+CLOSEOUT_COMPLETE`, outcome in the PR description); the authoring declaration (scale,
+impact components, `Design harvest` by component + doc type, owner confirmation at
+approve-and-execute); the Kyber-Docs renames (`kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment` with its
+owner-started assessment-and-remediation mode) with lockfile-observation-backed
+`docs init` / `squad doctor` warnings; and the three backfilled closeouts (#423, #425,
+#426). Whole-change review ran once over the change (expected `NEEDS_HUMAN` on the
+reserved paths); the owner reviewed and said "go" 2026-10-25 — Majors 1+2 fixed and
+re-verified, the SBOM parked item resolved by merge `96859a84` (SBOM paths match
+`origin/main` except the authorized `SquadPackAndReleaseTests` 28→27), Minors 4–5
+accepted as report-only.
+
+Open owner items (not tracked markers): the #426 deployment gap and the owner live
+gates, as the plan records. No new todo was owner-accepted at closeout.
+
+Freshness anchors re-verified 2026-10-25, one per impact component: DocGraph →
+`docs/docgraph/governance.md` (004 row, C0–C9 table, merge-base scope, fail-closed C0,
+gate-vs-lens split); KyberSquad → `docs/kyber-squad/architecture.md` (§10 lifecycle:
+scale, harvest, review, closeout, 004, Config Reg); CI Pipelines →
+`docs/ci-pipelines/workflows-runbook.md` (merge-ready CI: `--base`, push base,
+`fetch-depth: 0`); ContextHygiene → `docs/context-hygiene/skills.md` (authoring skill
+home, post-rename names verified, `last-reviewed` bumped 2026-10-16 → 2026-10-25);
+Distribution → `docs/install.md` (retired-skills section re-read against T13a/D37 and
+Q4: observed pruning, warnings, full commands verified, `last-reviewed` bumped
+2026-10-16 → 2026-10-25).
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| H1 | [docgraph/governance.md](../../docgraph/governance.md) — 004 rule row, C0–C9 condition table, gate-vs-lens split; [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) — 004 row |
+| H2 | [docgraph/governance.md](../../docgraph/governance.md) — merge-base scope (added/renamed/copied always checked, modified only with `documentation-impact`, untracked and uncommitted in scope, history never re-checked); [docgraph/architecture.md](../../docgraph/architecture.md) — Change-scoped archive reading |
+| H3 | [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md) — Merge-ready in PR CI (`--base` default `origin/HEAD`, push base, `fetch-depth: 0`, C0 fail-closed); [cli-command-surface.md](../../cli-command-surface.md) — `docs validate --base` row |
+| H4 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 scale and Design harvest declared at authoring time; [plans/README.md](../../plans/README.md) and [specs/README.md](../../specs/README.md) — Decisions, Design harvest and closeout policy sections |
+| H5 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 routing by component and doc type, high confidence with human approval, never adds ontology vocabulary, best existing home, todo only if the owner accepts |
+| H6 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 every-change review, run record, `DOCS_REVIEW:` / `RECOMMENDATIONS:`, PR outcome verbatim; [kyber-squad/requirements.md](../../kyber-squad/requirements.md) — KS-008 |
+| H7 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 `STATUS: CLOSEOUT_COMPLETE` / `STATUS: BLOCKED` digest, closeout before delivery |
+| H8 | [docgraph/governance.md](../../docgraph/governance.md) — gate checks C0–C9 structure only, lens judges content; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 intent-alignment lens pins |
+| H9 | [context-hygiene/skills.md](../../context-hygiene/skills.md) — `kyber-docs-authoring` home, gated like any skill; [docgraph/onboarding.md](../../docgraph/onboarding.md) — `docs init` deploys it via APM; [install.md](../../install.md) — all three renames, the new Kyber-Docs home, `squad doctor` pointer |
+| H10 | [install.md](../../install.md) — Retired skills: lockfile-gated pruning observed on 0.28.0 and 0.35.0, warnings as the main channel, full cleanup commands; [distribution.md](../../distribution.md) — Release notes are the generated PR-title list, skill gate row names all four gated skills |
+| G1 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 recommendations route by component and doc type from the catalog and ontology, never by folder |
+| G2 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 bar is high confidence with human approval before anything is written |
+| G3 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 the review never adds ontology vocabulary |
+| G4 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 host side: no literal `docs/` paths in portable text, locations resolve through Config Reg properties |
+| G5 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 best existing home wins, recommendations in the closeout section, the digest and the PR, closeout completes |
+| G6 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 each update placed beside the component's existing docs |
+| G7 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 routing by component and doc type with no routing configuration; judgement call recorded in the portable contract |
+| G8 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 scale frontmatter with impact components, owner confirms at approve-and-execute; [kyber-squad/requirements.md](../../kyber-squad/requirements.md) — KS-008; [plans/README.md](../../plans/README.md) and [specs/README.md](../../specs/README.md) — policy sections |
+| G9 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 Design harvest by target component and doc type, resolved at closeout; [plans/README.md](../../plans/README.md) and [specs/README.md](../../specs/README.md) — policy sections |
+| G10 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 conductor sends every completed change to `docs-dev`, bug-crusher joins the delegation roster; [kyber-squad/requirements.md](../../kyber-squad/requirements.md) — KS-008 |
+| G11 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 run record of asked/decided+why/files changed on the execution artifact, no transcripts |
+| G12 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 outcome in the PR description verbatim, heading fallback when the host template lacks one, no new register |
+| G13 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 recommendations in the closeout section, the digest and the PR, todo only if the owner accepts |
+| G14 | [docgraph/governance.md](../../docgraph/governance.md) — 004 runs always under `--merge-ready` with no opt-in; [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md) — merge-ready PR CI |
+| G15 | [docgraph/governance.md](../../docgraph/governance.md) — change-scoped, entries the change does not touch are never checked; [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md) — full-history checkout requirement |
+| G16 | [docgraph/governance.md](../../docgraph/governance.md) — C0–C9, no folder or doc-type rules |
+| G17 | [install.md](../../install.md) — `second-brain` move, new Kyber-Docs home, `squad doctor` steps; [distribution.md](../../distribution.md) — skill gate row covers `kyber-docs-onboarding-and-assessment`; assessment-mode mechanics live in the portable skill |
+| G18 | [install.md](../../install.md) — both renames with old and new names; [context-hygiene/skills.md](../../context-hygiene/skills.md) — authoring skill under its current name; [docgraph/onboarding.md](../../docgraph/onboarding.md) — APM deploy reference |
+| G19 | [install.md](../../install.md) — observed prune behaviour, warning conditions, full cleanup commands, no version gate; [distribution.md](../../distribution.md) — Release notes channel via generated PR-title list |
+| D1 | Documentation waiver — transient execution mode for this plan; no surviving doc invariant. |
+| D2 | Documentation waiver — transient autonomy basis for this run; no surviving doc invariant. |
+| D3 | Documentation waiver — historical diagnosis for this plan (evidence in git history); its durable consequence is the 004 gate. |
+| D4 | [docgraph/governance.md](../../docgraph/governance.md) — new id `KW-DOC-LIFECYCLE-004`, 003 unchanged; [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) — 004 row |
+| D5 | SUPERSEDED by G16 — surviving rule in [docgraph/governance.md](../../docgraph/governance.md) C0–C9; supersession recorded in the Decisions table. |
+| D6 | [docgraph/governance.md](../../docgraph/governance.md) — 004 under `--merge-ready`, no opt-in; [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md); [cli-command-surface.md](../../cli-command-surface.md) |
+| D7 | [docgraph/governance.md](../../docgraph/governance.md) — C1 closed-work statuses, C2 live body status |
+| D8 | SUPERSEDED by D29 — surviving rule in [docgraph/governance.md](../../docgraph/governance.md): a modified entry is re-checked only when its frontmatter declares `documentation-impact`. |
+| D9 | SUPERSEDED by D26/D28 — surviving mechanism in [docgraph/architecture.md](../../docgraph/architecture.md): narrow archived-document entry point, no directory walk. |
+| D10 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 `docs-dev` role (closeout as design harvest, every-change review); description wording lives in the portable contract |
+| D11 | Documentation waiver — explicitly not pursued; no design shipped. |
+| D12 | [dash/architecture.md](../../dash/architecture.md) — stale todo link removed, owner live gate stated as `[NOT LIVE-VERIFIED]` |
+| D13 | [plans/README.md](../../plans/README.md) — Decisions section preserved intact across all lifecycle transitions; backfills annotate without rewriting |
+| D14 | Documentation waiver — transient execution assignment for this plan; digests re-pinned in the pass, no surviving doc invariant. |
+| D15 | Documentation waiver — deferred scope; the route (G17 assessment-and-remediation mode) is mapped at G17. |
+| D16 | Documentation waiver — out of scope; its closeout must declare a scale and pass 004 when archived. |
+| D17 | Documentation waiver — transient finding (no stray harness copies); no design shipped, no doc change needed. |
+| D18 | Documentation waiver — deferred follow-up; no owner-accepted todo filed. |
+| D19 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 scale keys and impact components; [kyber-squad/requirements.md](../../kyber-squad/requirements.md) — KS-008; [plans/README.md](../../plans/README.md) and [specs/README.md](../../specs/README.md) — policy sections |
+| D20 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 Design harvest table by target component and doc type; [plans/README.md](../../plans/README.md) and [specs/README.md](../../specs/README.md) — policy sections |
+| D21 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 PLAN_READY / SPEC_READY verify scale and harvest, approve-and-execute restates them, 004 enforces at archive |
+| D22 | [docgraph/governance.md](../../docgraph/governance.md) — gate-vs-lens split; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 lens pins |
+| D23 | [plans/README.md](../../plans/README.md) — archived index rows reach the three backfilled plans, whose frontmatter carries the owner-confirmed `extends-component` scales |
+| D24 | [plans/README.md](../../plans/README.md) — this plan's archived index row carries its owner-confirmed `extends-component` scale and five impact components |
+| D25 | SUPERSEDED by G16 — surviving rule in [docgraph/governance.md](../../docgraph/governance.md) C8; no doc-type rule. |
+| D26 | [docgraph/governance.md](../../docgraph/governance.md) — merge-base scope, per-path change kinds, untracked and uncommitted files, deletions ignored |
+| D27 | [docgraph/governance.md](../../docgraph/governance.md) — `--base` default `origin/HEAD`, fail-closed C0 with fetch hint; [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md); [cli-command-surface.md](../../cli-command-surface.md) |
+| D28 | [docgraph/governance.md](../../docgraph/governance.md) — archive-container scope per the plan-index and specification-index properties; [docgraph/architecture.md](../../docgraph/architecture.md) — archive reading |
+| D29 | [docgraph/governance.md](../../docgraph/governance.md) — plan harvest document is the plan; a spec entry is checked by the document declaring `documentation-impact`; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 specification closeout migrates the declared harvest |
+| D30 | [docgraph/governance.md](../../docgraph/governance.md) — C7 live-governed-document definition (code files, missing files and archived docs do not count) |
+| D31 | [docgraph/governance.md](../../docgraph/governance.md) — C8 catalog row plus freshly reviewed mapped doc per component |
+| D32 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 review packet, run record, `DOCS_REVIEW:` / `RECOMMENDATIONS:`, PR outcome; [kyber-squad/requirements.md](../../kyber-squad/requirements.md) — KS-008 |
+| D33 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 `docs-dev` on the bug-crusher delegation roster |
+| D34 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 portable contract resolves locations through Config Reg properties |
+| D35 | [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md) — template history and `--base` requirement |
+| D36 | Documentation waiver — transient execution structure; one review and one closeout delivered, no surviving doc invariant. |
+| D37 | [install.md](../../install.md) — Retired skills: lockfile-gated pruning observed on 0.28.0 and 0.35.0, no version gate encoded, warnings encode the observation |
+| D38 | [distribution.md](../../distribution.md) — skill gate row validates, lints and scans all four skills; authoring keeps its SARIF category |
+| Q1 | SUPERSEDED by G14/G15 — surviving rule in [docgraph/governance.md](../../docgraph/governance.md): always on, change-scoped, no baseline list. |
+| Q2 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — §10 `STATUS: CLOSEOUT_COMPLETE` required before delivery plus post-closeout gates |
+| Q3 | SUPERSEDED by G16/D31 — surviving rule in [docgraph/governance.md](../../docgraph/governance.md) C8. |
+| Q4 | [distribution.md](../../distribution.md) — Release notes are the generated merged-PR-title list; [install.md](../../install.md) — PR body and install guide carry the full cleanup commands, warnings are the main channel, no release-workflow change |
+| AP1 | Documentation waiver — transient approval record; provenance preserved in the Decisions table and the archived index row. |
