@@ -16,7 +16,7 @@ keywords:
 
 # Requirements Document
 
-**Phase status:** Draft
+**Phase status:** Approved (dpalfery, 2026-10-24; Requirement 7 revised at the owner's direction)
 
 ## Introduction
 
@@ -128,13 +128,24 @@ source tree.
 
 7.1. WHEN two projects select different presets for the same harness THEN sessions in both
 SHALL be able to run at the same time, each with its agents on its own preset.
-7.2. Squad SHALL NOT write agent, skill or preset files into either project's tree to
-achieve 7.1.
-7.3. Each session SHALL keep the user's sign-in, settings and history for that harness.
-7.4. The mechanism SHALL be harness-neutral: one Squad command per project, whatever the
+7.2. Squad SHALL NOT write any file into either project's tree to achieve 7.1.
+7.3. Squad SHALL give each harness and preset pair its own instance folder under
+`~/.kyber-weave/`. Squad SHALL create it on first use, at a path that stays the same across
+release updates.
+7.4. An instance SHALL share the main home's settings and history through links. WHERE the
+harness stores sign-in in a file, the instance SHALL share sign-in through a link too. WHERE
+the harness ties sign-in to the folder path, as an OS keychain entry does, the user SHALL sign
+in at most once per instance.
+7.4a. Exception (dpalfery, 2026-10-24): WHERE a harness rewrites its sign-in file by rename,
+the instance SHALL NOT link that file, and the user SHALL sign in at most once per instance.
+7.5. Squad SHALL support instances on macOS and Windows. On Windows, creating links SHALL NOT
+need administrator rights or Developer Mode.
+7.6. The mechanism SHALL be harness-neutral: one Squad command per project, whatever the
 harness.
-7.5. IF a harness has no way to meet 7.1–7.3 THEN Squad SHALL say so, name the harness,
-and SHALL NOT fall back to a project deploy.
+7.7. IF a harness has no usable variable for pointing it at an instance folder THEN Squad
+SHALL fail and name the harness. It SHALL NOT fall back to a project deploy.
+7.8. WHEN Squad removes or refreshes an instance THEN it SHALL delete only the instance's own
+files and links. It SHALL NOT delete or change any link's target.
 
 ## Success criteria
 
@@ -142,15 +153,10 @@ and SHALL NOT fall back to a project deploy.
   `--replace-managed`.
 - After `squad update` to a new release, `squad status` still shows the same preset and the
   rendered models match it.
-- Two projects run the same harness at once on different presets, and `git status` in both
-  shows nothing from Squad.
+- On macOS and on Windows without admin rights, two projects run the same harness at once on
+  different presets. `git status` in both shows nothing from Squad, both sessions see the main
+  home's settings and history, and a release update does not ask for a new sign-in.
 
 ## Open questions
 
-1. Slice 2 mechanism. Recommended for design: render each preset into its own harness home
-   under `~/.kyber-weave/` and start the harness with its home-folder variable pointing
-   there. Squad already honours that variable for 9 of the 12 agent harnesses (`claude`,
-   `codex`, `cursor`, `copilot`, `opencode`, `kilo`, `pi`, `zcode`, `devin`); `antigravity`,
-   `factory` and `commandcode` have none. Design must verify per harness that a preset home
-   can share sign-in, settings and history with the real one (7.3).
-2. How the variable reaches the session: a `kyber-weave` launcher, a shell hook, or both.
+None. The per-harness unknowns are spikes, listed in the [design](design.md).
