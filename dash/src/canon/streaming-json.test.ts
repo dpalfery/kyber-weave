@@ -132,6 +132,39 @@ describe('bounded streaming JSON column reader', () => {
     }
   })
 
+  it('rejects trailing commas while still decoding empty containers exactly', async () => {
+    for (const json of ['{"a":1,}', '[1,]', '{"a":{"b":[1,2,]},}', '{"a":1,"b":2,}']) {
+      const reader = new StreamingJsonReader(chunkReader(Buffer.from(json, 'utf8'), 'text'))
+      try {
+        let failure: unknown
+        try {
+          await pumpToEof(reader, () => {})
+        } catch (error: unknown) {
+          failure = error
+        }
+        expect(failure, json).toMatchObject({ code: 'corrupt_column' })
+      } finally {
+        reader.dispose()
+      }
+    }
+    // WHY no event count for the empty containers: `{}` and `[]` decode
+    // successfully while emitting zero events, so reaching EOF without a
+    // `corrupt_column` failure is the exactness proof here.
+    for (const json of ['{}', '[]', '{"a":1}', '[1]', '{"a":{},"b":[]}', '[{"a":[1,{"b":2}]}]']) {
+      const reader = new StreamingJsonReader(chunkReader(Buffer.from(json, 'utf8'), 'text'))
+      try {
+        const events = await pumpToEof(reader, () => {})
+        if (json === '{"a":1}') {
+          expect(events.filter((event) => event.type === 'scalar')).toEqual([
+            expect.objectContaining({ path: ['a'], value: 1 }),
+          ])
+        }
+      } finally {
+        reader.dispose()
+      }
+    }
+  })
+
   it('rejects a non-finite exponent as a corrupt column instead of emitting Infinity', async () => {
     for (const json of ['{"v":1e999}', '{"v":-1e999}', '1e999']) {
       const reader = new StreamingJsonReader(chunkReader(Buffer.from(json, 'utf8'), 'text'))

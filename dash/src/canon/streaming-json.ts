@@ -9,7 +9,7 @@ export type JsonStringEvent =
   | { type: 'scalar'; path: readonly JsonPathSegment[]; value: number | boolean | null }
 export interface StreamingJsonReaderOptions { inputChunkBytes?: number; workByteLimit?: number; workTimeLimitMs?: number }
 export class StreamingJsonError extends Error { constructor(readonly code: 'corrupt_column' | 'cancelled', message: string, options?: { cause?: unknown }) { super(message, options); this.name = 'StreamingJsonError' } }
-type Frame = { path: readonly JsonPathSegment[]; kind: 'root' | 'object' | 'array'; state: string; key?: string; index?: number }
+type Frame = { path: readonly JsonPathSegment[]; kind: 'root' | 'object' | 'array'; state: string; key?: string; index?: number; afterComma: boolean }
 type Role = { key: true; frame: Frame } | { key: false; path: readonly JsonPathSegment[] }
 const numberPattern = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/
 
@@ -20,7 +20,7 @@ export class StreamingJsonReader {
   private readonly workMs: number
   private readonly events: JsonStringEvent[] = []
   private readonly chunks: Uint8Array[] = []
-  private readonly frames: Frame[] = [{ path: [], kind: 'root', state: 'value' }]
+  private readonly frames: Frame[] = [{ path: [], kind: 'root', state: 'value', afterComma: false }]
   private readonly inflater = createInflate({ chunkSize: 16 * 1024 })
   private offset = 0
   private ended = false
@@ -111,19 +111,23 @@ export class StreamingJsonReader {
     if (/\s/.test(c)) return
     const f = this.top()
     if (f.kind === 'object') {
-      if (f.state === 'key') { if (c === '}') { this.frames.pop(); return }; if (c !== '"') throw this.bad('object key must be a string'); this.beginString({ key: true, frame: f }); return }
+      // WHY an after-comma marker instead of dropping the early `}` pop: the
+      // `key` state serves both a fresh container (`{}`) and the position
+      // after a comma (`{"a":1,}`), so only the marker tells a valid empty
+      // object from a trailing comma.
+      if (f.state === 'key') { if (c === '}') { if (f.afterComma) throw this.bad('trailing comma in object'); this.frames.pop(); return }; if (c !== '"') throw this.bad('object key must be a string'); this.beginString({ key: true, frame: f }); return }
       if (f.state === 'colon') { if (c !== ':') throw this.bad('missing object colon'); f.state = 'value'; return }
-      if (f.state === 'comma') { if (c === '}') { this.frames.pop(); return }; if (c !== ',') throw this.bad('object values need commas'); f.state = 'key'; return }
+      if (f.state === 'comma') { if (c === '}') { this.frames.pop(); return }; if (c !== ',') throw this.bad('object values need commas'); f.state = 'key'; f.afterComma = true; return }
     }
-    if (f.kind === 'array') { if (f.state === 'comma') { if (c === ']') { this.frames.pop(); return }; if (c !== ',') throw this.bad('array values need commas'); f.state = 'value' } else if (c === ']') { this.frames.pop(); return } else { this.value(c) }; return }
+    if (f.kind === 'array') { if (f.state === 'comma') { if (c === ']') { this.frames.pop(); return }; if (c !== ',') throw this.bad('array values need commas'); f.state = 'value'; f.afterComma = true } else if (c === ']') { if (f.afterComma) throw this.bad('trailing comma in array'); this.frames.pop(); return } else { this.value(c) }; return }
     if (f.kind === 'root' && f.state === 'done') throw this.bad('content after root value')
     this.value(c)
   }
   private value(c: string): void {
     const path = this.path(); this.started()
     if (c === '"') this.beginString({ key: false, path })
-    else if (c === '{') this.frames.push({ path, kind: 'object', state: 'key' })
-    else if (c === '[') this.frames.push({ path, kind: 'array', state: 'value', index: 0 })
+    else if (c === '{') this.frames.push({ path, kind: 'object', state: 'key', afterComma: false })
+    else if (c === '[') this.frames.push({ path, kind: 'array', state: 'value', index: 0, afterComma: false })
     else if (c === '-' || /[0-9]/.test(c)) { this.mode = 'number'; this.token = c; this.scalarPath = path }
     else if (c === 't' || c === 'f' || c === 'n') { this.mode = 'literal'; this.token = c; this.scalarPath = path }
     else throw this.bad('invalid JSON value')
@@ -199,7 +203,7 @@ export class StreamingJsonReader {
   private number(c: string): void { if (/[0-9eE+.-]/.test(c)) { this.token += c; if (this.token.length > 128) throw this.bad('number too long'); return }; if (!delimiter(c) || !numberPattern.test(this.token)) throw this.bad('invalid JSON number'); const value = Number(this.token); if (!Number.isFinite(value)) throw this.bad('non-finite JSON number'); this.events.push({ type: 'scalar', path: this.scalarPath ?? this.completePath(), value }); this.mode = 'normal'; this.token = ''; this.scalarPath = null; this.normal(c) }
   private literal(c: string): void { if (/[a-z]/.test(c)) { this.token += c; return }; const v = this.token === 'true' ? true : this.token === 'false' ? false : this.token === 'null' ? null : undefined; if (!delimiter(c) || v === undefined) throw this.bad('invalid JSON literal'); this.events.push({ type: 'scalar', path: this.scalarPath ?? this.completePath(), value: v }); this.mode = 'normal'; this.token = ''; this.scalarPath = null; this.normal(c) }
   private path(): readonly JsonPathSegment[] { const f = this.top(); if (f.kind === 'root') return []; if (f.kind === 'array') return [...f.path, f.index!]; if (f.key === undefined) throw this.bad('object missing key'); return [...f.path, f.key] }
-  private started(): void { const f = this.top(); if (f.kind === 'root') f.state = 'done'; else if (f.kind === 'array') { f.index!++; f.state = 'comma' } else { f.key = undefined; f.state = 'comma' } }
+  private started(): void { const f = this.top(); if (f.kind === 'root') f.state = 'done'; else if (f.kind === 'array') { f.index!++; f.state = 'comma'; f.afterComma = false } else { f.key = undefined; f.state = 'comma'; f.afterComma = false } }
   private completePath(): readonly JsonPathSegment[] { const f = this.top(); if (f.kind === 'root') return []; if (f.kind === 'array') return [...f.path, f.index! - 1]; throw this.bad('scalar object path lost') }
   private finish(): void { if (this.mode === 'number') { if (!numberPattern.test(this.token)) throw this.bad('invalid final number'); const value = Number(this.token); if (!Number.isFinite(value)) throw this.bad('non-finite final number'); this.events.push({ type: 'scalar', path: this.scalarPath ?? this.completePath(), value }); this.mode = 'normal' } else if (this.mode === 'literal') { const v = this.token === 'true' ? true : this.token === 'false' ? false : this.token === 'null' ? null : undefined; if (v === undefined) throw this.bad('invalid final literal'); this.events.push({ type: 'scalar', path: this.scalarPath ?? this.completePath(), value: v }); this.mode = 'normal' }; this.scalarPath = null; if (this.mode !== 'normal' || this.frames.length !== 1 || this.top().state !== 'done') throw this.bad('incomplete JSON column') }
   private top(): Frame { const f = this.frames.at(-1); if (f === undefined) throw this.bad('nesting underflow'); return f }
