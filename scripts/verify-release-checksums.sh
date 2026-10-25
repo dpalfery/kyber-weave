@@ -39,13 +39,16 @@ else
     LIST_MODE=0
 fi
 
-# Expected assets: 21 files from six groups.
+# Expected assets: 41 files from seven groups.
 # CLI (5): kyber-weave-<rid>, osx and linux as .tar.gz, win as .zip
 # MCP (5): kyber-weave-mcp-<rid>, same pattern
 # KyberDash (5): kyberdash-<rid>, darwin as .tar.gz, linux as .tar.gz, win as .zip
 # Tray (3): kyberdash-tray-darwin-arm64.zip, darwin-x64.zip, win-x64-setup.exe
 # Squad (2): kyber-squad-<version>.zip, kyber-squad-plugin-<version>.zip
-# SBOM (1): kyber-weave-sbom-<version>.cdx.json
+# Per-artifact SBOMs (20): one <archive-stem>.cdx.json per published archive
+# (issue #417, decision D1; names match artifact_sbom_name in
+# scripts/syft-bootstrap.sh so the manifest and the generator cannot drift apart)
+# Aggregate SBOM (1): kyber-weave-sbom-<version>.cdx.json
 declare -a EXPECTED_ASSETS=(
     "kyber-weave-linux-x64.tar.gz"
     "kyber-weave-linux-arm64.tar.gz"
@@ -67,6 +70,26 @@ declare -a EXPECTED_ASSETS=(
     "kyberdash-tray-win-x64-setup.exe"
     "kyber-squad-${VERSION}.zip"
     "kyber-squad-plugin-${VERSION}.zip"
+    "kyber-weave-linux-x64.cdx.json"
+    "kyber-weave-linux-arm64.cdx.json"
+    "kyber-weave-osx-x64.cdx.json"
+    "kyber-weave-osx-arm64.cdx.json"
+    "kyber-weave-win-x64.cdx.json"
+    "kyber-weave-mcp-linux-x64.cdx.json"
+    "kyber-weave-mcp-linux-arm64.cdx.json"
+    "kyber-weave-mcp-osx-x64.cdx.json"
+    "kyber-weave-mcp-osx-arm64.cdx.json"
+    "kyber-weave-mcp-win-x64.cdx.json"
+    "kyberdash-darwin-arm64.cdx.json"
+    "kyberdash-darwin-x64.cdx.json"
+    "kyberdash-linux-arm64.cdx.json"
+    "kyberdash-linux-x64.cdx.json"
+    "kyberdash-win-x64.cdx.json"
+    "kyberdash-tray-darwin-arm64.cdx.json"
+    "kyberdash-tray-darwin-x64.cdx.json"
+    "kyberdash-tray-win-x64-setup.cdx.json"
+    "kyber-squad-${VERSION}.cdx.json"
+    "kyber-squad-plugin-${VERSION}.cdx.json"
     "kyber-weave-sbom-${VERSION}.cdx.json"
 )
 

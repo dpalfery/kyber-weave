@@ -1055,8 +1055,10 @@ public sealed class ReleaseTests
         // The release job cannot publish what has not been built. The SBOM is in
         // the list because the published asset list contains it, so a release
         // that published without one would fail the post-publish inventory check.
+        // Issue #417: the per-artifact SBOMs and their attestations gate the
+        // release the same way, so the release job waits for both new jobs.
         Assert.Contains(
-            "needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom]",
+            "needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]",
             workflow,
             StringComparison.Ordinal);
     }
@@ -1168,7 +1170,9 @@ public sealed class ReleaseTests
     /// <summary>
     /// The script lists all expected assets when run with --list mode.
     /// The list must include the three tray assets: both darwin variants
-    /// (arm64 and x64) and the Windows setup exe.
+    /// (arm64 and x64) and the Windows setup exe. Issue #417 adds one
+    /// per-artifact SBOM per published archive, so the list carries 41
+    /// names: 20 archives, 20 per-artifact SBOMs, and the aggregate SBOM.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsListModeOutputsAssetNames()
@@ -1195,17 +1199,156 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
 
-        // Must output exactly 21 lines (one per asset).
+        // Must output exactly 41 lines (one per asset).
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(21, lines.Length);
+        Assert.Equal(41, lines.Length);
 
         // The three tray assets must be in the list: both darwin architectures and Windows setup.
         Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
         Assert.Contains("kyberdash-tray-darwin-x64.zip", lines);
         Assert.Contains("kyberdash-tray-win-x64-setup.exe", lines);
 
+        // Issue #417: the per-artifact SBOMs ride in the same list, named
+        // <archive-stem>.cdx.json, with the aggregate keeping its versioned name.
+        Assert.Contains("kyber-weave-linux-x64.cdx.json", lines);
+        Assert.Contains("kyberdash-tray-win-x64-setup.cdx.json", lines);
+        Assert.Contains("kyber-squad-0.1.0.cdx.json", lines);
+        Assert.Contains("kyber-weave-sbom-0.1.0.cdx.json", lines);
+
         // --list mode does not write a manifest.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// Issue #417: --list emits one per-artifact SBOM name per published
+    /// archive, derived by <c>artifact_sbom_name</c> as
+    /// <c>&lt;archive-stem&gt;.cdx.json</c> (strip <c>.tar.gz</c> /
+    /// <c>.zip</c> / <c>.exe</c>, append <c>.cdx.json</c>). The aggregate
+    /// SBOM keeps its versioned name. A release whose manifest lacks a
+    /// per-artifact SBOM must fail verification the same way a missing
+    /// archive does.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsListModeEmitsEveryPerArtifactSbomName()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(41, lines.Length);
+
+        string[] perArtifactSboms =
+        [
+            "kyber-weave-linux-x64.cdx.json",
+            "kyber-weave-linux-arm64.cdx.json",
+            "kyber-weave-osx-x64.cdx.json",
+            "kyber-weave-osx-arm64.cdx.json",
+            "kyber-weave-win-x64.cdx.json",
+            "kyber-weave-mcp-linux-x64.cdx.json",
+            "kyber-weave-mcp-linux-arm64.cdx.json",
+            "kyber-weave-mcp-osx-x64.cdx.json",
+            "kyber-weave-mcp-osx-arm64.cdx.json",
+            "kyber-weave-mcp-win-x64.cdx.json",
+            "kyberdash-darwin-arm64.cdx.json",
+            "kyberdash-darwin-x64.cdx.json",
+            "kyberdash-linux-arm64.cdx.json",
+            "kyberdash-linux-x64.cdx.json",
+            "kyberdash-win-x64.cdx.json",
+            "kyberdash-tray-darwin-arm64.cdx.json",
+            "kyberdash-tray-darwin-x64.cdx.json",
+            "kyberdash-tray-win-x64-setup.cdx.json",
+            "kyber-squad-0.1.0.cdx.json",
+            "kyber-squad-plugin-0.1.0.cdx.json"
+        ];
+        Assert.Equal(20, perArtifactSboms.Length);
+        foreach (string sbom in perArtifactSboms)
+        {
+            Assert.Contains(sbom, lines);
+        }
+    }
+
+    /// <summary>
+    /// Issue #417: the per-artifact SBOM name mapping lives in one shared
+    /// shell function so the generator and the checksum manifest cannot
+    /// drift apart. The function strips the archive suffix and appends
+    /// <c>.cdx.json</c>; this pins its existence, not its host file, so the
+    /// extraction into a shared bootstrap does not break the pin.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsDefinesTheArtifactSbomNameMapping()
+    {
+        string scriptsDir = Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts");
+        string[] candidates =
+        [
+            Path.Combine(scriptsDir, "verify-release-checksums.sh"),
+            Path.Combine(scriptsDir, "syft-bootstrap.sh"),
+            Path.Combine(scriptsDir, "generate-artifact-sboms.sh")
+        ];
+
+        bool defined = false;
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(candidate)
+                && File.ReadAllText(candidate).Contains("artifact_sbom_name", StringComparison.Ordinal))
+            {
+                defined = true;
+                break;
+            }
+        }
+
+        Assert.True(defined, "no script defines artifact_sbom_name; the generator and the checksum manifest share no mapping.");
+    }
+
+    /// <summary>
+    /// Issue #417: the release pipeline generates one SBOM per published
+    /// archive and attests each one. The <c>artifact-sboms</c> job runs the
+    /// per-artifact generator, the <c>attest-sbom</c> job attests the SBOMs,
+    /// and the <c>release</c> job waits for both before publishing anything.
+    /// </summary>
+    [Fact]
+    public void ReleaseWorkflowGeneratesPerArtifactSbomsAndAttestsThemBeforeRelease()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        int artifactSboms = workflow.IndexOf("  artifact-sboms:", StringComparison.Ordinal);
+        Assert.True(artifactSboms >= 0, "release.yml has no artifact-sboms job.");
+        Assert.Contains(
+            "scripts/generate-artifact-sboms.sh",
+            workflow[artifactSboms..],
+            StringComparison.Ordinal);
+
+        int attest = workflow.IndexOf("  attest-sbom:", StringComparison.Ordinal);
+        Assert.True(attest >= 0, "release.yml has no attest-sbom job.");
+        Assert.True(attest > artifactSboms, "the attest-sbom job must come after the artifact-sboms job.");
+
+        int releaseJob = workflow.IndexOf("  release:", StringComparison.Ordinal);
+        Assert.True(releaseJob > attest, "the release job must come after the attest-sbom job.");
+
+        string releaseJobText = workflow[releaseJob..];
+        int needs = releaseJobText.IndexOf("needs:", StringComparison.Ordinal);
+        Assert.True(needs >= 0, "the release job has no needs:.");
+        string needsLine = releaseJobText[needs..];
+        Assert.Contains("artifact-sboms", needsLine, StringComparison.Ordinal);
+        Assert.Contains("attest-sbom", needsLine, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1257,7 +1400,11 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Helper array of all 21 expected release assets for fixture tests.
+    /// Helper array of all 41 expected release assets for fixture tests:
+    /// 20 published archives, one per-artifact SBOM per archive derived by
+    /// artifact_sbom_name as &lt;archive-stem&gt;.cdx.json, and the aggregate
+    /// SBOM. Issue #417 adds the 20 per-artifact names; the aggregate keeps
+    /// its versioned name.
     /// </summary>
     private static readonly string[] ReleaseAssets =
     [
@@ -1281,11 +1428,31 @@ public sealed class ReleaseTests
         "kyberdash-tray-win-x64-setup.exe",
         "kyber-squad-{0}.zip",
         "kyber-squad-plugin-{0}.zip",
+        "kyber-weave-linux-x64.cdx.json",
+        "kyber-weave-linux-arm64.cdx.json",
+        "kyber-weave-osx-x64.cdx.json",
+        "kyber-weave-osx-arm64.cdx.json",
+        "kyber-weave-win-x64.cdx.json",
+        "kyber-weave-mcp-linux-x64.cdx.json",
+        "kyber-weave-mcp-linux-arm64.cdx.json",
+        "kyber-weave-mcp-osx-x64.cdx.json",
+        "kyber-weave-mcp-osx-arm64.cdx.json",
+        "kyber-weave-mcp-win-x64.cdx.json",
+        "kyberdash-darwin-arm64.cdx.json",
+        "kyberdash-darwin-x64.cdx.json",
+        "kyberdash-linux-arm64.cdx.json",
+        "kyberdash-linux-x64.cdx.json",
+        "kyberdash-win-x64.cdx.json",
+        "kyberdash-tray-darwin-arm64.cdx.json",
+        "kyberdash-tray-darwin-x64.cdx.json",
+        "kyberdash-tray-win-x64-setup.cdx.json",
+        "kyber-squad-{0}.cdx.json",
+        "kyber-squad-plugin-{0}.cdx.json",
         "kyber-weave-sbom-{0}.cdx.json"
     ];
 
     /// <summary>
-    /// The complete fixture with all 21 expected assets present and no extras.
+    /// The complete fixture with all 41 expected assets present and no extras.
     /// The script must exit 0 and create a valid SHA256SUMS.txt.
     /// </summary>
     [Fact]
@@ -1296,7 +1463,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 21 expected assets.
+        // Create all 41 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1320,10 +1487,10 @@ public sealed class ReleaseTests
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
 
-        // The manifest must have 21 lines (one per asset).
+        // The manifest must have 41 lines (one per asset).
         string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
         string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(21, manifestLines.Length);
+        Assert.Equal(41, manifestLines.Length);
 
         // Each line must match the format: 64 hex characters, two spaces, filename.
         foreach (string line in manifestLines)
@@ -1479,7 +1646,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 21 expected assets.
+        // Create all 41 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1532,7 +1699,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 21 expected assets.
+        // Create all 41 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1562,7 +1729,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Against an empty asset directory the script exits non-zero, reports all 21
+    /// Against an empty asset directory the script exits non-zero, reports all 41
     /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
     /// and does not print "unbound variable". The last assertion guards the
     /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
@@ -1596,14 +1763,15 @@ public sealed class ReleaseTests
         // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
         Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
 
-        // Stderr must report all 21 missing assets.
+        // Stderr must report all 41 missing assets.
         int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
-        Assert.Equal(21, missingCount);
+        Assert.Equal(41, missingCount);
 
         // Must name the first and last expected assets.
         Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("kyber-squad-plugin-" + version + ".zip", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-sbom-" + version + ".cdx.json", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-linux-x64.cdx.json", result.StandardError, StringComparison.Ordinal);
 
         // Must not write a manifest when all assets are missing.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
