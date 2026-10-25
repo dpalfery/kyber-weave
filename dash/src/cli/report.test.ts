@@ -126,12 +126,13 @@ describe('kyberdash report exit codes (R11.12)', () => {
     expect(res.stderr).toMatch(/Did you mean "claude-/)
   })
 
-  it('exits 1 when the store is missing, naming the path', async () => {
+  it('exits 1 when the store is missing, naming the path and the build command', async () => {
     const home = await makeHome()
     const db = join(home, 'missing', 'canon.db')
     const res = runCli(['report', '--db', db], home)
     expect(res.status, res.stderr).toBe(1)
     expect(res.stderr).toContain(db)
+    expect(res.stderr).toContain('kyberdash dash refresh')
   })
 
   it('exits 1 when the store cannot be read', async () => {
