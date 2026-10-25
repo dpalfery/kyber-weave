@@ -16,6 +16,26 @@ import { isFiniteNumber, isRecord, type AnalyticsSource, type ExecutionOptions, 
 const MAX_MANIFEST_ROWS = 100
 const DEFAULT_MANIFEST_ROWS = 25
 
+// WHY engine-side allowlists: the MCP schema already rejects stray keys, but
+// HTTP callers reach this seam directly, and the frozen complete-context
+// contract answers unknown fields with `invalid_request` — silently dropping
+// them would accept a request the caller never meant. `scope` rides every
+// form because the shared service parses it before dispatching here.
+const CAPTURED_KEYS = new Set(['mode', 'target', 'representation', 'cursor', 'limit', 'byteLimit', 'scope'])
+const LEGACY_TURN_KEYS = new Set(['kind', 'includeContent', 'sessionId', 'turnIndex', 'blockId', 'byteLimit', 'cursor', 'scope'])
+const LEGACY_SESSION_KEYS = new Set(['kind', 'id', 'scope'])
+
+function unknownKey(raw: Record<string, unknown>, allowed: Set<string>): string | null {
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) return key
+  }
+  return null
+}
+
+function invalidRequest(message: string, hint: string): InspectResult {
+  return { ok: false, error: { code: 'invalid_request', message, hint } }
+}
+
 function capturedRequest(raw: Record<string, unknown>): Record<string, unknown> | null {
   if (raw.mode !== 'manifest' && raw.mode !== 'content') return null
   const target = isRecord(raw.target)
@@ -56,6 +76,16 @@ export async function executeInspect(
   raw: Record<string, unknown>,
   options?: ExecutionOptions,
 ): Promise<InspectResult> {
+  if (raw.mode !== undefined || raw.target !== undefined) {
+    const stray = unknownKey(raw, CAPTURED_KEYS)
+    if (stray !== null) return invalidRequest(`Inspection does not recognize the field '${stray}'.`, 'Send only mode, target, representation, cursor, limit and byteLimit.')
+  } else if (raw.kind === 'turn') {
+    const stray = unknownKey(raw, LEGACY_TURN_KEYS)
+    if (stray !== null) return invalidRequest(`Turn inspection does not recognize the field '${stray}'.`, 'Send only kind, includeContent, sessionId, turnIndex, blockId, byteLimit and cursor.')
+  } else if (raw.kind === 'session') {
+    const stray = unknownKey(raw, LEGACY_SESSION_KEYS)
+    if (stray !== null) return invalidRequest(`Session inspection does not recognize the field '${stray}'.`, 'Send only kind and id.')
+  }
   const captured = capturedRequest(raw)
   if (captured !== null) {
     if (source.readCapturedContext === undefined) {
@@ -84,12 +114,20 @@ export async function executeInspect(
       },
     }
   }
-  if (raw.kind === 'turn' && raw.includeContent === true && typeof raw.sessionId === 'string' && Number.isInteger(raw.turnIndex) && typeof raw.blockId === 'string') {
+  // WHY seam validation mirrors the captured form: a negative index or an
+  // out-of-budget byte limit is a malformed request (`invalid_request`), not
+  // a missing block. The bridge answers both with `undefined`, which reads
+  // as `content_unavailable` below — without this check the caller cannot
+  // tell a typo from an absent turn.
+  if (raw.kind === 'turn') {
+    if (raw.includeContent !== true || typeof raw.sessionId !== 'string' || !Number.isSafeInteger(raw.turnIndex) || (raw.turnIndex as number) < 0 || typeof raw.blockId !== 'string' || (raw.byteLimit !== undefined && (!Number.isSafeInteger(raw.byteLimit) || (raw.byteLimit as number) < 1 || (raw.byteLimit as number) > MAX_CONTENT_BYTES))) {
+      return invalidRequest('Turn inspection needs a session, a nonnegative turn index, a block and a byte limit within budget.', 'Specify sessionId, turnIndex, blockId and a byteLimit between 1 and 16384.')
+    }
     const page = await source.readTurnPage({
       sessionId: raw.sessionId,
       turnIndex: raw.turnIndex as number,
       blockId: raw.blockId,
-      byteLimit: Math.min(isFiniteNumber(raw.byteLimit) ? raw.byteLimit : MAX_CONTENT_BYTES, MAX_CONTENT_BYTES),
+      byteLimit: raw.byteLimit === undefined ? MAX_CONTENT_BYTES : raw.byteLimit as number,
       ...(typeof raw.cursor === 'string' ? { cursor: raw.cursor } : {}),
     })
     if (isRecord(page)?.kind === 'stale_cursor') {
@@ -112,7 +150,10 @@ export async function executeInspect(
     // Detail inspection is intentionally metadata-only. Content has a separate,
     // caller-selected turn/block read so a session inspection cannot accidentally
     // disclose an entire transcript.
-    const safeDetail = isRecord(detail)
+    // WHY a copy before stripping: the source owns the object it returned — a
+    // cached or shared detail would lose its turns for every later reader.
+    const record = isRecord(detail)
+    const safeDetail = record === null ? null : { ...record }
     if (safeDetail !== null) {
       delete safeDetail.turns
       delete safeDetail.content
