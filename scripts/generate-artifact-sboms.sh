@@ -461,7 +461,7 @@ if errors:
     # wrong bytes. The validator path already removes; the errors path must too.
     try:
         os.unlink(out_path)
-    except OSError:
+    except FileNotFoundError:
         pass
     print("")
     for message in errors:
