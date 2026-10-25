@@ -10,7 +10,7 @@ component: KyberSquad
 
 # Implementation Tasks
 
-**Phase status:** Draft
+**Phase status:** Approved (dpalfery, 2026-10-24), test contract included
 **Development mode:** test-first
 
 This builds the approved [requirements](requirements.md) and [design](design.md). Where a task
