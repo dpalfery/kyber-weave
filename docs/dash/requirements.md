@@ -111,10 +111,12 @@ adapter; direct-SQL analytics and engine auto-start rejected):
   a reused, tampered, cross-target, or post-purge cursor answers `stale_cursor`;
   capacity answers `budget_exceeded`; cancellation answers `cancelled`. Canonical
   content older than 14 days reads as absent or expired — retrieval never recaptures
-  or manufactures absent text — and raw packets outlive assembled turn text until a
-  harness wipe. The historical `includeContent: true` turn/block form and the
-  metadata-only session inspection remain as retained legacy forms, not the way to
-  retrieve context.
+or manufactures absent text — and raw packets outlive assembled turn text until a
+harness wipe. The historical `includeContent: true` turn/block form and the
+metadata-only session inspection remain as retained legacy forms, not the way to
+retrieve context. A field outside the recognized set for its form — the manifest/content
+form or either legacy form — answers `invalid_request`; unknown fields are never
+silently dropped.
 - **KD-011, KD-015, KD-018** are the lifecycle contract. The adapter holds no
   scheduler, job, receiver, or projection of its own; it attaches to the one local
   engine, never launches or stops it, never triggers migration or reprojection, and
