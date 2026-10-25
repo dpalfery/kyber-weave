@@ -30,9 +30,27 @@ export async function executeCompare(
   if (Array.isArray(raw.scopes)) {
     return compareScopes(source, scope, raw.scopes)
   }
-  const runs = await source.readRuns(scope)
   const ids = Array.isArray(raw.runIds) ? raw.runIds.filter((id): id is string => typeof id === 'string') : []
-  const selected = ids.length === 0 ? runs : runs.filter((run) => ids.includes(String(run.id ?? run.runId)))
+  // WHY no default pair: the run-compare design keeps the selected pair
+  // manual-only (issue #190) — an empty or miscounted request fails loudly
+  // before any canonical read, never silently comparing the newest runs.
+  if (ids.length !== 2) {
+    return { ok: false, error: { code: 'invalid_request', message: 'A run comparison needs exactly two run ids.', hint: 'Send two run ids from the run inventory.' } }
+  }
+  const runs = await source.readRuns(scope)
+  const selected = runs.filter((run) => ids.includes(String(run.id ?? run.runId)))
+  if (selected.length !== 2) {
+    const known = new Set(runs.map((run) => String(run.id ?? run.runId)))
+    const missing = ids.filter((id) => !known.has(id))
+    return {
+      ok: false,
+      error: {
+        code: 'not_found',
+        message: missing.length > 0 ? `The requested runs were not found: ${missing.join(', ')}.` : 'The run comparison needs two distinct known runs.',
+        hint: 'Use the run inventory to discover run identifiers.',
+      },
+    }
+  }
   const before = selected[0]?.inputTokens
   const after = selected[1]?.inputTokens
   return {

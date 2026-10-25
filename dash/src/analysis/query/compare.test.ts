@@ -31,4 +31,38 @@ describe('like-for-like comparisons', () => {
     expect(dataOf(result).deltas.input_tokens).toMatchObject({ relative: null, reason: expect.any(String) })
     expect(JSON.stringify(dataOf(result)).toLowerCase()).not.toContain('caused')
   })
+
+  it('requires exactly two run ids instead of defaulting to the first runs found', async () => {
+    // WHY no default pair: the run-compare design keeps the selected pair
+    // manual-only (issue #190) — an empty or misspelled request must fail
+    // loudly, never silently compare whatever the store listed first.
+    for (const request of [{}, { runIds: [] }, { runIds: ['only-one'] }, { runIds: ['a', 'b', 'c'] }]) {
+      const source = makeAnalyticsSource({
+        readRuns: async () => [
+          { id: 'before', inputTokens: 10 },
+          { id: 'after', inputTokens: 12 },
+        ],
+      })
+      const result = await makeService(source).execute('compare', request)
+
+      expect(result.error, JSON.stringify(request)).toMatchObject({ code: 'invalid_request' })
+      expect(source.readRuns).not.toHaveBeenCalled()
+    }
+  })
+
+  it('answers not_found for a run id the inventory does not resolve', async () => {
+    const source = makeAnalyticsSource({
+      readRuns: async () => [
+        { id: 'before', inputTokens: 10 },
+        { id: 'after', inputTokens: 12 },
+      ],
+    })
+    const result = await makeService(source).execute('compare', {
+      runIds: ['before', 'misspelled'],
+      metrics: ['input_tokens'],
+    })
+
+    expect(result.error).toMatchObject({ code: 'not_found' })
+    expect(JSON.stringify(result.error)).toContain('misspelled')
+  })
 })
