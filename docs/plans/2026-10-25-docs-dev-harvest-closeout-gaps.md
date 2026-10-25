@@ -1,6 +1,6 @@
 ---
 id: plans/2026-10-25-docs-dev-harvest-closeout-gaps
-title: "Make docs-dev closeout a design harvest: routing, impact declaration, spec parity, merge-ready closeout gate, three backfills"
+title: "docs-dev design harvest: authoring scale, closeout contract, every-change docs review, change-scoped merge gate, Kyber-Docs skill renames, three backfills"
 doc-type: plan
 status: draft
 component: KyberSquad
@@ -8,612 +8,653 @@ owner: dpalfery
 last-reviewed: 2026-10-25
 development-mode: test-first
 documentation-impact: extends-component
-impact-components: [DocGraph, KyberSquad]
+impact-components: [DocGraph, KyberSquad, CI Pipelines, ContextHygiene, Distribution]
 ---
 
-# Make docs-dev closeout a design harvest
+# docs-dev design harvest
 
-**Status: Draft — decision-complete (D1–D25, Q1–Q3 all ANSWERED), awaiting the owner's
-approve-and-execute, where the owner also confirms the documentation-impact scales (D23,
-D24). Scope was revised 2026-10-25 at the owner's direction: closeout harvests the whole
-design (architecture, feature set, interfaces, operations, decisions), not just decisions.
-Q1–Q3 are orchestrator technical calls the owner may override at that gate. The conductor
-re-runs `docs validate .` / `docs drift .` after this revision.**
+**Status: Draft — decision-complete, awaiting the owner's approve-and-execute. Rewritten
+2026-10-25 from the owner's alignment record (G1–G19); Q4 was answered by the owner
+2026-10-25. At approve-and-execute the owner also confirms the documentation-impact scales
+(D23, D24). The conductor re-runs `docs validate` and `docs drift` after this edit.**
 
-**Development mode:** `test-first` (packet). **Autonomy:** `supervised` (packet; overrides the
-Config Reg `<autonomy>` default for this run).
+**Development mode:** `test-first`. **Autonomy:** `supervised` (packet).
 
-**Documentation impact (proposed, owner confirms at approve-and-execute):**
-`extends-component` for `DocGraph` (the new gate) and `KyberSquad` (the agent lifecycle
-contract). See `## Design harvest`.
-
-**Working copy:** worktree `.claude/worktrees/harvest-gaps`, branch `docs/harvest-closeout-gaps`,
-cut from `origin/main` `a0862e7c`. Paths below are relative to that worktree.
+**Working copy:** worktree `.claude/worktrees/harvest-gaps`, branch `docs/harvest-closeout-gaps`
+(last commit `f0368f0d`, cut from `origin/main` `a0862e7c`). Paths are relative to the worktree.
+Literal paths in this plan describe **this** repository. The portable agent and skill text this
+plan changes must not contain them (G4).
 
 ## Problem and goal
 
 ### Problem
 
-The owner's intent for `docs-dev`: harvest **all** design and architecture from a plan or
-spec into canonical docs under `docs/`, not just its decisions. When a plan or spec builds a
-feature, the component's architecture docs must describe the new design and feature set. A
-major new feature can warrant a whole new docs folder (architecture, onboarding), following
-the ontology.
+Kyber-Weave is a meta-harness: this repository's ontology, configuration and catalog are one
+host's setup, and every host has its own. `docs-dev` exists to harvest a plan's or spec's
+**design** — architecture, behaviour and feature set, interfaces, operations, decisions — into
+the host's canonical documentation, routed by the host's own document identities.
 
-Today the contract is narrower than that, and even the narrow version slips:
+Today it falls short in four ways:
 
-1. **Closeouts are skipped** (D3). Three plans archived 2026-10-22..24 never got a real
-   closeout and still carry `status: draft` with a body status of `Ready`:
-   - `docs/archive/plans/2026-10-22-opencode-span-turn-hooks-kyberdash.md` (PR #423). Its §11
-     recorded the architecture harvest as `RESIDUAL` with no todo, and it was archived anyway.
-   - `docs/archive/plans/2026-10-23-opencode-context-capture-kyberdash.md` (PR #425). Moved
-     into the archive unchanged (commit `8beb97ae`, git R100) to satisfy `KW-DOC-LIFECYCLE-003`.
-   - `docs/archive/plans/2026-10-23-pi-renderer-network-read-mcp.md` (PR #426). Added straight
-     into the archive (commit `6dd4ce3f`) while its body said Ready.
+1. **Closeouts are skipped** (D3). Three plans were archived 2026-10-22..24 without a real
+   closeout, and each still carries `status: draft` with a body status of `Ready`:
+   - #423, `docs/archive/plans/2026-10-22-opencode-span-turn-hooks-kyberdash.md`: its closeout
+     admitted a `RESIDUAL` and archived anyway.
+   - #425, `…/2026-10-23-opencode-context-capture-kyberdash.md`: moved as an unchanged
+     rename (`8beb97ae`, R100) "to satisfy KW-DOC-LIFECYCLE-003".
+   - #426, `…/2026-10-23-pi-renderer-network-read-mcp.md`: added straight into the archive
+     while its body said Ready (`6dd4ce3f`, merged as `0351a45c` on 2026-10-24).
 2. **Nothing mechanical catches it.** `KW-DOC-LIFECYCLE-003` only checks that no plan or spec
-   is left in the active folder, so a bare move into the archive passes CI.
-3. **The contract is about decisions, not design.** Plan closeout maps decision IDs. Nothing
-   asks what scale of documentation change the work implies, which design sections must land
-   where, or whether the component's architecture doc was updated. The spec path does not
-   even have the decision mapping.
+   is still open.
+3. **The contract is decisions-only and plans-only.** Nothing declares the documentation scale
+   of a change. Specs have no decision mapping. Changes made without a plan (bug fixes, todos,
+   chat requests) get no documentation review at all.
+4. **Kyber-Docs skill naming and placement are inconsistent.** The authoring skill is called
+   `kyber-weave-docs`. The documentation-architecture skill (`second-brain`) ships with
+   Kyber-Squad, not Kyber-Docs, and it has no way to assess legacy plans for unharvested
+   design.
 
 ### Goal
 
-- **A — Routing and framing.** `docs-dev`'s description and Scope lead with plan/spec
-  closeout as a **design harvest**: design, architecture, feature set, interfaces and config,
-  operations, and decisions. It still routes READMEs, ADRs and runbooks, and keeps the
-  spec-authoring exclusion.
-- **B — Declare the impact up front; spec parity.** At authoring time, the architect
-  (plans) and product-owner (spec design phase) declare:
-  - a documentation impact: `new-component`, `extends-component` or `no-design-change`;
-  - the impact components;
-  - a `## Design harvest` list naming which design sections go to which canonical docs.
+| Item | Goal | Owner decisions |
+|---|---|---|
+| A — Routing | `docs-dev` leads with closeout as a design harvest, plus the every-change documentation review. It routes by host document identity (doc type + catalog component), never by folder. | G1–G7 |
+| B — Authoring | Plans and specs declare a scale and impact components, plus a Design harvest list that targets component + doc type. The owner confirms at approve-and-execute. Spec parity with plans. | G8, G9 |
+| C — Every-change review | The conductor and bug-crusher send every file-changing run to `docs-dev`. With no plan, the conductor writes a run record. The outcome goes in the PR description. | G10–G13 |
+| D — Gate | `KW-DOC-LIFECYCLE-004`, always on under `--merge-ready`. It checks only the plans and specs each change archives (git diff against the base). It is host-agnostic: no folder or doc-type rules. | G14–G16 |
+| E — Kyber-Docs skills | Rename `kyber-weave-docs` and `doc-corpus-integrity-review`. Move and rename `second-brain` into Kyber-Docs, with an owner-started assessment-and-remediation mode. Warn about stale installed copies. | G17–G19 |
+| F — Backfill | The three skipped plans get real design-harvest closeouts. | Kept |
 
-  The owner confirms the scale at approve-and-execute. Specs get the permanent Decisions
-  table, and both plans and specs get the same closeout rules: scale obligations, a mapping
-  of every design item and decision ID, ADR waiver vs documentation waiver, and "do not
-  archive" when anything is unmapped. The intent-alignment lens and the conductor check
-  specs as well as plans.
-- **C — Gate.** A new rule, `KW-DOC-LIFECYCLE-004`, enforces mechanically under
-  `--merge-ready`:
-  - archive status and no live body status;
-  - impact declared;
-  - every decision and design-harvest item mapped to an existing destination;
-  - the component's architecture doc mapped (and fresh, per Q3);
-  - for `new-component`, the catalog row and the component's architecture and onboarding docs;
-  - untracked `RESIDUAL` rejected.
-
-  The judgement parts stay with the intent-alignment lens (D22). Test-first.
-- **D — Backfill.** The three plans get their design and decisions mapped, with any missing
-  design written into canonical docs. Their history is annotated, not rewritten.
+Q2 is unchanged: delivery requires the `docs-dev` closeout digest.
 
 ## Decisions
 
-Permanent table; preserved intact across all lifecycle transitions (Draft → Ready → execution
-→ closeout → archive). D5 and D10 were revised in place on 2026-10-25 for the owner's scope
-change; D19–D25 and Q3 were added then.
+Permanent table, preserved intact across every lifecycle transition.
+
+- **G1–G19:** owner decisions from the 2026-10-25 alignment session.
+- **D-rows:** architect decisions. Rows overtaken by the alignment are kept and marked
+  SUPERSEDED, not deleted.
+- **Old Q1 and Q3:** superseded. Q2 stands. Q4 was answered by the owner.
+- **Numbering:** the "(Qn)" in a G-row's provenance is the alignment session's own question
+  number, not one of this plan's Q-ids.
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
-| D1 | Development mode? | `test-first`. | Packet sets it; no opt-out supplied. | ANSWERED — per packet 2026-10-25 |
-| D2 | Autonomy for this run? | `supervised`. | Packet sets it; the Config Reg default (`autonomous`) does not apply. | ANSWERED — per packet 2026-10-25 |
-| D3 | What is the root cause? | Closeouts were **skipped**, not done badly. There are three real failure shapes. (1) An unchanged move into the archive: #425, `8beb97ae`, R100, done "to satisfy KW-DOC-LIFECYCLE-003". (2) Added straight into the archive while Ready: #426, `6dd4ce3f`. (3) The closeout ran, recorded `RESIDUAL`, and the plan was archived anyway: #423. Item C is the primary fix. | Git evidence relayed by the conductor. The archived files corroborate every shape: all three carry `status: draft` and a body `**Status: Ready`; #423 §11 has two `RESIDUAL` rows; #425 §8 and #426 §11 are forecasts. | ANSWERED — conductor-relayed evidence 2026-10-25; file state verified in worktree |
-| D4 | New rule id, or extend 003? | New id **`KW-DOC-LIFECYCLE-004`**, new class `ArchiveCloseoutValidator`. 003 is unchanged. | Rule ids are permanent: suppressions and SARIF baselines key on them, and 003 means "still in the active folder". `OpenWorkValidatorTests.ArchivedPlansAndSpecificationsAreClosed` stays true. `004` is unused anywhere. | ANSWERED — architect technical call |
-| D5 | What counts as closeout evidence? (revised 2026-10-25) | Conditions C1–C11 in "Gate contract". C1–C6 cover archive status, no live body status, a Decisions table, a Closeout mapping table, mapping, and residuals. C7–C11 cover the declared impact, the Design harvest list, the component architecture link, `new-component` completeness, and freshness (Q3). One finding per entry names every failed condition and gives a hint. | Built from the three real shapes (D3) plus the owner's design-harvest scope. A loose "any heading containing Closeout" match was rejected, because #425's forecast §8 would satisfy it. `ADR waiver` alone maps nothing; this enforces the existing policy line "No ADR is NOT a documentation waiver". | ANSWERED — architect technical call; scope per owner direction relayed 2026-10-25 |
-| D6 | When does 004 run? | Only under `docs validate --merge-ready`, beside 003. | Matches 003. The `docs-validate` gate in `review gates` stays without `--merge-ready`, because an active plan is legitimate on a branch. The post-closeout run (T14) and Q2 cover the after-review window. | ANSWERED — architect technical call (low risk) |
-| D7 | Frontmatter status for archived documents | Accept `archived`, `complete` or `superseded` (case-insensitive). New closeouts write `status: archived` and a first body line `**Status: Archived <date> — …**`. The ontology's closed status vocabulary is **not** widened. | The loader excludes the `archive` segment (`OntologyConfig.cs:43-44`; `DocumentLoader.cs:65`), so archived documents are never schema-validated. That is why `archived`, `complete`, `completed` and `Archived` all occur today. | ANSWERED — architect technical call |
-| D8 | Where do a spec's impact, design harvest and mapping live? | In the spec's `design.md`. Its frontmatter carries `documentation-impact` and `impact-components`; its body has `## Decisions`, `## Design harvest` and, at closeout, `## Closeout mapping`. Every document in the archived spec folder carries the archive status. | `design.md` exists in both spec layouts (this repo's folder-with-README layout and the host three-file layout). The harvest list and the mapping sit beside the design they cover. | ANSWERED — architect technical call |
-| D9 | How does the validator read the archive? | Through the existing `DocumentLoader` parsing and the `DocsRootPath.EnumerateContainedFiles` symlink-safe walk, over `<docs-root>/archive/plans/` and `<docs-root>/archive/specs/` only. It also receives the live `DocumentSet` for the catalog and component checks. `EntryBelow` moves from `OpenWorkValidator` into `InventoryReachability` so both share it. | There is no second frontmatter parser. The default loader cannot be reused unchanged because it excludes the archive. `DocumentSet.Components` is already the parsed catalog vocabulary. | ANSWERED — architect technical call |
-| D10 | `docs-dev` description wording (revised 2026-10-25) | Closeout and design harvest lead. Working text: "Closes out finished plans and specs: harvests their design, architecture, features and decisions into canonical docs (a new docs folder for a new component), then archives them. Also writes READMEs, API docs, ADRs, runbooks, and inline docs in Markdown/Mermaid. Use when a plan or spec needs its docs-dev closeout, or when the deliverable is a .md file. Do not use when the deliverable is a formal requirements/design/tasks spec to author (product-owner) rather than reference documentation or a closeout." The worker may refine it with the `writing-trigger-descriptions` skill but must keep the T4 pins. | The `DescriptionScorer` rubric gives it at least 95/100: trigger 35, negative boundary 20, opening 15, keywords 15, length 10–15 (about 500 chars). It passes `KW-AGENT-LINT-002` and is above the `KW-AGENT-LINT-001` floor of 50. The exclusion names spec **authoring**, so spec **closeout** routes to `docs-dev`. | ANSWERED — architect technical call |
-| D11 | Move `docs-dev` off `model-profile: fast`? | **Not pursued.** It stays `fast`. | The evidence (D3) shows skipped closeouts, not weak ones; a bigger model does not fix skipping. The owner agrees. | ANSWERED — out of scope; owner position relayed by conductor 2026-10-25 |
-| D12 | `docs/dash/architecture.md:359` links `../todo/kyberdash-opencode-plugin-live-verification.md`, which does not exist | Remove the dangling link. State the owner live gate as open and `[NOT LIVE-VERIFIED]`. Do not recreate the todo. | The #423 index row records that the owner-directed opencode todos were removed. Root `AGENTS.md` allows a todo only when the user accepts one. | ANSWERED — architect technical call |
-| D13 | How do the backfills change archived history? | Annotate; do not rewrite. **Keep:** each Decisions table and every original section; the original status paragraph, unchanged, under the label "Pre-closeout status (preserved as history)". **Add:** the impact frontmatter keys; a new first body line `**Status: Archived <date> — closeout backfilled by plan 2026-10-25-docs-dev-harvest-closeout-gaps**`; a retroactive `## Design harvest` marked "(backfilled <date>)"; `## Completion summary`; `## Closeout mapping`. **Correct:** false index claims are marked corrected, as the #192 correction did. | Precedent: the #192 false-claim correction in `docs/archive/plans/2026-10-05-harvest-plan-decision-records.md`. 004 reads only the **first** `**Status:` line, so the history stays readable below it. | ANSWERED — architect technical call |
-| D14 | Who edits agent/skill markdown and the migration digest? | `docs-dev` edits `products/kyber-squad/**/*.md` text. `test-dev` re-pins `products/kyber-squad/migration/docs-dev.md` `final-body-sha256`. | `LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest` asserts `final-body-sha256 == agent.BodyDigest`, the SHA-256 of the LF-normalized body. Any `docs-dev.md` body edit turns it RED. `docs-dev` has no process tool; `test-dev` reads the actual value from the failing assertion. | ANSWERED — architect technical call |
-| D15 | Older partial mappings (`2026-10-09-issue-312`, `2026-10-10-kyberdash-claude-code-turn-content`, `2026-10-09-issue-319`) | Out of scope; listed in the baseline (Q1). A follow-up todo only if the owner accepts one. | Packet scope. | ANSWERED — per packet 2026-10-25 |
-| D16 | The in-flight `squad-model-presets` spec | Out of scope. At its own closeout it must meet 004: impact keys and `## Design harvest` in `design.md`, then `## Closeout mapping`. Its `design.md` already has `## Decisions`. | Packet scope. Because the rule is new, its author should add the impact declaration before that spec's approve-and-execute. | ANSWERED — per packet 2026-10-25 |
-| D17 | Which harness copies must change with canonical agent/skill text? | None are committed. At `a0862e7c`, `.github/` holds only `CODEOWNERS`, the PR template and `dependabot.yml`. Renderers project `products/kyber-squad` at `squad install/update`. The only propagated artifact is the migration record (D14). | The `.github/agents` tree that the 2026-10-05 plan edited has since been retired (Hotshot golden retirement, 2026-10-21). | ANSWERED — finding, verified in worktree |
-| D18 | The `product-owner` **skill** description claims "…tasks, or closeout…", although `closeout-phase.md` says `docs-dev` performs closeout | Out of scope; follow-up. | The overlap is skill vs agent, and `closeout-phase.md` redirects to `docs-dev`. | ANSWERED — architect technical call; follow-up only |
-| D19 | Scale vocabulary and where it is declared | Frontmatter on the plan (on a spec, its `design.md`). Required: `documentation-impact`, one of `new-component`, `extends-component` or `no-design-change`. Also `impact-components`, a list of catalog component names; it is required and non-empty for the first two scales. The existing required `component` key is unchanged and independent. For `new-component`, `impact-components` names a component the closeout adds to the catalog, so it is not checked against the catalog while the plan is a draft. | The owner asked for names "as you see fit". Frontmatter is machine-readable, survives archive, and is already tolerated: the shared deserializer uses `IgnoreUnmatchedProperties` (`MarkdownFrontmatterReader.cs:42-46`), which is how `development-mode` already lives there. `DocumentFrontmatter` gains two properties so 004 can read them. A plan's `component` must already be in the catalog (`KW-DOC-SPEC-004`), so it cannot name a component that does not exist yet; hence a separate key. | ANSWERED — architect technical call |
-| D20 | Format of the `## Design harvest` list | A table, `\| ID \| Design item (section) \| Planned canonical destination \|`, with ids `H1…Hn`. **Plans:** one row per design, contract, interface, behaviour or operations section that has a durable effect. **Specs:** one row per `design.md` section and per requirement group. `no-design-change` replaces the table with one line containing `Documentation waiver: <reason>`. At closeout every `H` id is mapped exactly like a decision ID. | Giving each design item a stable id makes "the design was harvested" checkable in the same way as decisions, without the gate having to understand prose. Whether the list is complete stays a review judgement (D22). | ANSWERED — architect technical call |
-| D21 | Who checks the declaration, and when? | **Author:** the architect (`plan-authoring.md`) or product-owner (`design-phase.md`) writes the scale, the impact components and the Design harvest list. **Conductor:** `PLAN_READY` / `SPEC_READY` checks require all three, and the conductor states the scale in the approve-and-execute question, so the owner confirms it there. **Closeout:** `docs-dev` closes out per the scale. **Gate:** 004 enforces it at archive time. There is no draft-time mechanical check. | The owner proposes and confirms; the planner only proposes. A draft-time validator rule would add a second check on active documents in every host for little gain, because 004 and the conductor checklist already cover it. Cheap to add later. | ANSWERED — architect technical call |
-| D22 | Which parts stay review judgement (intent-alignment lens) rather than gate checks? | **Lens judgement:** • whether a mapped section truly describes the shipped design and feature set; • whether the Design harvest list covers every durable design section; • whether the chosen scale is right; • for `extends-component`, whether onboarding, runbook or reference needed updating (behaviour, setup or operations changed) and whether the catalog row needed updating (surface changed); • for `new-component`, whether `requirements.md` is required (application or service); • whether each waiver is valid. **Gate (004):** everything structural and existence-based in C1–C11. | The gate can verify that destinations exist, link the right component's architecture doc, and (per Q3) were reviewed at closeout. It cannot verify meaning. The lens text names each judgement item explicitly (T5). | ANSWERED — architect technical call |
-| D23 | Scale for the three backfilled plans | All three `extends-component`: #423 and #425 → `[KyberDash]`; #426 → `[KyberSquad]`. Known missing design: `docs/kyber-squad/architecture.md` does not describe #426's canonical per-target overlay (`pi-extensions` / `pi-tools` keys and their Pi renderer lowering). It appears only in ADR 0019, `requirements.md` and `onboarding.md`, so T11 writes it. | Proposed here; the owner confirms at this plan's approve-and-execute (D21). #423/#425 design is already in `docs/dash/architecture.md` (the "OpenCode plugin span/turn envelope" section, lines 286-360), subject to per-item verification. | ANSWERED — architect proposal; owner confirms scale at approve-and-execute |
-| D24 | This plan's own scale | `extends-component`, `[DocGraph, KyberSquad]`. **DocGraph:** `docs/docgraph/architecture.md` gains the archive read path, and `governance.md` the rule. **KyberSquad:** `docs/kyber-squad/architecture.md` gains a "Plan and specification lifecycle" section (impact, design harvest, closeout, digest), and `requirements.md` KS-008 is updated. | Precedent: `kyber-squad/architecture.md` §9 already documents conductor workflow contracts (the circuit-breaker). | ANSWERED — architect proposal; owner confirms scale at approve-and-execute |
-| D25 | Components with no architecture or onboarding doc today | Out of scope to create them now. **No architecture doc:** `KyberUtilities` and `Distribution`. **No onboarding doc:** `ContextHygiene`, `ReviewCouncil` and `CI Pipelines`. Under C9, the first `extends-component` closeout for KyberUtilities or Distribution must create its architecture doc. | Verified from frontmatter (`doc-type`/`component`) across `docs/`. This is the owner's intent ("architecture docs must be updated"), applied when a component is next touched rather than as a sweep. | ANSWERED — architect technical call |
-| Q1 | How does 004 avoid failing the ~115 legacy archived entries, and how do hosts adopt it? | **(a) Frozen baseline.** `ontology.archive-closeout.baseline: .kyber-weave/archive-closeout-baseline.txt` lists every archived plan entry and spec folder at `a0862e7c` except the three backfill targets. Every other archived entry, including every future archive, is checked. The rule is silent until a host adopts the key. The baseline file joins `policy.always-human`, and a stale baseline entry is a 004 error. | **(a) Frozen baseline — RECOMMENDED and chosen.** Pros: exact, fail-closed, works the same locally and in CI, covers specs, needs no git. Cons: a one-time ~113-line list; hosts must opt in. **(b) Date cutoff.** Heuristic: plans authored before the cutoff but archived later escape, and spec folders have no date. **(c) Git-scoped.** Adds git to `docs validate`. The `skill-docs-gate` job checks out at default depth (`ci.yml:506-515`), and any later edit to a legacy archived plan pulls it into scope. | ANSWERED — orchestrator technical call under the owner's standing rule (make low-risk technical calls and report them); the owner may override at approve-and-execute, 2026-10-25 |
-| Q2 | Should the conductor and `docs-dev` also refuse an archive move that has no closeout digest? (Text only; defense in depth beside 004) | **(a) Yes.** `docs-dev` returns `STATUS: CLOSEOUT_COMPLETE` (`ARTIFACT`, `IMPACT`, `MAPPED: <n>/<n> ids`, `WAIVERS`, `VALIDATION`) or `STATUS: CLOSEOUT_BLOCKED` (`GAPS`). Only the `docs-dev` closeout task moves a plan or spec into the archive; any other worker that meets 003 routes the closeout to `docs-dev`. The conductor delivers only with `CLOSEOUT_COMPLETE` plus a post-closeout `docs validate . --merge-ready` run. | **(a) Yes — RECOMMENDED and chosen.** It makes "only a successful closeout completes the objective" enforceable, and it names the #425 shape (a review fix moved the plan). 004 stays the primary fix. **(b) No:** rely on 004 alone. | ANSWERED — orchestrator technical call under the owner's standing rule (make low-risk technical calls and report them); the owner may override at approve-and-execute, 2026-10-25 |
-| Q3 | Freshness proxy: must mapped destinations show `last-reviewed` on or after the closeout date? | **(a) Component architecture docs only.** For `new-component` and `extends-component`, every architecture document linked under C9 for each impact component must have `last-reviewed` ≥ the plan document's `last-reviewed` (the closeout date). Other mapped destinations are not date-checked. **Known limit:** a date bump with no real content change passes the gate. The intent-alignment lens must judge whether the architecture content was actually updated with the new design and feature set (D22). | **(a) Component architecture docs only — RECOMMENDED and chosen.** For `new-component` and `extends-component`, every linked architecture doc of each impact component must have `last-reviewed` ≥ the archived plan's (or `design.md`'s) `last-reviewed`, which the closeout sets. Pros: targets the owner's core demand (architecture updated with the new design) with one date bump per component per closeout; `last-reviewed` already means "last verified". Cons: a date bump can be made without real content (the lens backs it up); it forces a re-verify-and-bump even when the architecture text was already right. **(b) Every mapped governed destination.** Pros: strongest signal. Cons: date churn on every doc a closeout touches, frequent frontmatter merge conflicts between parallel branches, and pressure to bump docs that were only cited, not changed. **(c) No freshness check.** Pros: no churn. Cons: an old, untouched architecture section can be "mapped" without anyone re-reading it. | ANSWERED — orchestrator technical call under the owner's standing rule (make low-risk technical calls and report them); the owner may override at approve-and-execute, 2026-10-25 |
+| G1 | How is design routed to canonical docs? | By document identity: the host's doc type plus its catalog component (frontmatter), never by folder path. | This repository's layout is one host's configuration. | ANSWERED — owner, alignment session 2026-10-25 (Q1) |
+| G2 | Who may propose a new component? | The architect or `docs-dev` may recommend one, only with high confidence. A human always approves. When in doubt, use an existing component. | Typical hosts have 5–10 components; large ones about 100. | ANSWERED — owner, alignment session 2026-10-25 (Q2) |
+| G3 | May `docs-dev` add ontology vocabulary? | Never. It recommends new doc types and similar vocabulary to the human, even in autonomous mode. | Root `AGENTS.md`: "Do not widen the ontology to make a failure disappear." | ANSWERED — owner, alignment session 2026-10-25 (Q3) |
+| G4 | What may portable Kyber-Squad and Kyber-Docs text name? | Only host ontology terms and Config Reg placeholders, never this repository's layout. | Pinned by tests on every portable file this plan edits (D34). | ANSWERED — owner, alignment session 2026-10-25 (Q4) |
+| G5 | What happens while a recommendation waits? | Harvest into the best existing home now, list the recommendation in the PR, and complete the closeout. | Closeout never blocks on a pending new-component or new-doc-type recommendation. | ANSWERED — owner, alignment session 2026-10-25 (Q5) |
+| G6 | Where does a new doc file go? | Beside the component's existing docs. For a brand-new component, the location is part of the approved recommendation. | | ANSWERED — owner, alignment session 2026-10-25 (Q6) |
+| G7 | How is the doc type chosen? | `docs-dev` picks it by judgement from the host's doc-type list and documentation standard. No routing configuration for now. | | ANSWERED — owner, alignment session 2026-10-25 (Q7) |
+| G8 | What do plans and specs declare? | A scale: `new-component`, `extends-component` (one or more components), or `no-design-change` with a reason. The owner confirms it at approve-and-execute. | Mechanics in D19 and D21. | ANSWERED — owner, alignment session 2026-10-25 (Q9) |
+| G9 | How does the Design harvest list name targets? | As component + doc type, not file paths. `docs-dev` resolves the files at closeout. | Format in D20. | ANSWERED — owner, alignment session 2026-10-25 (Q12) |
+| G10 | Which changes get a docs review? | Every change, by `docs-dev`, whether it came from a plan, spec, todo, issue or one-off chat. The conductor and bug-crusher cover every file-changing entry point. A change may end with "no doc change", but only after the review. | Mechanics in D32 and D33. | ANSWERED — owner, alignment session 2026-10-25 (Q13, Q16) |
+| G11 | What does `docs-dev` get when there is no plan? | A short run record from the conductor: what was asked, what was decided and why, and which files changed. No transcripts. | It extends the existing execution artifact (D32). | ANSWERED — owner, alignment session 2026-10-25 (Q14) |
+| G12 | Where does the review outcome go? | No new register or file. `docs-dev` reviews what it is sent. The outcome goes in the PR description: "docs updated: …" or "no doc change: reason". The PR is critical. | `create-pull-request` already has a "Documentation impact" section (D32). | ANSWERED — owner, alignment session 2026-10-25 (Q15, Q20) |
+| G13 | Where do recommendations appear? | In the plan's closeout section, in the `docs-dev` digest, and in the PR. A todo only if the owner accepts one. | | ANSWERED — owner, alignment session 2026-10-25 (Q10) |
+| G14 | Is the gate opt-in? | No. It is always on, because it is core to the value proposition. | Replaces old Q1. Runs under `--merge-ready` with no config key (D6). | ANSWERED — owner, alignment session 2026-10-25 (Q11) |
+| G15 | What does the gate check? | Only what each change archives, from a git diff against the base. History is never re-checked; there is no baseline list. CI checkout needs enough history. | Scope rule in D26; base and CI in D27 and D35. | ANSWERED — owner, alignment session 2026-10-25 (Q17) |
+| G16 | Which checks does the gate run? | Archived status; a declared scale and impact components; every decision and design item maps to an existing governed doc or a written waiver; each impact component is a catalog row, and at least one mapped doc carries it with a fresh `last-reviewed`; a RESIDUAL links a todo. No folder or doc-type rules. Changes without a plan are covered by the review and the PR section, not by CI. | Conditions C0–C9 in "Gate contract". Replaces the earlier C9/C10/C11 and Q3. | ANSWERED — owner, alignment session 2026-10-25 (Q8, Q20) |
+| G17 | What happens to `second-brain`? | Rename it `kyber-docs-onboarding-and-assessment` and move it to Kyber-Docs (`.apm/skills`, deployed by `docs init`). Add an owner-started assessment-and-remediation mode: a per-plan/spec report (harvested, partial, or not harvested), the owner picks, and `docs-dev` fixes them in batches as PRs. | Today its Audit mode never inspects archived plans and remediates nothing; `doc-corpus-integrity-review` excludes the archive. Phase 2. | ANSWERED — owner, alignment session 2026-10-25 (Q17, Q18, Q19, Q21) |
+| G18 | Which skills are renamed? | Now, in this plan: `kyber-weave-docs` → `kyber-docs-authoring`, and `doc-corpus-integrity-review` → `kyber-docs-integrity-review`. `kyber-weave-cli` and `spec-conductor` keep their names. | Phase 2 (D36). | ANSWERED — owner, alignment session 2026-10-25 (Q22–Q24) |
+| G19 | What about old installed copies of renamed skills? | Verify whether APM and `squad update` prune removed skills. If they do not, `docs init` and `squad doctor` warn, and the release notes give the cleanup command. No stubs. **Release-notes channel (Q4):** the rename PR's title carries a short cleanup hint, which the auto-generated Release notes list; the PR body and the install guide carry the full commands; the warnings are the main channel. | Facts in D37, confirmed by observation in T13a. Q4 answered by the owner 2026-10-25. | ANSWERED — owner, alignment session 2026-10-25 (Q25) |
+| D1 | Development mode? | `test-first`. | Packet. | ANSWERED — per packet 2026-10-25 |
+| D2 | Autonomy for this run? | `supervised`. | Packet; overrides the Config Reg default for this run. | ANSWERED — per packet 2026-10-25 |
+| D3 | Root cause? | Closeouts were **skipped**, not done badly. Three real failure shapes: an unchanged move (#425); added while Ready (#426); archived with an admitted RESIDUAL (#423). | Git evidence was relayed by the conductor: #426 merged 2026-10-24T13:10:37Z as `0351a45c`, a squash of `6dd4ce3f`. All three files carry `status: draft` and `**Status: Ready`, which corroborates it. | ANSWERED — conductor-relayed evidence 2026-10-25; file state verified in worktree |
+| D4 | New rule id, or extend 003? | New id **`KW-DOC-LIFECYCLE-004`**, class `ArchiveCloseoutValidator`. 003 is unchanged. | Rule ids are permanent. 003 means "still open". No `LIFECYCLE-00[4-9]` exists anywhere. | ANSWERED — architect technical call |
+| D5 | Closeout evidence conditions | SUPERSEDED by G16; see C0–C9 and D30/D31. | The earlier C9 (architecture doc), C10 (new-component folder) and C11 (architecture freshness) shapes were dropped by the owner. | SUPERSEDED — owner, alignment session 2026-10-25 (G16) |
+| D6 | When does 004 run? | Always under `docs validate --merge-ready`, beside 003, with no opt-in key (G14). Plain `docs validate` does not run it: without a base there is no change to scope (G15). | `--merge-ready` is the merge gate CI already passes. The fast loop and `review gates` keep running plain `docs validate`. | ANSWERED — architect technical call under G14/G15 |
+| D7 | Archive status convention | Frontmatter `archived`, `complete` or `superseded` passes. New closeouts write `status: archived` and a first body line `**Status: Archived <date> — …**`. The ontology vocabulary is not widened (G3). | The loader excludes the `archive` segment (`OntologyConfig.cs:43-44`), so archived documents were never validated; that is why the archive mixes `archived`, `complete`, `completed` and `Archived`. | ANSWERED — architect technical call |
+| D8 | Where does a spec declare its harvest? | SUPERSEDED by D29. | | SUPERSEDED — architect, 2026-10-25 |
+| D9 | How is the archive read? | SUPERSEDED by D26 and D28. | | SUPERSEDED — architect, 2026-10-25 |
+| D10 | `docs-dev` description | Closeout as design harvest leads, then the every-change review, then general docs. Working text: "Closes out finished plans and specs by harvesting their design, architecture, features and decisions into the host's canonical docs, and reviews every change for documentation impact. Also writes READMEs, API docs, ADRs, runbooks, and inline docs in Markdown/Mermaid. Use when a plan or spec needs its docs-dev closeout, when a change needs its documentation-impact review, or when the deliverable is a .md file. Do not use when the deliverable is a formal requirements/design/tasks spec to author (product-owner) rather than reference documentation or a closeout." The worker may refine it with the `writing-trigger-descriptions` skill but must keep the T4 pins. | `DescriptionScorer` scores it at least 95 (length about 560 characters, so 10/15 on length). It passes `KW-AGENT-LINT-002`. The exclusion names spec **authoring**. | ANSWERED — architect technical call |
+| D11 | Move `docs-dev` off `model-profile: fast`? | **Not pursued.** | Evidence shows skipped closeouts, not weak ones. The owner agrees. | ANSWERED — out of scope; owner position relayed by conductor 2026-10-25 |
+| D12 | `docs/dash/architecture.md:359` links a missing todo | Remove the link and state the owner live gate as `[NOT LIVE-VERIFIED]`. Do not recreate the todo. | The owner removed the opencode todos. Todos exist only when the owner accepts them. | ANSWERED — architect technical call |
+| D13 | How do the backfills change archived history? | Annotate; never rewrite. **Keep** the Decisions tables and every original section; the original status paragraph stays, labelled "Pre-closeout status (preserved as history)". **Add** the scale frontmatter, a new first status line, a retroactive `## Design harvest`, `## Completion summary` and `## Closeout mapping`. **Correct** false index claims and mark them as corrected. | Precedent: the #192 correction in `docs/archive/plans/2026-10-05-harvest-plan-decision-records.md`. | ANSWERED — architect technical call |
+| D14 | Who edits agent and skill markdown, and who re-pins the digests? | `docs-dev` edits the text. `test-dev` re-pins `final-body-sha256` in `products/kyber-squad/migration/{docs-dev,conductor}.md`. | `LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest` requires `final-body-sha256 == BodyDigest` (body only). `docs-dev` has no process tool. `bug-crusher` has no migration record (net-new agent). | ANSWERED — architect technical call |
+| D15 | Older partial mappings (`2026-10-09-issue-312`, `2026-10-10-kyberdash-claude-code-turn-content`, `2026-10-09-issue-319`) | Not touched here. The G17 assessment-and-remediation mode is their route. | G15 never re-checks history. | ANSWERED — architect, per packet and G17 |
+| D16 | The in-flight `squad-model-presets` spec | Out of scope. At its closeout it must declare its scale and a Design harvest, and pass 004. | | ANSWERED — per packet 2026-10-25 |
+| D17 | Committed harness copies? | None. `.github/` holds only `CODEOWNERS`, the PR template and `dependabot.yml`. Renderers project `products/kyber-squad` at install time. The migration records are the only propagated artifacts. | | ANSWERED — finding, verified in worktree |
+| D18 | The `product-owner` skill description also claims "closeout" | Out of scope; follow-up. | `closeout-phase.md` redirects to `docs-dev`. | ANSWERED — architect technical call |
+| D19 | Scale keys | Frontmatter on the plan, or on the spec's design document: `documentation-impact` (`new-component`, `extends-component` or `no-design-change`) and `impact-components` (catalog component names; required and non-empty for the first two). For `new-component`, the names are checked against the catalog only at archive time, because the closeout adds the approved row. The existing `component` key is unchanged. | The shared deserializer ignores unknown keys (`MarkdownFrontmatterReader.cs:42-46`); `DocumentFrontmatter` gains two properties. A plan's `component` must already be in the catalog (`KW-DOC-SPEC-004`), so it cannot name a new component. | ANSWERED — architect technical call under G8 |
+| D20 | Design harvest format | A table: `\| ID \| Design item (section) \| Target component \| Target doc type \|`. Ids are `H1…Hn`. Targets are component + doc type from the host's catalog and ontology (G9). **Plans:** one row per durable design, contract, interface, behaviour or operations section. **Specs:** one row per design section and per requirement group. **`no-design-change`:** a single line, `Documentation waiver: <reason>`. | Every H id is then mapped at closeout exactly like a decision ID. | ANSWERED — architect technical call under G9 |
+| D21 | Who checks the declaration, and when? | **Author:** the architect (`plan-authoring.md`) or product-owner (`design-phase.md`) writes it. **Conductor:** the `PLAN_READY` / `SPEC_READY` checks require it, and the approve-and-execute question states the scale for the owner to confirm. **Gate:** 004 enforces it at archive time. There is no draft-time mechanical check. | G8. A draft-time rule would add little beyond 004 plus the checklist. | ANSWERED — architect technical call under G8 |
+| D22 | Gate vs review-lens split | **Lens (intent-alignment) judges:** • whether mapped content truly describes the shipped design; • whether the Design harvest list is complete; • whether the scale and component choice are right (G2); • whether the doc type and location are right (G6, G7); • whether waivers are valid; • whether a `no doc change` outcome is justified; • whether the PR documentation section is present and true. **Gate checks:** C0–C9 only. | G16: the gate has no folder or doc-type rules. | ANSWERED — architect technical call under G16 |
+| D23 | Backfill scales | All three plans are `extends-component`: #423 and #425 → `[KyberDash]`, #426 → `[KyberSquad]`. Known missing design: KyberSquad's architecture doc does not describe #426's `pi-extensions` / `pi-tools` overlay, so the backfill writes it. | The owner confirms at approve-and-execute. KyberDash design is expected in its architecture doc, "OpenCode plugin span/turn envelope" (lines 286-360), subject to per-item verification. | ANSWERED — architect proposal; owner confirms scale at approve-and-execute |
+| D24 | This plan's own scale | `extends-component`, `[DocGraph, KyberSquad, CI Pipelines, ContextHygiene, Distribution]`. See `## Design harvest`. | Distribution has root-level docs only (`install.md`, `distribution.md`), so this closeout exercises the host-agnostic rule. | ANSWERED — architect proposal; owner confirms scale at approve-and-execute |
+| D25 | Components with no architecture or onboarding doc | SUPERSEDED by G16: no doc-type rule. A component passes with any mapped fresh doc that carries it. | | SUPERSEDED — owner, alignment session 2026-10-25 (G16) |
+| D26 | Exactly which archived entries does a change put in scope? (G15) | Take the paths changed since the **merge base** of `HEAD` and `--base`, plus uncommitted and untracked files. Statuses A/C/M/R/T; deletions are ignored. An archived plan or spec entry is in scope when the change **adds, copies or renames** any of its documents into the archive, **or modifies** it while its harvest document declares `documentation-impact`. Editing a legacy archived plan that has no `documentation-impact` (a typo or link fix) is never checked. | This honours "history is never re-checked". It still gate-verifies the backfills and later G17 remediation PRs, because both add the key. A merge-base diff, rather than a plain diff against the base, keeps changes that landed on main after the branch point out of scope. | ANSWERED — architect technical call under G15 |
+| D27 | How is the base resolved? | `docs validate --merge-ready [--base <ref>]`. The default is `origin/HEAD` (the remote's default branch), so no branch name is assumed (G4). If git is missing, the directory is not a repository, the base is unknown, or the merge base cannot be found (shallow clone), 004 fails closed with one error: "cannot determine what this change archives". Its hint is "fetch full history (for example `actions/checkout` `fetch-depth: 0`) or pass `--base <ref>`". | G14: always on, fail-closed. `ChangedFiles` (`src/KyberWeave.Core/Review/ChangedFiles.cs`) already runs git by argv with `ValidateBase`; it gains a name-status, merge-base variant. | ANSWERED — architect technical call under G14/G15 |
+| D28 | Where is the archive? | For each inventory, `<docs root containing the index>/archive/<leaf name of the index folder>/`, for the `plan-index` and `specification-index` registry properties. Entries group by the first path segment below it. The existing `EntryBelow` moves to `InventoryReachability` and is shared with 003. | This matches the existing 003 hint and the `docs-dev` archive instruction (a product convention, not host layout). It works with any docs-root name and any number of roots. | ANSWERED — architect technical call |
+| D29 | Which document carries a spec's harvest? | Identity, not filename: the document in the archived spec entry that declares `documentation-impact`. The product-owner writes it on the spec's design document. A plan's harvest document is the plan document. | G1. No reliance on `design.md`. | ANSWERED — architect technical call under G1 |
+| D30 | What counts as an "existing governed doc"? | A relative link from the mapping that resolves to a document in the live `DocumentSet`: under a configured docs root, with frontmatter, and not archived. Code files, missing files and archived documents do not count. | G16 wording. ADRs and indexes are governed documents. | ANSWERED — architect technical call under G16 |
+| D31 | Component and freshness check | For each impact component X: X is a catalog row (`DocumentSet.Components`, the parsed Component column only), **and** at least one document linked from the Closeout mapping has `component: X` and `last-reviewed` ≥ the harvest document's `last-reviewed` (the closeout date). Known limit: a date bump without real content passes, so the lens judges content (D22). | G16. The free-text catalog columns are never parsed. It does not matter which doc type or folder the doc has. | ANSWERED — architect technical call under G16 |
+| D32 | Mechanics of the every-change review (G10–G13) | **When:** before delivery of every file-changing run, the conductor and bug-crusher dispatch `docs-dev`. **Packet:** the plan or spec, or a run record (asked, decided and why, files changed) written on the existing execution artifact, plus the changed-file list. **Digest:** a `DOCS_REVIEW:` line, either `docs updated: <docs>` or `no doc change: <reason>`, plus `RECOMMENDATIONS:`. For plan- or spec-backed work the closeout performs the review, and its `CLOSEOUT_COMPLETE` digest carries the same lines. **PR:** the "Documentation impact" section carries the outcome verbatim, with recommendations; it is appended even when the host's PR template has no such section. | G12 bars a new register, so the run record is not committed; it lives on the execution artifact and in the packet. | ANSWERED — architect technical call under G10–G13 |
+| D33 | Can bug-crusher reach `docs-dev`? | Add `docs-dev` to `bug-crusher`'s `delegates-to`. Update the Copilot render pin (`CopilotRendererTests.cs:634`). | Today it delegates only to `bug-crusher-investigator`, and harnesses that enforce `delegates-to` would block the review. Its `root-fixer` profile already allows `delegate`. | ANSWERED — architect technical call under G10 |
+| D34 | How is G4 enforced? | Text pins assert that every portable file this plan edits contains no literal `docs/` path (regex `(?<![\w<.-])docs/`). Paths use Config Reg placeholders (`<docs-root>`, `<component-catalog>`, `<documentation-ontology>`, `<plan-index>`, `<specification-index>`, `<adr-index>`, `<todo-index>`). | `docs-dev.md` currently says "(`docs/`) and/or ADRs (`docs/adr/`)". | ANSWERED — architect technical call under G4 |
+| D35 | CI and the host template | **`ci.yml` `skill-docs-gate`:** `fetch-depth: 0`; pass `--base origin/${{ github.base_ref }}` on `pull_request` and `--base ${{ github.event.before }}` on `push`. **Host template** `templates/github-actions/kyber-weave-docs-gate.yml`: the `docs-validate` job runs `--merge-ready --base origin/${{ github.base_ref }}` with `fetch-depth: 0` on `pull_request`. | G14 (core value, so hosts get it), G15 (history). Today's checkout is default depth (`ci.yml:506-515`; template `:39-40`). | ANSWERED — architect technical call under G14/G15 |
+| D36 | One plan or two? | **One plan, two phases.** Phase 1: G1–G16, Q2 and the backfills. Phase 2: G17–G19, after phase 1's text and gate land. One review, one closeout. | **Split rejected:** a second Draft plan in the active folder on this branch would fail Phase 1's PR under 003 until it was archived, or force a branch hand-off. G18 says "in this plan". The always-human review happens once either way. The task graph stays dispatchable (22 tasks, at most 4 ready at once). | ANSWERED — architect technical call; owner may override at approve-and-execute |
+| D37 | G19 facts: do the installers prune removed skills? | **APM: conditionally.** It removes files a package no longer ships only when an `apm.lock.yaml` records them, the lock has moved to the new commit (`apm update`), and the files are unedited. For the shared `.agents/skills/` root, rename cleanup works only from APM 0.34.0. The repository's fixtures pin 0.28.0, and `apm prune` touches only undeclared packages. **`squad update`: yes for unedited files.** Receipt-owned files it no longer renders are deleted when their digest matches; edited ones are retained (`SquadDeploymentPlan.cs:475-509`). So per G19: `docs init` warns about leftover retired skill directories, and `squad doctor` warns about retained or unmanaged retired skills. Both print the cleanup command. | APM research by `research-agent` from microsoft/apm v0.35.0 source, the CHANGELOG ([0.12.4], [0.21.0], [0.34.0], [0.35.0]) and the targets matrix; the `agent-skills` target writes `.agents/skills/<name>/`. **Confidence:** the APM facts are medium (quotes came through a summarizing fetch), and the 0.28.0 behaviour is unverified. T13a observes it directly before any warning test is written. If the observation contradicts this row, the row and the warning text follow the observation. `squad update` behaviour is from source (high confidence). | ANSWERED — `squad update` part verified 2026-10-25; APM part medium-confidence, pending T13a observation |
+| D38 | Which skills does CI gate after the rename? | Validate, lint and scan run for `kyber-docs-authoring`, `kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment` and `kyber-weave-cli`, in `ci.yml` and in the `review gates` suite. The renamed authoring skill keeps SARIF category `kyber-weave-skills` (per the `ci.yml:554-559` comment); the new skills take path-derived categories. `spec-conductor` gating is out of scope. | The `ci.yml:535-537` comment requires a gate and an upload step for every new skill directory. | ANSWERED — architect technical call under G18 |
+| Q1 | (old) Legacy scoping and opt-in for 004 | SUPERSEDED: G14 (always on) and G15 (change-scoped, no baseline) replace the frozen baseline and opt-in key. | Earlier answer (a), frozen baseline (orchestrator technical call 2026-10-25), is withdrawn. | SUPERSEDED — owner, alignment session 2026-10-25 (G14, G15) |
+| Q2 | Should the conductor and `docs-dev` refuse an archive move without a closeout digest? | **(a) Yes.** `docs-dev` returns `STATUS: CLOSEOUT_COMPLETE` (`ARTIFACT`, `IMPACT`, `MAPPED: <n>/<n> ids`, `WAIVERS`, `DOCS_REVIEW`, `RECOMMENDATIONS`, `VALIDATION`) or `STATUS: CLOSEOUT_BLOCKED` (`GAPS`). Only the `docs-dev` closeout task archives. Any other worker that meets 003 routes the work to closeout. Delivery needs `CLOSEOUT_COMPLETE` plus a post-closeout `docs validate . --merge-ready`. | It makes "only a successful closeout completes the objective" enforceable, and names the #425 shape. The owner's alignment record keeps this ("conductor requires the docs-dev closeout digest before delivery"). | ANSWERED — orchestrator technical call under the owner's standing rule (make low-risk technical calls and report them); the owner may override at approve-and-execute, 2026-10-25; kept by owner alignment session 2026-10-25 |
+| Q3 | (old) Freshness proxy scope | SUPERSEDED by G16 and D31: freshness applies to at least one mapped doc that carries each impact component, of any doc type. | | SUPERSEDED — owner, alignment session 2026-10-25 (G16) |
+| Q4 | G19 says the release notes give the retired-skill cleanup command, but Release notes are GitHub's generated list of merged PR titles (`docs/distribution.md` "Release notes"), so no channel exists for it. How should it get there? | **A variant of (a), with no manual paste.** Release pages list merged PR titles automatically, so: (1) the rename PR's **title** carries a short cleanup hint; (2) the PR **body** and the install guide carry the full cleanup commands; (3) the `docs init` and `squad doctor` warnings are the main channel. No release-workflow change, and nothing pasted by the release approver. | **(a) Manual addition at release, with the PR as the source — RECOMMENDED.** The PR title flags the rename; the PR body and the install guide carry the exact cleanup commands; the release approver pastes the upgrade note into that Release's body at the approval step the release job already has. The `docs init` and `squad doctor` warnings are the primary channel either way. Pros: no release-workflow change and no new file. Cons: a human step that can be forgotten. **(b) Build an "upgrade notes" injection into the release workflow.** Pros: automatic. Cons: touches the release path (adds `./scripts/update-loop.sh` to the gates); a per-version notes file needs versioning rules, which adds scope. **(c) Drop the release-notes channel:** warnings plus the install guide only. Pros: smallest. Cons: deviates from G19. The owner's variant keeps (a)'s zero-workflow cost and removes its forgettable manual step: the title is in the generated list by construction. | ANSWERED — owner 2026-10-25 |
 
 ## Design harvest
 
-Planned canonical destinations for this plan's design. At closeout (T13), every `H` id and
-every decision ID is mapped in `## Closeout mapping`.
+Targets are component + doc type (G9). The closeout (T20) maps every H id and every decision
+ID to the resolved docs.
 
-| ID | Design item (section of this plan) | Planned canonical destination |
-|---|---|---|
-| H1 | The 004 rule: scope, conditions C1–C11, message and hint ("Gate contract") | `docs/docgraph/governance.md`; `docs/ci-pipelines/rule-reference.md` |
-| H2 | The archive read path: only 004 reads the archive the loader excludes; shared entry grouping (D9) | `docs/docgraph/architecture.md` |
-| H3 | Adoption config and the frozen baseline (Q1) | `docs/configuration.md`; `docs/docgraph/governance.md` |
-| H4 | Documentation-impact declaration, the Design harvest list, and owner confirmation at approve-and-execute (D19–D21) | `docs/kyber-squad/architecture.md` (new "Plan and specification lifecycle" section); `docs/plans/README.md` and `docs/specs/README.md` policy |
-| H5 | Closeout obligations by scale, mapping rules, waivers, archive status convention (D5, D7, D8) | `docs/kyber-squad/architecture.md`; `docs/plans/README.md`; `docs/specs/README.md`; `docs/docgraph/governance.md` |
-| H6 | The closeout digest and the conductor delivery rule (Q2) | `docs/kyber-squad/architecture.md`; `docs/kyber-squad/requirements.md` (KS-008) |
-| H7 | The split between gate checks and review-lens judgement (D22) | `docs/kyber-squad/architecture.md`; `docs/docgraph/governance.md` |
+| ID | Design item (section of this plan) | Target component | Target doc type |
+|---|---|---|---|
+| H1 | The 004 rule: conditions C0–C9, message and hint ("Gate contract") | DocGraph; CI Pipelines | governance; reference |
+| H2 | Change-scoped reading: merge-base diff, scope rule, archive location, harvest-document identity (D26, D28, D29) | DocGraph | architecture |
+| H3 | `--base`, its default, fail-closed behaviour, CI history, the host template (D27, D35) | DocGraph; CI Pipelines | governance; runbook (and the CLI command-surface reference) |
+| H4 | Authoring declaration: scale, impact components, Design harvest by component + doc type, owner confirmation (G8, G9, D19–D21) | KyberSquad | architecture (plus plan and spec index policy) |
+| H5 | Routing and recommendations at closeout (G1–G7, G13) | KyberSquad | architecture |
+| H6 | Every-change docs review, run record, PR outcome (G10–G12, D32, D33) | KyberSquad | architecture; requirements |
+| H7 | Closeout digest and delivery rule (Q2) | KyberSquad | architecture |
+| H8 | Gate vs review-lens split (D22) | KyberSquad; DocGraph | architecture; governance |
+| H9 | Kyber-Docs skill set: renames, the onboarding-and-assessment skill and its assessment-and-remediation mode (G17, G18, D38) | ContextHygiene; DocGraph; KyberSquad | architecture; onboarding; architecture |
+| H10 | Retired-skill cleanup: the observed prune behaviour (T13a, D37); the `docs init` and `squad doctor` warnings as the main channel; full cleanup commands in the install guide; the rename PR title as the release-notes channel (G19, Q4) | Distribution; DocGraph; KyberSquad | runbook; onboarding; onboarding |
 
 ## Investigation findings
 
-**Discovery:** `Discovery: codegraph 9, docs 2, direct reads 41` (plus about 61 grep/glob calls).
-CodeGraph calls 1–8 answered from the main checkout (`9efb0288`); call 9 answered from this
-worktree's own index, which the conductor built. Every cited line was confirmed in the
-worktree. Direct reads of indexed code, with reasons:
+**Discovery:** `Discovery: codegraph 12, docs 2, direct reads 48` (plus about 75 grep/glob
+calls; 1 delegated `research-agent` query on APM).
 
-- `DocsValidateCommand.cs` and `DocsValidateSettings.cs`: codegraph did not return the bodies.
-- Test files, for exact patterns and worktree confirmation: `OpenWorkValidatorTests`, `SquadCanonicalContentTests`, `SquadSpecGateCollapseTests`, `SquadRustGoSpecialistTests`, `AgentGovernanceTests`.
-- The `DocFixture` grep: to confirm that fixtures never load the archive.
-- Confirmation greps in `OntologyConfig.cs`, `DocumentLoader.cs` and `OntologyYamlSection.cs`.
+- CodeGraph calls 1–8 answered from the main checkout; calls 9–12 from this worktree's index.
+- Direct reads of indexed code, with reasons:
+  - `DocsValidateCommand.cs`, `DocsValidateSettings.cs` and `DocsInitCommand.cs:90-174`: bodies not returned by codegraph.
+  - `SquadDeploymentPlan.cs:360-518`: to confirm `CreateUpdate`'s removal loop.
+  - Test files, for exact patterns.
+  - Confirmation greps.
+- Everything else read directly is outside the indexes: markdown under `products/` and `.apm/`, `apm.yml`, the catalog, CI and templates, and archived plans.
 
-Everything else read directly is not in either index: markdown under `products/`, the
-catalog's columns, config, CI, and archived plans.
-
-1. **Why the archive holds non-vocabulary statuses.** `OntologyConfig.DefaultStatuses` is
-   `current, draft, needs-review, superseded` (`OntologyConfig.cs:30-31`). The default
-   excluded segments start with `archive` (`:41-44`), and `DocumentLoader.Load` skips excluded
-   paths (`DocumentLoader.cs:65`), so no archived document is ever validated. Statuses
-   observed in the archive: `archived`, `complete`, `completed`, `Archived`, `superseded`, and
-   `draft` (the three targets only).
-2. **How merge-ready works today.** `DocsValidateCommand.Execute` (`:27-33`) loads one
-   `DocumentSet` (archive excluded). It runs validators 001 and 002 always, and 003 only with
+1. **Archive and statuses.** The loader excludes `archive` (`OntologyConfig.cs:41-44`;
+   `DocumentLoader.cs:65`), so archived documents were never validated. The archive holds
+   mixed statuses. Active plans keep frontmatter `draft` through Ready.
+2. **Merge-ready today.** `DocsValidateCommand.Execute` (`:27-33`) runs 003 only with
    `MergeReady`. CI runs `docs validate . --merge-ready --format table` (`ci.yml:580-585`, job
-   `skill-docs-gate`, default-depth checkout). The `docs-validate` gate in `review gates` has
-   no `--merge-ready` (`kyber-weave.yml:90-92`).
-3. **Test fixtures never see the archive.** `DocFixture.Load()` uses the default loader. The
-   new validator reads the archive itself, and its tests assert on files the fixture writes
-   there.
-4. **Frontmatter keys.** `MarkdownFrontmatterReader.Deserializer` ignores unmatched properties
-   (`:42-46`). `DocumentFrontmatter` (`DocumentModel.cs:48`) needs two new properties for the
-   impact keys, and the hyphenated naming convention binds `documentation-impact` and
-   `impact-components`.
-5. **Catalog and component docs.** Only the catalog's Component (index 1) and Owner (index 6)
-   columns are parsed (`catalog.md` "How the columns are read"), and `DocumentSet.Components`
-   carries that vocabulary.
-
-   | Component | `architecture` doc | `onboarding` doc |
-   |---|---|---|
-   | KyberDash | yes | yes |
-   | DocGraph | yes | yes |
-   | KyberSquad | yes | yes |
-   | ContextHygiene | yes (`agents.md`, `skills.md`) | no |
-   | ReviewCouncil | yes | no |
-   | CI Pipelines | yes | no |
-   | KyberUtilities | no | yes |
-   | Distribution | no (`reference` + `runbook` at docs root) | no |
-
-   This is D25. The ontology requires `component` on architecture, onboarding, requirements
-   and runbook docs, plus `source-root` on onboarding docs.
-6. **app-docs-standard.** A source-root README overview; `onboarding.md`, `architecture.md`
-   and `requirements.md` for applications and runnable services; a catalog update for a new
-   or materially changed component. It is the procedure `docs-dev` follows for
-   `new-component`.
-7. **No committed harness copies** (D17). The only propagated artifact is the migration
-   digest (D14).
-8. **Existing text pins.** `LoadDocsDevDefinesCloseoutMappingTableAndWaiverConventions`
-   (`SquadCanonicalContentTests.cs:543-553`) pins "Plan closeout", "mapping table",
-   "ADR waiver" and "Documentation waiver"; keep those phrases.
-   `LoadArchitectAndConductorDefinePermanentDecisionTableContract` (`:555-569`) pins the
-   five Decisions columns and `NO_QUESTIONS`. Precedents for new pins:
-   `SquadRustGoSpecialistTests` (descriptions) and `SquadSpecGateCollapseTests` (references).
-9. **Description gates for agents.** `KW-AGENT-LINT-002` fires when the trigger regex does not
-   match. `KW-AGENT-LINT-001` fires when the `DescriptionScorer` total is below 50.
-   `skill lint --min-desc-score 70` gates only `.apm/skills/*`, so the new test pins ≥ 70
-   itself.
-10. **Spec and conductor gaps.**
-    - `design-phase.md`: no Decisions, impact or harvest requirement.
-    - `closeout-phase.md` and `docs-dev.md` §Specification closeout: no mapping and no
-      waivers.
-    - `spec-path.md:18` (`SPEC_READY`) and `plan-path.md:18` (`PLAN_READY`) check no impact
-      declaration.
-    - `intent-alignment.md:49-54`: plans only, decisions only.
-    - `execution-and-review.md:88-95`: no mapping for spec-backed closeout.
-    - `docs/specs/README.md`: no policy section.
-    - `kyber-squad/requirements.md:33` KS-008 frames the closeout as maintaining docs, not as
-      harvesting design.
-11. **Backfill target facts** (verified in the worktree).
-    - **#423 (KyberDash).** IDs: D1–D7, Q1–Q3, AP1, R1, R2. Design sections: §3.1 placement,
-      §3.2 data flow, §3.3 privacy, §3.4 failure modes. They are expected in
-      `docs/dash/architecture.md` lines 286-360, whose last paragraph links a missing todo
-      (D12). The index row is stale ("RESIDUAL … no section landed").
-    - **#425 (KyberDash).** IDs: D1–D7, AP1. Design sections: §3.1–3.3 (envelope v2 shape).
-      §8 is a forecast. The index row's claim "mapped in the plan's §8 Closeout" is false.
-      Likely gaps: D6 (the `opencode.context.skills` listing source is absent from the
-      "Skills view contract" at `architecture.md:747`) and D1 (the standalone 8080 plugin was
-      rejected).
-    - **#426 (KyberSquad).** IDs: D1–D11. Design: the canonical per-target overlay keys and
-      their Pi lowering (§1.2, D7–D10). These appear in ADR 0019, `requirements.md` and
-      `onboarding.md`, but **not** in `docs/kyber-squad/architecture.md` (D23). The index row
-      is malformed (no Archive Date or canonical-docs cell). Archive date **2026-10-24**: PR
-      #426 merged 2026-10-24T13:10:37Z as merge commit `0351a45c`, a squash of `6dd4ce3f`
-      (conductor-relayed from git, 2026-10-25).
-12. **Archive inventory at `a0862e7c`.** `docs/archive/plans/` holds 115 entries: plan files,
-    one `.json` evidence file, and the folder `2026-09-06-kyberdash-spine-tasks/`.
-    `docs/archive/specs/` holds two spec folders, `kyberdash/` and
-    `kyberdash-context-surfaces/`. (`archive/specs/kyberdash/` is missing from
-    `docs/specs/README.md`; that is an out-of-scope observation.)
-13. **Pre-revision checks** (run by the conductor in this worktree, 2026-10-25):
-    `docs validate .` and `docs drift .` both returned no findings; the `skill-docs-gate`
-    checkout is default depth; the archive exclusion is at `OntologyConfig.cs:43-44`. This
-    revision adds frontmatter keys and sections to this plan, so both checks must be re-run.
+   `skill-docs-gate`, default-depth checkout `:514-515`). The host template runs plain
+   `docs validate` with default depth (`templates/github-actions/kyber-weave-docs-gate.yml:39-55`).
+3. **Git plumbing exists.** `ChangedFiles.Resolve` runs `git diff -z --name-only --diff-filter=ACMRT <base>`
+   plus untracked files, by argv with no shell, and `ValidateBase` refuses option-like refs. It
+   compares with the base itself, not the merge base, and returns names without statuses. D26
+   needs both.
+4. **Fixtures.** `DocFixture` defaults to the root `6-Docs` and the default loader, so the
+   validator must be handed the changed paths. This keeps condition tests git-free; the scope
+   tests use temporary git repositories.
+5. **Frontmatter.** Unknown keys are ignored (`MarkdownFrontmatterReader.cs:42-46`).
+   `DocumentFrontmatter` lives at `DocumentModel.cs:48`.
+6. **Catalog.** Only the Component (index 1) and Owner (index 6) columns are parsed; the other
+   columns are free text (`catalog.md` "How the columns are read"). `DocumentSet.Components`
+   holds the vocabulary. In this host, Distribution is `Supporting` with root-level docs only,
+   and ContextHygiene's docs are `skills.md` and `agents.md` (doc type `architecture`).
+7. **Agents.**
+   - `bug-crusher` has `delegates-to: [bug-crusher-investigator]` (`agents/bug-crusher.md:12`),
+     pinned by `CopilotRendererTests.cs:634`. It is a net-new agent with no migration record.
+   - `conductor.md` lines 59 and 71 tie completion to the plan or spec closeout only; editing
+     the body re-pins `migration/conductor.md`.
+   - `execution-and-review.md:13,63-65,88-95` defines the execution artifact and §Closeout.
+   - `create-pull-request` already has "Documentation impact" (`SKILL.md:137`) and fills the host
+     template when one exists (`:127-129`). This host's PR template has no docs section, only a
+     checkbox.
+8. **Kyber-Docs skills.**
+   - `apm.yml` (`includes: auto`) ships four skills from `.apm/skills/`; its description names
+     `kyber-weave-docs`.
+   - `docs init` runs `apm install dpalfery/kyber-weave --target <t>` (`DocsInitCommand.cs:108-153`;
+     default target `agent-skills`), so all four deploy together, and a fifth placed there
+     deploys too.
+   - `kyber-weave-docs` is named in `DocsInitCommand.cs:61,140,167`, `DocsInitSettings.cs:27`,
+     `DocsScaffolder.cs:885`, `AGENTS.md:36-38,184`, `.kyber-weave/kyber-weave.yml:67,70,75`,
+     `ci.yml:538,561,565`, `scripts/codex-cloud-setup.sh:99-100`, `README.md:97,283`,
+     `.apm/skills/kyber-weave-cli/SKILL.md:3,23,137`, `products/kyber-squad/README.md:157-158`,
+     `tests/KyberWeave.Tests/{KyberWeaveDocsSkillVocabularyTests.cs:14,SquadCanonicalContentTests.cs:217-218}`,
+     and in the docs (`install.md`, `docgraph/onboarding.md`, `context-hygiene/skills.md`,
+     `distribution.md`).
+   - `ApmManifestGuardTests` names `dpalfery/kyber-weave-docs` as a package-name variant, not
+     the skill, so it is unchanged.
+   - `second-brain` is named in `products/kyber-squad/{bundles/full.yml:51,README.md:85,130}`,
+     `SquadCanonicalContentTests.cs:131`, `SquadPackAndReleaseTests.cs:80`,
+     `Fakes/FakeSquadRenderer.cs:60`, and in `docs/kyber-squad/*` and `context-hygiene/skills.md:152`.
+     The `docs/plans/README.md` and `docs/todo/README.md` mentions are historical rows and stay.
+   - CI gates only `kyber-weave-docs` and `kyber-weave-cli` today (`ci.yml:538`).
+   - `second-brain`'s Audit mode never reads archived plans, and its text hard-codes layout
+     (`<docs-root>/catalog.md`, `system/architecture.md`), which G4 forbids.
+9. **Release notes** are GitHub's generated list of merged PR titles (`docs/distribution.md`
+   "Release notes"). So a merged PR's title reaches the notes automatically; this is the
+   basis of the Q4 answer.
+10. **Backfill targets.**
+    - **#423:** decision IDs D1–D7, Q1–Q3, AP1, R1, R2. Design in §3.1–3.4. Index row stale.
+    - **#425:** decision IDs D1–D7, AP1. Design in §3.1–3.3. Its index claim "mapped in §8" is
+      false. Likely missing: D6 (no Skills-view source for `opencode.context.skills`) and D1.
+    - **#426:** decision IDs D1–D11. Design in §1.2 and D7–D10. KyberSquad's architecture doc
+      lacks the overlay design. Index row malformed. Archive date 2026-10-24.
+11. **Conductor checks (2026-10-25, before this rewrite):** `docs validate .` and
+    `docs drift .` returned no findings. Both must be re-run.
 
 ## Gate contract (`KW-DOC-LIFECYCLE-004`)
 
-**Rule.** `KW-DOC-LIFECYCLE-004` — Error — an archived plan or specification lacks closeout
-evidence. It is raised only by `docs validate --merge-ready` (D6), and only once the host
-adopts `ontology.archive-closeout` with its baseline file (Q1).
+**Rule.** Error. Raised by `docs validate --merge-ready` in every host, with no opt-in (G14).
 
-**Scope.**
+**Scope (G15, D26–D29).**
 
-- **Entries:** everything directly below `<docs-root>/archive/plans/` and
-  `<docs-root>/archive/specs/`, where `<docs-root>` is `OntologyConfig.DocsRoot`.
-- **Plan entries:** a `*.md` file, or the `README.md` of a folder entry.
-- **Spec entries:** a folder; its *design document* is `design.md`.
-- **Plan document:** the plan file, or `design.md` for a spec. The conditions below read
-  this document.
-- **Skipped:** non-markdown files, and entries listed in the baseline.
-- **Stale baseline:** a baseline line naming a missing path is itself a 004 error.
-- **Live corpus:** the catalog and component checks read the live (non-archived)
-  `DocumentSet`.
+1. **Changes.** Resolve the merge base of `HEAD` and `--base` (default `origin/HEAD`). Take the
+   paths changed since then (A/C/M/R/T, plus uncommitted and untracked files).
+2. **Archive containers.** For the `plan-index` and `specification-index` properties, the
+   container is `<docs root of the index>/archive/<leaf of the index folder>/`. An entry is the
+   first path segment below a container.
+3. **Selection.** An entry is in scope when any of its documents was added, copied or renamed
+   by the change, or was modified while its harvest document declares `documentation-impact`.
+4. **Harvest document.** For a plan, the plan document. For a spec entry, the document that
+   declares `documentation-impact`.
+5. **Ignored:** untouched archives and deleted files.
 
-**Conditions** (each failure is named in the entry's single finding):
+**Conditions.** One finding per entry, naming every failed condition, with a hint.
 
-1. **C1 Archive status.** The frontmatter `status` of every document in the entry is
-   `archived`, `complete` or `superseded` (D7).
-2. **C2 No live body status (plans).** The first body line that starts `**Status:` does not
-   continue with `Draft`, `Ready`, `In progress`, `Blocked` or `Review required`.
-3. **C3 Decisions table.** A `##` heading `Decisions` (an `N.` prefix is optional) whose section
-   holds a table with at least one body row. The first-cell ids are taken with `**` and
-   backticks stripped and must match `^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$`.
-4. **C4 Closeout mapping table.** A `##` heading `Closeout mapping` (an `N.` prefix is
-   optional; case-insensitive) whose section holds a table.
-5. **C5 Every id mapped.** Every decision id (C3) and every design-harvest id (C8) is mapped.
-   A mapping row maps the ids listed in its first cell; comma-separated ids are allowed,
-   ranges such as `D1–D7` are **not** expanded. The rest of the row must contain either:
-   - (i) a relative link that resolves (`DocGraphProjection.ResolveLink`) to an existing file
-     outside `<docs-root>/archive/`; or
-   - (ii) the phrase `Documentation waiver`.
+0. **C0 Scope resolvable.** If git is missing, the directory is not a repository, the base is
+   unknown or the merge base is missing, emit one error: "cannot determine what this change
+   archives". Hint: "fetch full history (e.g. `actions/checkout` `fetch-depth: 0`) or pass
+   `--base <ref>`".
+1. **C1 Archive status.** Every document in the entry has frontmatter `status` of `archived`,
+   `complete` or `superseded`.
+2. **C2 No live body status (plans).** The first `**Status:` line does not continue with
+   `Draft`, `Ready`, `In progress`, `Blocked` or `Review required`.
+3. **C3 Decisions table.** A `##` heading `Decisions` (optionally numbered) whose section holds
+   a table with id rows. Ids are first cells with `**` and backticks stripped, matching
+   `^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$`.
+4. **C4 Closeout mapping table.** A `##` heading `Closeout mapping` (optionally numbered) whose
+   section holds a table.
+5. **C5 Scale declared.** `documentation-impact` is `new-component`, `extends-component` or
+   `no-design-change`. For the first two, `impact-components` is non-empty. For
+   `no-design-change`, the `## Design harvest` section contains `Documentation waiver:` followed
+   by a reason.
+6. **C6 Design harvest table.** For `new-component` and `extends-component`: a `##` heading
+   `Design harvest` with a table of id rows.
+7. **C7 Every id mapped.** Every C3 id and every C6 id is mapped by a row whose first cell
+   lists it. Comma-separated ids are allowed; ranges are not expanded. The row must contain
+   either a relative link that resolves to a live governed document (D30), or
+   `Documentation waiver`. A row containing `RESIDUAL` maps nothing. `ADR waiver` alone maps
+   nothing.
+8. **C8 Impact components covered.** For each impact component X:
+   - X is a catalog row; **and**
+   - at least one document linked from the Closeout mapping has `component: X` and
+     `last-reviewed` on or after the harvest document's `last-reviewed`.
 
-   A row containing `RESIDUAL` maps nothing. `ADR waiver` alone maps nothing.
-6. **C6 Residuals tracked.** Every line in the Closeout mapping section that contains
-   `RESIDUAL` also links an existing document inside the `todo-index` folder.
-7. **C7 Impact declared** (D19). `documentation-impact` is `new-component`,
-   `extends-component` or `no-design-change`. For the first two, `impact-components` is
-   non-empty.
-8. **C8 Design harvest.** A `##` heading `Design harvest` exists.
-   - For `new-component` / `extends-component`, it holds a table with at least one id row.
-     Those ids join C5.
-   - For `no-design-change`, it contains `Documentation waiver`.
-9. **C9 Architecture mapped.** For `new-component` / `extends-component`, the Closeout
-   mapping links, for **each** impact component X, at least one live document with
-   `doc-type: architecture` and `component: X`.
-10. **C10 New component complete.** For `new-component`, each impact component X:
-    - has a catalog row (X is in `DocumentSet.Components`);
-    - has live documents with `doc-type: architecture` and with `doc-type: onboarding`,
-      both with `component: X`;
-    - has a `README.md` in the architecture document's folder.
-11. **C11 Freshness (Q3 = a).** Every architecture document linked under C9 has
-    `last-reviewed` on or after the plan document's `last-reviewed`, which the closeout sets.
-    Other mapped destinations are not date-checked. Known limit: a date bump with no content
-    change passes, so the intent-alignment lens judges the content.
+   There are no doc-type or folder rules (D31).
+9. **C9 Residuals tracked.** Every Closeout mapping line containing `RESIDUAL` links an existing
+   document inside the `todo-index` folder.
 
-**The three real shapes (D3)** fail C1, C2, C4, C5, C7 and C8; #423 also fails C6. Each test
-below isolates its distinguishing condition with every other condition satisfied.
+**The real shapes.** #425 (an R100 rename into the archive) and #426 (added while Ready) fail
+C1, C2, C4, C5, C6 and C7. #423 also fails C9. Each shape has a RED test, in a temporary git
+repository, that isolates its distinguishing condition.
 
-**Message and hint.** `Archived plan '<entry>' lacks closeout evidence: <conditions>.` The
-hint names the fix, for example:
-
-- "Add `## Closeout mapping` rows for D3, H2"
-- "Link docs/<x>/architecture.md for component X"
-- "Add a catalog row for X"
-- "Set `status: archived`"
-
-**Stays review judgement** (intent-alignment lens; D22):
-
-- whether the mapped content is true and complete;
-- whether the Design harvest list is complete;
-- whether the scale is right;
-- for `extends-component`, onboarding, runbook, reference and catalog-row updates;
-- for `new-component`, `requirements.md`;
-- whether each waiver is valid.
+**Stays judgement:** D22.
 
 ## Test contract
 
-Runner prefix for every .NET row: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
--c Release --filter <filter>`, after `dotnet build KyberWeave.sln -c Release`.
+.NET rows run `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter
+<filter>` after a Release build. Scope tests create temporary git repositories; git is a test
+prerequisite, as in the existing review-gate tests.
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
-| T1 | No-test task (API skeleton) | Release build + full `dotnet test` | `ArchiveCloseoutValidator(string repoRoot, KyberWeaveConfig config)` with `MissingCloseoutEvidence = "KW-DOC-LIFECYCLE-004"`; `Validate(DocumentSet live)` returns an empty report. `DocumentFrontmatter.DocumentationImpact` / `ImpactComponents` exist. The config key parses but has no effect. Nothing is wired. | n/a. The skeleton lets T2 fail on behavior, not as a compile error that would block T4/T7 in the same project. | 0 warnings; existing suite unchanged and green. |
-| T2 | New `tests/KyberWeave.Tests/ArchiveCloseoutValidatorTests.cs`; additions to `OntologyConfigTests.cs` and `DocGovernanceTests.cs` (frontmatter binding) | `--filter "FullyQualifiedName~ArchiveCloseoutValidatorTests"`, `~OntologyConfigTests`, `~DocGovernanceTests` | **Real shapes:** (1) `AnUnchangedMoveIntoTheArchiveIsKWDOCLIFECYCLE004` (#425); (2) `APlanArchivedWhileItsBodySaysReadyFails` (C2, #426); (3) `AnArchivedPlanWithAnUntrackedResidualFails` (C6, #423).<br>**C1–C6:** (4) `ADecisionRowMarkedResidualIsNotMapped`; (5) `ADraftFrontmatterStatusFails`; (6) `AMissingDecisionsSectionFails`; (7) `AMissingCloseoutMappingSectionFails` (a forecast `## Review and closeout` does **not** satisfy C4); (8) `AnUnmappedDecisionIdIsNamedInTheHint`; (9) `AnAdrWaiverAloneDoesNotMapAnId`; (10) `ADocumentationWaiverMapsAnId`; (11) `AMappingLinkMustResolveToAnExistingNonArchivedFile`; (12) `AResidualLinkedToAnExistingTodoPasses`; (13) `ACommaSeparatedIdCellMapsEachIdButARangeDoesNot`.<br>**C7–C11:** (14) `AMissingDocumentationImpactFails`; (15) `AnUnknownImpactValueFails`; (16) `AnImpactWithoutComponentsFails`; (17) `AMissingDesignHarvestSectionFails`; (18) `AnUnmappedDesignHarvestIdIsNamedInTheHint`; (19) `NoDesignChangeNeedsAWaiverLineAndNoArchitectureLink`; (20) `ExtendsComponentWithoutTheComponentsArchitectureLinkFails`; (21) `AnArchitectureDocOfAnotherComponentDoesNotCount`; (22) `NewComponentWithoutACatalogRowFails`; (23) `NewComponentWithoutAnOnboardingDocFails`; (24) `NewComponentWithoutAFolderReadmeFails`; (25) `AStaleArchitectureDocFails` (C11).<br>**Pass controls:** (26) `ACompleteExtendsComponentCloseoutPasses` (`archived` and `complete` both accepted); (27) `ACompleteNewComponentCloseoutPasses`; (28) `ACompleteNoDesignChangeCloseoutPasses`.<br>**Specs:** (29) `AnArchivedSpecificationFolderIsOneFindingReadFromDesign`; (30) `ACompleteArchivedSpecificationPasses`.<br>**Scope:** (31) `ABaselinedEntryIsSkipped`; (32) `AStaleBaselineEntryIsAnError`; (33) `AHostThatHasNotAdoptedTheRuleSeesNothing`; (34) `DocsValidateReportsMissingCloseoutEvidenceOnlyWithMergeReady` (a theory mirroring `DocsValidateReportsOpenWorkOnlyWithMergeReady`).<br>**Other:** config tests (key parses; a missing baseline file is a config error; an entry outside the archive is rejected); a frontmatter test (`documentation-impact` and `impact-components` bind). | Every new test fails against the T1 skeleton, with its failing assertion recorded. The pass controls (26)–(28), (30), (31) and (33) must be shown failing first, so that they discriminate. | Same tests pass unweakened; `OpenWorkValidatorTests` green and unedited. Test (25) date-checks architecture docs only (Q3 = a), and a control asserts that a stale non-architecture destination does **not** fail. |
-| T3 | Same as T2 | Same as T2, then the full suite | Behavior per the Gate contract. | T2 RED. | All T2 tests green; full suite green; 0 warnings. |
-| T4 | New `tests/KyberWeave.Tests/SquadCloseoutHarvestContractTests.cs` | `--filter "FullyQualifiedName~SquadCloseoutHarvestContractTests"` | **Description:** pins the phrases listed under T5/T6. `DescriptionScorer` total ≥ 70. `AgentSyncLinter.LintSet` over an `AgentModel` raises no `KW-AGENT-LINT-001`/`-002`. "closeout" appears before "README", and "design" and "architecture" both appear.<br>**Body:** the first `You own:` bullet contains `closeout`. | Against the unedited tree, every closeout-first, design-harvest, impact, spec-parity and digest assertion fails. The score assertion passes today (it is a regression guard); say so in the evidence. | Same tests pass after T5/T6 with no test edit. |
-| T5, T6 | Text only | — (verified by T7) | — | T4 RED. | T7 green. |
-| T7 | T4's file + `SquadCanonicalContentTests` | `--filter "FullyQualifiedName~SquadCloseoutHarvestContractTests"`; `~SquadCanonicalContentTests` | Pins green. The digest test is green after the re-pin; the existing closeout-mapping and Decisions pins stay green. | The digest test fails after T5 (expected the old `6b0c5703…`); record the actual value. | Both classes green; `final-body-sha256 == BodyDigest`; full suite green. |
-| T8, T9 | No-test tasks (canonical docs) | `docs validate .` + `docs drift .` (in T12) | DocGraph and KyberSquad canonical docs describe the shipped design truthfully. | n/a | Zero findings (T12); `governance.md` `code-refs` resolves `ArchiveCloseoutValidator`. |
-| T10 | Real corpus | `dotnet run --project src/KyberWeave.Cli -c Release --no-build -- docs validate . --merge-ready --format json` | Adoption on the real archive. | **Real-corpus RED:** exactly three `KW-DOC-LIFECYCLE-004` findings (the backfill targets) plus one `KW-DOC-LIFECYCLE-003` for this active plan. | Same command after T11 (T12). |
-| T11 | No-test task (backfill) | — (T12) | Three closeouts meet C1–C11. | T10 RED. | T12. |
-| T12 | Real corpus | `docs validate . --merge-ready` + `docs drift .` | Gate green on the real archive. | T10. | Zero 004 findings; only 003 for this active plan; zero drift findings. |
-| T13 | No-test task (closeout, dogfood) | — (T14) | This plan meets C1–C11 and is not baselined. | n/a | T14. |
-| T14 | Real corpus + gates | `docs validate . --merge-ready` + `docs drift .` | Corpus clean after this plan is archived. | n/a | Zero findings of any rule. |
+| T1 | No-test task (API skeleton) | Release build + full suite | `ArchiveCloseoutValidator(string repoRoot, KyberWeaveConfig config).Validate(DocumentSet live, IReadOnlyList<ChangedPath> changes)` returns an empty report, with `MissingCloseoutEvidence = "KW-DOC-LIFECYCLE-004"`. `ChangedPath(string Path, ChangeKind Kind)`; `ChangedFiles.ResolveSinceMergeBase(...)` is a stub; `DocsValidateSettings.Base` exists; `DocumentFrontmatter.DocumentationImpact` and `.ImpactComponents` exist. Nothing is wired. | n/a. It lets T2 fail on behavior, not compile, so T4, T8 and T14 can share the project. | 0 warnings; existing suite unchanged and green. |
+| T2 | New `ArchiveCloseoutValidatorTests.cs`, `ArchiveCloseoutScopeTests.cs` (temporary git repos); additions to `DocGovernanceTests.cs` (frontmatter binding) | `--filter "FullyQualifiedName~ArchiveCloseout"`; `~DocGovernanceTests` | **Real shapes (git):** (1) `AnUnchangedRenameIntoTheArchiveIsKWDOCLIFECYCLE004` (#425); (2) `APlanAddedToTheArchiveWhileReadyFails` (C2, #426); (3) `AnArchivedPlanWithAnUntrackedResidualFails` (C9, #423).<br>**Scope (git):** (4) `AnUntouchedLegacyArchivedPlanIsNeverChecked`; (5) `EditingALegacyArchivedPlanWithoutTheImpactKeyIsNotChecked`; (6) `EditingAnArchivedPlanThatDeclaresImpactIsChecked`; (7) `ADeletedArchivedPlanIsIgnored`; (8) `UncommittedAndUntrackedArchiveMovesAreInScope`; (9) `ChangesThatLandedOnTheBaseAfterTheBranchPointAreOutOfScope` (merge base); (10) `TheBaseDefaultsToTheRemoteDefaultBranch`; (11) `AShallowCloneWithoutTheMergeBaseFailsClosedWithAFetchHint`; (12) `ANonGitDirectoryFailsClosedUnderMergeReady`; (13) `DocsValidateReportsMissingCloseoutEvidenceOnlyWithMergeReady` (theory).<br>**Conditions (injected changes):** (14) draft frontmatter; (15) missing Decisions; (16) missing Closeout mapping (a forecast `## Review and closeout` does not count); (17) missing scale; (18) unknown scale; (19) scale without components; (20) `no-design-change` without a reason; (21) missing Design harvest; (22) unmapped decision id named in the hint; (23) unmapped H id named; (24) `ADR waiver` alone does not map; (25) `Documentation waiver` maps; (26) a link to a code file, a missing file or an archived doc does not map; (27) a comma list maps each id, a range does not; (28) a RESIDUAL row maps nothing; (29) a RESIDUAL linked to an existing todo passes; (30) an impact component not in the catalog fails; (31) no mapped doc carries the component; (32) all mapped docs for the component are stale; (33) one fresh doc among stale ones passes.<br>**Portability:** (34) a docs root named other than `docs` (for example `handbook`); (35) multiple docs roots, with the plan index in the second root; (36) a component whose only doc is a `runbook` or `reference` passes; (37) a Supporting component with root-level docs and no folder passes; (38) `new-component` needs only a catalog row plus one mapped fresh doc carrying it, with no doc type or folder required.<br>**Pass controls:** (39) complete `extends-component` (with `archived` and with `complete`); (40) complete `no-design-change`; (41) a complete spec entry whose harvest document is the one declaring impact.<br>**Specs:** (42) a spec entry is one finding; (43) a spec entry where no document declares impact fails C5.<br>**Binding:** `documentation-impact` and `impact-components` bind. | Every new test fails against T1. The controls (36)–(41) are shown failing first, so they discriminate. Record each test's failing assertion. | Same tests pass unweakened. `OpenWorkValidatorTests` stays green and unedited. |
+| T3 | Same as T2 | Same, then the full suite | Per the Gate contract. | T2. | All T2 tests green; full suite green; 0 warnings. |
+| T4 | New `SquadDocsHarvestContractTests.cs`; edit `Squad/CopilotRendererTests.cs:634` | `--filter "FullyQualifiedName~SquadDocsHarvestContractTests"`; `~CopilotRendererTests` | Phrase pins (listed in T5–T7), plus: <br>• `docs-dev` description: `DescriptionScorer` ≥ 70; no `KW-AGENT-LINT-001`/`-002`; "closeout" before "README". <br>• `bug-crusher` `delegates-to` contains `docs-dev`; its Copilot render is `agents: ['bug-crusher-investigator', 'docs-dev']` (renderer order). <br>• **G4:** no literal `docs/` in any portable file edited in T5–T7. | Every assertion fails on the unedited tree, except the description score, which passes today as a regression guard (state this). | Same tests pass after T5–T7 with no test edit. |
+| T5–T7 | Text only | (T8) | — | T4. | T8 green. |
+| T8 | T4's tests + `SquadCanonicalContentTests` | `--filter "FullyQualifiedName~SquadDocsHarvestContractTests"`; `~SquadCanonicalContentTests`; `~CopilotRendererTests` | Pins green. Migration digests re-pinned for `docs-dev` and `conductor`. | The digest test fails after T5/T6; record the actual values. | All green; full suite green. |
+| T9, T11 | No-test (canonical docs) | (T19) | Docs describe the shipped design. | n/a | Zero findings in T19. |
+| T10 | Real history (no new test) | `dotnet run --project src/KyberWeave.Cli -c Release --no-build -- docs validate . --merge-ready --base 8beb97ae~1 --format json` | The gate catches the real failures. | **Historical RED:** 004 findings include the #425 and #426 plans. Record any other entries reported. | n/a (evidence). |
+| T12 | No-test (backfill) | (T19) | The three plans meet C1–C9 (in scope under D26 because they now declare impact). | T10. | T19. |
+| T13 | No-test (CI and template) | (T19 + PR CI) | CI passes `--base` with full history. | n/a | The PR's `skill-docs-gate` runs 004. |
+| T13a | No-test: observation experiment in a scratch repository (outside the worktree) | Per the T13a task. An isolated APM install per version; no global install. | **Observed** behaviour: whether a renamed skill's old directory remains after re-installing the package, for APM 0.28.0 (the fixtures' pin) and for APM ≥ 0.34.0. Recorded for both `apm install` and `apm update`, with and without `apm.lock.yaml`. | n/a (it is the evidence T14's RED encodes) | The observation record exists with versions, exact commands and outputs. If it contradicts D37, D37 and the warning text are corrected before T14 starts. |
+| T14 | `SquadCanonicalContentTests`, `SquadPackAndReleaseTests`, `Fakes/FakeSquadRenderer.cs`, `KyberWeaveDocsSkillVocabularyTests.cs`, new `KyberDocsSkillSetTests.cs`, `DocsInitCommand` and `SquadDoctorCommand` tests | `--filter "FullyQualifiedName~KyberDocsSkillSetTests"` and the named classes | **Renames:** `.apm/skills/{kyber-docs-authoring,kyber-docs-integrity-review,kyber-docs-onboarding-and-assessment}/SKILL.md` exist with matching `name`; the old directories and `products/kyber-squad/skills/second-brain` are gone; the Squad bundle and rosters lack `second-brain`; no Kyber-Docs skill lives in Squad. <br>**Assessment-mode pins:** `owner-started`, `harvested`, `partial`, `not harvested`, `batch`, `pull request`, `docs-dev`. <br>**G4:** no literal `docs/` in the three skills. <br>**`docs init`:** names `kyber-docs-authoring`; warns about a leftover retired skill directory under the target's skills root and prints the cleanup command. The warning's conditions and wording encode **T13a's observed APM behaviour**, not the summarized research. <br>**`squad doctor`:** warns about a retained or unmanaged retired skill, prints its paths and the cleanup steps, and names the new Kyber-Docs home. | All fail on the phase-1 tree. | Same tests pass after T15–T17. |
+| T15–T17 | Code, moves, text | (T18) | — | T14. | T18. |
+| T18 | Phase-2 tests | as T14, then the full suite | Green. | T14. | Green; `scripts/fast-loop-classes.txt` updated if a test class was renamed. |
+| T19 | Real corpus | `docs validate . --merge-ready --base origin/main` + `docs drift .` | Gate green for this change. | — | Zero 004 findings. The only finding is 003 for this active plan. Drift zero. Full suite green. |
+| T20 | No-test (closeout, dogfood) | (T21) | This plan meets C1–C9 once archived (an added entry). | n/a | T21. |
+| T21 | Real corpus + gates | `docs validate . --merge-ready --base origin/main` + `docs drift .` | Clean after closeout. | n/a | Zero findings of any rule. |
 
-Changing an approved Test-contract row, including weakening an assertion to reach green, is a
-scope change: the plan returns to Draft and the conductor relays reapproval.
+Changing an approved Test-contract row is a scope change: back to Draft and reapproval.
 
 ## Tasks
 
-Required skills are named, not agents. Every developer task ends with the worker's own
-`task-gate` run; a failing gate goes straight back to the same worker.
+Required skills are named, not agents. Every developer task ends with the worker's
+`task-gate`. Skill names in this section are the names current when each task starts;
+phase 2 renames the authoring skill to `kyber-docs-authoring`.
 
-### T1 — Gate API skeleton (no behavior)
+### Phase 1 — contract, review, gate, backfill
 
-- **Objective:** Let T2's tests compile so their RED is behavioral.
+**T1 — Gate API skeleton.**
 - **Files:**
-  - New `src/KyberWeave.Core/Docs/Validation/ArchiveCloseoutValidator.cs` (signature per the T1 row, with `<remarks>` giving the why: D3, D4).
-  - `src/KyberWeave.Core/Docs/Model/DocumentModel.cs`: `DocumentFrontmatter.DocumentationImpact` (string?) and `ImpactComponents` (list).
-  - Config plumbing per Q1: `OntologyYamlSection.ArchiveCloseout` (`baseline`), `OntologyConfigLoader.Merge`, and `OntologyConfig.ArchiveCloseout` (null = not adopted).
-- **Acceptance:** Per the T1 row.
-- **Dependencies:** none.
-- **Required skills:** `csharp-dev`; **<csharp-coding-standard>**.
+  - New `src/KyberWeave.Core/Docs/Validation/ArchiveCloseoutValidator.cs`; `<remarks>` give the why (D3, D4).
+  - `src/KyberWeave.Core/Review/ChangedFiles.cs`: a `ResolveSinceMergeBase` stub plus the `ChangedPath`/`ChangeKind` types.
+  - `src/KyberWeave.Core/Docs/Model/DocumentModel.cs`: two frontmatter properties.
+  - `src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs`: a `--base <REF>` option.
+- **Acceptance:** per the T1 row.
+- **Deps:** none.
+- **Skills:** `csharp-dev`.
 
-### T2 — RED: gate tests
+**T2 — RED: gate, scope and portability tests.**
+- **Files:** per the T2 row. Condition tests use `DocFixture` with injected changes. Scope tests build temporary repositories with a bare "origin", set `origin/HEAD`, and create a shallow clone for (11).
+- **Deps:** T1.
+- **Skills:** `test-dev`.
 
-- **Objective:** Author the T2 tests.
+**T3 — GREEN: gate.**
 - **Files:**
-  - New `tests/KyberWeave.Tests/ArchiveCloseoutValidatorTests.cs`. Use `DocFixture` in the builder style of `OpenWorkValidatorTests`. Adopting fixtures write `.kyber-weave/kyber-weave.yml` with `ontology: { docs-root: 6-Docs, archive-closeout: { baseline: … } }`. Catalog rows come from `WithCatalog()` plus fixture rows for the new-component cases.
-  - Additions to `OntologyConfigTests.cs` and `DocGovernanceTests.cs`.
-- **Acceptance:** Per the T2 row; the project compiles; `OpenWorkValidatorTests` is untouched.
-- **Dependencies:** T1.
-- **Required skills:** `test-dev`; **<test-coding-standard>**.
-
-### T3 — GREEN: gate implementation and wiring
-
-- **Objective:** Implement C1–C11.
-- **Files:**
-  - `ArchiveCloseoutValidator.cs`: the archive walk (D9); the conditions with hints; C9–C11 against the live `DocumentSet`.
+  - `ArchiveCloseoutValidator.cs`: C1–C9.
+  - `ChangedFiles.cs`: the merge-base name-status diff plus untracked files; argv only; `ValidateBase`.
   - `InventoryReachability.cs`: receives `EntryBelow`; `OpenWorkValidator.cs` now calls it there.
-  - `DocumentLoader.cs`: only a narrowly scoped internal entry point if parsing the archive needs one; default exclusions unchanged.
-  - `DocsValidateCommand.cs`: under `MergeReady`, `new ArchiveCloseoutValidator(settings.Path, config.WithOntology(ontology)).Validate(set)`.
-  - `DocsValidateSettings.cs`: the `--merge-ready` description names 003 and 004.
-  - `<remarks>`: why the archive is read here; why `ADR waiver` alone maps nothing; why a freshness proxy.
-- **Acceptance:** T2 tests green; full suite green; 0 warnings; no new dependency.
-- **Dependencies:** T2.
-- **Required skills:** `csharp-dev`; **<csharp-coding-standard>**.
+  - `DocsValidateCommand.cs`: under `MergeReady`, resolve the base (`--base` or `origin/HEAD`), compute the changes (or C0), and run the validator over the live `set`.
+  - `DocsValidateSettings.cs`: the description names 003 and 004.
+  - `DocumentLoader.cs`: only a narrowly scoped internal entry point, and only if needed to parse archived files.
+- **Acceptance:** per the T3 row; no new dependency.
+- **Deps:** T2.
+- **Skills:** `csharp-dev`.
 
-### T4 — RED: authoring, closeout and routing text pins
+**T4 — RED: text pins.**
+- **Files:** per the T4 row, following the `SquadSpecGateCollapseTests` `Read`/`AssertAll` pattern.
+- **Deps:** none.
+- **Skills:** `test-dev`.
 
-- **Objective:** Pin the A/B/Q2 text contract before it is written.
-- **Files:** New `tests/KyberWeave.Tests/SquadCloseoutHarvestContractTests.cs`.
-  - Follow the `SquadSpecGateCollapseTests` `Read(...)` / `AssertAll` pattern.
-  - Load the `docs-dev` description and body with `SquadSourceLoader.Load`.
-  - Section-scoped pins take the text between a heading and the next `## `.
-  - Pins are `Ordinal` unless the T4 row says otherwise.
-  - The phrases are listed in T5 and T6.
-- **Acceptance:** RED per the T4 row.
-- **Dependencies:** none (separate file; compiles independently of T2).
-- **Required skills:** `test-dev`; **<test-coding-standard>**.
+**T5 — GREEN: the `docs-dev` side.**
+- `products/kyber-squad/agents/docs-dev.md`:
+  - **Description** per D10. Pins: `Use when`, `Do not use when`, `design`, `decision`, `documentation-impact review`, `README`, `ADR`, `runbook`, `product-owner`.
+  - **Scope:** the first `You own:` bullet contains `closeout` and `design harvest`.
+  - **New "Documentation-impact review" section:**
+    - `DOCS_REVIEW: docs updated:`, `DOCS_REVIEW: no doc change:`, `RECOMMENDATIONS:`;
+    - "reviews what it is sent", "run record";
+    - routing by `component` and `doc type` from `<component-catalog>` and `<documentation-ontology>` (G1, G7);
+    - "beside the component's existing docs" (G6);
+    - "high confidence" and "human approves" for new components (G2);
+    - "never adds ontology vocabulary" (G3);
+    - "best existing home" (G5);
+    - recommendations in the closeout section, the digest and the PR, and `a todo only if the owner accepts` (G13).
+  - **Plan and Specification closeout:**
+    - keep `Plan closeout`, `mapping table`, `ADR waiver`, `Documentation waiver`, `do not archive`;
+    - add `## Design harvest`, `## Closeout mapping`, `documentation-impact`, `impact-components`, `last-reviewed`, `status: archived` and `**Status: Archived`;
+    - specs read from the document that declares the scale.
+  - **Digests (Q2):** `STATUS: CLOSEOUT_COMPLETE`, `STATUS: CLOSEOUT_BLOCKED`.
+  - Replace the literal `docs/` paths with placeholders (D34).
+- `products/kyber-squad/skills/product-owner/references/closeout-phase.md`: the same closeout contract; the digest gains `MAPPED:`, `IMPACT:` and `DOCS_REVIEW:`.
+- `products/kyber-squad/skills/product-owner/references/tasks-phase.md` (:40): the closeout task names the design harvest and the scale.
+- `products/kyber-squad/skills/code-review/references/lenses/intent-alignment.md` (:49-54):
+  - "archived plan or specification" plus the D22 judgement items;
+  - a `critical` finding for a missing or false PR documentation section, or an unjustified `no doc change`.
+- **Deps:** T4.
+- **Skills:** `kyber-weave-docs`, `writing-trigger-descriptions`.
 
-### T5 — GREEN: closeout-side text (docs-dev, closeout phase, lens, conductor closeout)
+**T6 — GREEN: the orchestration side.**
+- `products/kyber-squad/agents/conductor.md` (:59, :71): every completed change receives a `docs-dev` documentation-impact review; plan- and spec-backed changes get the closeout.
+- `products/kyber-squad/agents/conductor/references/execution-and-review.md`:
+  - a "Documentation-impact review" step: `run record` (asked, decided and why, files changed; `no transcripts`) on the execution artifact; dispatch `docs-dev`; require `DOCS_REVIEW:`;
+  - §Closeout gains the Q2 rules and `CLOSEOUT_COMPLETE`;
+  - "the pull request description" carries the outcome.
+- `products/kyber-squad/agents/conductor/references/autonomy.md` (:44): delivery requires `DOCS_REVIEW:` (or `CLOSEOUT_COMPLETE`), and the PR carries it.
+- `products/kyber-squad/skills/bug-crusher/SKILL.md` (§3 step 4, §5 step 5, §6): after verification and before review or delivery, a run record plus a `docs-dev` documentation-impact review; the outcome goes in the report and the PR.
+- `products/kyber-squad/agents/bug-crusher.md`: `delegates-to: [bug-crusher-investigator, docs-dev]` (D33).
+- `products/kyber-squad/skills/create-pull-request/SKILL.md` (:125-141, :178-185):
+  - "Documentation impact" = the `docs-dev` outcome verbatim (`docs updated:` / `no doc change:`) plus recommendations;
+  - add it under its own heading when the host template lacks one;
+  - "After merge" now says the closeout comes **before** delivery.
+- **Deps:** T4.
+- **Skills:** `kyber-weave-docs`.
 
-- **Objective:** Rewrite closeout as a design harvest with scale obligations.
-- **Files and pinned phrases:**
-  - `products/kyber-squad/agents/docs-dev.md`:
-    - **(A) Description** per D10. Pins: `Use when`, `Do not use when`, `design`, `architecture`, `decision`, `README`, `ADR`, `runbook`, `product-owner`, and "closeout" before "README". `model-profile` unchanged (D11).
-    - **(A) Scope:** closeout bullets come first. The first `You own:` bullet contains `closeout` and `design harvest`.
-    - **Plan closeout:** keep `Plan closeout`, `mapping table`, `ADR waiver` and `Documentation waiver`. Name `## Closeout mapping` (one row per decision ID and per `## Design harvest` id; a relative link or `Documentation waiver`). Obligations by scale, naming `new-component`, `extends-component`, `no-design-change`, `catalog row`, `app-docs-standard`, `architecture.md` and `onboarding.md`. State the `status: archived` rule and the first body line `**Status: Archived`. Keep "do not archive".
-    - **(B) Specification closeout:** the same, read from `design.md`, plus `requirement group`.
-    - **(Q2) Completion digest:** `STATUS: CLOSEOUT_COMPLETE` (with an `IMPACT:` line) and `STATUS: CLOSEOUT_BLOCKED`.
-  - `products/kyber-squad/skills/product-owner/references/closeout-phase.md`: obligations by scale; `## Closeout mapping` covering `design.md` sections, requirement groups and decision IDs; `ADR waiver`; `Documentation waiver`; "do not archive". The digest gains `MAPPED:` and `IMPACT:`.
-  - `products/kyber-squad/skills/product-owner/references/tasks-phase.md` (:40): the closeout task names the scale obligations and the design-harvest mapping.
-  - `products/kyber-squad/skills/code-review/references/lenses/intent-alignment.md` (:49-54):
-    - "archived plan or specification";
-    - list the D22 judgement items;
-    - a `critical` finding for: a missing component architecture update; a scale that contradicts the delivered change; a draft/Ready status, a missing `## Closeout mapping` or an untracked `RESIDUAL` on an archived artifact.
-  - `products/kyber-squad/agents/conductor/references/execution-and-review.md` (:88-95): closeout performs the design harvest per the declared scale. Q2 rules: only the `docs-dev` closeout archives; a worker meeting 003 routes to closeout; `CLOSEOUT_COMPLETE` plus a post-closeout `docs validate . --merge-ready`.
-  - `products/kyber-squad/agents/conductor/references/autonomy.md` (:44): delivery requires `CLOSEOUT_COMPLETE`.
-  - The `conductor.md` body is not edited (its digest is unaffected).
-- **Acceptance:** T7 green (with T6). No other files.
-- **Dependencies:** T4.
-- **Required skills:** `kyber-weave-docs`, `writing-trigger-descriptions`.
+**T7 — GREEN: the authoring side and policy.**
+- `products/kyber-squad/agents/architect/references/plan-authoring.md`:
+  - frontmatter `documentation-impact` (the three values) and `impact-components`;
+  - a `## Design harvest` table with `Target component` and `Target doc type`;
+  - "the owner confirms the scale at approve-and-execute"; "high confidence" for proposing a new component;
+  - keep the existing Decisions pins.
+- `products/kyber-squad/skills/product-owner/references/design-phase.md`: a permanent `## Decisions` table (the five columns, "preserved intact"), the scale frontmatter, and a `## Design harvest` that includes a `requirement group` row type.
+- `products/kyber-squad/agents/conductor/references/plan-path.md` (:18) and `spec-path.md` (:18, :21): `PLAN_READY` / `SPEC_READY` verify the scale and the Design harvest; the approve-and-execute question states the scale and the components.
+- `docs/plans/README.md` and `docs/specs/README.md`: policy sections only ("Decisions, Design Harvest and Closeout Policy").
+- `.github/PULL_REQUEST_TEMPLATE.md`: a `## Documentation impact` section (this host).
+- **Deps:** T4.
+- **Skills:** `kyber-weave-docs`.
 
-### T6 — GREEN: authoring-side text and policy READMEs
+**T8 — GREEN verification; digests.**
+- **Files:** `products/kyber-squad/migration/{docs-dev,conductor}.md` (`final-body-sha256` only).
+- **Deps:** T5, T6, T7.
+- **Skills:** `test-dev`.
 
-- **Objective:** Declare the impact and the design harvest when plans and specs are written; spec Decisions parity.
-- **Files and pinned phrases:**
-  - `products/kyber-squad/agents/architect/references/plan-authoring.md`, "Required plan contract":
-    - frontmatter `documentation-impact` (the three values) and `impact-components`;
-    - a `## Design harvest` table (`H` ids, design item, planned canonical destination) with the `no-design-change` waiver line;
-    - "the owner confirms the scale at approve-and-execute";
-    - keep the existing Decisions pins.
-  - `products/kyber-squad/skills/product-owner/references/design-phase.md`:
-    - a permanent `## Decisions` table with the five columns (`ID`, `Question`, `Answer / decision`, `Mitigating and supporting information`, `Status / approval provenance`) and "preserved intact";
-    - the same impact frontmatter on `design.md`;
-    - a `## Design harvest` covering `design.md` sections and requirement groups.
-  - `products/kyber-squad/agents/conductor/references/plan-path.md` (:18) and `spec-path.md` (:18, :21): `PLAN_READY` / `SPEC_READY` verify `documentation-impact`, `impact-components` and `## Design harvest` (spec: plus the Decisions table with `Mitigating and supporting information`). The approve-and-execute question states the scale and components for the owner to confirm.
-  - `docs/plans/README.md`, policy section only: rename it "Plan Decisions, Design Harvest and Closeout Policy"; add the scale obligations, `## Design harvest`, `## Closeout mapping`, `KW-DOC-LIFECYCLE-004`, and the D7 status convention. Rows untouched.
-  - `docs/specs/README.md`: a "Specification Decisions, Design Harvest and Closeout Policy" section mirroring it.
-- **Acceptance:** T7 green. Both READMEs pass `docs validate` (T12).
-- **Dependencies:** T4.
-- **Required skills:** `kyber-weave-docs`.
+**T9 — DocGraph, CI Pipelines and CLI-reference docs (H1–H3, H8).**
+- `docs/docgraph/governance.md`:
+  - the 004 row, C0–C9, scope, fail-closed behaviour, and the gate-vs-lens split;
+  - the 003 "not semantic proof" sentence now points at 004;
+  - `code-refs` gains `ArchiveCloseoutValidator`, `OpenWorkValidator` and `ChangedFiles`;
+  - bump `last-reviewed`.
+- `docs/docgraph/architecture.md`: change-scoped reading.
+- `docs/ci-pipelines/rule-reference.md`: the 004 row.
+- `docs/ci-pipelines/workflows-runbook.md`: the template's history and `--base` requirement.
+- `docs/cli-command-surface.md`: `--base`.
+- **Deps:** T3, T13.
+- **Skills:** `kyber-weave-docs`.
 
-### T7 — GREEN verification and migration digest re-pin
+**T10 — Historical RED on the real corpus.**
+- Run the T10 command and record the output verbatim.
+- **Deps:** T3.
+- **Skills:** `test-dev`.
 
-- **Objective:** Prove T5 and T6; re-pin the digest.
-- **Files:** `products/kyber-squad/migration/docs-dev.md` (`final-body-sha256` only).
-- **Acceptance:** Per the T7 row. A failing pin goes back to the T5 or T6 worker; the test is not edited.
-- **Dependencies:** T5, T6.
-- **Required skills:** `test-dev`.
+**T11 — KyberSquad docs (H4–H7).**
+- `docs/kyber-squad/architecture.md`: a new section, "Plan and specification lifecycle: documentation impact, design harvest, every-change review, closeout".
+- `docs/kyber-squad/requirements.md:33`: KS-008 restated.
+- **Deps:** T5, T6, T7.
+- **Skills:** `kyber-weave-docs`.
 
-### T8 — DocGraph canonical docs (H1–H3, H5, H7)
-
-- **Objective:** Document 004 where the gates and DocGraph architecture live.
+**T12 — Backfill the three plans (D13, D23).**
+- **Steps:**
+  1. Add the scale frontmatter, `status: archived` and `last-reviewed` to each plan.
+  2. Insert the new first status line and label the history.
+  3. Add a retroactive `## Design harvest` (component + doc type).
+  4. Map every H id and decision ID (13 + 8 + 11 decisions) to the resolved canonical doc. Write missing design rather than waiving it: the KyberSquad overlay, #425 D6 and #425 D1. Process and approval rows may take a reasoned `Documentation waiver`.
+  5. Bump `last-reviewed` on at least one mapped KyberDash doc and one KyberSquad doc after re-verifying them.
+  6. Fix the link at `docs/dash/architecture.md:359` (D12).
+  7. Add `## Completion summary` and `## Closeout mapping` to each plan.
+  8. Reconcile the three index rows (#426 Archive Date `2026-10-24`, merge `0351a45c`).
+  9. Leave #426's deployment gap and the owner live gates as open owner items, not `RESIDUAL`.
 - **Files:**
-  - `docs/docgraph/governance.md`:
-    - a rule row;
-    - rewrite the 003 "not semantic proof" sentence to point at 004;
-    - C1–C11, the D7 convention, adoption and the baseline, and the gate-vs-lens split;
-    - `code-refs` gains `ArchiveCloseoutValidator` and `OpenWorkValidator`;
-    - bump `last-reviewed`.
-  - `docs/docgraph/architecture.md`: the archive read path (H2).
-  - `docs/ci-pipelines/rule-reference.md`: a 004 row.
-  - `docs/configuration.md`: the `ontology.archive-closeout` key.
-- **Acceptance:** Truthful to T3's behavior; zero findings in T12.
-- **Dependencies:** T3.
-- **Required skills:** `kyber-weave-docs`.
+  - the three archived plans;
+  - `docs/dash/{architecture,telemetry-inventory,runbook}.md`;
+  - `docs/kyber-squad/{architecture,requirements,onboarding}.md`;
+  - `docs/adr/0019-pi-native-subagents-and-primary-lowering.md`;
+  - `docs/plans/README.md` (three rows).
+- **Deps:** T7 (README policy), T11 (shared `docs/kyber-squad/*`), T10 (historical RED first).
+- **Skills:** `kyber-weave-docs`, `app-docs-standard`.
 
-### T9 — KyberSquad canonical docs (H4–H7)
+**T13 — CI and host template (D35).**
+- `.github/workflows/ci.yml` (`skill-docs-gate`, `:514-515`, `:580-585`): `fetch-depth: 0`; `--base` per event; the comment names 003 and 004.
+- `templates/github-actions/kyber-weave-docs-gate.yml`: on pull requests, `--merge-ready --base origin/${{ github.base_ref }}` with `fetch-depth: 0`.
+- `templates/github-actions/README.md`: the matching row.
+- **Deps:** T3.
+- **Skills:** `github-devops`.
 
-- **Objective:** Canonical home for the new lifecycle design (D24).
-- **Files:**
-  - `docs/kyber-squad/architecture.md`: a new section, "Plan and specification lifecycle: documentation impact, design harvest, closeout", covering the impact keys, Design harvest, scale obligations, mapping and waivers, the closeout digest and delivery rule, and the gate-vs-lens split.
-  - `docs/kyber-squad/requirements.md` (:33): KS-008 restated as the design harvest.
-- **Acceptance:** Matches the T5/T6 text; zero findings in T12.
-- **Dependencies:** T5, T6.
-- **Required skills:** `kyber-weave-docs`.
+### Phase 2 — Kyber-Docs skills (G17–G19)
 
-### T10 — Adopt the gate; record real-corpus RED
+**T13a — Observe APM's pruning of renamed skills (D37 verification).**
+- **Objective:** Replace D37's medium-confidence APM facts with an observation, before any warning test is written.
+- **Scratch packages:** a git-backed package pair outside the worktree, in the session scratchpad:
+  - **v1** ships `.apm/skills/kyber-weave-docs/SKILL.md`;
+  - **v2** ships the same skill as `.apm/skills/kyber-docs-authoring/` instead;
+  - both use `apm.yml` with `targets: [agent-skills]` and `includes: auto`.
+  - Alternative: the real package at an old ref versus a pushed ref of this branch after T16.
+  - Record which source was used.
+- **Consumer:** a scratch consumer repository.
+- **Runs, for each APM version:**
+  1. Install v1 (`apm install <pkg> --target agent-skills`).
+  2. Move to v2: plain `apm install` and `apm update`, with `apm.lock.yaml` present.
+  3. Repeat without a lockfile.
+  4. List `.agents/skills/` after each step.
+- **Versions:**
+  - APM **0.28.0**, the version `tests/KyberWeave.Tests/SquadCliCommandTests.cs:361` pins;
+  - APM **0.34.0 or later** (latest is 0.35.0).
+- **Isolation:** run each version in an isolated tool environment (for example `uv tool run` or a throwaway virtualenv). No global or system-wide install. Network access is needed.
+- **Record:** on the execution artifact, write the versions, exact commands, exit codes, and directory listings, plus whether the old `kyber-weave-docs/` directory remained.
+- **If the observation contradicts D37:** before T14 starts, the conductor has the architect amend D37 (provenance "verified T13a") and the warning conditions and text that T14/T15 specify.
+- **Deps:** none (it can start in wave 1).
+- **Skills:** `github-devops` (toolchain and package-manager diagnostics, with a process tool).
 
-- **Objective:** Turn 004 on and prove it catches the three real failures.
-- **Files:**
-  - `.kyber-weave/kyber-weave.yml`: `ontology.archive-closeout.baseline`, and the baseline path added to `policy.always-human` with a comment giving the reason.
-  - New `.kyber-weave/archive-closeout-baseline.txt`: every entry under `docs/archive/plans/` and `docs/archive/specs/` at `a0862e7c` except the three backfill targets, with a header comment citing this plan and Q1.
-  - `.github/workflows/ci.yml:580-581`: the comment names 003 and 004 (comment only).
-- **Acceptance:** The T10 real-corpus RED, recorded verbatim.
-- **Dependencies:** T3.
-- **Required skills:** `github-devops`.
+**T14 — RED: skill set, assessment mode, warnings.**
+- **Files:** per the T14 row. The `docs init` leftover-warning tests encode T13a's observed behaviour.
+- **Deps:** T8 (phase-1 text pins green first, so the shared test project is stable), T13a.
+- **Skills:** `test-dev`.
 
-### T11 — Backfill the three closeouts as design harvests (D)
+**T15 — GREEN: CLI strings and warnings.**
+- `DocsInitCommand.cs` (:61, :140, :167), `DocsInitSettings.cs:27` and `DocsScaffolder.cs:885`: name `kyber-docs-authoring`.
+- `DocsInitCommand.cs`: after the deploy step, check the target's skills root (from the APM targets matrix; `agent-skills` → `.agents/skills/`, `claude` → `.claude/skills/`) for the retired `kyber-weave-docs` and `doc-corpus-integrity-review` directories, then warn with the exact cleanup command. The conditions and wording follow T13a's observation.
+- New `SquadRetiredSkills` (`second-brain`): `SquadDoctorCommand` warns about retained receipt entries or unmanaged directories, gives the delete-then-`squad update` steps, and points to `docs init` for the new home.
+- **Deps:** T14.
+- **Skills:** `csharp-dev`.
 
-- **Objective:** Real closeouts per D13 and D23.
-- **Files:**
-  - The three archived plans.
-  - `docs/dash/architecture.md`, `docs/dash/telemetry-inventory.md`, `docs/dash/runbook.md`.
-  - `docs/kyber-squad/architecture.md` (the Pi per-target overlay section), `docs/kyber-squad/requirements.md`, `docs/kyber-squad/onboarding.md`.
-  - `docs/adr/0019-pi-native-subagents-and-primary-lowering.md`, as needed.
-  - `docs/plans/README.md`: the three rows only.
-- **Work:**
-  1. **Frontmatter:** add `documentation-impact: extends-component` and `impact-components` (D23); set `status: archived` and `last-reviewed`.
-  2. **Status line:** insert the new first status line and label the history (D13).
-  3. **Design harvest:** add a retroactive `## Design harvest` listing each plan's design sections (#423 §3.1–3.4; #425 §3.1–3.3; #426 §1.2 and the D7–D10 mechanism).
-  4. **Mapping:** map every `H` id and decision ID (13 + 8 + 11 decisions) to the exact canonical section, after reading it in the worktree. Where content is missing, write it rather than waive it: the Pi overlay in `kyber-squad/architecture.md` (D23); #425 D6 in the Skills view contract; #425 D1. Process and approval rows (mode, autonomy, intake route, AP/R approvals, #426 D4 VOID, #426 D11 test placement) may take a reasoned `Documentation waiver`.
-  5. **Freshness:** re-verify and bump `last-reviewed` on `docs/dash/architecture.md` and `docs/kyber-squad/architecture.md` (C11).
-  6. **Link fix:** fix `docs/dash/architecture.md:359` per D12.
-  7. **Completion summary:** add `## Completion summary` (from each plan's own evidence) and `## Closeout mapping`.
-  8. **Index rows:**
-     - #423: replace "RESIDUAL … no section landed" with the landed section, annotated "corrected".
-     - #425: annotate the false "mapped in §8" claim as corrected.
-     - #426: rebuild the row with the archived-table columns, with Archive Date `2026-10-24` (PR #426 merge `0351a45c`, 2026-10-24T13:10:37Z).
-  9. **Open items:** #426's deployment gap and the owner live gates stay open owner items (`[NOT LIVE-VERIFIED]`), not `RESIDUAL`, with no todo unless the owner accepts one.
-- **Acceptance:** Each plan meets C1–C11, proven in T12; no Decisions table or original section altered beyond D13.
-- **Dependencies:** T6 (shared `docs/plans/README.md`; final conventions), T9 (shared `docs/kyber-squad/architecture.md` and `requirements.md`), T10 (real-corpus RED first).
-- **Required skills:** `kyber-weave-docs`, `app-docs-standard`.
+**T16 — Moves and wiring.**
+- `git mv`:
+  - `.apm/skills/kyber-weave-docs` → `.apm/skills/kyber-docs-authoring`;
+  - `.apm/skills/doc-corpus-integrity-review` → `.apm/skills/kyber-docs-integrity-review`;
+  - `products/kyber-squad/skills/second-brain` → `.apm/skills/kyber-docs-onboarding-and-assessment` (`SKILL.md` + `references/templates.md`).
+- `products/kyber-squad/bundles/full.yml`: remove `second-brain`.
+- `ci.yml` `skill-docs-gate`:
+  - `skills_dirs` lists all four gated skills (D38);
+  - the authoring upload keeps category `kyber-weave-skills` with the new `sarif_file`;
+  - new upload steps for the two other Kyber-Docs skills.
+- `.kyber-weave/kyber-weave.yml`: the gate paths, plus validate/lint/scan gates for the two new directories.
+- `AGENTS.md`: lines 36-38 and 184.
+- `scripts/codex-cloud-setup.sh:99-100`.
+- `apm.yml`: description.
+- **Deps:** T14, T13 (shared `ci.yml`).
+- **Skills:** `github-devops`.
 
-### T12 — Real-corpus GREEN
+**T17 — GREEN: skill content.**
+- `name` fields in the three moved skills.
+- `kyber-docs-onboarding-and-assessment/SKILL.md`:
+  - description (routing: bootstrap, audit, and the assessment and remediation of archived plans and specs);
+  - G4 placeholders throughout;
+  - the new **Assessment and remediation** mode (owner-started, per G17):
+    1. read archived plans and specs;
+    2. classify each as `harvested`, `partial` or `not harvested`, using the 004 conditions as the rubric — the mechanical half may come from `kyber-weave docs validate . --merge-ready --base <first commit>`;
+    3. report, and the owner picks;
+    4. `docs-dev` fixes the picks in batches, each as its own `pull request`.
+- `kyber-docs-integrity-review/SKILL.md`: name only.
+- `.apm/skills/kyber-weave-cli/SKILL.md` (:3, :23, :137): cross-references.
+- `products/kyber-squad/README.md` (:85, :130, :157-158).
+- **Deps:** T16.
+- **Skills:** `kyber-weave-docs`, `writing-trigger-descriptions`.
 
-- **Acceptance:** Per the T12 row, plus the full .NET suite green.
-- **Dependencies:** T7, T8, T11.
-- **Required skills:** `test-dev`.
+**T18 — GREEN verification, phase 2.**
+- **Deps:** T15, T17.
+- **Skills:** `test-dev`.
 
-### Review
+**T19 — Phase-2 canonical docs, then real-corpus GREEN for the whole change.**
+- **Docs (`docs-dev` part):**
+  - `README.md` (:97, :283);
+  - `docs/install.md` (:417, :434, plus an "Upgrading: retired skills" note with the full cleanup commands, matching the behaviour observed in T13a);
+  - `docs/docgraph/onboarding.md` (:61, :109);
+  - `docs/context-hygiene/skills.md` (:133, :152);
+  - `docs/distribution.md:483`;
+  - `docs/kyber-squad/{README.md:54, architecture.md:704, requirements.md:127, skill-resource-dispositions.md:23,45,127}`.
+- **Verification (`test-dev` part):** per the T19 row.
+- Split this task in two at dispatch: docs first, verification second.
+- **Deps:** T9, T12 (shared `docs/kyber-squad/*`), T16, T17, T18.
+- **Skills:** `kyber-weave-docs` (then `test-dev`).
 
-`code-reviewer` runs once over the whole change after T12. The change touches the
-always-human paths `products/kyber-squad/agents/**` and `.kyber-weave/kyber-weave.yml`, so the
-verdict will be `NEEDS_HUMAN` under `KW-REVIEW-008`. In supervised mode that is terminal until
-the owner reviews.
+### Review and closeout
 
-### T13 — `docs-dev` closeout of this plan (dogfood)
+**Review.** One `code-reviewer` run over the whole change. It is `NEEDS_HUMAN` by design
+(`KW-REVIEW-008`), because the change touches `products/kyber-squad/agents/**` and
+`.kyber-weave/kyber-weave.yml`. That verdict is terminal in supervised mode until the owner
+reviews.
 
-- **Objective:** Close this plan under the rules it creates.
-- **Files:**
-  - This plan.
-  - `docs/plans/README.md` (this row).
-  - Canonical docs as the mapping requires (H1–H7 destinations).
-- **Work:**
-  1. Map every `H` id and every decision ID, including the AP1 approval row added at finalization.
-  2. Re-verify and bump `last-reviewed` on `docs/docgraph/architecture.md` and `docs/kyber-squad/architecture.md` (C11).
-  3. Set `status: archived` and the first body line.
-  4. Move the plan to `docs/archive/plans/`, **not** baselined.
-  5. Return `STATUS: CLOSEOUT_COMPLETE`.
-- **Dependencies:** review resolved (APPROVE, or the owner's resolution of `NEEDS_HUMAN`).
-- **Required skills:** `kyber-weave-docs`.
+**T20 — `docs-dev` closeout of this plan (dogfood).**
+- Map H1–H10 and every decision ID.
+- Re-verify and bump `last-reviewed` on one mapped doc per impact component: DocGraph, KyberSquad, CI Pipelines, ContextHygiene, Distribution.
+- Set the archive status and the first body line.
+- Archive the plan, write its row, and return `CLOSEOUT_COMPLETE`.
+- Apply the Q4 answer in the closeout digest's `RECOMMENDATIONS` for delivery:
+  - the PR **title** carries a short cleanup hint, for example "Rename Kyber-Docs skills — delete old `kyber-weave-docs` skill dirs";
+  - the PR **body** carries the full cleanup commands from the install guide.
 
-### T14 — Post-closeout gate run
+  No release-workflow change, and nothing pasted at release.
+- **Deps:** the review is resolved.
+- **Skills:** `kyber-docs-authoring`.
 
-- **Acceptance:** Per the T14 row.
-- **Dependencies:** T13.
-- **Required skills:** `test-dev`.
+**T21 — Post-closeout gates.**
+- **Deps:** T20.
+- **Skills:** `test-dev`.
 
 ## Dependency graph
 
 ```text
-T1 ─► T2 ─► T3 ─┬─► T8 ───────────────────────────┐
-                └─► T10 ─────────────┐            │
-T4 ─┬─► T5 ─┬─► T7 ──────────────────┼────────────┼─► T12 ─► Review ─► T13 ─► T14
-    └─► T6 ─┴─► T9 ─► T11 ◄──────────┘            │
-                      └───────────────────────────┘
+Phase 1
+  T1 ─► T2 ─► T3 ─┬─► T10 ─────────────────┐
+                  └─► T13 ─► T9            │
+  T4 ─┬─► T5 ─┐                            │
+      ├─► T6 ─┼─► T8                       │
+      └─► T7 ─┴─► T11 ─► T12 ◄─────────────┘
+Phase 2
+  T13a ─┐
+  T8 ───┴─► T14 ─┬─► T15 ───────────┐
+  T13 ───────────┴─► T16 ─► T17 ─► T18 ─► T19 ◄── T9, T12
+                                            └─► Review ─► T20 ─► T21
 ```
 
-- **T7** waits on T5 and T6.
-- **T9** waits on T5 and T6.
-- **T11** waits on T6, T9 and T10.
-- **T12** waits on T7, T8 and T11.
+- **T13a** has no dependencies and runs in wave 1. T14 cannot start until T13a has recorded its
+  observation.
 - **Waves:**
-  1. T1, T4
-  2. T2, T5, T6
-  3. T3, T7, T9
-  4. T8, T10
-  5. T11
+  1. T1, T4, T13a
+  2. T2, T5, T6, T7
+  3. T3, T8, T11
+  4. T10, T13, T14
+  5. T9, T12, T15, T16
+  6. T17
+  7. T18
+  8. T19
 
-  At most three workers are ready at once (≤ `review.max-concurrent-workers: 4`).
-- **File scopes** never overlap between concurrently ready tasks:
-  - `docs/plans/README.md`: T6 → T11 → T13.
-  - `docs/kyber-squad/*`: T9 → T11 → T13.
+  At most four tasks are ready at once (`review.max-concurrent-workers: 4`).
+- **Shared files are serialized:**
+  - `docs/plans/README.md`: T7 → T12 → T20.
+  - `docs/kyber-squad/*`: T11 → T12 → T19.
+  - `ci.yml`: T13 → T16.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Always-human paths force `NEEDS_HUMAN` (`KW-REVIEW-008`). | Expected. The owner reviews before T13. Reserved-path escalation bypasses the remediation loop (`execution-and-review.md:86`). |
-| The gate rejects legitimate closeouts over heading or table variants. | Each section has one canonical heading, pinned by tests (7), (17) and (26)–(28). Hints name the exact fix, and the `docs-dev` text names the headings. |
-| Freshness is gamed (date bumped without content). | Q3 limits the check to architecture docs. The intent-alignment lens judges content (D22). |
-| Components with no architecture doc (KyberUtilities, Distribution) block their first `extends-component` closeout. | Intended (D25): that closeout creates the doc. Hints say so. |
-| The baseline is used to silence the gate. | The baseline file is always-human; stale entries are errors; new archives are never baselined (T13 dogfoods this). |
-| Host repositories break on upgrade. | The rule is silent until adopted (test 33). |
-| Plans already in flight lack the impact keys (for example `squad-model-presets`). | 004 checks only at archive time, so the author adds the keys before closeout (D16). |
-| Closeout happens after review. | T14 runs `--merge-ready` after closeout; Q2 makes that part of delivery; CI runs `--merge-ready` on the PR. |
-| The full suite is RED between T5 and T7 (migration digest). | Sequenced; T7 follows directly. |
-| `docs drift` needs `ArchiveCloseoutValidator` indexed. | Refresh the worktree's CodeGraph index after T3; CI defers drift (`ci.yml:587-589`). |
-| The backfill uncovers more missing design. | Bounded to three plans; write it, never waive "not documented". |
-| Commits `8beb97ae` / `6dd4ce3f` are relayed, not verified by this author. | The file states corroborate them (D3). The conductor supplied #426's merge from git (`0351a45c`, 2026-10-24T13:10:37Z); T11 uses 2026-10-24. |
-| The archive walk follows a symlink out of the tree. | Reuse `DocsRootPath.EnumerateContainedFiles` (D9). |
+| Hosts that run `--merge-ready` with a shallow checkout fail C0 after upgrading. | This is intended (G14, G15). The hint names the fix; the host template and install docs show `fetch-depth: 0`; the PR body states it. |
+| Always-human paths force `NEEDS_HUMAN`. | Expected; the owner reviews before T20. |
+| The rename breaks consumers' references to the old skill names. | The `docs init` and `squad doctor` warnings are the main channel. The install guide has the full commands. The rename PR's title carries a short cleanup hint, so it appears in the auto-generated Release notes (Q4). There are no stubs (G19). |
+| The PR title loses the cleanup hint (squash-merge retitling, truncation). | Keep the hint short and at the end of the title. `create-pull-request` reads the PR back after creating it and confirms the title (`SKILL.md:147-148`). The warnings remain the main channel either way. |
+| D37's APM facts are wrong for the pinned 0.28.0, or for current APM. | T13a observes both versions before any warning test is written. T14 RED encodes the observation, and D37 is corrected if it disagrees. |
+| The rename orphans SARIF alerts. | The authoring skill keeps category `kyber-weave-skills` (D38). |
+| Moving `second-brain` out of Squad leaves Squad-only hosts without it. | `squad doctor` names the new home (`docs init`). |
+| Freshness can be gamed with a date bump. | The lens judges content (D22, D31). |
+| Gate false positives from heading variants. | One canonical heading each, pinned by tests. Hints name the fix. |
+| Recommendations stall a closeout. | G5: harvest into the best existing home and recommend in the PR. |
+| Full suite RED between T5/T6 and T8 (migration digests). | Sequenced. |
+| `docs drift` needs new symbols indexed. | Refresh the worktree's CodeGraph index after T3 and T15. |
+| Backfill uncovers more missing design. | Bounded to three plans; write it, never waive it. |
+| A large single change. | Two phases, serialized shared files, one review. Well under `max-reviewable-lines`. |
 
 ## Out of scope
 
-- Changing `docs-dev`'s `model-profile` (D11, not pursued).
-- Partial mappings in `2026-10-09-issue-312`, `2026-10-10-kyberdash-claude-code-turn-content`
-  and `2026-10-09-issue-319` (D15; baselined; possible follow-up).
+- `docs-dev` `model-profile` (D11).
+- Legacy partial mappings, which go through the G17 mode later (D15).
 - The `squad-model-presets` spec (D16).
-- Creating the missing architecture or onboarding docs for KyberUtilities, Distribution,
-  ContextHygiene, ReviewCouncil and CI Pipelines (D25; done when each is next extended).
-- A draft-time mechanical check of the impact keys (D21).
-- The overlap with the `product-owner` skill description (D18).
-- #426's `squad install/update --global` deployment gap (open owner item).
-- `docs/archive/specs/kyberdash/` missing from `docs/specs/README.md`, and that README's
-  outdated `6-Docs/specs/` note.
-- Review-loop skills outside this repository that may move plans; 004 catches their output.
-- Regenerating `scripts/fast-loop-classes.txt`.
-- Any `dash/` change. `./scripts/update-loop.sh` is not required: the release path, packaging
-  and self-updater are untouched, and only canonical text already shipped in the pack
-  changes.
+- The `product-owner` skill description overlap (D18).
+- CI gating for `spec-conductor`.
+- #426's deployment gap.
+- A draft-time mechanical check of the scale keys (D21).
+- Renaming the `kyber-weave-docs-gate.yml` template file (G18 covers skills only).
+- `dash/` fixtures that contain the string `kyber-weave-docs`.
+- Any release-workflow change (Q4). `./scripts/update-loop.sh` is not required: the release path and self-updater are untouched.
 
 ## Verification gates
 
-Run before the review (T12) and again after closeout (T14). From the root `AGENTS.md`:
+Run before review (T19) and after closeout (T21), per the root `AGENTS.md`, with the
+authoring skill path renamed after T16:
 
 ```bash
 dotnet restore KyberWeave.sln
@@ -621,23 +662,24 @@ dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v mini
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn --no-restore -v minimal
 dotnet build KyberWeave.sln -c Release --no-restore
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-weave-docs
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-weave-docs --min-desc-score 70
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-weave-docs --fail-on critical
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-docs-authoring
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-docs-authoring --min-desc-score 70
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-docs-authoring --fail-on critical
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready --base origin/main
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
 ```
 
-- `review gates` adds the `kyber-weave-cli` skill trio, InspectCode, duplicates and the TS
-  gates.
-- Before T13, `docs validate --merge-ready` is expected to report exactly one finding:
-  `KW-DOC-LIFECYCLE-003` for this active plan. After T13 it reports zero.
-- `scripts/fast-loop.sh` is not evidence.
+- `review gates` covers the four gated skills (D38), InspectCode, duplicates and the TS gates.
+- Before T20, the expected merge-ready result is one finding: 003 for this plan. After T20,
+  zero.
 
 ## Review and closeout
 
-- **Review:** `code-reviewer`, once, after T12. `NEEDS_HUMAN` is expected.
-- **Closeout:** T13 (`docs-dev`, a dogfood design harvest of H1–H7 and every decision), then
-  T14.
-- The permanent `## Decisions` table above is preserved intact through archive.
+1. One `code-reviewer` run (expected `NEEDS_HUMAN`).
+2. T20: the dogfood closeout of H1–H10 and every decision, under the rules this plan creates.
+3. T21: the post-closeout gate run.
+4. Delivery: the PR title carries the short cleanup hint, and the PR body carries the
+   documentation-impact outcome and the full cleanup commands (Q4).
+
+The permanent `## Decisions` table is preserved through archive.
