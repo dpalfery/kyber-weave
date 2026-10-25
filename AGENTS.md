@@ -133,7 +133,11 @@ repository — do not treat those results as this checkout, and stop using that 
 
 **Persisted plans belong in docs.** When a durable plan artifact is warranted, store it under
 `<docs-root>/plans`, the directory indexed by `<plan-index>`. Do not put plans in hidden tool
-folders or create a plan file for an otherwise ephemeral execution plan.
+folders or create a plan file for an otherwise ephemeral execution plan. A plan artifact must be
+committed, not merely written to disk: an untracked plan is not persisted, it is lost to a checkout,
+a clean, or another machine. This holds for the plan's whole life — an active plan under `<plan-index>`
+and an archived plan under `<docs-root>/archive/plans` are both tracked. Creating the file without
+staging it is an incomplete plan write, not a finished one.
 
 **`TreatWarningsAsErrors` is on, with `AnalysisMode=all`.** A warning fails the build.
 Fix the cause; do not add to the `NoWarn` list in `Directory.Build.props` without a reason
