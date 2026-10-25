@@ -776,9 +776,237 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  artifact-sboms:
+    # One SBOM per published archive (issue #417, decision D1): <archive-stem>.cdx.json
+    # next to the archive (see artifact_sbom_name in scripts/syft-bootstrap.sh).
+    # Runs after the builds so every archive exists, before `release` and
+    # `attest-sbom` so the manifest carries the SBOMs and each one is attested.
+    #
+    # WHY separate from `sbom`: the aggregate covers the dependency closure across
+    # npm/cargo/nuget; these cover each archive's bytes (file catalogue, plus a
+    # not-measured marker where the runtime closure is opaque). The aggregate keeps
+    # its versioned name and is built by scripts/generate-sbom.sh instead (D2).
+    name: Generate per-artifact SBOMs
+    needs: [version, build, build-kyberdash, build-tray, pack-squad]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # The generator caches the pinned Syft tarball under the documented cache root
+      # and re-verifies its SHA-256 on every run, so a restored cache is checked
+      # before it is used rather than trusted (same as the `sbom` job).
+      - name: Cache the pinned Syft tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kyber-weave
+          key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
+
+      # Download only the build outputs, not the aggregate SBOM: the per-artifact
+      # generator scans *.tar.gz/*.zip/*.exe and ignores anything else, and an
+      # explicit pattern avoids racing the parallel `sbom` job's upload.
+      - name: Download CLI/MCP/KyberDash archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: binaries-*
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Download tray archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: tray-*
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Download Squad archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: squad-archives
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Generate per-artifact SBOMs
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash scripts/generate-artifact-sboms.sh per-artifact-assets "${VERSION}"
+          echo
+          echo "=== Per-artifact SBOMs ==="
+          ls -la per-artifact-assets/
+
+      - name: Upload per-artifact SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: artifact-sboms
+          path: per-artifact-assets/*.cdx.json
+          retention-days: 14
+          if-no-files-found: error
+
+  attest-sbom:
+    # Attest every SBOM via actions/attest in SBOM mode (issue #417, decisions
+    # D6/D7 — not the deprecated attest-sbom action). Each per-artifact SBOM is
+    # attested with its archive as the subject (predicate=SBOM); the aggregate
+    # SBOM is attested once against all archives. Runs after both SBOM jobs so
+    # every predicate file exists, before `release` so nothing publishes unattested.
+    #
+    # WHY these permissions: id-token mints the OIDC token for the Sigstore signing
+    # certificate, attestations persists the attestation, artifact-metadata creates
+    # the storage record, contents:read lets the action read the repo context.
+    name: Attest SBOMs
+    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      contents: read
+    steps:
+      # All needs are complete here, so a full download races nothing: the subjects
+      # (archives) and the predicates (aggregate + per-artifact SBOMs) arrive together.
+      - name: Download all release assets and SBOMs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: "*"
+          path: attest-assets
+          merge-multiple: true
+
+      - name: Attest kyber-weave-linux-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
+
+      - name: Attest kyber-weave-linux-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-linux-arm64.cdx.json
+
+      - name: Attest kyber-weave-osx-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-osx-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-osx-x64.cdx.json
+
+      - name: Attest kyber-weave-osx-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-osx-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-osx-arm64.cdx.json
+
+      - name: Attest kyber-weave-win-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-win-x64.zip
+          sbom-path: attest-assets/kyber-weave-win-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-linux-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-linux-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-linux-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-linux-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-linux-arm64.cdx.json
+
+      - name: Attest kyber-weave-mcp-osx-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-osx-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-osx-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-osx-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-osx-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-osx-arm64.cdx.json
+
+      - name: Attest kyber-weave-mcp-win-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-win-x64.zip
+          sbom-path: attest-assets/kyber-weave-mcp-win-x64.cdx.json
+
+      - name: Attest kyberdash-darwin-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-darwin-arm64.tar.gz
+          sbom-path: attest-assets/kyberdash-darwin-arm64.cdx.json
+
+      - name: Attest kyberdash-darwin-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-darwin-x64.tar.gz
+          sbom-path: attest-assets/kyberdash-darwin-x64.cdx.json
+
+      - name: Attest kyberdash-linux-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyberdash-linux-arm64.cdx.json
+
+      - name: Attest kyberdash-linux-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-linux-x64.tar.gz
+          sbom-path: attest-assets/kyberdash-linux-x64.cdx.json
+
+      - name: Attest kyberdash-win-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-win-x64.zip
+          sbom-path: attest-assets/kyberdash-win-x64.cdx.json
+
+      - name: Attest kyberdash-tray-darwin-arm64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-tray-darwin-arm64.zip
+          sbom-path: attest-assets/kyberdash-tray-darwin-arm64.cdx.json
+
+      - name: Attest kyberdash-tray-darwin-x64 SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-tray-darwin-x64.zip
+          sbom-path: attest-assets/kyberdash-tray-darwin-x64.cdx.json
+
+      - name: Attest kyberdash-tray-win-x64-setup SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyberdash-tray-win-x64-setup.exe
+          sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json
+
+      - name: Attest kyber-squad SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.zip
+          sbom-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.cdx.json
+
+      - name: Attest kyber-squad-plugin SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.zip
+          sbom-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.cdx.json
+
+      # The aggregate covers the whole dependency closure, so it is attested once
+      # against every published archive (D7): one attestation, all archives as subjects.
+      # The glob matches only archives (*.tar.gz/*.zip/*.exe), never the *.cdx.json
+      # predicates beside them.
+      - name: Attest aggregate SBOM against all archives
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
+          sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
+
   release:
     name: Publish GitHub Release (David Palfery must approve)
-    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom]
+    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
     environment: release
@@ -790,6 +1018,9 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pattern "*" downloads every build output plus both SBOM artifacts (`sbom`
+      # and `artifact-sboms`): the checksum manifest covers all 41, and the
+      # attestation verify step below checks each archive against its SBOM.
       - name: Download all release assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1005,7 +1236,7 @@ jobs:
           done <<< "$ASSETS_JSON"
 
           # Compare expected vs. published as sorted sets: both must contain
-          # exactly the 21 expected assets plus SHA256SUMS.txt (22 total).
+          # exactly the 41 expected assets plus SHA256SUMS.txt (42 total).
           # Sort and compare to catch both missing and extra assets.
           echo "Performing asset inventory verification..."
           declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")
@@ -1037,6 +1268,43 @@ jobs:
 
           echo "Asset inventory verification passed: all ${#expected_assets[@]} expected assets + manifest present"
           echo "Manifest byte-comparison verification passed"
+
+      - name: Verify SBOM attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Every published archive carries a CycloneDX SBOM attestation created by
+          # the attest-sbom job (subject=archive, predicate=SBOM). Verify each one
+          # against the bytes just published, failing closed on the first miss.
+          # WHY --predicate-type https://cyclonedx.org/bom: SBOM attestations use the
+          # CycloneDX predicate type; pinning it rejects a provenance attestation
+          # masquerading as an SBOM.
+          # WHY bounded retry: Sigstore propagation lag can make a just-created
+          # attestation briefly invisible to `gh attestation verify`. Each archive
+          # gets 3 attempts with a short sleep; a persistent miss still exits 1,
+          # so the step stays fail-closed and the inventory checks above are unchanged.
+          for archive in release-assets/*.tar.gz release-assets/*.zip release-assets/*.exe; do
+            [[ -f "$archive" ]] || continue
+            echo "Verifying SBOM attestation for ${archive}"
+            verified=false
+            for attempt in 1 2 3; do
+              if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://cyclonedx.org/bom"; then
+                verified=true
+                break
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                echo "::warning::SBOM attestation not yet visible for ${archive} (attempt ${attempt}/3); retrying after Sigstore propagation delay"
+                sleep 15
+              fi
+            done
+            if [[ "${verified}" != "true" ]]; then
+              echo "::error::no verified CycloneDX SBOM attestation for ${archive} after 3 attempts" >&2
+              exit 1
+            fi
+          done
+          echo "All published archives carry a verified CycloneDX SBOM attestation"
 
   gh-packages:
     name: Publish GitHub Packages (David Palfery must approve)
