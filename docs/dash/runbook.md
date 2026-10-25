@@ -716,7 +716,12 @@ single decoded summary over 256 KiB or cumulative decoded input over 16 MiB, and
 return no partial total on budget failure. A 5 s cooperative computation deadline is
 checked between bounded batches. The refused request names the narrowing step
 (`stale_cursor` says restart from the first page; `unsupported_query` says what to
-narrow, including the unsupported-dimension hint toward `dash_inspect`).
+narrow, including the unsupported-dimension hint toward `dash_inspect`). Over HTTP, the
+status follows the envelope error code — 400 for `invalid_request`/`unsupported_query`,
+404 for `not_found`, 409 for `stale_cursor`, 413 for `budget_exceeded`, 503 for
+`engine_unavailable`/`incompatible_engine`/`cancelled`, and 500 for `internal_error` or
+any code the route does not know — so a 500 means the engine returned a code the route
+does not know.
 
 **Content and outcome caveats are operational facts.** Search is metadata-only;
 `dash_inspect` and `POST /api/kyber/analytics/inspect` share one body —
@@ -739,7 +744,8 @@ cross-target, or post-purge cursor answers `stale_cursor`; capacity answers
 retention window reads as absent or expired — retrieval never recaptures or
 manufactures absent text. The historical `includeContent: true` turn/block form and
 the metadata-only session inspection are retained legacy forms, not the way to
-retrieve context. Outcomes stay sparse and empirical: missing data and conflicting signals are
+retrieve context. A field outside the recognized set for its form answers
+`invalid_request`; unknown fields are never silently dropped. Outcomes stay sparse and empirical: missing data and conflicting signals are
 reported, never smoothed over, and comparisons are descriptive, never causal. Tool
 annotations (read-only/idempotent/non-destructive/closed-world hints) do not replace
 the route allowlist.
