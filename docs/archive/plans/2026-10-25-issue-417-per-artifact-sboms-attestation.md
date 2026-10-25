@@ -302,14 +302,14 @@ intact above and was not edited during closeout.
 
 | Decision | Destination |
 |---|---|
-| D1 — one doc per artifact, `<archive-stem>.cdx.json` via `artifact_sbom_name` | [ADR 0042](../adr/0042-release-sbom-cyclonedx-syft.md) coverage contract D1; [`docs/distribution.md`](../distribution.md#per-artifact-sboms) (naming, generator, manifest sharing) |
+| D1 — one doc per artifact, `<archive-stem>.cdx.json` via `artifact_sbom_name` | [ADR 0042](../../adr/0042-release-sbom-cyclonedx-syft.md) coverage contract D1; [`docs/distribution.md`](../../distribution.md#per-artifact-sboms) (naming, generator, manifest sharing) |
 | D2 — keep aggregate and add per-artifact | ADR 0042 amended decision 1 (keep-aggregate-and-add-per-artifact, 21→41 manifest entries); `distribution.md` asset counts |
-| D3 — file catalogue is provenance, not runtime coverage | ADR 0042 D3; [`docs/install.md`](../install.md#per-artifact-sboms) (what per-artifact SBOMs cover) |
+| D3 — file catalogue is provenance, not runtime coverage | ADR 0042 D3; [`docs/install.md`](../../install.md#per-artifact-sboms) (what per-artifact SBOMs cover) |
 | D4 — Node SEA carries catalogue + not-measured marker | ADR 0042 D4; `install.md` per-artifact marker list (`dotnet-single-file`, `node-sea` both, `tauri-bundle`, Squad no marker) |
-| D5 — one Syft pin in `scripts/syft-bootstrap.sh` | [`docs/distribution.md`](../distribution.md#per-artifact-sboms) (one pin source, re-verified including from cache); `scripts/schemas/PROVENANCE.md` untouched — no schema change, no update needed |
-| D6 — attest with `actions/attest` SBOM mode, not deprecated `attest-sbom` | ADR 0042 D6; [`docs/distribution.md`](../distribution.md#sbom-attestations) (action, SBOM mode, CycloneDX predicate type) |
-| D7 — subject = archive, predicate = SBOM (20 + 1 aggregate) | ADR 0042 D7; `distribution.md` attestation section (permissions, glob, `gh attestation verify --predicate-type https://cyclonedx.org/bom`); [`docs/install.md`](../install.md#verifying-sbom-attestations) (consumer verify command) |
-| D8 — added cost bounded (cached Syft, `xargs -P`, one job + 21 steps) | `distribution.md` Cost bound (minutes on standard hosted runner, no new runner class); measured wall time recorded in this §12 completion summary |
+| D5 — one Syft pin in `scripts/syft-bootstrap.sh` | [`docs/distribution.md`](../../distribution.md#per-artifact-sboms) (one pin source, re-verified including from cache); `scripts/schemas/PROVENANCE.md` untouched — no schema change, no update needed |
+| D6 — attest with `actions/attest` SBOM mode, not deprecated `attest-sbom` | ADR 0042 D6; [`docs/distribution.md`](../../distribution.md#sbom-attestations) (action, SBOM mode, CycloneDX predicate type) |
+| D7 — subject = archive, predicate = SBOM (20 + 1 aggregate) | ADR 0042 D7; `distribution.md` attestation section (permissions, glob, `gh attestation verify --predicate-type https://cyclonedx.org/bom`); [`docs/install.md`](../../install.md#verifying-sbom-attestations) (consumer verify command) |
+| D8 — added cost bounded (cached Syft, `xargs -P`, one job + 21 steps) | `distribution.md` Cost bound (qualitative: bounded by minutes on the standard hosted runner via the parallel scan pool, no new runner class); no measured release wall time was recoverable in scope (release-only path, no release run), so this §12 summary records the qualitative bound, not a number |
 | D9 — `test-first`, `autonomous` | This plan frontmatter (`development-mode: test-first`); intake row D10/AP1 below — process metadata, no canonical doc change |
 | D10 — intake `PLAN` recommendation accepted | This plan §2 Decisions table — routing record, no canonical doc change |
 | AP1 — approve and execute | This plan §2 Decisions table — `APPROVED — autonomous: recommendation accepted 2026-10-25`; autonomous provenance recorded per row |
@@ -323,5 +323,6 @@ intact above and was not edited during closeout.
 - Tests: 161/161 in-plan tests pass.
 - Gates: 17/18 declared gates pass; the one outstanding gate is the pre-existing `docs/dash/architecture.md` drift (8 × `KW-DOC-DRIFT-001` code-refs with no CodeGraph symbol), parked as not in scope — reported, not fixed.
 - Council: `NEEDS_HUMAN`, in-scope clean (no in-scope findings); 4 findings fixed in-pass with re-gate.
+- Cost bound (D8): qualitative — the added release cost is bounded by minutes on the standard hosted runner (cached Syft, parallel scan pool, one job + 21 attestation steps; no new runner class). No measured release wall time was recoverable in scope (release-only path), so no number is recorded here; a regression past the documented qualitative ceiling is a defect to investigate, never a reason to skip a scan.
 - `docs validate . --merge-ready` clean for touched scope after archive (only the parked dash drift remains, reported under GAPS, not fixed per scope).
 - Autonomous provenance: D1–D10 + AP1 each recorded as `autonomous: recommendation accepted` in the §2 Decisions table (D3 notes the low-confidence Syft-cataloger sub-point with its reason).
