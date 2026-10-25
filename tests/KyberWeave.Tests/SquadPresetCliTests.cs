@@ -32,6 +32,9 @@ public sealed class SquadPresetCliTests : IDisposable
     private const string FastPresetYaml = """
                                           schema: kyber-squad.model-preset/v1
                                           profiles:
+                                            architect:
+                                              default: gpt-4o-mini
+                                              claude: gpt-4o-mini
                                             general:
                                               default: gpt-4o-mini
                                               claude: gpt-4o-mini
@@ -51,6 +54,7 @@ public sealed class SquadPresetCliTests : IDisposable
         _projectDir = Path.Combine(_temp.Path, "project");
         Directory.CreateDirectory(_projectDir);
         _userPaths = new FakeSquadUserPaths(_home);
+        Directory.CreateDirectory(_userPaths.HomeDirectory);
         _selectionStore = new SquadModelPresetSelectionStore(_userPaths);
         _stateStore = new SquadStateStore(_userPaths);
     }
@@ -135,6 +139,8 @@ public sealed class SquadPresetCliTests : IDisposable
     [Fact]
     public void ClearWhenTargetNotDeployedGloballyExitsWithCode2AndInstallGuidance()
     {
+        WritePreset("fast", FastPresetYaml);
+
         CliResult result = Run("squad", "preset", "clear", "--target", "claude", "--global");
 
         Assert.Equal(2, result.ExitCode);
@@ -337,7 +343,7 @@ public sealed class SquadPresetCliTests : IDisposable
 
     private void WritePreset(string name, string yaml)
     {
-        string presetDir = Path.Combine(_home, ".kyber-weave", "squad", "presets");
+        string presetDir = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
         Directory.CreateDirectory(presetDir);
         string filePath = Path.Combine(presetDir, $"{name}.yml");
         File.WriteAllText(filePath, yaml, Encoding.UTF8);
@@ -411,12 +417,14 @@ public sealed class SquadPresetCliTests : IDisposable
             startInfo.ArgumentList.Add(argument);
         }
 
-        startInfo.Environment["HOME"] = _home;
-        startInfo.Environment["USERPROFILE"] = _home;
+        string userHome = _userPaths.HomeDirectory;
+        Directory.CreateDirectory(userHome);
+        startInfo.Environment["HOME"] = userHome;
+        startInfo.Environment["USERPROFILE"] = userHome;
         startInfo.Environment["APPDATA"] = Path.Combine(_home, "AppData", "Roaming");
         startInfo.Environment["LOCALAPPDATA"] = Path.Combine(_home, "AppData", "Local");
-        startInfo.Environment["CLAUDE_CONFIG_DIR"] = Path.Combine(_home, ".claude");
-        startInfo.Environment["CODEX_HOME"] = Path.Combine(_home, ".codex");
+        startInfo.Environment["CLAUDE_CONFIG_DIR"] = Path.Combine(userHome, ".claude");
+        startInfo.Environment["CODEX_HOME"] = Path.Combine(userHome, ".codex");
 
         foreach (string key in new[] { "PATH", "PATHEXT", "SystemRoot", "ComSpec", "windir", "TEMP", "TMP" })
         {

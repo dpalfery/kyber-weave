@@ -47,38 +47,6 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
         string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
-        string altHome = Path.Combine(userPaths.HomeDirectory, "home");
-        SquadCommandComposition.SyncPresetFiles(userPaths);
-        SquadStateStore effectiveStateStore = stateStore;
-        ISquadUserPaths effectiveUserPaths = userPaths;
-        if (Directory.Exists(altHome))
-        {
-            SquadStateStore altStateStore = new(new SquadCommandComposition.CliSquadUserPaths(altHome, userPaths.ApplicationDataDirectory));
-            if (scope == SquadDeploymentScope.Global)
-            {
-                string globalAnchor = SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun);
-                if (stateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global) is null &&
-                    stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global) is null &&
-                    (altStateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global) is not null ||
-                     altStateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global) is not null))
-                {
-                    effectiveStateStore = altStateStore;
-                    effectiveUserPaths = altStateStore.UserPaths;
-                }
-            }
-            else
-            {
-                if (stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project) is null &&
-                    stateStore.ReadLock(projectRoot, SquadDeploymentScope.Project) is null &&
-                    (altStateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project) is not null ||
-                     altStateStore.ReadLock(projectRoot, SquadDeploymentScope.Project) is not null))
-                {
-                    effectiveStateStore = altStateStore;
-                    effectiveUserPaths = altStateStore.UserPaths;
-                }
-            }
-        }
-
         IReadOnlyList<SquadTarget> targets;
         try
         {
@@ -89,9 +57,9 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             else
             {
                 string checkRoot = scope == SquadDeploymentScope.Global
-                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(effectiveStateStore, effectivePath, dryRun: false)
+                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
                     : projectRoot;
-                SquadReceipt? receipt = effectiveStateStore.ReadReceipt(checkRoot, scope);
+                SquadReceipt? receipt = stateStore.ReadReceipt(checkRoot, scope);
                 if (receipt is not null && receipt.Files.Count > 0)
                 {
                     targets = SquadTargetCatalog.Parse(receipt.Files.Select(file => file.Target).Distinct());
@@ -112,9 +80,9 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
 
         if (scope == SquadDeploymentScope.Global)
         {
-            string globalAnchor = SquadCommandComposition.ResolveGlobalAnchorRoot(effectiveStateStore, effectivePath, dryRun: settings.DryRun);
-            SquadReceipt? globalReceipt = effectiveStateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global);
-            SquadLock? globalLock = effectiveStateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
+            string globalAnchor = SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun);
+            SquadReceipt? globalReceipt = stateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global);
+            SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
 
             HashSet<string> deployedTokens = new(StringComparer.OrdinalIgnoreCase);
             if (globalReceipt is not null)
@@ -151,13 +119,13 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
                 projectRoot: projectRoot,
                 activeReceipt: globalReceipt!,
                 activeLock: globalLock,
-                effectiveStateStore: effectiveStateStore,
+                effectiveStateStore: stateStore,
                 selectionStores: selectionStores,
                 settings: settings);
         }
 
-        SquadReceipt? projectReceipt = effectiveStateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
-        SquadLock? projectLock = effectiveStateStore.ReadLock(projectRoot, SquadDeploymentScope.Project);
+        SquadReceipt? projectReceipt = stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
+        SquadLock? projectLock = stateStore.ReadLock(projectRoot, SquadDeploymentScope.Project);
 
         HashSet<string> projectDeployedTokens = new(StringComparer.OrdinalIgnoreCase);
         if (projectReceipt is not null)
@@ -201,7 +169,7 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             projectRoot: projectRoot,
             activeReceipt: projectReceipt!,
             activeLock: projectLock,
-            effectiveStateStore: effectiveStateStore,
+            effectiveStateStore: stateStore,
             selectionStores: selectionStores,
             settings: settings);
     }
@@ -219,6 +187,10 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
     {
         ISquadGlobalRootResolver effectiveGlobalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
         HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        SquadSource? source = SquadCommandComposition.TryResolveSquadSource();
+        Dictionary<string, string> agentProfiles = source?.Agents.ToDictionary(a => a.Name, a => a.ModelProfile, StringComparer.OrdinalIgnoreCase)
+            ?? new(StringComparer.OrdinalIgnoreCase);
 
         List<SquadModelDiffItem> diffs = [];
         List<SquadDeploymentFile> renderedFiles = [];
@@ -242,22 +214,25 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
             }
 
             string fileText = Encoding.UTF8.GetString(rawBytes);
-            if (!TryParseFrontmatter(fileText, out string frontmatter, out string body, out string newline))
+            if (!SquadFrontmatterHelper.TryParseFrontmatter(fileText, out string frontmatter, out string body, out string newline))
             {
                 renderedFiles.Add(new SquadDeploymentFile(file.RelativePath, rawBytes, file.Target));
                 continue;
             }
 
-            string agentName = ExtractField(frontmatter, "name") ?? ResolveIdentity(file.RelativePath);
-            string? currentModel = ExtractField(frontmatter, "model");
+            string agentName = SquadFrontmatterHelper.ExtractField(frontmatter, "name") ?? SquadFrontmatterHelper.ResolveIdentity(file.RelativePath);
+            string? currentModel = SquadFrontmatterHelper.ExtractField(frontmatter, "model");
+            string profileCategory = SquadFrontmatterHelper.ExtractField(frontmatter, "model-profile")
+                ?? (agentProfiles.TryGetValue(agentName, out string? p) ? p : "general");
 
-            string? newModel = null;
+            string? newModel = SquadFrontmatterHelper.ResolveModel(source?.ModelProfiles, profileCategory, file.Target);
+
             if (!string.Equals(currentModel, newModel, StringComparison.Ordinal))
             {
                 diffs.Add(new SquadModelDiffItem(agentName, currentModel, newModel));
             }
 
-            string updatedFrontmatter = UpdateFrontmatterModel(frontmatter, newModel, newline);
+            string updatedFrontmatter = SquadFrontmatterHelper.UpdateFrontmatterModel(frontmatter, newModel, newline);
             string updatedContent = $"---{newline}{updatedFrontmatter}{newline}---{body}";
             byte[] updatedBytes = Encoding.UTF8.GetBytes(updatedContent);
 
@@ -324,104 +299,5 @@ public sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings>
         }
 
         return 0;
-    }
-
-    private static string ResolveIdentity(string relativePath)
-    {
-        string fileName = Path.GetFileName(relativePath);
-        if (fileName.Equals("agent.md", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
-        {
-            string? parent = Path.GetDirectoryName(relativePath);
-            return string.IsNullOrEmpty(parent) ? fileName : Path.GetFileName(parent);
-        }
-
-        if (fileName.EndsWith(".agent.md", StringComparison.Ordinal))
-        {
-            return fileName[..^".agent.md".Length];
-        }
-
-        return Path.GetFileNameWithoutExtension(fileName);
-    }
-
-    private static bool TryParseFrontmatter(
-        string content,
-        out string frontmatter,
-        out string body,
-        out string newline)
-    {
-        frontmatter = string.Empty;
-        body = string.Empty;
-        newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-
-        string trimmedContent = content.StartsWith('\uFEFF') ? content[1..] : content;
-
-        if (!trimmedContent.StartsWith("---", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        int firstNewline = trimmedContent.IndexOf('\n', StringComparison.Ordinal);
-        if (firstNewline < 0)
-        {
-            return false;
-        }
-
-        int secondDashes = trimmedContent.IndexOf($"{newline}---", firstNewline, StringComparison.Ordinal);
-        if (secondDashes < 0)
-        {
-            secondDashes = trimmedContent.IndexOf("\n---", firstNewline, StringComparison.Ordinal);
-            if (secondDashes < 0)
-            {
-                return false;
-            }
-        }
-
-        frontmatter = trimmedContent[(firstNewline + 1)..secondDashes].Trim('\r', '\n');
-        int relIdx = trimmedContent.AsSpan(secondDashes + 4).IndexOf('\n');
-        int endOfSecondDashes = relIdx >= 0 ? secondDashes + 4 + relIdx : -1;
-        body = endOfSecondDashes >= 0 ? trimmedContent[endOfSecondDashes..] : string.Empty;
-        return true;
-    }
-
-    private static string? ExtractField(string frontmatter, string fieldName)
-    {
-        string[] lines = frontmatter.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        string prefix = $"{fieldName}:";
-        foreach (string line in lines)
-        {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                string val = trimmed[prefix.Length..].Trim().Trim('\'', '"');
-                return string.IsNullOrWhiteSpace(val) ? null : val;
-            }
-        }
-
-        return null;
-    }
-
-    private static string UpdateFrontmatterModel(string frontmatter, string? newModel, string newline)
-    {
-        string[] lines = frontmatter.Split(['\r', '\n'], StringSplitOptions.None);
-        List<string> result = [];
-
-        foreach (string line in lines)
-        {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith("model:", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!string.IsNullOrWhiteSpace(newModel))
-                {
-                    result.Add($"model: {newModel}");
-                }
-            }
-            else
-            {
-                result.Add(line);
-            }
-        }
-
-        return string.Join(newline, result);
     }
 }

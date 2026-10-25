@@ -24,6 +24,11 @@ public sealed class SquadLifecycleService
     private readonly SquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    ///     Gets the state store associated with this lifecycle service.
+    /// </summary>
+    public SquadStateStore StateStore => _stateStore;
+
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
@@ -59,6 +64,9 @@ public sealed class SquadLifecycleService
 
         if (request.Targets is null || request.Targets.Count == 0)
             throw new ArgumentException("At least one deployment target must be specified.", nameof(request));
+
+        if (request.Scope == SquadDeploymentScope.Instance && request.Targets.Count != 1)
+            throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
         RequireRenderableTargets(request.Targets);
 
@@ -240,6 +248,9 @@ public sealed class SquadLifecycleService
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetRoot);
+
+        if (request.Scope == SquadDeploymentScope.Instance && (request.Targets is null || request.Targets.Count != 1))
+            throw new ArgumentException("SquadDeploymentScope.Instance requires exactly one target.", nameof(request));
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;

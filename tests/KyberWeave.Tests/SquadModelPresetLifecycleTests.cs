@@ -1,9 +1,6 @@
 using System.Security.Cryptography;
-using System.Text;
-using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -22,57 +19,60 @@ namespace KyberWeave.Tests;
 public sealed class SquadModelPresetLifecycleTests : IDisposable
 {
     private const string FastPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            default: inherit
-            copilot: gpt-4o
-          general:
-            default: gpt-4o-mini
-            copilot: gpt-4o-mini
-        """;
+                                          schema: kyber-squad.model-preset/v1
+                                          profiles:
+                                            deep-planning:
+                                              default: inherit
+                                              copilot: gpt-4o
+                                            general:
+                                              default: gpt-4o-mini
+                                              copilot: gpt-4o-mini
+                                          """;
 
     private const string QualityPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            default: o3-mini
-            copilot: o3-mini
-            claude: claude-3-7-sonnet
-          general:
-            default: gpt-4o
-            copilot: gpt-4o
-            claude: claude-3-7-sonnet
-        """;
+                                             schema: kyber-squad.model-preset/v1
+                                             profiles:
+                                               deep-planning:
+                                                 default: o3-mini
+                                                 copilot: o3-mini
+                                                 claude: claude-3-7-sonnet
+                                               general:
+                                                 default: gpt-4o
+                                                 copilot: gpt-4o
+                                                 claude: claude-3-7-sonnet
+                                             """;
 
     private const string ClaudeFastPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            claude: claude-3-5-haiku
-          general:
-            claude: claude-3-5-haiku
-        """;
+                                                schema: kyber-squad.model-preset/v1
+                                                profiles:
+                                                  deep-planning:
+                                                    claude: claude-3-5-haiku
+                                                  general:
+                                                    claude: claude-3-5-haiku
+                                                """;
 
     private const string ClaudeQualityPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            claude: claude-3-7-sonnet
-          general:
-            claude: claude-3-7-sonnet
-        """;
+                                                   schema: kyber-squad.model-preset/v1
+                                                   profiles:
+                                                     deep-planning:
+                                                       claude: claude-3-7-sonnet
+                                                     general:
+                                                       claude: claude-3-7-sonnet
+                                                   """;
 
     private const string UnknownCategoryPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          nonexistent-profile-category:
-            default: custom-unsupported-model
-        """;
+                                                     schema: kyber-squad.model-preset/v1
+                                                     profiles:
+                                                       nonexistent-profile-category:
+                                                         default: custom-unsupported-model
+                                                     """;
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     [Fact]
     public async Task InstallWithPresetWritesV2LockAndReceiptHashesMatchDeployedFiles()
@@ -94,9 +94,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         };
 
         SquadInstallRequest request = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: presets);
 
@@ -147,9 +147,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
 
@@ -158,8 +158,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Act — update specifying ModelPresets = null must preserve and re-apply recorded preset
         SquadUpdateRequest updateRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
+            targetRoot,
+            SquadDeploymentScope.Project,
             Version: "1.1.0",
             ModelPresets: null);
 
@@ -198,9 +198,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Claude, SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Claude, SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string>
             {
@@ -213,8 +213,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Act — update overriding only Claude target's preset
         SquadUpdateRequest updateRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
+            targetRoot,
+            SquadDeploymentScope.Project,
             Version: "1.1.0",
             ModelPresets: new Dictionary<SquadTarget, string>
             {
@@ -247,9 +247,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string>
             {
@@ -270,19 +270,20 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Act
         SquadUpdateRequest updateRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
+            targetRoot,
+            SquadDeploymentScope.Project,
             Version: "1.1.0",
             ModelPresets: null);
 
-        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
-            () => service.UpdateAsync(updateRequest));
+        SquadDeploymentConflictException exception =
+            await Assert.ThrowsAsync<SquadDeploymentConflictException>(() => service.UpdateAsync(updateRequest));
 
         // Assert
         Assert.Contains("copilot", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ephemeral", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ephemeral.yml", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("kyber-weave squad preset clear --target copilot", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("kyber-weave squad preset clear --target copilot", exception.Message,
+            StringComparison.OrdinalIgnoreCase);
 
         // Must fail closed without calling release source download
         Assert.Single(releaseSource.Requests);
@@ -308,9 +309,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string>
             {
@@ -318,14 +319,15 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             });
 
         // Act
-        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
-            () => service.InstallAsync(request));
+        SquadDeploymentConflictException exception =
+            await Assert.ThrowsAsync<SquadDeploymentConflictException>(() => service.InstallAsync(request));
 
         // Assert
         Assert.Contains("copilot", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("nonexistent-preset", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("nonexistent-preset.yml", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("kyber-weave squad preset clear --target copilot", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("kyber-weave squad preset clear --target copilot", exception.Message,
+            StringComparison.OrdinalIgnoreCase);
 
         Assert.Empty(releaseSource.Requests);
         Assert.Empty(Directory.GetFiles(targetRoot, "*", SearchOption.AllDirectories));
@@ -346,9 +348,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string>
             {
@@ -356,8 +358,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             });
 
         // Act
-        SquadSourceValidationException exception = await Assert.ThrowsAsync<SquadSourceValidationException>(
-            () => service.InstallAsync(request));
+        SquadSourceValidationException exception =
+            await Assert.ThrowsAsync<SquadSourceValidationException>(() => service.InstallAsync(request));
 
         // Assert
         Assert.Contains("nonexistent-profile-category", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -379,9 +381,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             DryRun: true,
             ModelPresets: new Dictionary<SquadTarget, string>
@@ -397,10 +399,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.True(result.DryRun);
         Assert.NotNull(result.ModelChanges);
         Assert.NotEmpty(result.ModelChanges);
-        Assert.All(result.ModelChanges, item =>
-        {
-            Assert.False(string.IsNullOrWhiteSpace(item.Agent));
-        });
+        Assert.All(result.ModelChanges, item => { Assert.False(string.IsNullOrWhiteSpace(item.Agent)); });
 
         // Dry run must write nothing to target root or state store
         Assert.Empty(Directory.GetFiles(targetRoot, "*", SearchOption.AllDirectories));
@@ -428,9 +427,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Install Project 1 with "fast" preset
         SquadInstallRequest request1 = new(
-            TargetRoot: projectRoot1,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            projectRoot1,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
 
@@ -439,9 +438,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Install Project 2 with "quality" preset
         SquadInstallRequest request2 = new(
-            TargetRoot: projectRoot2,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            projectRoot2,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "quality" });
 
@@ -450,8 +449,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Act — update Project 1 with ModelPresets = null
         SquadUpdateRequest update1 = new(
-            TargetRoot: projectRoot1,
-            Scope: SquadDeploymentScope.Project,
+            projectRoot1,
+            SquadDeploymentScope.Project,
             Version: "1.1.0",
             ModelPresets: null);
 
@@ -459,7 +458,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.True(updateResult1.Success);
 
         // Assert — Project 1 re-applies "fast", Project 2's persisted lock remains "quality"
-        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? lastRenderPresets = renderer.RenderRequests[^1].ModelPresets;
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset>?
+            lastRenderPresets = renderer.RenderRequests[^1].ModelPresets;
         Assert.NotNull(lastRenderPresets);
         Assert.Equal("fast", lastRenderPresets[SquadTarget.Copilot].Name);
 
@@ -486,9 +486,9 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadInstallRequest installRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
 
@@ -497,8 +497,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Act — update with empty map clears presets
         SquadUpdateRequest updateRequest = new(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
+            targetRoot,
+            SquadDeploymentScope.Project,
             Version: "1.1.0",
             ModelPresets: new Dictionary<SquadTarget, string>());
 
@@ -511,6 +511,47 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.True(updatePresets is null || updatePresets.Count == 0);
     }
 
+    [Fact]
+    public async Task InstallAsyncWithInstanceScopeAndMultipleTargetsThrowsArgumentException()
+    {
+        string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-install");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadInstallRequest request = new(
+            targetRoot,
+            SquadDeploymentScope.Instance,
+            [SquadTarget.Claude, SquadTarget.Codex],
+            Version: "1.0.0");
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => service.InstallAsync(request));
+        Assert.Contains("requires exactly one target", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateAsyncWithInstanceScopeAndMultipleTargetsThrowsArgumentException()
+    {
+        string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-update");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadUpdateRequest request = new(
+            targetRoot,
+            SquadDeploymentScope.Instance,
+            [SquadTarget.Claude, SquadTarget.Codex]);
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateAsync(request));
+        Assert.Contains("requires exactly one target", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)
     {
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
@@ -520,8 +561,10 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         return presetPath;
     }
 
-    private static string ResolveTargetPath(string root, string relativePath) =>
-        Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    private static string ResolveTargetPath(string root, string relativePath)
+    {
+        return Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    }
 
     private static Dictionary<string, byte[]> CaptureDirectorySnapshot(string root)
     {
@@ -546,7 +589,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.Equal(expected.Count, actual.Count);
         foreach (KeyValuePair<string, byte[]> kvp in expected)
         {
-            Assert.True(actual.TryGetValue(kvp.Key, out byte[]? actualBytes), $"File '{kvp.Key}' missing from snapshot.");
+            Assert.True(actual.TryGetValue(kvp.Key, out byte[]? actualBytes),
+                $"File '{kvp.Key}' missing from snapshot.");
             Assert.True(actualBytes.SequenceEqual(kvp.Value), $"File '{kvp.Key}' contents differed from snapshot.");
         }
     }

@@ -181,6 +181,42 @@ public sealed class SquadInstanceServiceTests : IDisposable
     }
 
     /// <summary>
+    ///     Regression test: Path traversal attempt in RemoveAsync throws ArgumentException or
+    ///     completes without touching any directories outside the designated instance path.
+    /// </summary>
+    [Theory]
+    [InlineData("../../etc")]
+    [InlineData("..")]
+    [InlineData("../traversal")]
+    public async Task RemoveAsyncPathTraversalDoesNotTouchDirectoriesOutsideDesignatedInstancePath(string preset)
+    {
+        using TestContext context = CreateContext();
+        SquadInstanceService service = context.CreateService();
+
+        string outsideDir = Path.Combine(
+            context.UserPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "outside-directory");
+        Directory.CreateDirectory(outsideDir);
+        string canaryFile = Path.Combine(outsideDir, "canary.txt");
+        await File.WriteAllTextAsync(canaryFile, "untouched", Encoding.UTF8);
+
+        try
+        {
+            await service.RemoveAsync(SquadTarget.Claude, preset);
+        }
+        catch (ArgumentException)
+        {
+            // Expected if preset validation rejects traversal
+        }
+
+        Assert.True(Directory.Exists(outsideDir));
+        Assert.True(File.Exists(canaryFile));
+        Assert.Equal("untouched", await File.ReadAllTextAsync(canaryFile, Encoding.UTF8));
+    }
+
+    /// <summary>
     ///     Verifies that RefreshAllAsync discovers all existing deployed instances under instance-state
     ///     that have a receipt and refreshes/ensures each of them.
     /// </summary>

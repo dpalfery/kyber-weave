@@ -1,15 +1,20 @@
 ---
-id: specs/squad-model-presets/index
+id: archive/specs/squad-model-presets/index
 title: Squad model presets specification
 doc-type: index
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-25
 ---
 
 # Squad model presets specification
 
-**Status:** In-progress (slice 1 and slice 2 tasks 1-17 complete; awaiting platform E2E) — approved by dpalfery on 2026-10-24, execution approved
+**Status:** Archived
+**Archive Date:** 2026-10-25
+
+Delivered and closed out 2026-10-25: every acceptance criterion traces to a completed task (see [tasks](tasks.md)). The durable decisions live in [ADR 0043](../../../adr/0043-squad-lock-v2-and-instance-deployment-scope.md), [`docs/kyber-squad/onboarding.md`](../../../kyber-squad/onboarding.md), and [`docs/kyber-squad/architecture.md`](../../../kyber-squad/architecture.md).
+
+---
 
 User-owned, named model presets that Squad applies when it renders agents, so switching
 provider or inference plan is one command and survives updates.

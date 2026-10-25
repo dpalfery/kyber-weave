@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
@@ -11,21 +10,21 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit tests for Squad model preset parsing, schema validation, and file-system store resolution.
+///     Unit tests for Squad model preset parsing, schema validation, and file-system store resolution.
 /// </summary>
 public sealed class SquadModelPresetStoreTests
 {
     private const string ValidPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            default: inherit
-            claude: claude-3-7-sonnet
-            copilot: inherit
-          general:
-            default: gpt-4o
-            cursor: gpt-4o-mini
-        """;
+                                           schema: kyber-squad.model-preset/v1
+                                           profiles:
+                                             deep-planning:
+                                               default: inherit
+                                               claude: claude-3-7-sonnet
+                                               copilot: inherit
+                                             general:
+                                               default: gpt-4o
+                                               cursor: gpt-4o-mini
+                                           """;
 
     [Fact]
     public void ValidPresetFileLoadsWithComputedDigestAndProfiles()
@@ -58,12 +57,12 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "inherit-only.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              fast:
-                copilot: inherit
-                claude: claude-haiku-5-5
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            profiles:
+                              fast:
+                                copilot: inherit
+                                claude: claude-haiku-5-5
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset(relativePath, bytes);
@@ -80,18 +79,18 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "invalid-schema.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v2
-            profiles:
-              general:
-                default: inherit
-            """;
+                            schema: kyber-squad.model-preset/v2
+                            profiles:
+                              general:
+                                default: inherit
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "kyber-squad.model-preset/v1",
-            expectedLine: 1);
+            1);
 
         Assert.Equal(1, diagnostic.StartLine);
     }
@@ -101,19 +100,19 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "unexpected-top-level.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            unexpected_field: disallowed
-            profiles:
-              general:
-                default: inherit
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            unexpected_field: disallowed
+                            profiles:
+                              general:
+                                default: inherit
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "unexpected_field",
-            expectedLine: 2);
+            2);
 
         Assert.Equal(2, diagnostic.StartLine);
     }
@@ -123,19 +122,19 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "unknown-harness.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                default: inherit
-                unsupported_harness: gpt-5
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            profiles:
+                              general:
+                                default: inherit
+                                unsupported_harness: gpt-5
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "unsupported_harness",
-            expectedLine: 5);
+            5);
 
         Assert.Equal(5, diagnostic.StartLine);
     }
@@ -145,20 +144,20 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "duplicate-category.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                default: inherit
-              general:
-                default: gpt-4o
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            profiles:
+                              general:
+                                default: inherit
+                              general:
+                                default: gpt-4o
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "general",
-            expectedLine: 5);
+            5);
 
         Assert.Equal(5, diagnostic.StartLine);
     }
@@ -168,19 +167,19 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "duplicate-harness.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                claude: claude-3-5-sonnet
-                claude: claude-3-7-sonnet
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            profiles:
+                              general:
+                                claude: claude-3-5-sonnet
+                                claude: claude-3-7-sonnet
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "claude",
-            expectedLine: 5);
+            5);
 
         Assert.Equal(5, diagnostic.StartLine);
     }
@@ -190,16 +189,16 @@ public sealed class SquadModelPresetStoreTests
     {
         const string relativePath = "malformed.yml";
         const string yaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles: [unclosed
-            """;
+                            schema: kyber-squad.model-preset/v1
+                            profiles: [unclosed
+                            """;
         byte[] bytes = Encoding.UTF8.GetBytes(yaml);
 
         Diagnostic diagnostic = AssertSourceValidationException(
             () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
             relativePath,
             "YAML",
-            expectedLine: null);
+            null);
 
         Assert.NotNull(diagnostic.StartLine);
     }
@@ -225,6 +224,39 @@ public sealed class SquadModelPresetStoreTests
         Assert.Equal(presetFilePath, preset.SourcePath);
         Assert.Equal(expectedDigest, preset.Digest);
         Assert.True(preset.Profiles.ContainsKey("general"));
+    }
+
+    [Fact]
+    public void TryLoadLoadsPresetWithUtf8BomPreambleWithoutThrowingOrModifyingFileOnDisk()
+    {
+        using TempDirectory temp = new();
+        FakeSquadUserPaths userPaths = new(temp.Path);
+        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+        Directory.CreateDirectory(presetsDir);
+
+        string presetFilePath = Path.Combine(presetsDir, "bom-preset.yml");
+        byte[] preamble = Encoding.UTF8.GetPreamble();
+        byte[] contentBytes = Encoding.UTF8.GetBytes(ValidPresetYaml);
+        byte[] fileBytesWithBom = new byte[preamble.Length + contentBytes.Length];
+        Buffer.BlockCopy(preamble, 0, fileBytesWithBom, 0, preamble.Length);
+        Buffer.BlockCopy(contentBytes, 0, fileBytesWithBom, preamble.Length, contentBytes.Length);
+
+        File.WriteAllBytes(presetFilePath, fileBytesWithBom);
+        DateTime lastWriteTimeUtcBefore = File.GetLastWriteTimeUtc(presetFilePath);
+
+        SquadModelPresetStore store = new(userPaths);
+        SquadModelPreset? preset = store.TryLoad("bom-preset");
+
+        Assert.NotNull(preset);
+        Assert.Equal("bom-preset", preset.Name);
+        Assert.Equal(presetFilePath, preset.SourcePath);
+        Assert.True(preset.Profiles.ContainsKey("general"));
+
+        byte[] fileBytesAfter = File.ReadAllBytes(presetFilePath);
+        DateTime lastWriteTimeUtcAfter = File.GetLastWriteTimeUtc(presetFilePath);
+
+        Assert.Equal(fileBytesWithBom, fileBytesAfter);
+        Assert.Equal(lastWriteTimeUtcBefore, lastWriteTimeUtcAfter);
     }
 
     [Fact]
@@ -302,17 +334,14 @@ public sealed class SquadModelPresetStoreTests
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedPath, StringComparison.Ordinal) &&
                     (item.Message.Contains(expectedMessageOrHintFragment, StringComparison.OrdinalIgnoreCase) ||
-                     (item.Hint?.Contains(expectedMessageOrHintFragment, StringComparison.OrdinalIgnoreCase) ?? false)));
+                     (item.Hint?.Contains(expectedMessageOrHintFragment, StringComparison.OrdinalIgnoreCase) ??
+                      false)));
 
         Assert.Equal(Severity.Error, diagnostic.Severity);
         if (expectedLine.HasValue)
-        {
             Assert.Equal(expectedLine.Value, diagnostic.StartLine);
-        }
         else
-        {
             Assert.NotNull(diagnostic.StartLine);
-        }
 
         return diagnostic;
     }

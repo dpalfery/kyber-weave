@@ -36,24 +36,10 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
         SquadModelPresetStore presetStore = new(userPaths);
         IReadOnlyList<SquadModelPresetSelectionStore> selectionStores = SquadCommandComposition.ResolveSelectionStores(userPaths);
 
-        string altHome = Path.Combine(userPaths.HomeDirectory, "home");
-        SquadCommandComposition.NormalizeAllPresetFiles(Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets"));
-        SquadCommandComposition.NormalizeAllPresetFiles(Path.Combine(altHome, ".kyber-weave", "squad", "presets"));
-
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
         string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
-        HashSet<string> presetNameSet = new(presetStore.List(), StringComparer.Ordinal);
-        if (Directory.Exists(altHome))
-        {
-            SquadModelPresetStore altPresetStore = new(new SquadCommandComposition.CliSquadUserPaths(altHome, userPaths.ApplicationDataDirectory));
-            foreach (string name in altPresetStore.List())
-            {
-                presetNameSet.Add(name);
-            }
-        }
-
-        List<string> presetNames = [.. presetNameSet.Order(StringComparer.Ordinal)];
+        List<string> presetNames = [.. presetStore.List().Order(StringComparer.Ordinal)];
 
         Dictionary<string, HashSet<string>> usages = new(StringComparer.Ordinal);
 
@@ -92,11 +78,6 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
         }
 
         List<SquadProjectRegistryEntry> allProjects = [.. stateStore.ListProjects()];
-        if (Directory.Exists(altHome))
-        {
-            SquadStateStore altStateStore = new(new SquadCommandComposition.CliSquadUserPaths(altHome, userPaths.ApplicationDataDirectory));
-            allProjects.AddRange(altStateStore.ListProjects());
-        }
 
         foreach (SquadProjectRegistryEntry project in allProjects)
         {
@@ -129,14 +110,9 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
             }
         }
 
-        foreach (string homeDir in new[] { userPaths.HomeDirectory, altHome })
+        string selectionsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections");
+        if (Directory.Exists(selectionsDir))
         {
-            string selectionsDir = Path.Combine(homeDir, ".kyber-weave", "squad", "selections");
-            if (!Directory.Exists(selectionsDir))
-            {
-                continue;
-            }
-
             foreach (string file in Directory.EnumerateFiles(selectionsDir, "*.yml"))
             {
                 try
@@ -178,14 +154,6 @@ public sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
         foreach (string name in presetNames)
         {
             string presetPath = Path.Combine(presetsDir, $"{name}.yml");
-            if (!File.Exists(presetPath) && Directory.Exists(altHome))
-            {
-                string candidateAltPath = Path.Combine(altHome, ".kyber-weave", "squad", "presets", $"{name}.yml");
-                if (File.Exists(candidateAltPath))
-                {
-                    presetPath = candidateAltPath;
-                }
-            }
 
             string usedByText = "none";
             if (usages.TryGetValue(name, out HashSet<string>? tokens) && tokens.Count > 0)

@@ -212,7 +212,6 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             string targetToken = SquadTargetCatalog.GetToken(entry.Key);
             string presetName = entry.Value.Name;
-            NormalizePresetFileEncoding(stateStore.UserPaths, presetName);
             SquadModelPreset? loadedPreset = null;
             try
             {
@@ -244,28 +243,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         return hasMissingPreset;
     }
 
-    /// <summary>
-    ///     Strips a UTF-8 byte order mark (BOM) from a model preset file if present.
-    ///     Presets authored with standard .NET APIs may carry a 3-byte preamble that
-    ///     YamlDotNet and SHA-256 digest comparisons treat as content unless normalized.
-    /// </summary>
-    private static void NormalizePresetFileEncoding(ISquadUserPaths userPaths, string presetName)
-    {
-        try
-        {
-            string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-            string filePath = Path.Combine(presetsDir, $"{presetName}.yml");
-            if (!File.Exists(filePath)) return;
 
-            byte[] bytes = File.ReadAllBytes(filePath);
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-                File.WriteAllBytes(filePath, bytes.AsSpan(3).ToArray());
-        }
-        catch (Exception)
-        {
-            // Ignore filesystem errors during best-effort encoding normalization.
-        }
-    }
 
     /// <summary>
     ///     Lists the projects registered with the home-level registry, flagging each stale one with its reason.

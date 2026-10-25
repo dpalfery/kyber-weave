@@ -410,7 +410,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 SquadModelPresetStore presetStore = new(stateStore.UserPaths);
                 foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
                 {
-                    NormalizePresetFileEncoding(stateStore.UserPaths, entry.Value.Name);
                     try
                     {
                         SquadModelPreset? preset = presetStore.TryLoad(entry.Value.Name);
@@ -463,24 +462,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     .GetAwaiter()
                     .GetResult();
 
-                foreach (SquadDeploymentFile file in render.Files)
-                    try
-                    {
-                        string fullPath = SquadPathPolicy.ResolveFile(targetGlobalRoot, file.RelativePath);
-                        if (File.Exists(fullPath))
-                        {
-                            byte[] diskBytes = File.ReadAllBytes(fullPath);
-                            if (diskBytes.Length >= 3 &&
-                                diskBytes[0] == 0xEF && diskBytes[1] == 0xBB && diskBytes[2] == 0xBF &&
-                                diskBytes.AsSpan(3).SequenceEqual(file.Content.Span))
-                                File.WriteAllBytes(fullPath, diskBytes.AsSpan(3).ToArray());
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        // Ignore file normalization errors.
-                    }
-
                 collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
                     workingDirectory,
                     SquadDeploymentScope.Global,
@@ -509,29 +490,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
 
         return invalidGlobalRoot;
-    }
-
-    /// <summary>
-    ///     Strips a UTF-8 byte order mark (BOM) from a model preset file if present.
-    ///     Presets authored with standard .NET APIs may carry a 3-byte preamble that
-    ///     YamlDotNet and SHA-256 digest comparisons treat as content unless normalized.
-    /// </summary>
-    private static void NormalizePresetFileEncoding(ISquadUserPaths userPaths, string presetName)
-    {
-        try
-        {
-            string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-            string filePath = Path.Combine(presetsDir, $"{presetName}.yml");
-            if (!File.Exists(filePath)) return;
-
-            byte[] bytes = File.ReadAllBytes(filePath);
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-                File.WriteAllBytes(filePath, bytes.AsSpan(3).ToArray());
-        }
-        catch (Exception)
-        {
-            // Ignore filesystem errors during best-effort encoding normalization.
-        }
     }
 
     private static string GetCliVersion()

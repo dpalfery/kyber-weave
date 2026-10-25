@@ -323,7 +323,14 @@ public sealed class SquadDeploymentPlan
             bool existsAsFile = File.Exists(rendered.FullPath);
             if (existsAsFile)
             {
-                string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+                byte[] diskBytes = File.ReadAllBytes(rendered.FullPath);
+                ReadOnlySpan<byte> diskSpan = diskBytes;
+                if (diskSpan.Length >= 3 && diskSpan[0] == 0xEF && diskSpan[1] == 0xBB && diskSpan[2] == 0xBF)
+                {
+                    diskSpan = diskSpan[3..];
+                }
+
+                string currentDigest = Digest(diskSpan);
                 string renderedDigest = Digest(rendered.File.Content.Span);
                 if (!adopt || !string.Equals(currentDigest, renderedDigest, StringComparison.Ordinal))
                     throw UnmanagedCollision(rendered.File.RelativePath);
@@ -692,7 +699,14 @@ public sealed class SquadDeploymentPlan
 
             if (!File.Exists(rendered.FullPath)) continue;
 
-            string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+            byte[] diskBytes = File.ReadAllBytes(rendered.FullPath);
+            ReadOnlySpan<byte> diskSpan = diskBytes;
+            if (diskSpan.Length >= 3 && diskSpan[0] == 0xEF && diskSpan[1] == 0xBB && diskSpan[2] == 0xBF)
+            {
+                diskSpan = diskSpan[3..];
+            }
+
+            string currentDigest = Digest(diskSpan);
             string renderedDigest = Digest(rendered.File.Content.Span);
             if (!string.Equals(currentDigest, renderedDigest, StringComparison.Ordinal))
                 collisions.Add(ToCollision(rendered));

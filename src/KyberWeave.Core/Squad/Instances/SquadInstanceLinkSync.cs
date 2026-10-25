@@ -118,7 +118,7 @@ public static class SquadInstanceLinkSync
         string instanceStateDirectory)
     {
         List<SquadLinkRecord> recordedLinks = ReadRecordedLinks(instanceStateDirectory);
-        List<SquadLinkRecord> mainListing = EnumerateMainHome(mainHome);
+        List<SquadLinkRecord> mainListing = EnumerateMainHome(mainHome, renderedPaths, row.ExtraLinks);
         List<string> instanceListing = EnumerateInstanceRoot(instanceRoot);
 
         IReadOnlyList<SquadLinkAction> actions = SquadInstanceLinkPlanner.Plan(
@@ -295,13 +295,39 @@ public static class SquadInstanceLinkSync
         }
     }
 
-    private static List<SquadLinkRecord> EnumerateMainHome(string mainHome)
+    private static List<SquadLinkRecord> EnumerateMainHome(
+        string mainHome,
+        IReadOnlySet<string> renderedPaths,
+        IReadOnlyList<string> extraLinks)
     {
         List<SquadLinkRecord> records = [];
         if (!Directory.Exists(mainHome)) return records;
 
-        Queue<DirectoryInfo> queue = new();
-        queue.Enqueue(new DirectoryInfo(mainHome));
+        HashSet<string> interestingPrefixes = new(StringComparer.Ordinal);
+        foreach (string path in renderedPaths)
+        {
+            string norm = path.Replace('\\', '/').Trim('/');
+            int slash = norm.LastIndexOf('/');
+            while (slash > 0)
+            {
+                interestingPrefixes.Add(norm[..slash]);
+                slash = norm.LastIndexOf('/', slash - 1);
+            }
+        }
+
+        foreach (string extra in extraLinks)
+        {
+            string norm = extra.Replace('\\', '/').Trim('/');
+            int slash = norm.LastIndexOf('/');
+            while (slash > 0)
+            {
+                interestingPrefixes.Add(norm[..slash]);
+                slash = norm.LastIndexOf('/', slash - 1);
+            }
+        }
+
+        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
+        queue.Enqueue((new DirectoryInfo(mainHome), 0));
 
         EnumerationOptions options = new()
         {
@@ -311,7 +337,7 @@ public static class SquadInstanceLinkSync
 
         while (queue.Count > 0)
         {
-            DirectoryInfo current = queue.Dequeue();
+            (DirectoryInfo current, int depth) = queue.Dequeue();
             IEnumerable<FileSystemInfo> entries;
             try
             {
@@ -325,11 +351,18 @@ public static class SquadInstanceLinkSync
             foreach (FileSystemInfo entry in entries)
             {
                 string relativePath = Path.GetRelativePath(mainHome, entry.FullName).Replace('\\', '/');
+                string normRel = relativePath.Trim('/');
+
                 if (entry is DirectoryInfo dirEntry)
                 {
                     records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.Directory, dirEntry.FullName));
-                    if (entry.LinkTarget is null && !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                        queue.Enqueue(dirEntry);
+                    if (depth < 10 &&
+                        entry.LinkTarget is null &&
+                        !entry.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+                        interestingPrefixes.Contains(normRel))
+                    {
+                        queue.Enqueue((dirEntry, depth + 1));
+                    }
                 }
                 else
                 {
@@ -346,8 +379,8 @@ public static class SquadInstanceLinkSync
         List<string> results = [];
         if (!Directory.Exists(instanceRoot)) return results;
 
-        Queue<DirectoryInfo> queue = new();
-        queue.Enqueue(new DirectoryInfo(instanceRoot));
+        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
+        queue.Enqueue((new DirectoryInfo(instanceRoot), 0));
 
         EnumerationOptions options = new()
         {
@@ -357,7 +390,7 @@ public static class SquadInstanceLinkSync
 
         while (queue.Count > 0)
         {
-            DirectoryInfo current = queue.Dequeue();
+            (DirectoryInfo current, int depth) = queue.Dequeue();
             IEnumerable<FileSystemInfo> entries;
             try
             {
@@ -372,8 +405,13 @@ public static class SquadInstanceLinkSync
             {
                 string relativePath = Path.GetRelativePath(instanceRoot, entry.FullName).Replace('\\', '/');
                 results.Add(relativePath);
-                if (entry is DirectoryInfo dirEntry && entry.LinkTarget is null &&
-                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) queue.Enqueue(dirEntry);
+                if (entry is DirectoryInfo dirEntry &&
+                    depth < 10 &&
+                    entry.LinkTarget is null &&
+                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    queue.Enqueue((dirEntry, depth + 1));
+                }
             }
         }
 

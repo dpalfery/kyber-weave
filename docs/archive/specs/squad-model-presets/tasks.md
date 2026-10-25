@@ -1,17 +1,18 @@
 ---
-id: specs/squad-model-presets/tasks
+id: archive/specs/squad-model-presets/tasks
 title: Squad model presets tasks
 doc-type: spec
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-25
 component: KyberSquad
 ---
 
 # Implementation Tasks
 
-**Status:** In-progress — approved by dpalfery on 2026-10-24, execution approved
-**Phase status:** Approved (dpalfery, 2026-10-24), test contract included
+**Status:** Archived
+**Archive Date:** 2026-10-25
+**Phase status:** Delivered and verified
 **Development mode:** test-first
 
 This builds the approved [requirements](requirements.md) and [design](design.md). Where a task
@@ -112,7 +113,7 @@ installed and signed in, runs them.
       - a valid file loads with its digest;
       - `default` may be missing, and `inherit` is kept;
       - an unknown harness, a duplicate key, an unknown top-level key and bad YAML each throw an
-        exception naming the file and line;
+      exception naming the file and line;
       - a bad name throws, a missing file returns `null`, and `List` is sorted.
     - RED: the types do not exist, so the build fails. GREEN: every case passes.
 - [x] 2. **Merge, validation and model diff** · R1.3, R2.4, R4.1, R4.3 · needs 1
@@ -406,7 +407,7 @@ installed and signed in, runs them.
     - Behavior: removing an instance, the status listing, the refresh during update, and their
       exit codes.
     - RED: the build fails. GREEN: every case passes.
-- [ ] 18. **macOS and Windows end-to-end** · R7.1, R7.2, R7.4, R7.5, R7.8 · csharp-dev with the owner · needs 12–17
+- [x] 18. **macOS and Windows end-to-end** · macOS verified / Windows deferred · R7.1, R7.2, R7.4, R7.5, R7.8 · csharp-dev with the owner · needs 12–17
   - This task writes no test code. It is checked by the E-mac and E-win entries in
     [Evidence](#evidence).
   - Run `SquadLinkFileSystemTests`, `SquadInstanceLinkSyncTests` and `SquadInstanceServiceTests` on
@@ -423,15 +424,15 @@ installed and signed in, runs them.
 
 ## Release and closeout
 
-- [ ] 19. **Pre-push gates** · all ids · csharp-dev · needs 1–18
+- [x] 19. **Pre-push gates** · all ids · csharp-dev · needs 1–18
   - Run `dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json`; it
     must be clean.
   - Run the full suite in a CI-like Linux container:
     `docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`.
-- [ ] 20. **Final code-review council** · all ids · conductor → code-reviewer · needs 19
+- [x] 20. **Final code-review council** · all ids · conductor → code-reviewer · needs 19
   - The verdict must be Approve.
   - Each fix goes back to the task that owns it, then 19 and 20 run again.
-- [ ] 21. **Closeout** · all ids · conductor → docs-dev · needs 20
+- [x] 21. **Closeout** · all ids · conductor → docs-dev · needs 20
   - Check every requirement id against the code, the tests, the Evidence section and the review.
   - Move the durable facts into:
     - `docs/kyber-squad/onboarding.md`: preset files and verbs, selections, `squad run`,
@@ -484,8 +485,63 @@ commands, what was observed, and the outcome. The outcome is one of: `<row> → 
 
 - Slice 1 (Tasks 1-8): Complete.
 - Slice 2 (Tasks 9-17): Complete. All 17 implementation tasks delivered and verified green with passing task gates and review gates.
-- Spikes S1-S8 and Task 18 (macOS/Windows platform E2E): pending execution on real target platforms.
+- Task 18: macOS E2E verified (E-mac); Windows deferred by owner (E-win).
+- Spikes S1-S8: pending execution on real target platforms.
 - Tasks 19-21 (Pre-push gates, final code review council, documentation closeout): next steps upon platform verification.
 
 - S1–S8: _pending_
-- E-mac, E-win (task 18): _pending_
+
+#### E-mac · macOS 27.2 (Darwin 27.2.0 arm64) · claude · 2026-10-25
+
+- **Commands:**
+  - `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter-class KyberWeave.Tests.SquadLinkFileSystemTests` (7 passed, 3 skipped Windows-only)
+  - `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter-class KyberWeave.Tests.SquadInstanceLinkSyncTests` (13 passed)
+  - `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter-class KyberWeave.Tests.SquadInstanceServiceTests` (6 passed)
+  - `kyber-weave squad preset use preset-alpha --target claude` (project-alpha)
+  - `kyber-weave squad preset use preset-beta --target claude` (project-beta)
+  - `kyber-weave squad run claude` (project-alpha and project-beta)
+  - `kyber-weave squad instance remove --target claude --preset preset-alpha --yes`
+- **Observed:**
+  - All link and instance unit tests passed green on macOS host.
+  - `git status` remained clean in both projects after preset selection and execution.
+  - Instances created under `.kyber-weave/squad/instances/claude/preset-alpha` and `preset-beta`.
+  - Main home settings file (`~/.claude/settings.json`) symlinked to instance roots (`CLAUDE_CONFIG_DIR`).
+  - Modifications to settings in main home reflected across link in instances.
+  - File inode check (`stat -f %i`) on main home file before and after `squad instance remove` confirmed inode 281372378 remained unchanged.
+- **Outcome:** `claude → Ready`
+
+#### E-win
+
+- **Outcome:** `deferred by owner (2026-10-25)`
+
+#### Task 19 · Linux Docker container & Host Gates · 2026-10-25
+
+- **Commands:**
+  - `dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json`
+  - `docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`
+- **Observed:**
+  - Declared review gates: 18/18 gates clean (build, test, formatting, inspectcode, docs validate, docs drift).
+  - Linux Docker test run: 3,422 passed, 0 failed, 3 skipped (Windows-only skip).
+- **Outcome:** `Pass`
+
+#### Task 20 · Code Review Council · 2026-10-25
+
+- **Commands:**
+  - Final code-review council execution over branch diff.
+- **Observed:**
+  - Verdict: `APPROVE`
+  - Risk: `LOW`
+  - Findings: 0 surviving findings.
+- **Outcome:** `Approve`
+
+#### Task 21 · Closeout Documentation & Archival · 2026-10-25
+
+- **Commands:**
+  - Canonical documentation updates (`docs/kyber-squad/onboarding.md`, `docs/kyber-squad/architecture.md`).
+  - Author ADR 0043 (`docs/adr/0043-squad-lock-v2-and-instance-deployment-scope.md`) and update ADR index.
+  - Author deferred work todo (`docs/todo/squad-model-presets-windows-e2e-and-spikes.md`) and update todo index.
+  - Move spec bundle to `docs/archive/specs/squad-model-presets/` and update `docs/specs/README.md`.
+- **Observed:**
+  - All durable content migrated to canonical locations.
+  - Deferred spikes S1–S8 and Windows E2E captured in todo corpus.
+- **Outcome:** `Archived`

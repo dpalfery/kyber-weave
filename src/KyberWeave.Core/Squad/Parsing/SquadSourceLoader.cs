@@ -253,6 +253,14 @@ public static class SquadSourceLoader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
+        if (bytes.Length >= 3 &&
+            bytes.Span[0] == 0xEF &&
+            bytes.Span[1] == 0xBB &&
+            bytes.Span[2] == 0xBF)
+        {
+            bytes = bytes[3..];
+        }
+
         string digest = Convert.ToHexStringLower(SHA256.HashData(bytes.Span));
         string content;
         try
@@ -267,6 +275,11 @@ public static class SquadSourceLoader
                 path,
                 "Save the file using UTF-8 encoding without a byte order mark.");
             throw new InvalidOperationException("Unreachable after validation failure.");
+        }
+
+        if (content.Length > 0 && content[0] == '﻿')
+        {
+            content = content[1..];
         }
 
         SourceFile file = new(path, content);

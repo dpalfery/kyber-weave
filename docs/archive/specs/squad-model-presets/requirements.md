@@ -1,10 +1,10 @@
 ---
-id: specs/squad-model-presets/requirements
+id: archive/specs/squad-model-presets/requirements
 title: Squad model presets requirements
 doc-type: requirements
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-25
 component: KyberSquad
 keywords:
   - model presets
@@ -16,13 +16,13 @@ keywords:
 
 # Requirements Document
 
-**Status:** In-progress — approved by dpalfery on 2026-10-24, execution approved
-**Phase status:** Approved (dpalfery, 2026-10-24; Requirement 7 revised at the owner's direction)
+**Status:** Archived
+**Archive Date:** 2026-10-25
 
 ## Introduction
 
 Every canonical agent names a model category in its frontmatter (`model-profile: fast`), and
-the bundled [`models.yml`](../../../products/kyber-squad/profiles/models.yml) maps each
+the bundled [`models.yml`](../../../../products/kyber-squad/profiles/models.yml) maps each
 category to one model per harness. That map ships inside the release, so switching provider
 or inference plan today means waiting for a release or hand-editing deployed files, which
 Squad's receipt then reports as local edits.
@@ -32,7 +32,7 @@ renders, inside the normal install and update transaction, so deployed files sta
 receipt-owned. "Preset" is used because "model profile" already names the category.
 
 Presets and project selections live in the user's home, never in a project's tree, for the
-reason [ADR 0037](../../adr/0037-squad-state-in-user-home.md) moved Squad state there.
+reason [ADR 0037](../../../adr/0037-squad-state-in-user-home.md) moved Squad state there.
 
 Slice 1 is Requirements 1–6. Slice 2 is Requirement 7.
 

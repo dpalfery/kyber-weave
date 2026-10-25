@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console.Cli;
@@ -7,8 +8,10 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 ///     Removes a harness instance deployment and its recorded state without modifying main harness files.
 /// </summary>
-public sealed class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSettings>
+public sealed partial class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSettings>
 {
+    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
+    private static partial Regex PresetNameRegex();
     private readonly SquadInstanceService? _instanceService;
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
@@ -64,12 +67,30 @@ public sealed class SquadInstanceRemoveCommand : Command<SquadInstanceRemoveSett
             return 2;
         }
 
+        if (!PresetNameRegex().IsMatch(settings.Preset))
+        {
+            SquadCommandComposition.WriteClientInputError(
+                $"Invalid preset name '{settings.Preset}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.");
+            return 2;
+        }
+
         ISquadUserPaths userPaths = _userPaths ?? SquadCommandComposition.ResolveUserPaths();
         string targetToken = SquadTargetCatalog.GetToken(target);
         string instanceRoot = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", targetToken,
             settings.Preset);
         string instanceStateDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instance-state",
             targetToken, settings.Preset);
+
+        string expectedBase = Path.GetFullPath(Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", targetToken));
+        string fullInstanceRoot = Path.GetFullPath(instanceRoot);
+        string prefix = expectedBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        if (!fullInstanceRoot.StartsWith(prefix, StringComparison.Ordinal) || fullInstanceRoot.Length <= prefix.Length)
+        {
+            SquadCommandComposition.WriteClientInputError(
+                $"Instance path '{fullInstanceRoot}' escapes instance directory '{expectedBase}'.");
+            return 2;
+        }
 
         if (!Directory.Exists(instanceRoot) && !Directory.Exists(instanceStateDir))
         {

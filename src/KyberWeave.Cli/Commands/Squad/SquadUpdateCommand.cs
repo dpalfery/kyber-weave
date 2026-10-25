@@ -67,12 +67,16 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _instanceService = instanceService;
     }
 
-    /// <inheritdoc />
-    private static void EnsureInstancePresetsExist(ISquadUserPaths userPaths)
+    /// <summary>
+    ///     Validates that each deployed instance with a receipt has its corresponding model preset file on disk.
+    /// </summary>
+    /// <param name="userPaths">The user paths provider.</param>
+    /// <returns><c>true</c> if all deployed instance presets exist; otherwise, <c>false</c>.</returns>
+    private static bool ValidateInstancePresets(ISquadUserPaths userPaths)
     {
         string home = userPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
-        if (!Directory.Exists(instanceStateBase)) return;
+        if (!Directory.Exists(instanceStateBase)) return true;
 
         string presetsDir = Path.Combine(home, ".kyber-weave", "squad", "presets");
 
@@ -87,27 +91,38 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         {
             if (targetEntry is not DirectoryInfo targetDir || targetEntry.LinkTarget is not null) continue;
 
+            SquadTarget? matchedTarget = null;
+            foreach (SquadTarget candidate in SquadTargetCatalog.All)
+            {
+                if (string.Equals(SquadTargetCatalog.GetToken(candidate), targetDir.Name,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedTarget = candidate;
+                    break;
+                }
+            }
+
+            if (matchedTarget is null) continue;
+
             foreach (FileSystemInfo presetEntry in targetDir.EnumerateFileSystemInfos("*", options))
             {
                 if (presetEntry is not DirectoryInfo presetDir || presetEntry.LinkTarget is not null) continue;
 
+                string receiptFile = Path.Combine(presetDir.FullName, "squad.receipt.json");
+                if (!File.Exists(receiptFile)) continue;
+
                 string presetName = presetDir.Name;
                 string presetFile = Path.Combine(presetsDir, $"{presetName}.yml");
                 if (!File.Exists(presetFile))
-                    try
-                    {
-                        Directory.CreateDirectory(presetsDir);
-                        string stubPreset =
-                            "schema: kyber-squad.model-preset/v1\nprofiles:\n  general:\n    default: default-model\n";
-                        File.WriteAllText(presetFile, stubPreset, new UTF8Encoding(false));
-                    }
-                    catch (Exception)
-                    {
-                    }
+                {
+                    SquadCommandComposition.WriteLine(
+                        $"[red]error:[/] Missing preset file '{Markup.Escape(presetFile)}' for instance '{Markup.Escape(targetDir.Name)}/{Markup.Escape(presetName)}'.");
+                    return false;
+                }
             }
         }
 
-        SquadCommandComposition.SyncPresetFiles(userPaths);
+        return true;
     }
 
     public override int Execute(CommandContext context, SquadUpdateSettings settings,
@@ -211,13 +226,22 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 if (exitCode != 0) return exitCode;
             }
 
+            ISquadUserPaths paths = _userPaths ?? stateStore.UserPaths;
+            if (!ValidateInstancePresets(paths))
+            {
+                return 1;
+            }
+
             try
             {
-                ISquadUserPaths paths = _userPaths ?? stateStore.UserPaths;
-                EnsureInstancePresetsExist(paths);
                 SquadInstanceService instanceService = _instanceService ??
                                                        SquadCommandComposition.CreateInstanceService(paths);
                 instanceService.RefreshAllAsync(cancellationToken).GetAwaiter().GetResult();
+            }
+            catch (SquadDeploymentConflictException ex)
+            {
+                SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+                return 1;
             }
             catch (Exception ex)
             {
@@ -360,7 +384,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
         catch (ArgumentException)
         {
-            receiptTargets = Array.Empty<SquadTarget>();
+            receiptTargets = [];
         }
 
         // Load configuration if present

@@ -106,100 +106,14 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>
-    ///     Creates preset selection stores covering primary and fake-harness alt home directories.
+    ///     Creates preset selection stores covering primary home directory.
     /// </summary>
     public static IReadOnlyList<SquadModelPresetSelectionStore> ResolveSelectionStores(ISquadUserPaths userPaths)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
-        List<SquadModelPresetSelectionStore> stores = [new(userPaths)];
-
-        string altHome = Path.Combine(userPaths.HomeDirectory, "home");
-        stores.Add(new SquadModelPresetSelectionStore(
-            new CliSquadUserPaths(altHome, userPaths.ApplicationDataDirectory)));
-
-        return stores;
+        return [new(userPaths)];
     }
 
-    /// <summary>
-    ///     Normalizes a preset file by stripping any leading UTF-8 Byte Order Mark (BOM),
-    ///     which would otherwise cause strict closed-schema YAML validation to reject the leading key.
-    /// </summary>
-    public static void NormalizePresetFile(string presetsDirectory, string name)
-    {
-        if (string.IsNullOrWhiteSpace(presetsDirectory) || string.IsNullOrWhiteSpace(name)) return;
-
-        string filePath = Path.Combine(presetsDirectory, $"{name}.yml");
-        if (!File.Exists(filePath)) return;
-
-        try
-        {
-            byte[] bytes = File.ReadAllBytes(filePath);
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-                File.WriteAllBytes(filePath, bytes[3..]);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    /// <summary>
-    ///     Normalizes all YAML preset files in the given directory by stripping leading UTF-8 BOMs.
-    /// </summary>
-    public static void NormalizeAllPresetFiles(string presetsDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(presetsDirectory) || !Directory.Exists(presetsDirectory)) return;
-
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(presetsDirectory, "*.yml"))
-            {
-                byte[] bytes = File.ReadAllBytes(file);
-                if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-                    File.WriteAllBytes(file, bytes[3..]);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
-    /// <summary>
-    ///     Synchronizes and normalizes preset files between primary and alt home directories.
-    /// </summary>
-    public static void SyncPresetFiles(ISquadUserPaths userPaths)
-    {
-        ArgumentNullException.ThrowIfNull(userPaths);
-        string primaryPresets = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        string altHome = Path.Combine(userPaths.HomeDirectory, "home");
-        string altPresets = Path.Combine(altHome, ".kyber-weave", "squad", "presets");
-
-        NormalizeAllPresetFiles(primaryPresets);
-        NormalizeAllPresetFiles(altPresets);
-
-        if (Directory.Exists(primaryPresets))
-        {
-            Directory.CreateDirectory(altPresets);
-            foreach (string file in Directory.EnumerateFiles(primaryPresets, "*.yml"))
-            {
-                string target = Path.Combine(altPresets, Path.GetFileName(file));
-                if (!File.Exists(target) || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(target))
-                    File.Copy(file, target, true);
-            }
-        }
-
-        if (Directory.Exists(altPresets))
-        {
-            Directory.CreateDirectory(primaryPresets);
-            foreach (string file in Directory.EnumerateFiles(altPresets, "*.yml"))
-            {
-                string target = Path.Combine(primaryPresets, Path.GetFileName(file));
-                if (!File.Exists(target) || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(target))
-                    File.Copy(file, target, true);
-            }
-        }
-    }
-
-    /// <summary>Resolves the state store using the specified or default user paths.</summary>
     public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null)
     {
         return new SquadStateStore(userPaths ?? ResolveUserPaths());
@@ -902,12 +816,13 @@ internal static class SquadCommandComposition
     public static SquadInstanceService CreateInstanceService(ISquadUserPaths? userPaths = null)
     {
         ISquadUserPaths resolvedPaths = userPaths ?? ResolveUserPaths();
+        SquadStateStore stateStore = ResolveStateStore(resolvedPaths);
         ISquadReleaseSource releaseSource = ResolveDefaultReleaseSource();
-        SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, releaseSource: releaseSource);
+        SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore: stateStore, releaseSource: releaseSource);
         SquadModelPresetStore presetStore = new(resolvedPaths);
         ISquadLinkFileSystem linkFileSystem = ResolveLinkFileSystem();
         ISquadGlobalRootResolver globalRoots = ResolveGlobalRoots();
-        return new SquadInstanceService(lifecycleService, presetStore, linkFileSystem, globalRoots);
+        return new SquadInstanceService(lifecycleService, presetStore, linkFileSystem, globalRoots, stateStore);
     }
 
     internal sealed class CliSquadUserPaths : ISquadUserPaths

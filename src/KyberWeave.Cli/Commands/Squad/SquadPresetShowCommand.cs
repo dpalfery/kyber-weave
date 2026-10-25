@@ -31,19 +31,10 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
         ISquadUserPaths userPaths = _userPaths ?? stateStore.UserPaths;
         SquadModelPresetStore presetStore = new(userPaths);
 
-        string altHome = Path.Combine(userPaths.HomeDirectory, "home");
-        SquadCommandComposition.NormalizePresetFile(Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets"), settings.Name);
-        SquadCommandComposition.NormalizePresetFile(Path.Combine(altHome, ".kyber-weave", "squad", "presets"), settings.Name);
-
         SquadModelPreset? preset = null;
         try
         {
             preset = presetStore.TryLoad(settings.Name);
-            if (preset is null && Directory.Exists(altHome))
-            {
-                SquadModelPresetStore altPresetStore = new(new SquadCommandComposition.CliSquadUserPaths(altHome, userPaths.ApplicationDataDirectory));
-                preset = altPresetStore.TryLoad(settings.Name);
-            }
         }
         catch (ArgumentException)
         {

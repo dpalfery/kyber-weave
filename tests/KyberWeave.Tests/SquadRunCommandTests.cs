@@ -31,6 +31,7 @@ public sealed class SquadRunCommandTests : IDisposable
         _projectDir = Path.Combine(_temp.Path, "project");
         Directory.CreateDirectory(_projectDir);
         _userPaths = new FakeSquadUserPaths(_home);
+        Directory.CreateDirectory(_userPaths.HomeDirectory);
         _selectionStore = new SquadModelPresetSelectionStore(_userPaths);
     }
 
@@ -57,6 +58,29 @@ public sealed class SquadRunCommandTests : IDisposable
             "No preset selected for claude in this project. Run `kyber-weave squad preset use <name> --target claude`.",
             execution.Output,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingPresetFileOnDiskExitsWithCodeOneAndDoesNotCreateStubFile()
+    {
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "missing-preset");
+        SquadRunCommand command = CreateCommand(
+            _ => 0,
+            name => $"/usr/bin/{name}");
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("missing-preset", execution.Output, StringComparison.OrdinalIgnoreCase);
+
+        string presetPath = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets",
+            "missing-preset.yml");
+        Assert.False(File.Exists(presetPath),
+            "Synthetic preset stub must not be created on disk when preset is missing.");
     }
 
     #endregion
@@ -97,7 +121,8 @@ public sealed class SquadRunCommandTests : IDisposable
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
 
         Assert.Equal(2, execution.Result);
-        Assert.Contains("opencode cannot run on a preset instance:", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("opencode cannot run on a preset instance:", execution.Output,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion
@@ -107,6 +132,7 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void HarnessMissingFromPathExitsWithCodeOne()
     {
+        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         SquadRunCommand command = CreateCommand(findOnPath: _ => null);
         SquadRunSettings settings = new()
@@ -151,7 +177,7 @@ public sealed class SquadRunCommandTests : IDisposable
         int expectedExitCode = 42;
 
         SquadRunCommand command = CreateCommand(
-            runner: startInfo =>
+            startInfo =>
             {
                 capturedStartInfo = startInfo;
                 return expectedExitCode;
@@ -194,10 +220,11 @@ public sealed class SquadRunCommandTests : IDisposable
         File.WriteAllText(sourceFile, "// Original content", Encoding.UTF8);
         string[] entriesBefore = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
 
+        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         SquadRunCommand command = CreateCommand(
-            runner: _ => 0,
-            findOnPath: name => $"/usr/bin/{name}");
+            _ => 0,
+            name => $"/usr/bin/{name}");
 
         SquadRunSettings settings = new()
         {
@@ -220,6 +247,7 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void ConcurrentRunsExecuteWithIsolatedInstanceRoots()
     {
+        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         _selectionStore.Set(_projectDir, SquadTarget.Codex, "fast");
 
@@ -227,20 +255,20 @@ public sealed class SquadRunCommandTests : IDisposable
         string? codexRoot = null;
 
         SquadRunCommand claudeCommand = CreateCommand(
-            runner: startInfo =>
+            startInfo =>
             {
                 claudeRoot = startInfo.Environment["CLAUDE_CONFIG_DIR"];
                 return 0;
             },
-            findOnPath: name => $"/usr/bin/{name}");
+            name => $"/usr/bin/{name}");
 
         SquadRunCommand codexCommand = CreateCommand(
-            runner: startInfo =>
+            startInfo =>
             {
                 codexRoot = startInfo.Environment["CODEX_HOME"];
                 return 0;
             },
-            findOnPath: name => $"/usr/bin/{name}");
+            name => $"/usr/bin/{name}");
 
         CapturedConsoleExecution<int> exec1 = ProcessConsoleCapture.Run(() =>
             claudeCommand.Execute(null!, new SquadRunSettings { Harness = "claude" }));
@@ -267,17 +295,18 @@ public sealed class SquadRunCommandTests : IDisposable
     [InlineData("pi")]
     public void HarnessNeutralSyntaxSupportsAnyApprovedReadyTarget(string harnessToken)
     {
+        WritePreset("fast");
         SquadTarget target = SquadTargetCatalog.Parse([harnessToken])[0];
         _selectionStore.Set(_projectDir, target, "fast");
 
         bool launched = false;
         SquadRunCommand command = CreateCommand(
-            runner: _ =>
+            _ =>
             {
                 launched = true;
                 return 0;
             },
-            findOnPath: name => $"/bin/{name}");
+            name => $"/bin/{name}");
 
         SquadRunSettings settings = new()
         {
@@ -294,6 +323,24 @@ public sealed class SquadRunCommandTests : IDisposable
 
     #region Helper Methods
 
+    private void WritePreset(string name, string? yaml = null)
+    {
+        string presetsDir = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+        Directory.CreateDirectory(presetsDir);
+        string presetPath = Path.Combine(presetsDir, $"{name}.yml");
+        string content = yaml ?? """
+                                 schema: kyber-squad.model-preset/v1
+                                 profiles:
+                                   general:
+                                     default: gpt-4o-mini
+                                     claude: gpt-4o-mini
+                                     codex: gpt-4o-mini
+                                     copilot: gpt-4o-mini
+                                     pi: gpt-4o-mini
+                                 """;
+        File.WriteAllText(presetPath, content, Encoding.UTF8);
+    }
+
     private SquadRunCommand CreateCommand(
         Func<ProcessStartInfo, int>? runner = null,
         Func<string, string?>? findOnPath = null,
@@ -301,13 +348,13 @@ public sealed class SquadRunCommandTests : IDisposable
         Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null)
     {
         return new SquadRunCommand(
-            userPaths: _userPaths,
-            selectionStore: _selectionStore,
-            runner: runner ?? (_ => 0),
-            getEnv: getEnv ?? (_ => null),
-            findOnPath: findOnPath ?? (name => $"/usr/local/bin/{name}"),
-            workingDirectory: _projectDir,
-            ensureOverride: ensureOverride);
+            _userPaths,
+            _selectionStore,
+            runner ?? (_ => 0),
+            getEnv ?? (_ => null),
+            findOnPath ?? (name => $"/usr/local/bin/{name}"),
+            _projectDir,
+            ensureOverride);
     }
 
     #endregion

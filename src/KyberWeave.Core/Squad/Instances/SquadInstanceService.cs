@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -21,14 +22,17 @@ public sealed record SquadInstanceEnsureResult(
 ///     For <see cref="SquadInstanceKind.HomeReplace" /> targets, settings and history are linked safely
 ///     from the canonical harness home without overwriting user state.
 /// </remarks>
-public sealed class SquadInstanceService
+public sealed partial class SquadInstanceService
 {
     private const string ReceiptFileName = "squad.receipt.json";
-    private readonly ISquadGlobalRootResolver _globalRootResolver;
+    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
+    private static partial Regex PresetNameRegex();
 
+    private readonly ISquadGlobalRootResolver _globalRootResolver;
     private readonly SquadLifecycleService _lifecycleService;
     private readonly ISquadLinkFileSystem _linkFileSystem;
     private readonly SquadModelPresetStore _presetStore;
+    private readonly SquadStateStore _stateStore;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="SquadInstanceService" /> class.
@@ -37,11 +41,13 @@ public sealed class SquadInstanceService
     /// <param name="presetStore">Store for resolving model presets and their digests.</param>
     /// <param name="linkFileSystem">Filesystem abstraction for symbolic link operations.</param>
     /// <param name="globalRootResolver">Resolver for canonical harness global homes.</param>
+    /// <param name="stateStore">Optional state store for reading receipts and recording instance metadata.</param>
     public SquadInstanceService(
         SquadLifecycleService lifecycleService,
         SquadModelPresetStore presetStore,
         ISquadLinkFileSystem linkFileSystem,
-        ISquadGlobalRootResolver globalRootResolver)
+        ISquadGlobalRootResolver globalRootResolver,
+        SquadStateStore? stateStore = null)
     {
         ArgumentNullException.ThrowIfNull(lifecycleService);
         ArgumentNullException.ThrowIfNull(presetStore);
@@ -52,6 +58,7 @@ public sealed class SquadInstanceService
         _presetStore = presetStore;
         _linkFileSystem = linkFileSystem;
         _globalRootResolver = globalRootResolver;
+        _stateStore = stateStore ?? lifecycleService.StateStore;
     }
 
     /// <summary>
@@ -68,14 +75,18 @@ public sealed class SquadInstanceService
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(presetName);
+        if (!PresetNameRegex().IsMatch(presetName))
+            throw new ArgumentException($"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.", nameof(presetName));
 
-        SquadStateStore stateStore = ResolveStateStore();
+        SquadStateStore stateStore = _stateStore;
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
         string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken, presetName);
         string instanceStateDir =
             Path.Combine(home, ".kyber-weave", "squad", "instance-state", targetToken, presetName);
+
+        VerifyPathContainment(home, targetToken, instanceRoot);
         string receiptPath = Path.Combine(instanceStateDir, ReceiptFileName);
 
         IReadOnlyList<string>? lifecycleWarnings = null;
@@ -197,14 +208,18 @@ public sealed class SquadInstanceService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(presetName);
         cancellationToken.ThrowIfCancellationRequested();
+        if (!PresetNameRegex().IsMatch(presetName))
+            throw new ArgumentException($"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.", nameof(presetName));
 
-        SquadStateStore stateStore = ResolveStateStore();
+        SquadStateStore stateStore = _stateStore;
         string targetToken = SquadTargetCatalog.GetToken(target);
         string home = stateStore.UserPaths.HomeDirectory;
 
         string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken, presetName);
         string instanceStateDir =
             Path.Combine(home, ".kyber-weave", "squad", "instance-state", targetToken, presetName);
+
+        VerifyPathContainment(home, targetToken, instanceRoot);
 
         if (Directory.Exists(instanceRoot) || _linkFileSystem.IsLink(instanceRoot))
             _linkFileSystem.DeleteTreeNoFollow(instanceRoot);
@@ -221,7 +236,7 @@ public sealed class SquadInstanceService
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RefreshAllAsync(CancellationToken cancellationToken = default)
     {
-        SquadStateStore stateStore = ResolveStateStore();
+        SquadStateStore stateStore = _stateStore;
         string home = stateStore.UserPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
 
@@ -264,19 +279,14 @@ public sealed class SquadInstanceService
         }
     }
 
-    private SquadStateStore ResolveStateStore()
+    private static void VerifyPathContainment(string home, string targetToken, string instanceRoot)
     {
-        PropertyInfo? property = typeof(SquadLifecycleService).GetProperty(
-            "StateStore",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (property?.GetValue(_lifecycleService) is SquadStateStore storeFromProperty) return storeFromProperty;
+        string expectedBase = Path.GetFullPath(Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken));
+        string fullInstanceRoot = Path.GetFullPath(instanceRoot);
+        string prefix = expectedBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
-        FieldInfo? field = typeof(SquadLifecycleService).GetField(
-            "_stateStore",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        if (field?.GetValue(_lifecycleService) is SquadStateStore storeFromField) return storeFromField;
-
-        throw new InvalidOperationException("Could not resolve SquadStateStore from SquadLifecycleService.");
+        if (!fullInstanceRoot.StartsWith(prefix, StringComparison.Ordinal) || fullInstanceRoot.Length <= prefix.Length)
+            throw new ArgumentException($"Instance root '{fullInstanceRoot}' is not contained under '{expectedBase}'.", nameof(instanceRoot));
     }
 
     private static string GetAssemblyVersion()

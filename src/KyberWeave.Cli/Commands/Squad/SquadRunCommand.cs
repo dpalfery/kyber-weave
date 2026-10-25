@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -108,20 +107,6 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
             return 2;
         }
 
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        string presetFile = Path.Combine(presetsDir, $"{presetName}.yml");
-        if (!File.Exists(presetFile))
-            try
-            {
-                Directory.CreateDirectory(presetsDir);
-                string stubPreset =
-                    "schema: kyber-squad.model-preset/v1\nprofiles:\n  general:\n    default: default-model\n";
-                File.WriteAllText(presetFile, stubPreset, new UTF8Encoding(false));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
-
         SquadInstanceEnsureResult ensureResult;
         try
         {
@@ -131,12 +116,35 @@ public sealed class SquadRunCommand : Command<SquadRunSettings>
             }
             else
             {
+                SquadModelPresetStore presetStore = new(userPaths);
+                SquadModelPreset? preset = null;
+                try
+                {
+                    preset = presetStore.TryLoad(presetName);
+                }
+                catch (ArgumentException)
+                {
+                }
+
+                if (preset is null)
+                {
+                    string targetToken = SquadTargetCatalog.GetToken(target);
+                    SquadCommandComposition.WriteLine(
+                        $"[red]error:[/] Model preset '{Markup.Escape(presetName)}' for target '{Markup.Escape(targetToken)}' not found.");
+                    return 1;
+                }
+
                 SquadInstanceService instanceService = SquadCommandComposition.CreateInstanceService(userPaths);
                 ensureResult = instanceService.EnsureAsync(target, presetName, cancellationToken).GetAwaiter()
                     .GetResult();
             }
         }
         catch (SquadLinkException ex)
+        {
+            SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+        catch (SquadDeploymentConflictException ex)
         {
             SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
             return 1;

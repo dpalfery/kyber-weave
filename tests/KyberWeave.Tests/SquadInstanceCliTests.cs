@@ -236,6 +236,41 @@ public sealed class SquadInstanceCliTests : IDisposable
         Assert.Contains("preset", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    ///     Regression test: Path traversal attempt in preset name exits with code 2 without mutating
+    ///     directories outside the designated instance path.
+    /// </summary>
+    [Theory]
+    [InlineData("../../etc")]
+    [InlineData("../traversal")]
+    public void InstanceRemoveRejectsPathTraversalAttemptExitingTwoWithoutTouchingExternalDirectories(
+        string invalidPreset)
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        string outsideDir = Path.Combine(userPaths.HomeDirectory, "outside");
+        Directory.CreateDirectory(outsideDir);
+        string canaryFile = Path.Combine(outsideDir, "canary.txt");
+        File.WriteAllText(canaryFile, "protected", Encoding.UTF8);
+
+        SquadInstanceRemoveCommand command = CreateRemoveCommand(
+            userPaths,
+            isInteractive: false);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadInstanceRemoveSettings
+            {
+                Target = "claude",
+                Preset = invalidPreset,
+                Yes = true
+            }));
+
+        Assert.Equal(2, execution.ExitCode);
+        Assert.True(Directory.Exists(outsideDir));
+        Assert.True(File.Exists(canaryFile));
+        Assert.Equal("protected", File.ReadAllText(canaryFile, Encoding.UTF8));
+    }
+
     #endregion
 
     #region squad status --global Instances Listing Tests
@@ -494,6 +529,24 @@ public sealed class SquadInstanceCliTests : IDisposable
         Directory.CreateDirectory(instanceRoot);
         Directory.CreateDirectory(instanceStateDir);
 
+        string presetsDir = Path.Combine(home, ".kyber-weave", "squad", "presets");
+        Directory.CreateDirectory(presetsDir);
+        string presetFilePath = Path.Combine(presetsDir, $"{presetName}.yml");
+        if (!File.Exists(presetFilePath))
+        {
+            string defaultPresetYaml = $"""
+                                        schema: kyber-squad.model-preset/v1
+                                        profiles:
+                                          general:
+                                            default: gpt-4o-mini
+                                            {targetToken}: gpt-4o-mini
+                                        """;
+            File.WriteAllText(presetFilePath, defaultPresetYaml, Encoding.UTF8);
+        }
+
+        byte[] presetBytes = File.ReadAllBytes(presetFilePath);
+        string presetDigest = Convert.ToHexStringLower(SHA256.HashData(presetBytes));
+
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relPath, string content) in instanceFiles)
         {
@@ -527,7 +580,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')),
             new Dictionary<SquadTarget, SquadAppliedPreset>
             {
-                [target] = new(presetName, "a1b2c3d4".PadRight(64, '0'))
+                [target] = new(presetName, presetDigest)
             });
 
         SquadStateStore stateStore = new(userPaths);

@@ -5,8 +5,8 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="SquadInstanceLinkPlanner"/>, <see cref="SquadLinkRecord"/>,
-/// <see cref="SquadLinkKind"/>, and <see cref="SquadLinkAction"/> planning logic.
+///     Unit tests for <see cref="SquadInstanceLinkPlanner" />, <see cref="SquadLinkRecord" />,
+///     <see cref="SquadLinkKind" />, and <see cref="SquadLinkAction" /> planning logic.
 /// </summary>
 public sealed class SquadInstanceLinkPlannerTests
 {
@@ -71,9 +71,15 @@ public sealed class SquadInstanceLinkPlannerTests
         List<SquadLinkAction.Add> adds = actions.OfType<SquadLinkAction.Add>().ToList();
         Assert.Equal(3, adds.Count);
 
-        Assert.Contains(adds, a => a.Record.RelativePath == "settings.json" && a.Record.Kind == SquadLinkKind.File && a.Record.TargetPath == "/main/.claude/settings.json");
-        Assert.Contains(adds, a => a.Record.RelativePath == "history.sqlite" && a.Record.Kind == SquadLinkKind.File && a.Record.TargetPath == "/main/.claude/history.sqlite");
-        Assert.Contains(adds, a => a.Record.RelativePath == "logs" && a.Record.Kind == SquadLinkKind.Directory && a.Record.TargetPath == "/main/.claude/logs");
+        Assert.Contains(adds,
+            a => a.Record.RelativePath == "settings.json" && a.Record.Kind == SquadLinkKind.File &&
+                 a.Record.TargetPath == "/main/.claude/settings.json");
+        Assert.Contains(adds,
+            a => a.Record.RelativePath == "history.sqlite" && a.Record.Kind == SquadLinkKind.File &&
+                 a.Record.TargetPath == "/main/.claude/history.sqlite");
+        Assert.Contains(adds,
+            a => a.Record.RelativePath == "logs" && a.Record.Kind == SquadLinkKind.Directory &&
+                 a.Record.TargetPath == "/main/.claude/logs");
     }
 
     [Fact]
@@ -134,8 +140,10 @@ public sealed class SquadInstanceLinkPlannerTests
         Assert.DoesNotContain(adds, a => a.Record.RelativePath == "agents/architect.md");
 
         // Non-rendered individual files within 'agents/' MUST be linked individually.
-        Assert.Contains(adds, a => a.Record.RelativePath == "agents/personal.md" && a.Record.Kind == SquadLinkKind.File);
-        Assert.Contains(adds, a => a.Record.RelativePath == "agents/custom-helper.md" && a.Record.Kind == SquadLinkKind.File);
+        Assert.Contains(adds,
+            a => a.Record.RelativePath == "agents/personal.md" && a.Record.Kind == SquadLinkKind.File);
+        Assert.Contains(adds,
+            a => a.Record.RelativePath == "agents/custom-helper.md" && a.Record.Kind == SquadLinkKind.File);
     }
 
     [Fact]
@@ -177,8 +185,8 @@ public sealed class SquadInstanceLinkPlannerTests
             "claude",
             SquadInstanceKind.HomeReplace,
             "CLAUDE_CONFIG_DIR",
-            ExtraLinks: [],
-            NeverLinked: ["telemetry.json", "cache", "temp-run.lock"],
+            [],
+            ["telemetry.json", "cache", "temp-run.lock"],
             SquadInstanceStatus.Ready,
             null);
 
@@ -217,8 +225,8 @@ public sealed class SquadInstanceLinkPlannerTests
             "claude",
             SquadInstanceKind.HomeReplace,
             "CLAUDE_CONFIG_DIR",
-            ExtraLinks: [".credentials", "custom-cert.pem"],
-            NeverLinked: [],
+            [".credentials", "custom-cert.pem"],
+            [],
             SquadInstanceStatus.Ready,
             null);
 
@@ -244,6 +252,47 @@ public sealed class SquadInstanceLinkPlannerTests
         Assert.Contains(adds, a => a.Record.RelativePath == ".credentials" && a.Record.Kind == SquadLinkKind.File);
         Assert.Contains(adds, a => a.Record.RelativePath == "custom-cert.pem" && a.Record.Kind == SquadLinkKind.File);
         Assert.Contains(adds, a => a.Record.RelativePath == "settings.json" && a.Record.Kind == SquadLinkKind.File);
+    }
+
+    /// <summary>
+    ///     Regression test: ExtraLinks specified on SquadInstanceRow must generate SquadLinkAction.Add actions for each extra
+    ///     link.
+    /// </summary>
+    [Fact]
+    public void ExtraLinksSpecifiedOnSquadInstanceRowGenerateAddActionForEachExtraLink()
+    {
+        SquadInstanceRow rowWithExtraLinks = new(
+            SquadTarget.Claude,
+            "claude",
+            SquadInstanceKind.HomeReplace,
+            "CLAUDE_CONFIG_DIR",
+            [".credentials.json", "custom-certs", "plugins/tools.json"],
+            [],
+            SquadInstanceStatus.Ready,
+            null);
+
+        IReadOnlyList<SquadLinkRecord> mainListing =
+        [
+            new("settings.json", SquadLinkKind.File, "/main/.claude/settings.json"),
+            new(".credentials.json", SquadLinkKind.File, "/main/.claude/.credentials.json"),
+            new("custom-certs", SquadLinkKind.Directory, "/main/.claude/custom-certs"),
+            new("plugins/tools.json", SquadLinkKind.File, "/main/.claude/plugins/tools.json")
+        ];
+        IReadOnlySet<string> renderedPaths = FrozenSet<string>.Empty;
+        IReadOnlyList<SquadLinkRecord> recordedLinks = [];
+        IReadOnlyList<string> instanceListing = [];
+
+        IReadOnlyList<SquadLinkAction> actions = SquadInstanceLinkPlanner.Plan(
+            mainListing,
+            renderedPaths,
+            rowWithExtraLinks,
+            recordedLinks,
+            instanceListing);
+
+        List<SquadLinkAction.Add> adds = actions.OfType<SquadLinkAction.Add>().ToList();
+
+        foreach (string extraLink in rowWithExtraLinks.ExtraLinks)
+            Assert.Contains(adds, a => a.Record.RelativePath == extraLink);
     }
 
     [Fact]
@@ -323,8 +372,8 @@ public sealed class SquadInstanceLinkPlannerTests
     }
 
     /// <summary>
-    /// Acceptance criterion 7.4: An instance SHALL share the main home's settings and history through links.
-    /// WHERE the harness stores sign-in in a file, the instance SHALL share sign-in through a link too.
+    ///     Acceptance criterion 7.4: An instance SHALL share the main home's settings and history through links.
+    ///     WHERE the harness stores sign-in in a file, the instance SHALL share sign-in through a link too.
     /// </summary>
     [Fact]
     public void AcceptanceCriterion7_4_InstanceSharesSettingsHistoryAndSignInFilesThroughLinks()
@@ -363,8 +412,8 @@ public sealed class SquadInstanceLinkPlannerTests
     }
 
     /// <summary>
-    /// Acceptance criterion 7.4a: Exception: WHERE a harness rewrites its sign-in file by rename,
-    /// the instance SHALL NOT link that file, and the user SHALL sign in at most once per instance.
+    ///     Acceptance criterion 7.4a: Exception: WHERE a harness rewrites its sign-in file by rename,
+    ///     the instance SHALL NOT link that file, and the user SHALL sign in at most once per instance.
     /// </summary>
     [Fact]
     public void AcceptanceCriterion7_4a_SignInFileRewrittenByRenameInNeverLinkedIsNotLinked()
@@ -374,8 +423,8 @@ public sealed class SquadInstanceLinkPlannerTests
             "codex",
             SquadInstanceKind.HomeReplace,
             "CODEX_HOME",
-            ExtraLinks: [],
-            NeverLinked: ["session.json"],
+            [],
+            ["session.json"],
             SquadInstanceStatus.Ready,
             null);
 
@@ -438,20 +487,21 @@ public sealed class SquadInstanceLinkPlannerTests
             instanceListing);
 
         Assert.Equal(firstRun.Count, secondRun.Count);
-        for (int i = 0; i < firstRun.Count; i++)
-        {
-            Assert.Equal(firstRun[i], secondRun[i]);
-        }
+        for (int i = 0; i < firstRun.Count; i++) Assert.Equal(firstRun[i], secondRun[i]);
     }
 
-    private static SquadLinkRecord CreateSampleRecord(string relativePath, SquadLinkKind kind, string targetPath) =>
-        new(relativePath, kind, targetPath);
+    private static SquadLinkRecord CreateSampleRecord(string relativePath, SquadLinkKind kind, string targetPath)
+    {
+        return new SquadLinkRecord(relativePath, kind, targetPath);
+    }
 
     private static IReadOnlyList<SquadLinkAction> PlanSample(
         IReadOnlyList<SquadLinkRecord> mainListing,
         IReadOnlySet<string> renderedPaths,
         SquadInstanceRow row,
         IReadOnlyList<SquadLinkRecord> recordedLinks,
-        IReadOnlyList<string> instanceListing) =>
-        SquadInstanceLinkPlanner.Plan(mainListing, renderedPaths, row, recordedLinks, instanceListing);
+        IReadOnlyList<string> instanceListing)
+    {
+        return SquadInstanceLinkPlanner.Plan(mainListing, renderedPaths, row, recordedLinks, instanceListing);
+    }
 }
