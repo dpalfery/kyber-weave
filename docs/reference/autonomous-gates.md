@@ -11,7 +11,7 @@ last-reviewed: 2026-10-24
 
 Full inventory of every gate reachable in autonomous mode on `main` `2089297`,
 prepared as item A of the
-[reduce autonomous gates plan](../plans/2026-10-24-issue-386-reduce-autonomous-gates.md).
+[reduce autonomous gates plan](../archive/plans/2026-10-24-issue-386-reduce-autonomous-gates.md).
 It classifies each gate as **keep**, **reduce**, or **collapse**, records the
 autonomous behavior for each, and gives the irreversible-action justification
 for every keep. Removals already made by PR #424 are recorded as
@@ -255,7 +255,7 @@ inventory.
 
 ## Related
 
-- [Reduce autonomous gates plan](../plans/2026-10-24-issue-386-reduce-autonomous-gates.md) — items A–E, decisions Q1–Q5 and D1–D5
+- [Reduce autonomous gates plan](../archive/plans/2026-10-24-issue-386-reduce-autonomous-gates.md) — items A–E, decisions Q1–Q5 and D1–D5
 - [Review council architecture](../code-review/architecture.md) — three layers, task gates, verdict rules 1–6
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-REVIEW-*` id
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — conductor delivery and rendering
