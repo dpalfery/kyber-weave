@@ -311,6 +311,11 @@ EOF
     # "not built" page, now that the blob above is injected and runnable.
     quietly node "${dash}/scripts/sea-web-smoke.mjs" "$binary"
 
+    # The MCP command is a second released-shape entry point. It must load the
+    # SDK from the SEA rather than a checkout's node_modules, and its fixture
+    # stays on loopback with an isolated HOME/state directory.
+    quietly node "${dash}/scripts/sea-mcp-smoke.mjs" "$binary"
+
     cp "${dash}/THIRD_PARTY_NOTICES.md" "${stage}/out/THIRD_PARTY_NOTICES.md"
     tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
 }

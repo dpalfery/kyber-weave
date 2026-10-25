@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-25
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -14,6 +14,7 @@ code-refs:
   - runTranscriptSync
   - formatSessionTitle
   - relinkQuarantinedClaudeLogs
+  - runMcpCommand
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -657,6 +658,108 @@ run the build against the store:
 ```bash
 node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 ```
+
+### 2j. Conversational analytics over MCP (`kyberdash mcp`)
+
+`kyberdash mcp` serves the eight read-only analytics tools over stdio for an MCP
+client. `runMcpCommand` (`dash/src/cli/mcp.ts`) builds the adapter
+(`createAnalyticsMcpServer`) on a client that only fetches the eight
+`/api/kyber/analytics/*` routes — the adapter never imports the canonical store and
+never owns the server lifecycle:
+
+```bash
+kyberdash web --no-open     # the engine must already be running; mcp never starts it
+kyberdash mcp                                       # discover via the server.json receipt
+kyberdash mcp --server-url http://127.0.0.1:4747   # explicit receipt override (wins)
+kyberdash mcp --state-dir /path/to/state           # read an existing receipt elsewhere
+```
+
+```mermaid
+flowchart LR
+    Client[MCP client] -->|stdio JSON-RPC| MCP[kyberdash mcp]
+    MCP -->|loopback fetch, 8 routes only| Engine[running engine /api/kyber/analytics/*]
+    Engine --> P[canon.db projection]
+    MCP -.->|never starts, stops, migrates, or reprojects| Engine
+```
+
+**Attach-only ownership.** The MCP process starts no engine, acquires no job lease,
+mutates no config, imports no content, and triggers no migration or projection; it
+never stops the engine it attached to. Discovery reads the existing receipt without
+rewriting it, and there is no `--db` flag because the running engine owns the
+datastore selection. Only literal loopback origins are contacted
+(`http://127.0.0.1:<port>` or `http://[::1]:<port>`, port required, no
+userinfo/query/fragment, no redirects); anything else, a missing receipt, or a stale
+one yields `engine_unavailable` telling the operator to run `kyberdash web --no-open`.
+An unknown analytics contract version (or a non-conforming body) yields
+`incompatible_engine`, never an empty corpus. Rediscovery happens once after an
+unavailable connection; the adapter never silently attaches to a different store
+mid-query, and a changed engine instance or projection generation rejects the cursor.
+
+**Stdio and shutdown discipline.** Help/version before transport activation keep normal
+CLI behavior. Once connected, every stdout line is valid JSON-RPC; logs, pricing
+messages, and diagnostics go to stderr, and nothing else is printed on stdout. Tool
+results carry the full analytics envelope as structured content with `isError: true`
+on tool-domain errors; JSON-RPC errors are reserved for protocol failures. Client
+cancellation aborts active fetches (10 s abortable HTTP cap); EOF/SIGTERM drains
+accepted requests within a bounded deadline, closes stdio/fetch resources, and exits
+without stopping the shared engine. A client closing its read end does not produce an
+unhandled EPIPE. Status reports a store identity token, never the DB contents or an
+unnecessary absolute path.
+
+**Limits the operator will meet.** Request bodies cap at 64 KiB and MCP replies at 64
+KiB (an oversized reply becomes a `budget_exceeded` envelope naming the narrowing
+step, not a silent truncation); each content page caps at 16 KiB UTF-8 — a page and
+working-memory bound, not a transcript total (`byteLimit` caps content pages;
+`limit` caps manifest rows). Queries admit
+at most 10,000 sessions, scan derived summaries in batches of at most 100, refuse a
+single decoded summary over 256 KiB or cumulative decoded input over 16 MiB, and
+return no partial total on budget failure. A 5 s cooperative computation deadline is
+checked between bounded batches. The refused request names the narrowing step
+(`stale_cursor` says restart from the first page; `unsupported_query` says what to
+narrow, including the unsupported-dimension hint toward `dash_inspect`).
+
+**Content and outcome caveats are operational facts.** Search is metadata-only;
+`dash_inspect` and `POST /api/kyber/analytics/inspect` share one body —
+`mode: 'manifest' | 'content'` plus an explicit `target` (`run` / `session` /
+`turn`) — and content needs no additional flag or approval. `mode: 'manifest'`
+discovers without returning text bodies (run executions with parent/child/session
+linkage and `isSubagent`, turn identities, part/block identities with `role` and
+`origin`); `mode: 'content'` returns `chunks` (`partId`, `blockId`, `sessionId`,
+`turnIndex`, `spanId`, `origin`, `text`, `byteOffset`, `complete`, `role`, `order`,
+`resident`) paged by `pagination.nextCursor` / `hasMore`, following continuations to
+reach all retained context. `limit` (manifest only; default 25, max 100) and
+`byteLimit` (content only; default and max 16384) bound a page and working memory,
+never the total retrievable transcript. `coverage.completeness` is `captured_only`
+with `coverage.gaps` naming what is missing; `representation: 'assembled_turn'`
+(turn targets only) is a labelled reconstruction, never the exact model input. `run`
+scope includes child/subagent sessions; `session` scope stays local. Cursors bind
+target, representation, limits, and projection generation: a reused, tampered,
+cross-target, or post-purge cursor answers `stale_cursor`; capacity answers
+`budget_exceeded`; cancellation answers `cancelled`. Canonical content older than the
+retention window reads as absent or expired — retrieval never recaptures or
+manufactures absent text. The historical `includeContent: true` turn/block form and
+the metadata-only session inspection are retained legacy forms, not the way to
+retrieve context. Outcomes stay sparse and empirical: missing data and conflicting signals are
+reported, never smoothed over, and comparisons are descriptive, never causal. Tool
+annotations (read-only/idempotent/non-destructive/closed-world hints) do not replace
+the route allowlist.
+
+**Verifying it.** Focused suites plus the release smoke:
+
+```bash
+npm --prefix dash exec -- vitest run src/analysis/query      # engine contracts, budgets, cursors
+npm --prefix dash exec -- vitest run src/server/analytics-routes.test.ts src/server/analytics-parity.test.ts
+npm --prefix dash exec -- vitest run src/mcp                 # tools, discovery, stdio, clean exit
+npm --prefix dash exec -- vitest run scripts/sea-mcp-smoke.test.ts
+```
+
+`dash/scripts/sea-mcp-smoke.mjs` stages the real single-executable binary outside any
+checkout (`HOME`, config, and state all point at a temp dir), initializes over stdio,
+lists exactly the eight tools, calls `dash_status` against an isolated loopback
+fixture, then closes the child and asserts a clean exit. It runs beside the web smoke
+in `scripts/release-local.sh` and `.github/workflows/release.yml`. It proves protocol,
+tool list, and the attach-only boundary — not host-client compatibility (see the
+[adoption guide](onboarding.md#3-what-is-and-is-not-validated)).
 
 ### 3. Raw Content Backfill and Re-normalization
 

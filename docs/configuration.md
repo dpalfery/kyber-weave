@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-10-25
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -42,7 +42,7 @@ ontology:
   doc-types: [architecture, onboarding, requirements, adr, plan, spec,
               runbook, reference, rule, governance, index, coding-standard]
   statuses: [current, draft, needs-review, superseded]
-  technologies: [csharp, test]
+  technologies: [csharp, test, typescript]
   base-required-keys: [id, title, owner, last-reviewed, doc-type, status]
   required-keys:
     architecture: [component]
@@ -144,7 +144,8 @@ disable a requirement.
 
 `technologies` is the list of stacks this repository declares a coding standard for. It is
 empty by default, because no repository has a standard until it says what it writes code in,
-and a seeded list would scaffold standards for stacks a host does not have.
+and a seeded list would scaffold standards for stacks a host does not have. This repository
+declares C#, test, and TypeScript standards.
 
 Declaring one and re-running `docs init`:
 
@@ -347,9 +348,9 @@ drift.
 
 Kyber-Weave governs its own documentation with three overrides —
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml). The docs root moves to
-`docs/`, the inherited exclusions are cleared, and one technology is declared: this repository
-is C# and nothing else. Everything else is product default, which is the intended shape of a
-host config.
+`docs/`, the inherited exclusions are cleared, and three technologies are declared: this
+repository writes C#, TypeScript, and the tests that pin them. Everything else is product
+default, which is the intended shape of a host config.
 
 ## Related
 

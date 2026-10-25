@@ -14,9 +14,10 @@ project-specific; the agents and skills that read it are not, which is why they 
 through the configuration registry rather than carrying their own. Only standards with
 `status: current` outrank portable agent defaults; draft standards do not.
 
-This repository declares C# and test standards. The authoritative list is the Config
-Reg block in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on
-every `docs init` run — this file is not.
+This repository declares [C#](csharp/README.md), [test](test/README.md), and
+[TypeScript](typescript/README.md) standards. The authoritative list is the Config Reg block
+in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on every
+`docs init` run — this file is not.
 
 ## Declaring a technology
 

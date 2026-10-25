@@ -436,6 +436,11 @@ jobs:
               # the --version check just above.
               node scripts/sea-web-smoke.mjs "${FINAL_BIN}"
               echo "dashboard smoke test passed for ${RID}"
+              # The MCP command is a second released-shape entry point. It must load the
+              # SDK from the SEA rather than a checkout's node_modules, and its fixture
+              # stays on loopback with an isolated HOME/state directory.
+              node scripts/sea-mcp-smoke.mjs "${FINAL_BIN}"
+              echo "mcp smoke test passed for ${RID}"
           else
               echo "skipping smoke test: ${RID} is cross-built on ${HOST_OS}-${HOST_ARCH}"
           fi

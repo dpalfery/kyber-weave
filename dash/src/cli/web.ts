@@ -23,6 +23,10 @@ import { acquireEngine, queryEngine, requestEngineShutdown, type EngineAttached,
 import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
 import { runMaintenancePass } from '../refresh/folder-import.js'
 import type { CaptureRouteSettings } from '../server/capture-routes.js'
+import type { AnalyticsService } from '../server/analytics-routes.js'
+import { storeGeneration } from '../server/store-generation.js'
+import { createCanonAnalyticsSource } from '../analysis/query/canon-source.js'
+import { createAnalyticsService } from '../analysis/query/service.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
 import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
 
@@ -638,6 +642,8 @@ export type WebDashboardServices = {
    * directory; injectable so a test points the whole server at a temporary one.
    */
   capture?: CaptureRouteSettings
+  /** Shared read-only analytics service, injectable for real HTTP parity tests. */
+  analyticsService?: AnalyticsService
   /**
    * The seam the startup migration hands the event loop back through.
    *
@@ -1086,6 +1092,17 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // the migration rather than before it: a handle that predates the migration is a
   // handle onto a schema that is about to change underneath it.
   const bridge = opts.kyberBridge ?? new KyberBridge()
+  // One read-only service is shared by every analytics route. It receives the existing
+  // bridge rather than a store handle so analysis cannot open, migrate, or reproject a
+  // second canonical database connection.
+  const analyticsService = opts.analyticsService ?? createAnalyticsService({
+    source: createCanonAnalyticsSource(bridge),
+    clock: () => new Date(),
+    identity: {
+      instanceId: randomBytes(12).toString('hex'),
+      projectionGeneration: () => String(storeGeneration(store)),
+    },
+  })
 
   const serveIndexHtml = async (res: import('http').ServerResponse, filePath: string): Promise<void> => {
     const html = applyHtmlBrand(await readFile(filePath, 'utf8'))
@@ -1150,6 +1167,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
           jobHost: current?.jobHost,
           receiverHost: current?.receiverHost,
           ...(opts.capture === undefined ? {} : { capture: opts.capture }),
+          analyticsService,
         })
       ) {
         return

@@ -33,7 +33,7 @@ async function parse(...args: string[]): Promise<void> {
 // Requirements 2.1 and 2.2 of the KyberDash context surfaces specification: the CLI registers
 // the context-troubleshooting commands and nothing inherited from the spend product. Hidden
 // commands count too, which is why this reads the tree rather than the help text.
-const RETAINED = ['dash', 'doctor', 'kyber', 'menubar', 'otel', 'report', 'web']
+const RETAINED = ['dash', 'doctor', 'kyber', 'mcp', 'menubar', 'otel', 'report', 'web']
 
 describe('registered top-level commands', () => {
   it('are exactly the retained set', () => {

@@ -220,6 +220,7 @@ references that belong to this repository.
 - **<standards-root>**: `docs/standards`
 - **<csharp-coding-standard>**: `docs/standards/csharp/README.md`
 - **<test-coding-standard>**: `docs/standards/test/README.md`
+- **<typescript-coding-standard>**: `docs/standards/typescript/README.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`
