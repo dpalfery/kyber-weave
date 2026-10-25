@@ -42,9 +42,17 @@ function toStableError(error: unknown, code: 'engine_unavailable' | 'incompatibl
  * convenience window.
  */
 function applyWindowDays(out: Record<string, unknown>, now: () => Date): void {
+  if (!('windowDays' in out)) return
   const windowDays = out['windowDays']
   delete out['windowDays']
-  if (typeof windowDays !== 'number' || !Number.isSafeInteger(windowDays) || windowDays < 1 || windowDays > 365) return
+  // WHY reject here instead of dropping: the MCP schema already constrains
+  // this range, but HTTP and test callers bypass schemas. Silently ignoring
+  // a malformed window would send an unscopable request the caller never
+  // meant; the error names the valid range so it stays actionable.
+  if (windowDays === undefined) return
+  if (typeof windowDays !== 'number' || !Number.isSafeInteger(windowDays) || windowDays < 1 || windowDays > 365) {
+    throw new Error('invalid_request: windowDays must be an integer between 1 and 365.')
+  }
   const end = now()
   const start = new Date(end.getTime() - windowDays * 86_400_000)
   const scope = isRecord(out['scope']) ?? {}

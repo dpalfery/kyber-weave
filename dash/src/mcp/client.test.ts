@@ -126,4 +126,25 @@ describe('analytics MCP engine client', () => {
     expect(bodies[0]).not.toHaveProperty('windowDays')
     expect(bodies[0]).toMatchObject({ scope: { from: '2026-10-01T00:00:00.000Z', to: '2026-10-02T00:00:00.000Z' } })
   })
+
+  it('rejects an invalid windowDays instead of silently dropping it', async () => {
+    // WHY the schema evidence matters here: the MCP tool schema already
+    // constrains windowDays, but HTTP and test callers bypass schemas — the
+    // client must defend the range itself rather than send an unscopable
+    // request the caller never meant.
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1
+      return Response.json({ contractVersion: 1, scope: {}, data: {}, measurement: {}, coverage: {}, freshness: {}, evidence: [], pagination: {}, error: null })
+    }
+    const client = createAnalyticsClient({
+      serverUrl: 'http://127.0.0.1:4747',
+      fetchImpl,
+      now: () => new Date('2026-10-25T12:00:00.000Z'),
+    })
+    for (const windowDays of ['30', 0, 1000, Number.NaN, 1.5]) {
+      await expect(client.callTool('dash_findings', { windowDays }), `windowDays=${String(windowDays)}`).rejects.toThrow(/invalid_request.*1.*365/)
+    }
+    expect(calls).toBe(0)
+  })
 })
