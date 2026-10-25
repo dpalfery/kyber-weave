@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-25
 ---
 
 # CLI command surface
@@ -322,6 +322,7 @@ Owned by the [KyberDash overview](dash/README.md) and the
 |---|---|---|
 | [`report`](dash/README.md) (default) | `--format text\|markdown\|json` (default `text`), `--harness <id>`, `--session <id>`, `--run <id>`, `--days <n>` (default `7`), `--limit <n>` (default `5`), `--db <path>` | Print a non-interactive context diagnosis of the store. |
 | [`web`](dash/onboarding.md#first-run) | `--port <number>` (default: the persisted `dashboard.port`, `4747`), `--no-open`, `--view <path>` | Open the local web dashboard. |
+| [`mcp`](dash/runbook.md#2j-conversational-analytics-over-mcp-kyberdash-mcp) | `--server-url <url>` (literal loopback, wins), `--state-dir <dir>` (existing receipt) | Serve the eight read-only analytics tools over MCP stdio; attaches to the running engine, never starts or stops it. |
 | [`menubar`](dash/onboarding.md#install-the-tray) | `--force`, `--update`, `--version <version>` | Install and launch the macOS/Windows tray; `--update` updates an existing install. |
 | [`doctor`](dash/runbook.md) | `--provider <provider>` (default `all`), `--json`, `--no-color` | Per-provider detection status: paths probed, sessions found, parse health. |
 
@@ -384,6 +385,7 @@ risk. The three rules below mirror the contract in
 | `dash clean` | `2` without `--yes`, or with an invalid or missing scope; `1` on failure |
 | `dash settings set` | `2` for an unknown setting key or an invalid value |
 | `web` | `2` for a non-port `--port` or an unknown `--view`; `1` when the port is refused; `0` when attaching to the already-running engine |
+| `mcp` | `0` on clean EOF/SIGTERM shutdown (the engine keeps running); tool-domain errors are in-band (`isError: true`) with stable codes, not exit codes |
 | `kyber otel` | `2` when a custom `--port` or `--host` is supplied while the engine attaches |
 | `capture` leaves | `2` for a usage error; otherwise the capture action's own code |
 

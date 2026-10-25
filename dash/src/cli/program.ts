@@ -90,6 +90,16 @@ export function buildProgram(): Command {
   registerReportCommand(program)
 
   program
+    .command('mcp')
+    .description('Serve read-only KyberDash analytics over MCP stdio')
+    .option('--server-url <url>', 'Attach to an existing literal loopback KyberDash web server')
+    .option('--state-dir <dir>', 'Read an existing KyberDash server receipt from this directory')
+    .action(async (opts: { serverUrl?: string; stateDir?: string }) => {
+      const { runMcpCommand } = await import('./mcp.js')
+      await runMcpCommand(opts)
+    })
+
+  program
     .command('web')
     .description('Open the local KyberDash web dashboard in your browser')
     // No commander default: an absent --port resolves inside the engine from the

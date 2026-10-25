@@ -624,7 +624,8 @@ public sealed class ReleaseTests
             "npm --prefix web run build",
             "scripts/pack-sea-web.mjs",
             "\"web.json\":",
-            "scripts/sea-web-smoke.mjs"
+            "scripts/sea-web-smoke.mjs",
+            "scripts/sea-mcp-smoke.mjs"
         ];
         foreach (string value in shared)
         {
