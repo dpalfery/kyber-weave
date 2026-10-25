@@ -548,10 +548,12 @@ public sealed class SbomTests
         Assert.Contains("upload-artifact", job, StringComparison.Ordinal);
         Assert.Contains("name: artifact-sboms", job, StringComparison.Ordinal);
 
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
-        int releaseJob = workflow.IndexOf("  release:", StringComparison.Ordinal);
-        Assert.True(releaseJob >= 0, "release.yml has no release job.");
-        Assert.Contains("artifact-sboms", workflow[releaseJob..], StringComparison.Ordinal);
+        string releaseJobText = ReadReleaseJob("release");
+        int needs = releaseJobText.IndexOf("needs:", StringComparison.Ordinal);
+        Assert.True(needs >= 0, "the release job has no needs:.");
+        int needsEnd = releaseJobText.IndexOf('\n', needs);
+        string needsSlice = needsEnd >= 0 ? releaseJobText[needs..needsEnd] : releaseJobText[needs..];
+        Assert.Contains("artifact-sboms", needsSlice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -565,16 +567,30 @@ public sealed class SbomTests
     {
         string job = ReadReleaseJob("attest-sbom");
 
-        Assert.Contains("actions/attest", job, StringComparison.Ordinal);
-        Assert.Contains("sbom-path", job, StringComparison.Ordinal);
+        // Pin the action usage (not the comment that names it) and the SBOM-mode
+        // with: block: subject-path: + sbom-path: keys.
+        Assert.Contains("uses: actions/attest@", job, StringComparison.Ordinal);
+        Assert.Contains("with:", job, StringComparison.Ordinal);
+        Assert.Contains("subject-path:", job, StringComparison.Ordinal);
+        Assert.Contains("sbom-path:", job, StringComparison.Ordinal);
+
+        // Permissions block structure: id-token mints the OIDC token,
+        // attestations persists it, artifact-metadata creates the storage
+        // record, contents:read reads the repo context.
+        Assert.Contains("permissions:", job, StringComparison.Ordinal);
         Assert.Contains("id-token: write", job, StringComparison.Ordinal);
         Assert.Contains("attestations: write", job, StringComparison.Ordinal);
-        Assert.Contains("artifact-metadata", job, StringComparison.Ordinal);
+        Assert.Contains("artifact-metadata: write", job, StringComparison.Ordinal);
+        Assert.Contains("contents: read", job, StringComparison.Ordinal);
 
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
-        int releaseJob = workflow.IndexOf("  release:", StringComparison.Ordinal);
-        Assert.True(releaseJob >= 0, "release.yml has no release job.");
-        Assert.Contains("attest-sbom", workflow[releaseJob..], StringComparison.Ordinal);
+        // Assert on the release job's own needs: slice so a comment mentioning
+        // attest-sbom elsewhere cannot satisfy this.
+        string releaseJobText = ReadReleaseJob("release");
+        int needs = releaseJobText.IndexOf("needs:", StringComparison.Ordinal);
+        Assert.True(needs >= 0, "the release job has no needs:.");
+        int needsEnd = releaseJobText.IndexOf('\n', needs);
+        string needsSlice = needsEnd >= 0 ? releaseJobText[needs..needsEnd] : releaseJobText[needs..];
+        Assert.Contains("attest-sbom", needsSlice, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -658,7 +674,25 @@ public sealed class SbomTests
                 "kyberdash SBOM must carry kyber-weave:sbom:not-measured=node-sea but carried "
                 + (nodeSeaMarker ?? "<none>") + ".");
 
-            string? squadMarker = ReadNotMeasuredMarker(Path.Combine(dir, "kyber-squad-test-0.1.0.cdx.json"));
+            string squadSbomPath = Path.Combine(dir, "kyber-squad-test-0.1.0.cdx.json");
+            string squadContent = File.ReadAllText(squadSbomPath);
+            using JsonDocument squadDocument = JsonDocument.Parse(squadContent);
+            Assert.True(
+                squadDocument.RootElement.TryGetProperty("metadata", out JsonElement squadMetadata),
+                "kyber-squad SBOM must carry a metadata block so the absent marker is meaningful, not a missing block: " +
+                squadSbomPath + ".");
+            Assert.True(
+                squadMetadata.ValueKind == JsonValueKind.Object,
+                "kyber-squad SBOM metadata must be an object: " + squadSbomPath + ".");
+            Assert.True(
+                squadMetadata.TryGetProperty("properties", out JsonElement squadProperties),
+                "kyber-squad SBOM must carry metadata.properties so the absent marker is meaningful, not a missing block: " +
+                squadSbomPath + ".");
+            Assert.True(
+                squadProperties.ValueKind == JsonValueKind.Array,
+                "kyber-squad SBOM metadata.properties must be an array: " + squadSbomPath + ".");
+
+            string? squadMarker = ReadNotMeasuredMarker(squadSbomPath);
             Assert.True(
                 squadMarker is null,
                 "kyber-squad SBOM must carry no kyber-weave:sbom:not-measured marker but carried "
@@ -676,10 +710,17 @@ public sealed class SbomTests
             {
                 Directory.Delete(dir, true);
             }
-            catch
+            catch (IOException ex)
             {
                 // Best-effort cleanup; the directory lives under %TEMP% with a
                 // unique name, so a leak is bounded.
+                Console.Error.WriteLine("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Best-effort cleanup; the directory lives under %TEMP% with a
+                // unique name, so a leak is bounded.
+                Console.Error.WriteLine("warning: could not delete temp artifact-sbom dir " + dir + ": " + ex.Message);
             }
         }
     }
@@ -762,13 +803,26 @@ public sealed class SbomTests
             return null;
         }
 
+        Assert.True(
+            metadata.ValueKind == JsonValueKind.Object,
+            "the SBOM at " + sbomPath + " carries a non-object metadata block; expected an object with properties.");
         if (!metadata.TryGetProperty("properties", out JsonElement properties))
         {
             return null;
         }
 
+        Assert.True(
+            properties.ValueKind == JsonValueKind.Array,
+            "the SBOM at " + sbomPath +
+            " carries a non-array metadata.properties; expected an array of {name,value} objects.");
+
         foreach (JsonElement property in properties.EnumerateArray())
         {
+            if (property.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
             if (property.TryGetProperty("name", out JsonElement name)
                 && string.Equals(name.GetString(), "kyber-weave:sbom:not-measured", StringComparison.Ordinal)
                 && property.TryGetProperty("value", out JsonElement value))
