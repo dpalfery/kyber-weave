@@ -132,6 +132,23 @@ describe('bounded streaming JSON column reader', () => {
     }
   })
 
+  it('rejects a non-finite exponent as a corrupt column instead of emitting Infinity', async () => {
+    for (const json of ['{"v":1e999}', '{"v":-1e999}', '1e999']) {
+      const reader = new StreamingJsonReader(chunkReader(Buffer.from(json, 'utf8'), 'text'))
+      try {
+        let failure: unknown
+        try {
+          await pumpToEof(reader, () => {})
+        } catch (error: unknown) {
+          failure = error
+        }
+        expect(failure, json).toMatchObject({ code: 'corrupt_column' })
+      } finally {
+        reader.dispose()
+      }
+    }
+  })
+
   it('reports cancellation and corrupt compressed columns as stable typed failures', async () => {
     const controller = new AbortController()
     controller.abort()
