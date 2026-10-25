@@ -223,3 +223,17 @@ describe('SchemaCostRanking', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ name: 'read_file', invocations: 5 }))
   })
 })
+
+describe('SchemaCostRanking: per-tool schema token count', () => {
+  it('shows the tool name and its schema tokens per turn in the grid', () => {
+    const html = renderHtml(
+      <SchemaCostRanking
+        tools={[{ name: 'Bash', total_schema_cost: 5000, schema_tokens: 250, turns_resident: 20, invocations: 3 }]}
+      />,
+    )
+    expect(html).toContain('Bash')
+    expect(html).toContain('data-testid="tool-schema-tokens-Bash"')
+    expect(html).toContain('250 tok')
+    expect(html).toContain('20 turns')
+  })
+})

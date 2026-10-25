@@ -25,6 +25,11 @@ ontology:
 # part of a command. The cost is that a pipeline or a redirect cannot be expressed here; that
 # is the trade, and it is the right way round.
 review:
+  # Item E (issue #386, Q4 reversal of the 2026-10-14 "no max concurrency" directive):
+  # the ready-queue dispatcher caps concurrent workers at this value. Default 4 bounds
+  # MSBuild node and shared-compilation contention while keeping parallelism; a host that
+  # names another positive value gets that value instead.
+  max-concurrent-workers: 4
   gates:
     # Format is a required local check in AGENTS.md. Without these two gates, `review
     # gates` can pass a change that `dotnet format --verify-no-changes` would reject,
@@ -43,7 +48,7 @@ review:
     # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
     # test gate that follows it from running against binaries no longer executable.
     - id: build
-      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental]
+      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
@@ -149,6 +154,121 @@ review:
       run: [npm, run, --prefix, dash, "check:reachable"]
       blocking: true
 
+  # Developer task gates. `kyber-weave review gates . --agent <name> --paths ... --task <slug>`
+  # runs one developer agent's list against the change that agent just made, so the agent finds a
+  # broken gate before a reviewer does. Keyed by agent slug; gates run in declaration order.
+  #
+  # Each gate is written once with a YAML anchor and aliased by every agent that runs it. A YAML
+  # sequence cannot be concatenated, so an agent's list names each gate it runs, one alias apiece.
+  # `include` decides whether a gate runs at all: a gate whose globs match no changed file is
+  # reported as skipped, not run. Globs are quoted because a bare `*` opens a YAML alias in a
+  # flow sequence, and `{` would be read as a flow mapping.
+  #
+  # A gate whose argv has no `{changed}` is a whole-project check: it checks the entire working
+  # tree, not only the files this task changed. dash-typecheck, dash-lint, tray-ui-typecheck,
+  # cargo-fmt, cargo-clippy, and dotnet-build are of that kind. Another worker's concurrent edit
+  # can therefore fail one of them on a file this task never touched. The task-gate skill re-runs
+  # such a failure once after the other change settles, before it counts as rework.
+  task-gates:
+    # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
+    # is the form `--fix` applies first; the verify form then decides, so a fix that does not
+    # converge still fails the gate. The build is Release and writes under a per-task artifacts
+    # directory, so two agents building at once do not share one obj/ tree.
+    csharp-dev:
+      - &fmt-whitespace
+        id: format-whitespace
+        include: &net-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
+        run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, whitespace, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+      - &fmt-style
+        id: format-style
+        include: *net-paths
+        run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, style, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+      - &fmt-analyzers
+        id: format-analyzers
+        include: *net-paths
+        run: [dotnet, format, KyberWeave.sln, analyzers, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+        fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
+      - &dotnet-build
+        id: dotnet-build
+        # The build is the one gate a solution-only change must reach: a .sln, NuGet.config, or
+        # .editorconfig changes what compiles and how analyzers read it. The format gates keep the
+        # source-only *net-paths, because `dotnet format` given a solution in --include checks
+        # nothing and exits 0.
+        include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
+        run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts", -nr:false, -p:UseSharedCompilation=false]
+    dal-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    maui-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    pulumi-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    sql-database-architect:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+    github-devops:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+
+    # TypeScript and the tray UI. The dash include lists directories instead of `dash/**`,
+    # because the tray is a separate project under dash/tray with its own gates below, and an
+    # include list has no exclusion to subtract it. A tray change therefore runs only the tray
+    # gates, not the dash suite.
+    react-dev:
+      - &dash-typecheck
+        id: dash-typecheck
+        include: &dash-paths ["dash/src/**", "dash/tests/**", "dash/web/**", "dash/e2e/**", "dash/scripts/**", "dash/*.ts", "dash/*.js", "dash/*.mjs", "dash/*.json"]
+        run: [npm, run, --prefix, dash, typecheck]
+      - &dash-lint
+        id: dash-lint
+        include: *dash-paths
+        run: [npm, run, --prefix, dash, lint]
+      - &tray-ui-typecheck
+        id: tray-ui-typecheck
+        include: ["dash/tray/ui/**"]
+        run: [npm, run, --prefix, dash/tray/ui, typecheck]
+
+    # Tauri shell. The Rust gates are the tray's own; the dash and tray-ui gates are the ones
+    # react-dev runs, aliased here because a Tauri change reaches the same TypeScript the UI does.
+    # `cargo fmt --check` verifies and the fix form rewrites; clippy is verify-only, with warnings
+    # promoted to errors, because a warning it prints and a reviewer skims is not a gate.
+    tauri-dev:
+      - &cargo-fmt
+        id: cargo-fmt
+        include: &tray-rust-paths ["dash/tray/src-tauri/**"]
+        run: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml, --check]
+        fix: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml]
+      - &cargo-clippy
+        id: cargo-clippy
+        include: *tray-rust-paths
+        run: [cargo, clippy, --manifest-path, dash/tray/src-tauri/Cargo.toml, --, -D, warnings]
+      - *dash-typecheck
+      - *dash-lint
+      - *tray-ui-typecheck
+
+    # Tests are .NET (tests/) and TypeScript (dash/tests, dash/web), so test-dev runs both sets.
+    test-dev:
+      - *fmt-whitespace
+      - *fmt-style
+      - *fmt-analyzers
+      - *dotnet-build
+      - *dash-typecheck
+      - *dash-lint
+
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —
   # braces, blank lines, whole-line comments, and the signature are already gone — so a
@@ -168,7 +288,16 @@ review:
       - ".kyber-weave/kyber-weave.yml"
       - "**/*secret*"
       - "**/*credential*"
-    max-reviewable-lines: 10000
+    # Raised from 10000 to 20000 because one delivery — the KyberDash sessions-list payload
+    # independence (schema v21 and v22 with the session-turn split, the covering index, the
+    # bounded read routes, the engine's maintenance-pass fix, the CLI's vacuum command, and
+    # their tests and documentation) — reached roughly 17,400 changed lines. The owner
+    # reviewed that single unit and approved it rather than splitting it (PR 397), which is
+    # the remedy this ceiling's own documentation names: "Split the change or have a human
+    # review it." A change to this file is human-only by the policy above, and that approval
+    # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
+    # stamp for whatever comes next.
+    max-reviewable-lines: 20000
     major-count-blocks: 3
     min-confidence: 7
 

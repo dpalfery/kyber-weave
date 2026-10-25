@@ -13,6 +13,11 @@ last-reviewed: 2026-09-03
 
 Accepted
 
+The "Backward-compatible endpoints" clause of decision D3 is superseded by
+[ADR 0041](0041-kyberdash-retire-legacy-context-schema-routes.md):
+`GET /api/kyber/context` and `GET /api/kyber/schema` are deleted (no live
+caller); `/api/kyber/timeline` and every other D3 endpoint stand.
+
 ## Context
 
 KyberDash was established in [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) as a TypeScript soft fork of `getagentseal/codeburn` (vendored under `dash/`) hosting OpenTelemetry span analysis from the retired Python pipeline (`agent-session-analysis-dashboard`). While `dash/kyber/canon/store.ts` provided raw span persistence into `~/.kyberdash/canon.db`, the Web Dashboard and Context Explorer suffered from four key defects:

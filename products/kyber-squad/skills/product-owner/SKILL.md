@@ -57,6 +57,8 @@ DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or n
 
 Supervised behaviour is unchanged. The agent records phase approval only when the conductor supplies explicit user approval, with a single exception: under resolved autonomy `autonomous`, an invocation carrying the conductor's explicit `AUTONOMOUS_APPROVAL: <gate id>` input counts as that approval and is recorded with provenance `autonomous: recommendation accepted`, never inferred from silence or from the mode alone. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
 
+The tasks-to-execute gate collapse is declared by the conductor spec-path contract: a tasks `STATUS: READY_FOR_REVIEW` with no gaps and no open questions may be presented as one consolidated review covering tasks approval and approve and execute. Supervised runs keep separate gates.
+
 ## Shelf life
 
 A specification records intent, not current behavior. Every tasks artifact ends with a `docs-dev` closeout task. Delivered specifications must migrate durable facts into canonical documentation before the specification is archived; the archive is never cited as current guidance.

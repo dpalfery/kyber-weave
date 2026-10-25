@@ -18,6 +18,8 @@ You implement the persistence layer. You follow the path declared as **<data-acc
 
 Use the `dal-dev` skill when working on the persistence layer.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: schema-contract consumption, ADO.NET repositories, and FluentMigrator reference documentation.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
@@ -83,6 +85,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
 - Never author application services or test files.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
@@ -95,5 +98,6 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of persistence file paths changed or created>
 SUMMARY: <2–4 sentences: repositories/migrations touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=dal-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

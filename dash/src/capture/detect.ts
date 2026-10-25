@@ -122,6 +122,25 @@ function groupsFor(writer: CaptureHarnessWriter, home: string, env: PathEnv): Pr
           ],
         },
       ]
+    case 'kilo':
+      // One question — "is Kilo here?" — answered by any of three traces:
+      // the config directory, the shared-runtime database the folder import
+      // reads, or the Kilo extension's VS Code Stable globalStorage directory.
+      return [
+        {
+          probes: [
+            { label: 'config directory', path: pjoin(platform, home, '.config', 'kilo') },
+            {
+              label: 'shared-runtime database',
+              path: pjoin(platform, home, '.local', 'share', 'kilo', 'kilo.db'),
+            },
+            {
+              label: 'VS Code Stable globalStorage directory',
+              path: kiloVscodeGlobalStoragePath(home, env),
+            },
+          ],
+        },
+      ]
     default:
       // Status-only and injected writers: their one config file is the evidence.
       return [{ probes: [{ label: 'config', path: writer.resolvePath(home, env) }] }]
@@ -136,6 +155,34 @@ function copilotSettingsPath(
 ): string {
   const file = writer.kind === 'managed' ? writer.configFiles?.find((f) => f.fileId === fileId) : undefined
   return (file?.resolvePath ?? writer.resolvePath)(home, env)
+}
+
+/**
+ * The Kilo extension's globalStorage directory under VS Code Stable's user
+ * data, through the same platform seam Copilot's settings paths use: win32
+ * roots at the application-data directory (injected appData first, then the
+ * host's APPDATA, then the documented <home>\AppData\Roaming default), darwin
+ * at `~/Library/Application Support`, linux at `~/.config`.
+ */
+function kiloVscodeGlobalStoragePath(home: string, env: PathEnv): string {
+  const { platform } = env
+  if (platform === 'win32') {
+    const appData = env.appData ?? process.env.APPDATA ?? pjoin(platform, home, 'AppData', 'Roaming')
+    return pjoin(platform, appData, 'Code', 'User', 'globalStorage', 'kilocode.kilo-code')
+  }
+  if (platform === 'darwin') {
+    return pjoin(
+      platform,
+      home,
+      'Library',
+      'Application Support',
+      'Code',
+      'User',
+      'globalStorage',
+      'kilocode.kilo-code',
+    )
+  }
+  return pjoin(platform, home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code')
 }
 
 /** Judge one harness from filesystem evidence under `home`. */

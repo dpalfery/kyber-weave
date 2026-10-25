@@ -1,4 +1,4 @@
-// OpenCode capture writer (P2.4a).
+// OpenCode capture writer (P2.4a, T6 ownership).
 //
 // AI-SDK spans need `experimental.openTelemetry: true` in
 // ~/.config/opencode/opencode.jsonc (JSONC). The OTLP endpoint is not a
@@ -6,10 +6,25 @@
 // environment, so status reports that variable and enable never writes it
 // or a shell rc. Status also notes upstream #13438 and the non-model span
 // volume; those are observations, not keys the receipt restores.
+//
+// T6 owns the dash-CLI-managed plugin contract here beside the flag: the
+// plugin id and its `plugins` config keys are DECLARED (re-exported) so
+// capture owns the contract, but they are never written — local file
+// discovery installs the plugin by file, and `desiredKeys` stays the single
+// OTel flag. The endpoint likewise stays process-env-only.
 
 import { envJoin, type PathEnv } from '../paths.js'
 
 import type { ManagedHarnessWriter } from './registry.js'
+
+/**
+ * The plugin capture contract, declared here and never written (T6
+ * declare-only). The dash CLI installs the plugin file into opencode's own
+ * plugin directories (see `resolveOpencodePluginPaths`); capture manages
+ * only the OTel flag below. Re-exported so the writer module is the single
+ * ownership point for the plugin's capture keys.
+ */
+export { OPENCODE_PLUGIN_CONFIG_KEYS, OPENCODE_PLUGIN_ID } from './opencode-plugin/plugin.js'
 
 /** The only key enable writes. The value stays a JSON boolean. */
 const OPENCODE_OTEL_FLAG_KEY = 'experimental.openTelemetry'
@@ -19,6 +34,14 @@ const OPENCODE_OTEL_FLAG_KEY = 'experimental.openTelemetry'
  * `desiredKeys` is what keeps enable from writing it into opencode.jsonc.
  */
 const STATUS_ENV_KEY = 'OTEL_EXPORTER_OTLP_ENDPOINT'
+
+/**
+ * D5 consent (T3): sender-owned, off by default. Content (system prompt,
+ * tool definitions, skills listing) rides only when this is `1`.
+ * Declare-only: reported on status like the endpoint above, never written
+ * or receipted by enable — the `OTEL_EXPORTER_OTLP_ENDPOINT` pattern.
+ */
+const CONTEXT_CONSENT_ENV_KEY = 'KYBERDASH_OPENCODE_CONTEXT'
 
 export const opencodeHarness: ManagedHarnessWriter = {
   kind: 'managed',
@@ -37,6 +60,6 @@ export const opencodeHarness: ManagedHarnessWriter = {
   statusEnvSnippet: {
     label:
       'process env (upstream #13438; non-model spans are emitted with model spans and are not written here)',
-    envKeys: [STATUS_ENV_KEY],
+    envKeys: [STATUS_ENV_KEY, CONTEXT_CONSENT_ENV_KEY],
   },
 }

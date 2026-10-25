@@ -33,11 +33,22 @@ import {
   convertInclusiveCounts,
   exclusiveConvention,
   hasNamespace,
+  parseStructured,
   readOptionalCounter,
   readUsageCounters,
   validateRecordTokens,
 } from './copilot.js'
 import { contentFromParts, notMeasurable, type ContentPart } from '../types.js'
+import {
+  isOpencodeEnvelopeModel,
+  isOpencodeEnvelopeSpan,
+  isOpencodeEnvelopeTool,
+  isSupportedOpencodeEnvelope,
+  opencodeEnvelopeContextSystem,
+  opencodeEnvelopeContextTools,
+  opencodeEnvelopePromptText,
+  opencodeEnvelopeSessionId,
+} from './opencode-envelope.js'
 
 /** The harness identity stamped on records this adapter wins. */
 const OPENCODE_HARNESS = 'opencode'
@@ -173,15 +184,6 @@ function yieldsToAnotherHarness(attributes: Record<string, unknown>): boolean {
   return false
 }
 
-function parseJson(value: unknown): unknown {
-  if (typeof value !== 'string') return value
-  try {
-    return JSON.parse(value)
-  } catch {
-    return undefined
-  }
-}
-
 function attributeText(value: unknown): string | undefined {
   if (typeof value === 'string' && value !== '') return value
   if (value !== null && value !== undefined && typeof value === 'object') return JSON.stringify(value)
@@ -231,7 +233,7 @@ function legacyAiParts(attributes: Record<string, unknown>, startOrder: number):
 
   const messagesRaw = attributes[LEGACY_MESSAGES_KEY]
   const messagesText = attributeText(messagesRaw)
-  const parsedMessages = parseJson(messagesRaw)
+  const parsedMessages = parseStructured(messagesRaw)
   if (Array.isArray(parsedMessages)) {
     for (const message of parsedMessages) {
       const extracted = messageText(message)
@@ -271,7 +273,7 @@ function legacyAiParts(attributes: Record<string, unknown>, startOrder: number):
 function openInferenceParts(attributes: Record<string, unknown>, startOrder: number): ContentPart[] {
   const parts: ContentPart[] = []
   let order = startOrder
-  const parsed = parseJson(attributes[OPENINFERENCE_INPUT_MESSAGES_KEY])
+  const parsed = parseStructured(attributes[OPENINFERENCE_INPUT_MESSAGES_KEY])
   if (!Array.isArray(parsed)) return parts
   for (const message of parsed) {
     const extracted = messageText(message)
@@ -375,6 +377,52 @@ function applyOpenInferenceUsage(
   }
 }
 
+/**
+ * The plugin envelope mapping (T1). A supported version stamps the envelope
+ * session and maps the turn onto its operation: the tool marker wins over
+ * the model marker, as `gen_ai.tool.name` does over a model vote. The prompt
+ * text buckets as conversation history. Any other version leaves the record
+ * untouched — `detect` scores those spans 0, so this path only runs for the
+ * supported contract, and anything else keeps `unspecified` for the
+ * non-model quarantine.
+ */
+function applyEnvelope(record: ReturnType<typeof baseRecord>, raw: RawSpan): void {
+  if (!isSupportedOpencodeEnvelope(raw)) return
+  const sessionId = opencodeEnvelopeSessionId(raw.attributes)
+  if (sessionId !== undefined) record.sessionId = sessionId
+  if (isOpencodeEnvelopeTool(raw.attributes)) {
+    record.op = 'tool.invoke'
+  } else if (isOpencodeEnvelopeModel(raw.attributes) && record.op !== 'tool.invoke') {
+    record.op = 'llm.invoke'
+  }
+  const prompt = opencodeEnvelopePromptText(raw.attributes)
+  if (prompt !== undefined) {
+    appendPart(record, { part: 'conversation_history', text: prompt })
+  }
+  // Envelope v2 context content (plan 2026-10-23 §5-T5, D4): the assembled
+  // system prompt buckets as `system_prompt` and the serialized tool
+  // definitions as `tool_definitions`, the `legacyAiParts` pattern, ordered
+  // after every existing part. Counters are never fabricated here — a context
+  // span with no usage keys keeps zero tokens with not-measurable cache classes.
+  const system = opencodeEnvelopeContextSystem(raw.attributes)
+  if (system !== undefined) {
+    appendPart(record, { part: 'system_prompt', text: system })
+  }
+  const tools = opencodeEnvelopeContextTools(raw.attributes)
+  if (tools !== undefined) {
+    appendPart(record, { part: 'tool_definitions', text: tools })
+  }
+}
+
+/** Appends a content part after every existing part, recomputing order and content. */
+function appendPart(record: ReturnType<typeof baseRecord>, part: Omit<ContentPart, 'order'>): void {
+  const existing = record.parts ?? []
+  const order = existing.reduce((max, entry) => Math.max(max, (entry.order ?? 0) + 1), 0)
+  const parts: ContentPart[] = [...existing, { ...part, order }]
+  record.parts = parts
+  record.content = contentFromParts(parts)
+}
+
 export const opencodeAdapter: HarnessAdapter = {
   name: OPENCODE_HARNESS,
   namespaces: ['ai', 'gen_ai', 'openinference', 'opencode'],
@@ -383,6 +431,13 @@ export const opencodeAdapter: HarnessAdapter = {
     // Another harness's fingerprint wins outright. `service.name` is not
     // evidence and is not read.
     if (yieldsToAnotherHarness(span.attributes)) return 0
+    // The plugin envelope is claimed only under the supported contract (T1):
+    // an unknown or missing version scores 0 so no vote can claim it, and
+    // the ingest seam quarantines it with the unknown-version reason instead.
+    // A supported envelope scores 1 whatever its markers: `normalize` maps
+    // model and tool markers onto their operations, and a marker-less span
+    // keeps `unspecified` so ingest quarantines it as non-model.
+    if (isOpencodeEnvelopeSpan(span)) return isSupportedOpencodeEnvelope(span) ? 1 : 0
     if (isModelSpan(span)) return 1
     // Any other OpenInference span is claimed so its group's confidence holds
     // and ingest quarantines it as non-model rather than filing an unclaimed
@@ -396,6 +451,7 @@ export const opencodeAdapter: HarnessAdapter = {
   relevance(span) {
     if (yieldsToAnotherHarness(span.attributes)) return 0
     if (isModelSpan(span)) return 1
+    if (isSupportedOpencodeEnvelope(span) && isOpencodeEnvelopeModel(span.attributes)) return 1
     return 0
   },
 
@@ -420,6 +476,7 @@ export const opencodeAdapter: HarnessAdapter = {
       record.content = contentFromParts(parts)
     }
     applyUsage(record, raw.attributes)
+    applyEnvelope(record, raw)
     // The app spans keep `unspecified`, which the ingest seam quarantines as
     // non-model. `llm.invoke` is the model call; an OpenInference `TOOL` span
     // is the tool call. A `gen_ai.tool.name` still wins over a model vote.

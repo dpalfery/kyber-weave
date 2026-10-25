@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: tauri-dev
-description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use when the change is the WebView UI that consumes the IPC contract rather than the native core."
+description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use for Rust outside a Tauri app — CLIs, daemons, and library crates (rust-dev) — or when the change is the WebView UI that consumes the IPC contract rather than the native core."
 invocation: subagent
 model-profile: general
 capability-profile: worker
@@ -61,6 +61,10 @@ Your packet is your whole scope. Do not open files under the directories named b
    **<tauri-coding-standard>** names before declaring done.
 8. **Cite.** Reference the official docs pages you relied on.
 
+
+## Skills
+
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
 
 ## Discovery order
 
@@ -162,6 +166,10 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
   treat the sidecar boundary as untrusted, like any other. Surface sidecar failures through
   the error type.
 
+### Completion gate
+
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+
 ## How to handle common requests
 
 - **"Add a feature that needs backend + UI."** Design the command/event/channel contract →
@@ -182,6 +190,19 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - When unsure or when behavior is version-specific, verify against the official docs rather
   than guessing.
 
+
+## Completion digest
+
+When done, return:
+
+```text
+STATUS: READY_FOR_REVIEW
+ARTIFACTS: <list of Rust and config file paths changed or created>
+SUMMARY: <2–4 sentences: commands, capabilities, and state touched, plus any hand-offs>
+IPC_CONTRACT: <command, event, and channel names changed, or "none">
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=tauri-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
+OPEN_QUESTIONS: <bullets, or "none">
+```
 
 ## Reference index (official Tauri v2 docs)
 

@@ -90,6 +90,7 @@ public static class SquadSourceValidator
             }
 
             ValidateCopilotToolCapabilities(agent, copilotCapabilityProfile, copilotProfile);
+            ValidatePiOverlay(agent);
 
             string devinCapabilityProfile = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
             if (!capabilities.Profiles.TryGetValue(devinCapabilityProfile, out SquadCapabilityProfile? devinProfile))
@@ -239,6 +240,39 @@ public static class SquadSourceValidator
                     agent.SourcePath,
                     $"Remove '{tool}' from copilot-tools or set '{requiredCapability}' to 'allow' " +
                     $"in Copilot capability profile '{capabilityProfileName}'.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cross-checks the Pi overlay: every <c>pi-tools</c> <c>ext:</c> entry's extension must
+    /// be declared in <c>pi-extensions</c>, modeled on
+    /// <see cref="ValidateCopilotToolCapabilities"/>. The <c>ext:</c>-form restriction
+    /// itself is enforced at load time; this guards the membership half.
+    /// </summary>
+    private static void ValidatePiOverlay(SquadAgent agent)
+    {
+        if (agent.PiTools.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> declared = new(agent.PiExtensions, StringComparer.Ordinal);
+        foreach (string tool in agent.PiTools)
+        {
+            string remainder = tool.StartsWith("ext:", StringComparison.Ordinal)
+                ? tool["ext:".Length..]
+                : tool;
+            int separator = remainder.IndexOf('/', StringComparison.Ordinal);
+            string extension = separator < 0 ? remainder : remainder[..separator];
+            if (!declared.Contains(extension))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' declares Pi tool '{tool}', but extension '{extension}' " +
+                    "is not declared in 'pi-extensions'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Add the extension to 'pi-extensions' or remove the 'pi-tools' entry.");
             }
         }
     }

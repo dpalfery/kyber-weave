@@ -2,7 +2,7 @@ using KyberWeave.Core.Utilities.StatusLine;
 
 namespace KyberWeave.Cli.Commands.Utilities;
 
-/// <summary>Maps the CLI's harness tokens to the three status-line targets this slice keeps.</summary>
+/// <summary>Maps the CLI's harness tokens to the four status-line targets this slice keeps.</summary>
 /// <remarks>
 ///     A closed vocabulary mirroring <see cref="StatusLineTarget" />, kept in the CLI rather than in Core
 ///     because it is presentation: the token text an operator types and reads, not a domain value. D9
@@ -22,7 +22,8 @@ public static class UtilitiesStatusLineTargetCatalog
     [
         StatusLineTarget.Claude,
         StatusLineTarget.Agy,
-        StatusLineTarget.Pi
+        StatusLineTarget.Pi,
+        StatusLineTarget.CommandCode
     ];
 
     /// <summary>The lowercase CLI token for <paramref name="target" />.</summary>
@@ -33,6 +34,7 @@ public static class UtilitiesStatusLineTargetCatalog
             StatusLineTarget.Claude => "claude",
             StatusLineTarget.Agy => "agy",
             StatusLineTarget.Pi => "pi",
+            StatusLineTarget.CommandCode => "commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

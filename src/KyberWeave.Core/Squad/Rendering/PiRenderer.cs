@@ -2,6 +2,8 @@ using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -65,14 +67,23 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Only <see cref="SquadPermissionDecision.Allow"/> grants a tool; <c>ask</c> and <c>deny</c>
 /// both withhold, because Pi has no per-capability permission prompt and <c>tools</c> is
 /// binary — an <c>ask</c> decision is therefore recorded as <c>safety-narrowed</c> rather
-/// than expressed in frontmatter (owner decision Q1-A, 2026-09-14). <c>network.read</c> and
-/// <c>network.publish</c> have no built-in Pi tool at all, so an <c>allow</c> decision for
-/// either records <c>permission-not-expressible</c>.
+/// than expressed in frontmatter (owner decision Q1-A, 2026-09-14). <c>network.read</c>
+/// has no expressible built-in Pi tool (R8, re-confirmed 2026-10-24: bare <c>mcp</c> is not
+/// a built-in — plain <c>tools:</c> names must be built-ins, and subagents inherit the
+/// <c>-builtin:mcp</c> global opt-out, so the loader refuses it under the unknown-name
+/// rule); read-only web access arrives instead via the canonical agent-file overlay
+/// (<c>pi-extensions</c> / <c>pi-tools</c>), which the renderer lowers onto the declared
+/// <c>extensions</c> sequence and <c>ext:</c> tool entries. <c>network.publish</c>
+/// still has no built-in Pi tool, so an <c>allow</c> decision for it records
+/// <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
 /// <b><c>extensions</c>.</b> <c>extensions: false</c> loads no extensions for the agent —
-/// emitted unconditionally on every rendered agent per the owner's Q1-A decision, so Squad
-/// agents on Pi reach no CodeGraph, docs MCP, or web tooling beyond the seven built-ins.
+/// emitted unconditionally on every rendered agent without a canonical overlay per the owner's
+/// Q1-A decision, so Squad agents on Pi reach no CodeGraph, docs MCP, or web tooling beyond
+/// the seven built-ins. An agent declaring the canonical <c>pi-extensions</c> overlay instead
+/// emits that list as a YAML sequence (the exact form live-verified 2026-10-24; the CSV-scalar
+/// form is unverified and is not emitted).
 /// This combines with <c>allowed_subagents</c> without conflict, because nested-subagent
 /// tools are injected directly rather than through a loaded extension.
 /// </para>
@@ -114,8 +125,11 @@ public sealed class PiRenderer : ISquadRenderer
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Pi's built-in tool names, verified
     /// against the pi-subagents 0.19.0 README ("Tool &amp; extension scoping") on 2026-09-14.
-    /// <c>network.read</c> and <c>network.publish</c> are absent deliberately: neither has a
-    /// built-in Pi tool. <c>delegate</c> is handled separately because an allowed, non-empty
+    /// <c>network.read</c> is absent deliberately: bare <c>mcp</c> is not a built-in Pi tool
+    /// (re-confirmed 2026-10-24), so it still has no expressible lowering — web access arrives
+    /// via the canonical <c>pi-extensions</c> / <c>pi-tools</c> overlay instead.
+    /// <c>network.publish</c> is absent deliberately: it still has no built-in Pi tool.
+    /// <c>delegate</c> is handled separately because an allowed, non-empty
     /// roster emits <c>allowed_subagents</c>, not a tool.
     /// </summary>
     private static readonly (string Capability, string[] Tools)[] CapabilityTools =
@@ -137,7 +151,9 @@ public sealed class PiRenderer : ISquadRenderer
         "off", "minimal", "low", "medium", "high", "max"
     };
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
+        .WithTypeConverter(new PiExtensionsFlowSequenceConverter())
+        .Build();
 
     /// <summary>
     /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
@@ -323,12 +339,18 @@ public sealed class PiRenderer : ISquadRenderer
             frontmatter["thinking"] = thinkingLevel;
         }
 
-        // Always emit tools: omitting the key grants every built-in (widening).
-        IReadOnlyList<string> tools = ResolveTools(agent, capabilityProfiles);
+        // Always emit tools: omitting the key grants every built-in (widening). The
+        // capability-derived CSV comes first in the fixed ToolOrder; the declared pi-tools
+        // overlay entries follow in declared canonical order.
+        IReadOnlyList<string> capabilityTools = ResolveTools(agent, capabilityProfiles);
+        IReadOnlyList<string> tools = [.. capabilityTools, .. agent.PiTools];
         frontmatter["tools"] = tools.Count == 0 ? "none" : string.Join(", ", tools);
 
-        // Every agent, unconditionally (owner decision Q1-A, 2026-09-14).
-        frontmatter["extensions"] = false;
+        // Every agent without a canonical overlay, unconditionally (owner decision Q1-A,
+        // 2026-09-14); an overlay agent emits the declared extension ids as a YAML sequence.
+        frontmatter["extensions"] = agent.PiExtensions.Count == 0
+            ? false
+            : new PiExtensionsFlowSequence(agent.PiExtensions);
 
         if (IsDelegateAllowed(agent, capabilityProfiles) && agent.DelegatesTo.Count > 0)
         {
@@ -534,7 +556,9 @@ public sealed class PiRenderer : ISquadRenderer
             readDecision == SquadPermissionDecision.Allow)
         {
             notExpressibleDetails.Add(
-                "Capability 'network.read' is allowed but no built-in Pi tool exists to express it.");
+                "Capability 'network.read' is allowed but no built-in Pi tool exists to express it " +
+                "(bare 'mcp' is not a built-in; web access arrives via the canonical 'pi-extensions' / " +
+                "'pi-tools' agent-file overlay, not the renderer).");
         }
 
         if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
@@ -635,4 +659,47 @@ public sealed class PiRenderer : ISquadRenderer
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    /// <summary>
+    /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
+    /// <see cref="PiExtensionsFlowSequenceConverter"/>.
+    /// </summary>
+    private sealed class PiExtensionsFlowSequence(IEnumerable<string> extensions) : List<string>(extensions);
+
+    /// <summary>
+    /// Serializes the Pi agent <c>extensions</c> list as an inline YAML flow sequence
+    /// (e.g. <c>extensions: [pi-mcp-adapter]</c>, the exact form live-verified 2026-10-24).
+    /// Mirrors <c>ClaudeRenderer.ClaudeToolsFlowSequenceConverter</c>.
+    /// </summary>
+    private sealed class PiExtensionsFlowSequenceConverter : IYamlTypeConverter
+    {
+        public bool Accepts(Type type) => type == typeof(PiExtensionsFlowSequence);
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            throw new NotSupportedException("Deserialization of PiExtensionsFlowSequence is not supported.");
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            if (value is not PiExtensionsFlowSequence extensions)
+            {
+                return;
+            }
+
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            foreach (string extension in extensions)
+            {
+                emitter.Emit(new Scalar(
+                    AnchorName.Empty,
+                    TagName.Empty,
+                    extension,
+                    ScalarStyle.Plain,
+                    isPlainImplicit: true,
+                    isQuotedImplicit: true));
+            }
+
+            emitter.Emit(new SequenceEnd());
+        }
+    }
 }

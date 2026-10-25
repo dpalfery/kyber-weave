@@ -399,3 +399,29 @@ describe('dash settings: rejected input exits 2 and writes nothing', () => {
       }
     })
 })
+describe('dash settings show with an unreadable store', () => {
+  it('reports one line and exits 1 instead of throwing the bundle blob', async () => {
+    const { Command } = await import('commander')
+    const { registerKyberCommands } = await import('./register.js')
+    const stdout: string[] = []
+    const stderr: string[] = []
+    const program = new Command()
+    program.exitOverride()
+    registerKyberCommands(program, {
+      write: (line: string) => { stdout.push(line) },
+      writeError: (line: string) => { stderr.push(line) },
+      createStore: () => { throw new Error('canon store at /tmp/canon.db is at schema version 99') },
+    })
+    const previousExitCode = process.exitCode
+    process.exitCode = undefined
+    try {
+      await program.parseAsync(['node', 'kyberdash', 'dash', 'settings', 'show'])
+    } finally {
+      // The command must handle the failure itself, not propagate it.
+      expect(process.exitCode).toBe(1)
+      process.exitCode = previousExitCode
+    }
+    expect(stderr.join('\n')).toMatch(/kyberdash: settings show failed:/)
+    expect(stdout.join('\n')).toBe('')
+  })
+})

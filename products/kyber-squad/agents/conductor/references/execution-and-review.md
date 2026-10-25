@@ -4,15 +4,15 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 ## Ready queue
 
-A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately with no concurrency cap; when file scope is uncertain, favor parallelism and accept the conflict risk. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
+A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Dispatch ready tasks up to `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); when file scope is uncertain, favor parallelism within the cap and accept the conflict risk. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive, which predated per-task artifacts-path isolation.) Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
 Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope; a plan or spec path in the packet is routing metadata marked not for reading.
 
 ## Task session continuity
 
-Record the task id, owning specialist type, `worker-session-id`, and separate `reviewer-session-id` on the execution artifact. Store actual handles returned by the harness; when none is available, record that fact and the reason rather than inventing one. Keep a recovery brief containing the task packet, completion evidence, reviewer findings, decisions, failed approaches, and persisted failure-cluster tallies.
+Record the task id, owning specialist type, and `worker-session-id` on the execution artifact. Store actual handles returned by the harness; when none is available, record that fact and the reason rather than inventing one. Keep a recovery brief containing the task packet, completion evidence, rejected gate results, decisions, failed approaches, and persisted failure-cluster tallies.
 
-Reuse the original worker session for implementation, review fixes, verification, and any final-council findings in its scope. Use the harness's continuation or follow-up operation with the recorded handle. Append the findings and current scope/evidence updates without rewriting earlier conversation history. A fresh invocation of the same specialist type is a replacement, not continuation. Keep the task session available until its audits and any run-level findings are settled; do not repurpose it for an unrelated task while it awaits review.
+Reuse the original worker session for implementation, task-gate rework, verification, and any final-council findings in its scope. Use the harness's continuation or follow-up operation with the recorded handle. Append the findings and current scope/evidence updates without rewriting earlier conversation history. A fresh invocation of the same specialist type is a replacement, not continuation. Keep the task session available until its exit gate and any run-level findings are settled; do not repurpose it for an unrelated task while it awaits rework.
 
 Start a replacement only when continuation is unavailable, the original session cannot be recovered, or its context is unreliable (for example, it repeatedly acts on superseded requirements after correction). Record the replacement reason, pass the recovery brief, and update the handle. A busy session is queued, not replaced merely to avoid waiting. Separate unrelated tasks use separate sessions.
 
@@ -24,7 +24,7 @@ Discover continuation support from the current harness's exposed tools; do not a
 
 1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists.
 2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence.
-3. **REFACTOR:** cleanup and task review preserve GREEN.
+3. **REFACTOR:** cleanup and the developer exit gate preserve GREEN.
 
 If changing requirements would require weakening or replacing the approved Test contract, return the artifact to its author and reopen approval for that contract.
 
@@ -34,19 +34,27 @@ If changing requirements would require weakening or replacing the approved Test 
 
 1. **Implementation:** the specialist delivers the scoped change.
 2. **Verification:** the specialist runs the approved automated tests and checks against the current tree.
-3. **Review:** task audit and final council use that current evidence.
+3. **Gate:** the worker's exit gate and the final council use that current evidence.
 
 Changing the verification contract after approval reopens its approval gate.
 
-## Three-pass task audit
+## Developer exit gate
 
-Invoke `task-reviewer` after each worker completion with the mode, pass number, task contract, acceptance criteria, completion digest, current diff, and evidence. Keep the reviewer independent: it receives review evidence, not the implementation conversation. Reuse its separate reviewer session for passes 2 and 3 when supported, supplying prior findings and the current diff and evidence on every pass. A replacement reviewer receives the same review history. The implementation owner waits for its task's audit; other task sessions may continue with non-overlapping ready work.
+Every developer worker ends its task by running the deterministic `task-gate` and reports the result in its completion digest. No agent audits a single task, and the conductor does not judge technical correctness.
 
-- `PASS` completes the task's audit but does not authorize merge.
-- `FAIL` on pass 1 or pass 2 creates a self-contained rework item for the original worker session. Use the replacement policy above only when needed. Re-run the relevant contract against the current tree before the next audit; remembered results are not current evidence.
-- `FAIL` on pass 3, or any `ESCALATION: end-of-run`, enters the run's findings collection. There is no pass 4.
+The digest must carry one line:
 
-The reviewer requires matching Test-contract and RED/GREEN evidence only in test-first mode. In standard mode it requires the approved verification contract and current evidence.
+`TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…`
+
+- **Missing line or `FAIL`:** reject the digest. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it.
+- **`PASS`:** the task's gate is complete. It does not authorize merge.
+- **`NONE_DECLARED`:** valid; the repository declares no gates for that agent.
+- **`NONE_APPLICABLE`:** valid; gates are declared for that agent, but every one was skipped for this host or change, so none ran. Accept it as `NONE_DECLARED` is accepted. It is not a pass, and it never reads as `PASS`.
+- **`UNAVAILABLE`:** the gate could not run. It is never a pass: record it in the findings collection with the worker's reason and continue.
+- **Test-first ordering:** before dispatching GREEN, mechanically check that the RED digest for the task exists and records a failing run. This is a presence check on the digest, not an LLM audit; without it, return the task to `test-dev`.
+- Re-run nothing from memory: rework ends with a fresh `TASK_GATE:` line against the current tree.
+
+Other task sessions may continue with non-overlapping ready work while a task awaits rework.
 
 ## Iteration circuit-breaker and loop detection
 
@@ -58,14 +66,24 @@ The per-cluster **dispatch tally** lives on the run's persisted execution artifa
 
 - **Cluster-level retry limit:** Maximum of 2 rework dispatches for the same failing fixture or subsystem failure cluster across the run. If a failure cluster persists across 2 rework attempts, the circuit-breaker trips on that cluster.
 - **Oscillation detection:** If a fix for Failure Cluster A causes regression in Failure Cluster B, and a fix for B regresses A (or rework alternates between failure signatures), the loop detector trips immediately.
-- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the finding in the run's findings collection using the same `ESCALATION:` prefix as `ESCALATION: end-of-run`, with the key `ESCALATION: circuit-breaker`. Include `CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>` plus the affected failure cluster, contradictory invariants, blast radius, and the worker's `RECOMMENDED_ACTION`. Reject any other trigger token; do not invent a reason.
+- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the finding in the run's findings collection with the key `ESCALATION: circuit-breaker`. Include `CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>` plus the affected failure cluster, contradictory invariants, blast radius, and the worker's `RECOMMENDED_ACTION`. Reject any other trigger token; do not invent a reason.
 - **Architect mediation:** Tripped circuit-breakers must not be ignored or bypassed. When the queue drains to the findings collection, `architect` investigates the failure cluster, assesses whether coupled test fixtures assert conflicting invariants or legacy details, and authors an intake recommendation or Draft plan to resolve the architectural conflict.
 
 ## Findings and final council
 
-When the ready queue is empty and every task has left the ladder, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
+When the ready queue is empty and every task has cleared its exit gate, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
 
-With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green.
+With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the bounded auto-remediation loop below; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green (in autonomous mode, deliver as the autonomy contract directs).
+
+### Bounded council remediation loop (Critical/Major only, per Q3)
+
+When the council returns actionable Critical or Major findings fixable within the approved scope, the conductor routes each finding to its owning worker session for one bounded remediation pass before park: a single same session continuation in the same file scope, ending with a fresh task-gate re-run against the current tree so evidence is current instead of remembered. Remediation rework uses the same queue and scope rules as any rework; the rework dispatch counts in the per-cluster tally and the worker's inner iteration cap applies to the remediation pass.
+
+Unactionable, out-of-scope, or second-failure findings park immediately with their finding ids in the parked list instead of earning another worker dispatch: Unactionable findings (no deterministic fix within scope), findings outside the authorized file scope, and any finding that survives the one bounded remediation pass and fails a second council review park immediately — record the finding ids and continue unaffected work per the autonomy contract.
+
+Minor/Info findings never trigger remediation and never park: a Minor-only council reports its findings and moves on without a remediation loop and without parking the change or task.
+
+The following verdict paths are not findings for this loop and bypass remediation entirely: KW-REVIEW-008 reserved-path escalation (always-human paths), size escalation over max-reviewable-lines (KW-REVIEW-009), and any blocking-gate failure (blocking-gate verdict rule 3, including docs validate, docs drift, build, test, and analyzers). Each keeps its escalation and REQUEST_CHANGES path as written; a size escalation parks delivery but never cancels an in-flight remediation pass already dispatched.
 
 ## Closeout
 

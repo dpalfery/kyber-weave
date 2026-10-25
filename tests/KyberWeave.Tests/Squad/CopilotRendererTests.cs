@@ -209,6 +209,7 @@ public sealed class CopilotRendererTests
     [InlineData("dal-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("docs-dev", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("github-devops", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]")]
+    [InlineData("go-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("maui-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("product-owner", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
     [InlineData("pulumi-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
@@ -217,10 +218,11 @@ public sealed class CopilotRendererTests
     [InlineData("research-agent", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
     [InlineData("review-lens", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
     [InlineData("review-triage", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("rust-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("sql-database-architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("task-reviewer", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]")]
     [InlineData("tauri-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("test-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("typescript-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -284,7 +286,7 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("task-reviewer", "reviewer", "Gemini 3.8 Flash (copilot)")]
+    [InlineData("review-triage", "reviewer", "Gemini 3.8 Flash (copilot)")]
     [InlineData("test-dev", "fast", "MAI-Code-1.1-Flash (copilot)")]
     public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
         string agentName,
@@ -625,9 +627,9 @@ public sealed class CopilotRendererTests
     [InlineData(
         "conductor",
         "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
-        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
-        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
-        "'task-reviewer', 'tauri-dev', 'test-dev']")]
+        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'product-owner', " +
+        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'rust-dev', 'sql-database-architect', " +
+        "'tauri-dev', 'test-dev', 'typescript-dev']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
@@ -645,6 +647,29 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The per-task reviewer was retired; a Copilot render that still emits any path naming it would
+    /// hand the harness an agent the conductor can no longer route to by contract.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_DoesNotEmitAnyPathNamingTheRetiredTaskReviewer()
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string[] offenders = result.Files
+            .Select(file => file.RelativePath)
+            .Where(path => path.Contains("task-reviewer", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(offenders);
     }
 
     /// <summary>

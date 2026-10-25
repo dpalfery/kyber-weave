@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { readJsonKeys } from '../edit-json.js'
 import { runCapture } from '../index.js'
-import { opencodeHarness } from './opencode.js'
+import { runCaptureAction } from '../actions.js'
+import { opencodeHarness, OPENCODE_PLUGIN_CONFIG_KEYS, OPENCODE_PLUGIN_ID } from './opencode.js'
 
 const temporaryHomes: string[] = []
 
@@ -169,5 +170,144 @@ describe('opencode capture writer (P2.4a)', () => {
     expect(opencodeHarness.resolvePath('/tmp/synthetic-home')).toBe(
       join('/tmp/synthetic-home', '.config', 'opencode', 'opencode.jsonc'),
     )
+  })
+})
+
+describe('opencode capture ownership (T6)', () => {
+  it('declares the plugin capture keys as declare-only: the OTel flag is the only written key', () => {
+    // The plugin registration (`plugins`) is declared on the writer module so
+    // capture owns the contract, but it is never written: local file discovery
+    // installs the plugin by file. The OTLP endpoint stays process-env-only
+    // for the same reason — OpenCode never reads it from opencode.jsonc.
+    for (const endpoint of ['http://127.0.0.1:4318', 'https://receiver.example:4318']) {
+      expect(opencodeHarness.desiredKeys(endpoint)).toEqual({ [OPENCODE_OTEL_FLAG_KEY]: true })
+    }
+    expect(OPENCODE_PLUGIN_ID).toBe('kyberdash-opencode')
+    expect(OPENCODE_PLUGIN_CONFIG_KEYS).toEqual({ plugins: 'plugins' })
+    expect(opencodeHarness.desiredKeys('http://127.0.0.1:4318')).not.toHaveProperty('plugins')
+    expect(opencodeHarness.desiredKeys('http://127.0.0.1:4318')).not.toHaveProperty(STATUS_ENV_KEY)
+    expect(opencodeHarness.ensureIfAbsentKeys).toBeUndefined()
+    expect(opencodeHarness.configFiles).toBeUndefined()
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'dry-run previews the exact flag change and writes nothing (CLI side)',
+    async () => {
+      const home = makeHome()
+      const { path } = seedOpencodeJsonc(home)
+
+      const result = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        dryRun: true,
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.events).toHaveLength(1)
+      expect(result.events[0]).toMatchObject({
+        kind: 'would-write',
+        harness: 'opencode',
+        fileId: 'opencode-config',
+        path,
+      })
+      expect(result.events[0]?.changes).toEqual([
+        { key: OPENCODE_OTEL_FLAG_KEY, before: false, after: true },
+      ])
+      expect(readFileSync(path, 'utf8')).toContain('"openTelemetry": false')
+      expect(existsSync(join(home, '.kyberdash', 'capture-receipt.json'))).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'CLI and structured action agree on the dry-run events (CLI↔POST parity)',
+    async () => {
+      const home = makeHome()
+      seedOpencodeJsonc(home)
+
+      const cli = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        dryRun: true,
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+      const structured = await runCaptureAction({
+        action: 'enable',
+        harnessId: 'opencode',
+        dryRun: true,
+        homeDir: home,
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(cli.exitCode).toBe(0)
+      expect(structured.outcome).toBe('previewed')
+      expect(structured.events).toEqual(cli.events)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'a drifted flag refuses the disable without writes (409-class refusal)',
+    async () => {
+      const home = makeHome()
+      const { path } = seedOpencodeJsonc(home)
+
+      const enabled = await runCaptureAction({
+        action: 'enable',
+        harnessId: 'opencode',
+        dryRun: false,
+        homeDir: home,
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+      expect(enabled.outcome).toBe('wrote')
+
+      writeOpencodeJsonc(path, readFileSync(path, 'utf8').replace('"openTelemetry": true', '"openTelemetry": false'))
+      const drifted = readFileSync(path, 'utf8')
+
+      const refused = await runCaptureAction({
+        action: 'disable',
+        harnessId: 'opencode',
+        dryRun: false,
+        homeDir: home,
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+      expect(refused.outcome).toBe('refused')
+      expect(refused.reason).toBe('drift')
+      expect(readFileSync(path, 'utf8')).toBe(drifted)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'an unparseable opencode.jsonc refuses the enable without writes',
+    async () => {
+      const home = makeHome()
+      const configPath = opencodeConfigPath(home)
+      writeOpencodeJsonc(configPath, '{ this is not jsonc\n')
+
+      const result = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(result.exitCode).toBe(1)
+      expect(result.events.some((event) => event.kind === 'refused')).toBe(true)
+      expect(readFileSync(configPath, 'utf8')).toBe('{ this is not jsonc\n')
+    },
+  )
+
+  it('resolves and reports the win32 config path with win32 separators (D14 seam)', async () => {
+    const home = makeHome()
+    expect(opencodeHarness.resolvePath(home, { platform: 'win32' })).toBe(
+      `${home}\\.config\\opencode\\opencode.jsonc`,
+    )
+
+    const result = await runCapture('status', {
+      homeDir: home,
+      platform: 'win32',
+      harnessIds: ['opencode'],
+      fetchHealth: KYBERDASH_LISTENER,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`${home}\\.config\\opencode\\opencode.jsonc`)
   })
 })

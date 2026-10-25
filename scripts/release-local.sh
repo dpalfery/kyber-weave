@@ -8,7 +8,7 @@
 #
 #   kyber-weave-<rid>.tar.gz    kyber-weave-mcp-<rid>.tar.gz
 #   kyber-squad-<version>.zip   kyber-squad-plugin-<version>.zip
-#   kyberdash-<node-rid>.tar.gz SHA256SUMS.txt
+#   kyberdash-<node-rid>.tar.gz kyber-weave-sbom-<version>.cdx.json SHA256SUMS.txt
 #
 # The publish flags are kept identical to .github/workflows/release.yml. Single-file
 # packaging is the whole point: the self-update failure this exists to catch only
@@ -334,6 +334,16 @@ fi
 
 rm -rf "$STAGING"
 restore_locks
+
+# The SBOM is a release asset: release.yml attaches it to the GitHub Release and
+# scripts/verify-release-checksums.sh expects it in the asset list, so the local
+# tree has to carry one too — otherwise the local tree and the published release
+# do not describe the same set of files.
+#
+# It is generated from SOURCE_ROOT, so a --ref build describes the code being
+# released rather than whatever is in the working tree.
+log "generating the SBOM for ${VERSION}"
+bash "${SOURCE_ROOT}/scripts/generate-sbom.sh" "$DEST" "$VERSION"
 
 # Hash into a temp file: redirecting straight to SHA256SUMS.txt inside the same directory
 # creates it before the glob expands, so the manifest would list itself.

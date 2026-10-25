@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -13,6 +14,35 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [CommandOption("--stop-on-failure")]
     [Description("Skip the remaining gates once a blocking gate fails.")]
     public bool StopOnFailure { get; set; }
+
+    [CommandOption("--agent <NAME>")]
+    [Description("Run only this agent's task gates from review.task-gates, not the repository-wide gates.")]
+    public string? Agent { get; set; }
+
+    [CommandOption("--paths <PATH>")]
+    [Description("Changed file to gate, relative to the repository root. Repeat for several. " +
+                 "Defaults to the diff against --base plus untracked files. Requires --agent.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Paths { get; set; } = [];
+
+    [CommandOption("--base <REF>")]
+    [Description("Git ref the working tree is diffed against when --paths is not given. Defaults to HEAD. " +
+                 "Requires --agent.")]
+    public string? BaseRef { get; set; }
+
+    [CommandOption("--task <SLUG>")]
+    [Description("Task slug substituted for {task} in the agent's task gate commands. Requires --agent.")]
+    public string? TaskSlug { get; set; }
+
+    [CommandOption("--fix")]
+    [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
+    public bool Fix { get; set; }
+
+    /// <summary>Whether any option that only makes sense for one agent was given.</summary>
+    public bool HasAgentOnlyOptions =>
+        Paths is { Length: > 0 } || BaseRef is not null || TaskSlug is not null || Fix;
 }
 
 /// <summary>Settings for <c>review duplicates</c>.</summary>

@@ -156,3 +156,49 @@ describe('detectInstall: status-only harnesses', () => {
     expect(malformed.installed).toBe('unknown')
   })
 })
+
+describe('detectInstall: kilo', () => {
+  // Resolved per test rather than at describe scope, so the rest of this file still
+  // runs (and reports) while kilo is not yet in the registry.
+  const kilo = (): CaptureHarnessWriter => writerFor('kilo')
+
+  // The three places a Kilo install leaves a trace. The VS Code one is the Stable
+  // edition's globalStorage directory for the extension id, resolved through the same
+  // user-data seam Copilot's settings path uses (linux: ~/.config/Code, win32: appData).
+  const KILO_SOURCES = [
+    '/h/.config/kilo',
+    '/h/.local/share/kilo/kilo.db',
+    '/h/.config/Code/User/globalStorage/kilocode.kilo-code',
+  ] as const
+
+  it.each(KILO_SOURCES)('is detected by %s alone, with one evidence line', (source) => {
+    const result = detectInstall(kilo(), '/h', POSIX, probeOf([source]))
+    expect(result.installed).toBe('detected')
+    // One question, three alternatives: a detected harness is not padded with the
+    // alternatives it did not need, and it names the one that answered.
+    expect(result.evidence).toHaveLength(1)
+    expect(result.evidence[0]).toContain(source)
+    expect(result.evidence[0]).toMatch(/found/)
+  })
+
+  it('is not-detected with one evidence line naming all three places when none exists', () => {
+    const result = detectInstall(kilo(), '/h', POSIX, probeOf([]))
+    expect(result.installed).toBe('not-detected')
+    expect(result.evidence).toHaveLength(1)
+    for (const source of KILO_SOURCES) expect(result.evidence[0]).toContain(source)
+  })
+
+  it('resolves the three places with win32 separators through the app-data root', () => {
+    const seen: string[] = []
+    detectInstall(kilo(), 'C:\\Users\\me', WIN, (path) => {
+      seen.push(path)
+      return 'absent'
+    })
+    expect(seen).toHaveLength(KILO_SOURCES.length)
+    expect(seen).toContain('C:\\Users\\me\\.config\\kilo')
+    expect(seen).toContain('C:\\Users\\me\\.local\\share\\kilo\\kilo.db')
+    expect(seen).toContain(
+      'C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\kilocode.kilo-code',
+    )
+  })
+})

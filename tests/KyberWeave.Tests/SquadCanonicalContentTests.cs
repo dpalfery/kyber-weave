@@ -41,7 +41,29 @@ public sealed class SquadCanonicalContentTests
     [
         "architect-v3",
         "conductor-v3",
+        "task-reviewer",
         "task-reviewer-v3"
+    ];
+
+    /// <summary>
+    /// Developer agents that run the deterministic <c>task-gate</c> exit gate and report its
+    /// <c>TASK_GATE:</c> digest. Every other canonical agent is non-developer and must never emit one.
+    /// </summary>
+    private static readonly string[] DeveloperGateAgents =
+    [
+        "csharp-dev",
+        "dal-dev",
+        "github-devops",
+        "go-dev",
+        "maui-dev",
+        "pulumi-dev",
+        "python-dev",
+        "react-dev",
+        "rust-dev",
+        "sql-database-architect",
+        "tauri-dev",
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -67,16 +89,17 @@ public sealed class SquadCanonicalContentTests
         "react-dev",
         "research-agent",
         "sql-database-architect",
-        "task-reviewer",
         "tauri-dev",
         "test-dev"
     ];
 
     /// <summary>
-    /// Review-council workers are canonical-only roles and are deliberately excluded from
-    /// Hotshot migration provenance.
+    /// Agents authored after the Hotshot migration — the review-council workers, `bug-crusher`,
+    /// and the Rust, Go, and TypeScript specialists — are canonical-only roles and are deliberately excluded
+    /// from Hotshot migration provenance.
     /// </summary>
-    private static readonly string[] ExpectedNewAgents = ["bug-crusher", "review-lens", "review-triage"];
+    private static readonly string[] ExpectedNewAgents =
+        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev", "typescript-dev"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
@@ -97,16 +120,20 @@ public sealed class SquadCanonicalContentTests
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
+        "go-dev",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
         "resharper-clt",
+        "rust-dev",
         "second-brain",
         "security-review",
         "setup-dev-environment",
-        "test-dev"
+        "task-gate",
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -121,10 +148,13 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "product-owner",
         "python-dev",
-        "test-dev"
+        "rust-dev",
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>
@@ -138,9 +168,12 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "python-dev",
-        "test-dev"
+        "rust-dev",
+        "test-dev",
+        "typescript-dev"
     ];
 
     /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
@@ -297,15 +330,13 @@ public sealed class SquadCanonicalContentTests
             .ToArray();
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        SquadAgent taskReviewer = Assert.Single(source.Agents, agent => agent.Name == "task-reviewer");
 
         Assert.Equal(["conductor"], defaultAgents);
         Assert.Equal("orchestration", conductor.ModelProfile);
         Assert.Equal("architect", architect.ModelProfile);
-        Assert.Equal("reviewer", taskReviewer.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("product-owner", conductor.DelegatesTo);
-        Assert.Contains("task-reviewer", conductor.DelegatesTo);
+        Assert.DoesNotContain("task-reviewer", conductor.DelegatesTo);
         Assert.Contains("code-reviewer", conductor.DelegatesTo);
         Assert.Contains("docs-dev", conductor.DelegatesTo);
     }
@@ -379,16 +410,18 @@ public sealed class SquadCanonicalContentTests
     [InlineData("dal-dev")]
     [InlineData("docs-dev")]
     [InlineData("github-devops")]
+    [InlineData("go-dev")]
     [InlineData("maui-dev")]
     [InlineData("pulumi-dev")]
     [InlineData("python-dev")]
     [InlineData("react-dev")]
     [InlineData("review-lens")]
     [InlineData("review-triage")]
+    [InlineData("rust-dev")]
     [InlineData("sql-database-architect")]
-    [InlineData("task-reviewer")]
     [InlineData("tauri-dev")]
     [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
     public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -397,21 +430,40 @@ public sealed class SquadCanonicalContentTests
         AssertDiscoveryContract(agent.InstructionBody, agentName);
     }
 
+    /// <summary>
+    /// Task sessions are worker-only: the deterministic <c>task-gate</c> is not a session-bearing
+    /// agent, so the conductor records and resumes exactly one session per task.
+    /// </summary>
     [Fact]
-    public void ConductorRetainsTaskSessionsForIndependentReviewAndRework()
+    public void ConductorRetainsOnlyWorkerSessionsForTaskRework()
     {
         string contract = ReadAgentContract("conductor");
 
         Assert.Contains("original worker session", contract, StringComparison.Ordinal);
         Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
-        Assert.Contains("reviewer-session-id", contract, StringComparison.Ordinal);
         Assert.Contains("Resuming a worker counts as a rework dispatch", contract, StringComparison.Ordinal);
         Assert.Contains("unrelated task", contract, StringComparison.Ordinal);
         Assert.Contains("continuation is unavailable", contract, StringComparison.Ordinal);
         Assert.Contains("context is unreliable", contract, StringComparison.Ordinal);
-        Assert.Contains("Keep the reviewer independent", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("reviewer-session-id", contract, StringComparison.Ordinal);
         Assert.DoesNotContain("Every worker invocation is cold", contract, StringComparison.Ordinal);
         Assert.DoesNotContain("any available worker", contract, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A failing <c>TASK_GATE</c> digest is rejected back to the original worker as a rework item. The
+    /// retired per-task reviewer's three-pass audit must not survive as a second routing path.
+    /// </summary>
+    [Fact]
+    public void ConductorRejectsTaskGateFailuresBackToTheWorkerInsteadOfThreePassAudit()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("TASK_GATE", contract, StringComparison.Ordinal);
+        Assert.Contains("reject", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("task-gate/", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Three-pass task audit", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("task-reviewer", contract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -589,18 +641,129 @@ public sealed class SquadCanonicalContentTests
             name => Assert.Contains(name, declaredTargets));
     }
 
-    [Fact]
-    public void LoadTaskReviewerDefinesThreePassesForBothDevelopmentModes()
+    /// <summary>
+    /// Developer agents close every task by reporting the <c>task-gate</c> digest. A developer body
+    /// that does not name the gate would silently skip the exit check.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("go-dev")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("rust-dev")]
+    [InlineData("sql-database-architect")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    [InlineData("typescript-dev")]
+    public void DeveloperAgentBodyNamesTaskGateAndEmitsDigestLine(string agentName)
     {
-        string contract = ReadAgentContract("task-reviewer");
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
-        Assert.Contains("pass 3", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("test-first", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("standard", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("RED/GREEN", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("verification contract", contract, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("code-reviewer", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE:", agent.InstructionBody, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The <c>TASK_GATE:</c> digest is a developer exit contract. A non-developer body that emits it
+    /// would claim a gate it never ran.
+    /// </summary>
+    [Fact]
+    public void NonDeveloperAgentBodiesNeverEmitTaskGateDigest()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] offenders = source.Agents
+            .Where(agent => !DeveloperGateAgents.Contains(agent.Name, StringComparer.Ordinal))
+            .Where(agent => agent.InstructionBody.Contains("TASK_GATE:", StringComparison.Ordinal))
+            .Select(agent => agent.Name)
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// The skill is the deterministic exit gate itself: it runs review gates through the CLI, applies
+    /// fixes, caps the cycle, and reports a closed <c>TASK_GATE:</c> digest.
+    /// </summary>
+    [Fact]
+    public void TaskGateSkillDefinesTheDeterministicReviewGateContract()
+    {
+        string path = Path.Combine(ProductRoot, "skills", "task-gate", "SKILL.md");
+        Assert.True(File.Exists(path), $"Canonical task-gate skill is missing: {path}");
+        string skill = File.ReadAllText(path);
+
+        Assert.Contains("review gates", skill, StringComparison.Ordinal);
+        Assert.Contains("--agent", skill, StringComparison.Ordinal);
+        Assert.Contains("--fix", skill, StringComparison.Ordinal);
+        Assert.Contains("2-cycle cap", skill, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", skill, StringComparison.Ordinal);
+        Assert.Contains("task-gate/<gate-id>", skill, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill, StringComparison.Ordinal);
+        Assert.Contains("every declared gate was skipped", skill, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(skill);
+    }
+
+    /// <summary>
+    /// The per-task reviewer is retired outright. Its agent, its reference folder, and its migration
+    /// record must not survive in the squad source, or the orchestrator can still route to it.
+    /// </summary>
+    [Fact]
+    public void TaskReviewerAgentReferenceFolderAndMigrationRecordAreRemoved()
+    {
+        string agentsRoot = Path.Combine(ProductRoot, "agents");
+
+        Assert.False(
+            File.Exists(Path.Combine(agentsRoot, "task-reviewer.md")),
+            "The retired task-reviewer agent body must be deleted.");
+        Assert.False(
+            Directory.Exists(Path.Combine(agentsRoot, "task-reviewer")),
+            "The retired task-reviewer reference folder must be deleted.");
+        Assert.False(
+            File.Exists(Path.Combine(ProductRoot, "migration", "task-reviewer.md")),
+            "The retired task-reviewer migration record must be deleted.");
+    }
+
+    /// <summary>
+    /// Scans every squad source entry, by name and by content, so no surface (bundle, README,
+    /// sibling skill, or reviewer array) keeps routing to the retired reviewer.
+    /// </summary>
+    [Fact]
+    public void NoSquadSourceEntryNamesOrQuotesRetiredTaskReviewer()
+    {
+        string[] nameOffenders = Directory.EnumerateFileSystemEntries(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Contains("task-reviewer", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .ToArray();
+        string[] textOffenders = Directory.EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("task-reviewer", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .ToArray();
+
+        Assert.Empty(nameOffenders.Concat(textOffenders).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void CodeReviewerBodyAndArchitectPlanAuthoringDoNotNameRetiredTaskReviewer()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent codeReviewer = Assert.Single(source.Agents, agent => agent.Name == "code-reviewer");
+        string planAuthoring =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "plan-authoring.md"));
+
+        Assert.False(
+            codeReviewer.InstructionBody.Contains("task-reviewer", StringComparison.Ordinal),
+            "The code-reviewer body must not name the retired task-reviewer.");
+        Assert.False(
+            planAuthoring.Contains("task-reviewer", StringComparison.Ordinal),
+            "The architect plan-authoring reference must not name the retired task-reviewer.");
+    }
+
+    private static string RelativeSourcePath(string path) =>
+        Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
 
     [Fact]
     public void LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest()
@@ -663,6 +826,22 @@ public sealed class SquadCanonicalContentTests
             name => Assert.False(
                 File.Exists(Path.Combine(migrationRoot, $"{name}.md")),
                 $"'{name}' was authored after the migration and must not claim a migration baseline."));
+    }
+
+    /// <summary>
+    /// <c>code-review</c> carries the pre-push self-review trigger and gate. Nothing else
+    /// pins this section, so deleting this test returns it to no coverage.
+    /// </summary>
+    [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
     }
 
     private static string ProductRoot =>
@@ -837,7 +1016,6 @@ public sealed class SquadCanonicalContentTests
             "architect-v3" => "architect",
             "conductor-v3" => "conductor",
             "dotnet-dev" => "csharp-dev",
-            "task-reviewer-v3" => "task-reviewer",
             _ => name
         };
     }
@@ -950,8 +1128,6 @@ public sealed class SquadCanonicalContentTests
                                                       .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
                                                       .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
                                                       .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
-                                                      .github/agents/task-reviewer.agent.md|e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c
-                                                      .github/agents/task-reviewer-v3.agent.md|27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8
                                                       .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
                                                       .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
                                                       """;

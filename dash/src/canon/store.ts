@@ -22,6 +22,7 @@ const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
 import { deflateSync, inflateSync } from 'node:zlib'
+import { setImmediate as scheduleImmediate } from 'node:timers'
 
 import type { TokenCacheStore } from './tokens.js'
 import {
@@ -42,6 +43,25 @@ import {
   type RefreshTrigger,
 } from './refresh-run.js'
 import { contentFromParts } from './types.js'
+import { compressColumn, decompressColumn, type CompressedColumn } from './compressed-column.js'
+import {
+  SESSION_PAYLOAD_FRAGMENTS_SELECT,
+  SESSION_PAYLOAD_SELECT,
+  SESSION_TURNS_SELECT,
+  parseJsonObject,
+  sessionTurnsOf,
+  turnObjectOf,
+} from './session-read.js'
+
+// The compressed-column codec moved to `./compressed-column.js` so the
+// split-read contract (`./session-read.js`) can read a turn row without
+// importing this module: the store imports the contract, so the contract
+// cannot import the store without closing an import cycle.
+//
+// Re-exported here so the store's exported names do not change: the codec is
+// still the store's to hand out, and an importer that resolved it from here
+// keeps resolving it.
+export { compressColumn, decompressColumn, type CompressedColumn } from './compressed-column.js'
 
 /**
  * What a user-initiated wipe removed (issue #312). Counts only — the rows
@@ -96,6 +116,14 @@ function wipeHarnessRows(
       `DELETE FROM source_checkpoint WHERE harness_id IN (${placeholders})`,
     ),
   }
+  db.prepare(
+    // The turn rows go with their sessions: the session rows are the only
+    // thing that names them, so the subquery finds the turns before the
+    // session rows go. The migration does not clean up after itself -- it
+    // splits the rows it finds and leaves them -- so the wipe is where the
+    // orphans of a split corpus are collected.
+    `DELETE FROM session_turn WHERE session_id IN (SELECT session_id FROM session WHERE harness IN (${placeholders}))`,
+  ).run(...rawNames)
   db.prepare(`DELETE FROM session WHERE harness IN (${placeholders})`).run(...rawNames)
   db.prepare(`DELETE FROM harness_rollup WHERE harness IN (${placeholders})`).run(...rawNames)
   db.prepare(`DELETE FROM problems WHERE harness IN (${placeholders})`).run(...rawNames)
@@ -161,7 +189,24 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 20
+export const SCHEMA_VERSION = 22
+
+/**
+ * The refusal a store written by a newer KyberDash earns.
+ *
+ * WHY it is one function and not a literal at each call site: the store
+ * refuses to open such a store, and every tool that reads a store *without*
+ * opening it for writing has to refuse it the same way — the vacuum's dry
+ * run reads the store's page counters and cannot open it for writing. Two
+ * literals would drift, and a drifted refusal is a refusal nobody recognises
+ * when the engine's own refresh reports one.
+ */
+export function schemaVersionRefusal(path: string, from: number, to: number = SCHEMA_VERSION): string {
+  return (
+    `canon store at ${path} was built with schema version ${from}, ` +
+    `but this build understands version ${to}; upgrade KyberDash`
+  )
+}
 
 /**
  * How much of the write-ahead log the store keeps on disk once a checkpoint
@@ -195,11 +240,34 @@ export const WAL_SIZE_LIMIT_BYTES = 32 * 1024 * 1024
 export const DETECTOR_VERSION = 4
 
 /**
+ * Metadata key: the records-write marker.
+ *
+ * WHY it exists: the derived tables (`session`, `run`, `execution`, `finding`)
+ * are a cache over `records`, and rebuilding them over a real corpus costs
+ * ~26 s of CPU. A pass that rebuilds on a timer burns that CPU whether or not
+ * anything changed. The marker is the corpus's change signal: every write to
+ * `records` bumps it, so a pass can ask "did the corpus move since the last
+ * rebuild?" in one metadata read instead of rebuilding to find out.
+ *
+ * It is a counter rather than a timestamp because the only question asked is
+ * "same or different", and a counter cannot go backwards when two writers
+ * race.
+ */
+export const RECORDS_WRITE_MARKER_KEY = 'records_write_seq'
+
+/**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
  * constructing against an existing store is a no-op and a fresh clone builds
  * the empty store on first use. The tokenization cache table is created here
  * because the schema is versioned as one unit; its accessors arrive with the
  * tokenizer (task 3.3).
+ *
+ * The turn table is the one exception, and it is not an oversight: it is
+ * materialized where turns are written and read -- by the migration that
+ * backfills them, by the session write path, and by the raw-handle accessor a
+ * consumer queries directly. A store that has never held a turn row does not
+ * carry the table, so a store that predates it stays the store it was instead
+ * of growing a table from the build that opens it.
  */
 /**
  * The one table the constructor needs before it can ask what version the
@@ -211,6 +279,43 @@ CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+`
+
+/**
+ * The turns of a session, one row per turn.
+ *
+ * A session row used to carry its whole session in a single `payload` column
+ * -- 15.3 MB for one session of 10,933 turns, 79.6 MB across the 336-session
+ * corpus -- so reading one session's turns meant reading the whole blob. The
+ * turns live here instead, one row each, and the session row keeps the rest
+ * of the session.
+ *
+ * `turn_index` is the turn's own index, copied verbatim from the payload: the
+ * projection writes a 0-based `index` on every turn, so copying that value
+ * settles the base question without a convention of our own. The index on
+ * `(session_id, turn_index)` is the reader's path -- one session's turns, in
+ * order -- and is not unique on purpose: a legacy payload may repeat an
+ * index, and the migration replaces a session's rows wholesale rather than
+ * dropping a turn whose index it has already stored.
+ *
+ * `turn_json` holds the turn's deflated JSON -- the same `deflateSync` form
+ * `records.parts_json` holds, and the same reason: the turn rows are the
+ * split's bulk, and 40,621 of them uncompressed would give the split's
+ * storage win straight back. The column's declared type is left as it was
+ * when the v22 migration created the table, because the schema and the
+ * migration are not this change's to make: SQLite's dynamic typing keeps the
+ * deflated bytes a BLOB value in a TEXT column all the same, and the readers
+ * tell the two forms apart by the storage class the value comes back with.
+ * A row written before the compression landed holds the plain JSON, and the
+ * readers accept that form too.
+ */
+export const SESSION_TURN_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS session_turn (
+  session_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  turn_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_turn_by_session ON session_turn (session_id, turn_index);
 `
 
 export const SCHEMA_SQL = `
@@ -265,9 +370,32 @@ CREATE TABLE IF NOT EXISTS session (
   settled_at TEXT,
   transcript_path TEXT,
   transcript_offset INTEGER DEFAULT 0,
+  -- Materialized summary of the payload: the serialized $.summary object
+  -- and the json_array_length($.problems) of the payload's problem list.
+  -- Both are nullable and carry no DEFAULT on purpose: NULL is the legacy
+  -- sentinel meaning "not materialized", so a reader knows to derive the
+  -- value from the payload instead of mistaking it for an empty summary or
+  -- a zero problem count.
+  summary_json TEXT,
+  problems_count INTEGER,
+  -- The context window's provenance, materialized from the payload's
+  -- $.context.contextLimitSource: the corpus exposes that value only
+  -- inside the payload blob today, so counting the unknown-window sessions
+  -- paged every payload in the table. Nullable with no DEFAULT on purpose:
+  -- NULL is the "not materialized" sentinel, so a reader knows to derive the
+  -- value from the payload instead of mistaking it for a recorded source.
+  context_limit_source TEXT,
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_started ON session (started);
+-- The covering index for the sessions list is not here: it lives in
+-- createSessionDenormIndex, because it cannot be unconditional DDL in this
+-- constant. A store that predates the current session shape carries its own
+-- older session table, and an index over columns that table does not have
+-- cannot be created at all -- the store would fail to open rather than
+-- migrate. The constructor runs it right after this schema, and the v20 ->
+-- v21 migration runs it inside its own step, so both creation paths have it.
+
 -- Derived runs: group executions into user-initiated units of work.
 -- Grouping basis (explicit or derived) and rule are recorded per row (D13).
 CREATE TABLE IF NOT EXISTS run (
@@ -440,6 +568,90 @@ CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
 );
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
+/**
+ * The columns the sessions-list covering index carries, in order.
+ *
+ * `started` leads, descending, so the scan answers the reader's
+ * `ORDER BY started DESC` with no sort step. The rest follow the reader's
+ * select list in reader order, so the index alone answers the whole list
+ * query.
+ *
+ * The DDL below names these columns in this order; the guard in
+ * `createSessionDenormIndex` needs them by name, to decide whether a store's
+ * session table can carry the index at all.
+ */
+const SESSION_DENORM_INDEX_COLUMNS = [
+  'started',
+  'session_id',
+  'harness',
+  'label',
+  'is_subagent',
+  'parent_session',
+  'agent_name',
+  'repo',
+  'branch',
+  'ended',
+  'summary_json',
+  'problems_count',
+] as const
+
+/**
+ * The covering index for the sessions list, as DDL.
+ *
+ * <remarks>
+ * The index is what makes the denormalization worth anything. `ALTER TABLE`
+ * appends the materialized columns after `payload`, so a table-row read for
+ * `summary_json` still walks the payload's overflow chain: on the measured
+ * corpus the denormalization alone moved the cost rather than removing it.
+ * An index carrying the reader's whole select list answers the list query
+ * from the index alone.
+ *
+ * The rowid every SQLite index carries keeps the entries unique, so the
+ * leading `started DESC` needs no tiebreaker of its own.
+ */
+const SESSION_DENORM_INDEX_SQL = `CREATE INDEX IF NOT EXISTS session_denorm_idx
+  ON session (started DESC, session_id, harness, label, is_subagent,
+              parent_session, agent_name, repo, branch, ended,
+              summary_json, problems_count)`
+
+/**
+ * Create the covering index for the sessions list, when the session table
+ * can carry it.
+ *
+ * <remarks>
+ * Two creation paths, one DDL: the v20 -> v21 migration runs it inside its
+ * own step, so the index lands with the columns it covers and with the
+ * version stamp; the constructor runs it after the schema, so a fresh store
+ * is born with it. `IF NOT EXISTS` makes both idempotent, so the
+ * constructor's run on every open is a no-op once the index exists.
+ *
+ * The session table's shape is not the current schema's for every store: a
+ * store that predates it carries its own older table, and an index over
+ * columns that table does not have cannot be created at all. Such a store
+ * gains nothing from the index — the reader's own statement names the same
+ * columns, so it cannot read that table either — and failing the open over
+ * it would be worse than leaving it without the index. So the creation is
+ * skipped, and the store opens and migrates as it always did.
+ *
+ * @returns Whether this call created the index. A caller that needs the
+ * planner's statistics for it uses this: SQLite writes one statistics row per
+ * analyzed index, so an index created after the last analysis carries none,
+ * and the planner then keeps choosing a different index for the sessions
+ * list.
+ */
+function createSessionDenormIndex(db: Database): boolean {
+  const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+  if (!hasSession) return false
+  const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+  if (!SESSION_DENORM_INDEX_COLUMNS.every((column) => cols.includes(column))) return false
+  const existing = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='session_denorm_idx'")
+    .get()
+  if (existing !== undefined) return false
+  db.exec(SESSION_DENORM_INDEX_SQL)
+  return true
+}
+
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
   return {
@@ -485,12 +697,54 @@ export function normalizeIngestSource(source: string): string {
 }
 
 /**
+ * How a migration hands the event loop back between sessions.
+ *
+ * <remarks>
+ * The seam is injected rather than hard-wired so a test can count the yields:
+ * the count is the contract, not a timing threshold.
+ */
+export type MigrationYield = () => Promise<void>
+
+/**
+ * The options a migration step takes.
+ *
+ * <remarks>
+ * A step given no `yield` runs synchronously — the shape the store's
+ * constructor needs, where an open is one blocking pass. A step given a
+ * `yield` may hand the event loop back between sessions, and its caller
+ * awaits it.
+ */
+export type MigrationOptions = {
+  /**
+   * Called between sessions to hand the event loop back.
+   *
+   * <remarks>
+   * The seam is called inside the step's transaction. That is safe because
+   * the transaction and its write lock live on the SQLite connection, not on
+   * the JavaScript stack: an await between two statements neither commits
+   * nor rolls back, and the connection keeps the write lock for the whole
+   * transaction. The connection is the migration's own — the caller owns it
+   * and hands it to nobody else — so no other writer can join the
+   * transaction through it, and another connection cannot write at all
+   * while the lock is held.
+   */
+  yield?: MigrationYield
+}
+
+/**
  * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
  * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
  * this work: every statement in it is `IF NOT EXISTS`, so an existing table
  * never gains a column.
+ *
+ * A step returns a promise only when it is given a yield seam; the
+ * synchronous open path passes none, and every step then runs to completion
+ * before the transaction is committed.
  */
-export const MIGRATIONS: Record<number, (db: Database) => void> = {
+export const MIGRATIONS: Record<
+  number,
+  (db: Database, options?: MigrationOptions) => void | Promise<void>
+> = {
   // v1 -> v2: structured content parts. v1 stored content as a flat string
   // per bucket, which has nowhere to put the ground-truth MCP server a tool
   // definition arrived under, nor a harness-reported per-part token count.
@@ -832,6 +1086,358 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       db.exec('ALTER TABLE session ADD COLUMN transcript_offset INTEGER DEFAULT 0')
     }
   },
+  // v20 -> v21: materialized session summary columns.
+  // `summary_json` holds the serialized `$.summary` object of the session
+  // payload and `problems_count` the payload's `json_array_length($.problems)`,
+  // so a reader can serve them without reparsing the payload.
+  // Neither column carries a DEFAULT: NULL is the legacy sentinel meaning
+  // "not materialized" — a row that predates the columns must be derived from
+  // its payload, never read as an empty summary or a zero problem count. A
+  // DEFAULT would erase exactly that distinction.
+  // Each ADD COLUMN is presence-guarded, as migration 19's are: re-running the
+  // step, or opening a store an off-main build already stamped 21, must not
+  // die on "duplicate column name".
+  20: (db: Database) => {
+    const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+    if (!hasSession) return
+    const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes('summary_json')) {
+      db.exec('ALTER TABLE session ADD COLUMN summary_json TEXT')
+    }
+    if (!cols.includes('problems_count')) {
+      db.exec('ALTER TABLE session ADD COLUMN problems_count INTEGER')
+    }
+    // The covering index for the sessions list, created in this step, right
+    // after the columns it covers: the constructor runs the migration first
+    // -- the columns have to exist before an index can cover them -- and the
+    // schema second, so the index has to be created here to land with the
+    // columns and the version stamp, in one step.
+    createSessionDenormIndex(db)
+    // The planner's cost information for `session`: real statistics for the
+    // covering index and the table as the corpus grows, and the same plan on
+    // every path — which is what the contract's EXPLAIN pin asserts. The
+    // covering index above is the mechanism, not these statistics: on this
+    // build the planner already picks it with no `sqlite_stat1` rows at all.
+    //
+    // They are written here, inside the step's transaction, rather than at
+    // connection open: the reader opens the store read-only and a read-only
+    // connection cannot write `sqlite_stat1`.
+    db.exec('ANALYZE session')
+  },
+  // v21 -> v22: the session's turns leave the payload blob.
+  //
+  // A session row carried its whole session in one `payload` column -- 15.3 MB
+  // for a single session of 10,933 turns -- so reading one session's turns
+  // meant reading the whole blob. The turns move to their own `session_turn`
+  // table, one row per turn, and the payload keeps the rest of the session.
+  // The context window's provenance moves to a column as well, so the count of
+  // unknown-window sessions stops paging every payload blob in the table.
+  //
+  // The v21 step added `summary_json` and `problems_count` and backfilled
+  // neither: the corpus was left unmaterialized, and the reader falls back to
+  // the payload whenever those columns are NULL. This step is the one pass
+  // that already walks every session row, so it materializes them as it goes
+  // -- with the writer's own derivation, so a migrated row and a written row
+  // carry the same values. A store that migrates to v22 therefore comes out
+  // the other side materialized.
+  //
+  // The table and the column are presence-guarded, as migration 19's and 20's
+  // are: re-running the step, or opening a store an off-main build already
+  // stamped 22, must not die on "table already exists" or "duplicate column
+  // name", and must not add a second row for a turn it already stored.
+  //
+  // The step runs synchronously when it is given no yield seam — the
+  // constructor's open is one blocking pass — and yields between sessions
+  // when it is given one, so an opening server can answer requests while the
+  // corpus is upgraded. Both paths do the same work and commit the same
+  // transaction.
+  21: (db: Database, options?: MigrationOptions): void | Promise<void> => {
+    db.exec(SESSION_TURN_TABLE_SQL)
+    const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+    if (!hasSession) return
+    const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes('context_limit_source')) {
+      db.exec('ALTER TABLE session ADD COLUMN context_limit_source TEXT')
+    }
+    if (options?.yield === undefined) {
+      backfillSessionTurns(db)
+      finishSessionStatistics(db)
+      return
+    }
+    return runYieldingSessionTurnBackfill(db, options.yield)
+  },
+}
+
+/**
+ * The v21 -> v22 step as the yielding open path runs it: the same backfill,
+ * handing the event loop back between sessions, and the same statistics at
+ * the end.
+ */
+async function runYieldingSessionTurnBackfill(db: Database, yieldToLoop: MigrationYield): Promise<void> {
+  await backfillSessionTurnsYielding(db, yieldToLoop)
+  finishSessionStatistics(db)
+}
+
+/**
+ * The migration's last act: the covering index for the sessions list, and the
+ * planner's statistics for `session`.
+ *
+ * <remarks>
+ * This mirrors MIGRATIONS[20] exactly, and the order is the point: the index
+ * is created first, because a statistics row can only exist for an index that
+ * exists, and `ANALYZE session` writes one row per analyzed index.
+ *
+ * WHY the migration writes them, rather than leaving it to the close-time
+ * `PRAGMA optimize`: the deployed store is held open by the engine, so that
+ * optimization never runs while the dashboard serves. A store that is already
+ * at v21 runs neither MIGRATIONS[20] — which the v21 -> v22 path skips — nor
+ * the constructor's new-store branch, so without this the covering index is
+ * left with no statistics at all, while the table's other indexes carry
+ * theirs. SQLite then falls back to an estimate for the unanalysed index
+ * that keeps it out of the plan, and the sessions list is planned over
+ * `session_by_started` instead: a non-covering scan that reads every row's
+ * payload. Measured on the deployed corpus, that is the plan the dashboard
+ * served; the statistics are what put the covering scan back.
+ */
+function finishSessionStatistics(db: Database): void {
+  createSessionDenormIndex(db)
+  db.exec('ANALYZE session')
+}
+
+/**
+ * The context window's provenance, as the new column stores it.
+ *
+ * `payload.context.contextLimitSource` is the only place the corpus exposes
+ * that value today; the column carries the same value, so a reader stops
+ * paging every payload blob to count the unknown-window sessions. A payload
+ * with no context object, or with a source that is not a string, has no
+ * provenance to materialize: NULL, never a fabricated value.
+ */
+function contextLimitSourceOf(payload: Record<string, unknown>): string | null {
+  const context = payload['context']
+  if (typeof context !== 'object' || context === null || Array.isArray(context)) return null
+  const source = (context as Record<string, unknown>)['contextLimitSource']
+  return typeof source === 'string' ? source : null
+}
+
+/**
+ * The context window's provenance, as the column stores it, derived from the
+ * serialized payload a session row stores.
+ *
+ * The migration derives the column from the payload it finds in the corpus;
+ * the write path derives it from the payload it is about to store. Both go
+ * through `contextLimitSourceOf`, so the two derivations cannot disagree: a
+ * row written after the migration carries the same value the migration would
+ * have written for it, and a payload with no provenance carries NULL.
+ *
+ * Derived from the serialized payload rather than from the caller's object,
+ * for the same reason `materializeSessionSummary` does it that way: the column
+ * must describe the blob the row holds, not the object the blob came from.
+ */
+function materializeContextLimitSource(payloadJson: string): string | null {
+  const payload = parseJsonObject(payloadJson)
+  return payload === undefined ? null : contextLimitSourceOf(payload)
+}
+
+/**
+ * The index a turn carries inside the payload, verbatim.
+ *
+ * The projection writes a 0-based `index` on every turn, so copying that
+ * value settles the base question without a convention of our own: the row
+ * names the turn by the number the turn was given. A turn that carries no
+ * index at all falls back to its position in the array, so the row still
+ * names an order.
+ */
+function turnIndexOf(turn: unknown, position: number): number {
+  if (typeof turn === 'object' && turn !== null && !Array.isArray(turn)) {
+    const index = (turn as Record<string, unknown>)['index']
+    if (typeof index === 'number' && Number.isFinite(index)) return index
+  }
+  return position
+}
+
+/**
+ * One session's turns, split out of the blob that carried them.
+ *
+ * The blob a session row stores and the turn rows it owns are two views of
+ * one session: the blob keeps the session's metadata, the rows keep its
+ * turns. The split follows the rules the v22 migration applied to the rows it
+ * found, so a session written now is stored the way a session upgraded now
+ * would have been — the two paths cannot drift apart:
+ *
+ * - A payload with no `turns` key is left byte for byte as it is. There is
+ *   nothing to split, and re-serializing it would rewrite bytes nobody asked
+ *   to rewrite.
+ * - A payload with a `turns` key loses it — an empty array included, because
+ *   a key that names an empty list still says "the turns are here", and after
+ *   the split they are not — and keeps every other key in the order it had,
+ *   so a reader that diffs two payloads sees the turns leaving and nothing
+ *   else moving.
+ * - Each turn becomes a row, named by the turn's own `index` (or by its
+ *   position, when the turn names none) and carrying the turn's own JSON.
+ */
+function splitSessionTurns(payloadJson: string): {
+  payload: string
+  turns: Array<{ index: number; stored: CompressedColumn }>
+} {
+  const payload = parseJsonObject(payloadJson)
+  // A payload that does not parse is stored whole, exactly as it came: the
+  // write path owns the blob it is handed, and a blob it cannot read is a
+  // blob it must not rewrite.
+  if (payload === undefined) return { payload: payloadJson, turns: [] }
+  if (!Object.prototype.hasOwnProperty.call(payload, 'turns')) {
+    return { payload: payloadJson, turns: [] }
+  }
+  const turns = payload['turns']
+  // A `turns` key that is not an array names no turn, so it names no row --
+  // but the key still leaves the payload, as the migration's split left it.
+  const rows = Array.isArray(turns)
+    ? turns.map((turn, position) => ({
+        index: turnIndexOf(turn, position),
+        // The turn's own JSON, deflated: the turn rows are the split's bulk
+        // (40,621 of them on the measured corpus), so they are stored the way
+        // `records.parts_json` is stored -- compressed, and read back
+        // decompressed. Compressing them at the writer is what keeps the
+        // split's storage win from being given back by uncompressed turn
+        // JSON. A row written before this change holds the plain JSON, and
+        // the readers accept both forms.
+        stored: compressColumn(turn),
+      }))
+    : []
+  delete payload['turns']
+  return { payload: JSON.stringify(payload), turns: rows }
+}
+
+/**
+ * Move every session's turns out of its payload and into `session_turn`, and
+ * materialize the columns the corpus now reads instead of the payload.
+ *
+ * Three things happen per row, and they are deliberately not the same thing:
+ *
+ * - `summary_json`, `problems_count` and `context_limit_source` are populated
+ *   for EVERY row the step processes, a row with no turns included. The
+ *   columns are new to this corpus, and a consumer that reads them must not
+ *   silently miss rows because the row happened to carry no turns: a NULL
+ *   there would read as "no provenance recorded" for a session whose payload
+ *   names one.
+ * - The turn split is confined to rows that carry a `turns` key. A row
+ *   without one has no turns to remove, so its payload is left exactly as it
+ *   is -- byte for byte, not re-serialized.
+ *
+ * WHY the summary columns are materialized here, and not left to the writer:
+ * the reader falls back to the payload whenever they are NULL (the legacy
+ * path in `dash/src/server/bridge.ts`), so a corpus whose columns were never
+ * populated pays a payload parse on every sessions-list read. Measured
+ * against the live 3.3 GB corpus, that is the difference between a 4.61 ms
+ * warm list and a 55.79 ms one. This step is the one pass that already walks
+ * every session row, so materializing here costs no extra traversal -- and a
+ * store that migrates to v22 comes out the other side materialized, exactly
+ * as if every row had been written by this build.
+ *
+ * The values are the writer's values: `sessionSummaryOf` is the same rule
+ * `upsertSession` derives the columns through, so a migrated row and a
+ * written row carry identical columns for the same payload. They are derived
+ * from the payload AS IT WAS BEFORE the turn split -- the summary and the
+ * problems live in the session's metadata, not in its turns, so the split
+ * cannot move them.
+ *
+ * The rewritten payload keeps the original's own key order, minus `turns`:
+ * the blob is built from the parsed original's key sequence, so a reader
+ * that diffs two payloads sees the turns leaving and nothing else moving.
+ *
+ * A session's rows are replaced wholesale -- delete, then insert -- so a
+ * re-run of the step cannot leave two rows for one turn.
+ *
+ * The pass has two drivers over one per-session worker: the synchronous one
+ * the constructor's open path uses, and the yielding one the asynchronous
+ * open path uses. The work is the same in both; only the hand-back to the
+ * event loop differs.
+ */
+function backfillSessionTurns(db: Database): void {
+  const backfill = backfillStatements(db)
+  for (const sessionId of backfillSessionIds(db)) backfillOneSession(backfill, sessionId)
+}
+
+/**
+ * The same backfill, handing the event loop back between sessions.
+ *
+ * <remarks>
+ * The yield is between sessions and inside the step's transaction: the
+ * transaction and its write lock live on the SQLite connection, not on the
+ * JavaScript stack, so the await neither commits nor rolls back and the step
+ * stays one atomic unit. The connection is the migration's own, so no other
+ * writer can join the transaction through it.
+ */
+async function backfillSessionTurnsYielding(db: Database, yieldToLoop: MigrationYield): Promise<void> {
+  const backfill = backfillStatements(db)
+  for (const sessionId of backfillSessionIds(db)) {
+    backfillOneSession(backfill, sessionId)
+    await yieldToLoop()
+  }
+}
+
+/** The sessions the backfill walks, in storage order. */
+function backfillSessionIds(db: Database): string[] {
+  return (db.prepare('SELECT session_id FROM session').all() as { session_id: string }[]).map(
+    (row) => row.session_id,
+  )
+}
+
+/** The statements the backfill writes with, prepared once for the pass. */
+function backfillStatements(db: Database): SessionTurnBackfill {
+  return {
+    readPayload: db.prepare('SELECT payload FROM session WHERE session_id = ?'),
+    writePayload: db.prepare('UPDATE session SET payload = ? WHERE session_id = ?'),
+    writeMaterialized: db.prepare(
+      'UPDATE session SET summary_json = ?, problems_count = ?, context_limit_source = ? WHERE session_id = ?',
+    ),
+    deleteTurns: db.prepare('DELETE FROM session_turn WHERE session_id = ?'),
+    insertTurn: db.prepare(
+      'INSERT INTO session_turn (session_id, turn_index, turn_json) VALUES (?, ?, ?)',
+    ),
+  }
+}
+
+/**
+ * One session's backfill: the materialized columns are filled in from the
+ * payload the row still carries, and the turns move to their own rows.
+ */
+function backfillOneSession(backfill: SessionTurnBackfill, sessionId: string): void {
+  const row = backfill.readPayload.get(sessionId) as { payload: string } | undefined
+  if (row === undefined) return
+  const payload = parseJsonObject(row.payload)
+  // A payload that does not parse is left exactly as it is: the upgrade must
+  // not take a whole corpus down over one unreadable row.
+  if (payload === undefined) return
+  // The columns are derived from the payload this row still carries, before
+  // the turn split rewrites it -- and from the writer's own rule, so a
+  // migrated row and a written row agree.
+  const summary = sessionSummaryOf(payload)
+  backfill.writeMaterialized.run(
+    summary.summary_json,
+    summary.problems_count,
+    contextLimitSourceOf(payload),
+    sessionId,
+  )
+  if (!Object.prototype.hasOwnProperty.call(payload, 'turns')) return
+  const turns = payload['turns']
+  backfill.deleteTurns.run(sessionId)
+  if (Array.isArray(turns)) {
+    for (const [position, turn] of turns.entries()) {
+      backfill.insertTurn.run(sessionId, turnIndexOf(turn, position), compressColumn(turn))
+    }
+  }
+  delete payload['turns']
+  backfill.writePayload.run(JSON.stringify(payload), sessionId)
+}
+
+/** The statements the v22 backfill writes with. */
+type SessionTurnBackfill = {
+  readonly readPayload: StatementSync
+  readonly writePayload: StatementSync
+  readonly writeMaterialized: StatementSync
+  readonly deleteTurns: StatementSync
+  readonly insertTurn: StatementSync
 }
 
 /** Escape a literal for a LIKE pattern: backslash, percent, and underscore match themselves. */
@@ -958,6 +1564,24 @@ export type QuarantinedLog = {
   harness?: string
 }
 
+/** What the request-body matcher needs of a model call: no content, no raw. */
+export type ModelCallCandidate = {
+  spanId: string
+  timestamp: string
+  /** Null only if a legacy row stored none; the matcher treats that as unknown. */
+  durationMs: number | null
+}
+
+type CandidateRow = { span_id: unknown; timestamp: unknown; duration_ms: unknown }
+
+function toCandidate(row: CandidateRow): ModelCallCandidate {
+  return {
+    spanId: String(row.span_id),
+    timestamp: String(row.timestamp),
+    durationMs: typeof row.duration_ms === 'number' ? row.duration_ms : null,
+  }
+}
+
 export type RecordRow = {
   span_id: unknown
   trace_id: unknown
@@ -1008,6 +1632,11 @@ export function decompressRaw(blob: Uint8Array): unknown {
  * `content_json` carries something else), otherwise `content_json` decides.
  * Both callers (the store method below and the store-less bridge path) read
  * through here so the two seams cannot diverge.
+ *
+ * The parts are read from either stored form — the deflated one, and the
+ * plain JSON a row written before the compression landed holds — so a
+ * pre-change row keeps the system prompts it holds instead of falling
+ * through to a `content_json` that is '{}' on a parts-carrying row.
  * </remarks>
  */
 export function systemPromptTextsFromContentColumns(
@@ -1015,16 +1644,12 @@ export function systemPromptTextsFromContentColumns(
   partsJson: unknown,
 ): string[] {
   if (partsJson !== null && partsJson !== undefined) {
-    try {
-      const parts = decompressRaw(partsJson as Uint8Array) as ContentPart[]
-      if (Array.isArray(parts) && parts.length > 0) {
-        return [...parts]
-          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string' && part.text !== '')
-          .map((part) => part.text)
-      }
-    } catch {
-      // A corrupt blob falls through to content_json — same as partsFromRow.
+    const parts = decompressColumn(partsJson)
+    if (Array.isArray(parts) && parts.length > 0) {
+      return [...parts]
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string' && part.text !== '')
+        .map((part) => part.text)
     }
   }
   if (typeof contentJson === 'string' && contentJson !== '' && contentJson !== '{}') {
@@ -1176,6 +1801,15 @@ function nullableText(value: unknown): string | null {
  * `JSON.stringify`, `Object.keys` and deep equality all see the same shape,
  * in the same order, with the same values. Redefining a key the literal
  * already declared keeps its original position in that order.
+ *
+ * Assigning `undefined` RELEASES the field rather than storing an absent
+ * value: the next read derives it again. The two uses are different on
+ * purpose. The payload reduction REPLACES the payload with the attributes the
+ * derived views read — a defined value, so it stays cached for the record's
+ * lifetime. The parts are RELEASED once the readers have counted them: the
+ * decompressed text is the session's working set, and a reader that genuinely
+ * needs it again (the twin collapse's content transplant, a subagent's task
+ * summary) asks for it and inflates it once more.
  */
 function defineLazy<T>(target: object, key: string, compute: () => T): void {
   let value: T
@@ -1192,9 +1826,45 @@ function defineLazy<T>(target: object, key: string, compute: () => T): void {
     },
     set(next: T): void {
       value = next
-      computed = true
+      computed = next !== undefined
     },
   })
+}
+
+/**
+ * Drop a record's parts, and the content derived from them.
+ *
+ * WHY: the parts are a record's largest field, and the projection reads them
+ * once — to count them into the composition's bucket totals, the tool
+ * catalogue and the skills listing — and then has no further use for the
+ * text. `defineLazy` caches what it computed, so the decompressed parts
+ * stayed alive for as long as the record, and the record lives as long as the
+ * session: on the measured corpus ~10,933 turns x 64 KB of text, about 1.4 GB
+ * as UTF-16, which is what the used heap spiked to.
+ *
+ * The release is a RELEASE, not a destruction: the lazy fields are marked
+ * unread, so a later read derives them again from the row. A reader that
+ * needs the raw text after the release therefore pays one more inflation, and
+ * the projection keeps the reduced value rather than the text.
+ */
+export function releaseRecordParts(record: CanonicalRecord): void {
+  releaseLazyField(record, 'parts')
+  releaseLazyField(record, 'content')
+}
+
+/**
+ * Release one lazy field: drop what it cached and mark it unread, so a later
+ * read derives it again.
+ *
+ * Only a LAZY field is released. A plain value is the record's own data — a
+ * record built by hand, or the twin collapse's merged record — and there is
+ * nothing to re-derive it from, so releasing it would lose it.
+ */
+function releaseLazyField(record: CanonicalRecord, key: 'parts' | 'content'): void {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key)
+  if (descriptor === undefined) return
+  if (descriptor.get === undefined || descriptor.set === undefined) return
+  ;(record as unknown as Record<string, unknown>)[key] = undefined
 }
 
 export function toRecord(row: RecordRow): CanonicalRecord {
@@ -1235,13 +1905,223 @@ export function toRecord(row: RecordRow): CanonicalRecord {
     // measured 166 MB of uncompressed `content_json` against 40 MB for the
     // same text compressed as parts — a 4x store for one copy of the data,
     // which is the shape of the 2.9 GB problem R12.4 exists to prevent.
-    defineLazy(record, 'parts', () => decompressRaw(row.parts_json as Uint8Array) as ContentPart[])
+    //
+    // The column holds the deflated parts, and the plain JSON a row written
+    // before the compression landed still holds. Both are read, so a
+    // pre-change row keeps its parts: falling back to `content_json` would
+    // lose them, because that column is '{}' on a parts-carrying row.
+    //
+    // A column that holds neither form reads as no parts, and the content
+    // falls back to `content_json` — one unreadable cell must not take the
+    // record's reader down with it.
+    defineLazy(record, 'parts', () => decompressColumn(row.parts_json) as ContentPart[] | undefined)
     defineLazy(record, 'content', () => ({
       ...contentFromParts(record.parts ?? []),
       ...(JSON.parse(text(row.content_json)) as CanonicalRecord['content']),
     }))
   }
   return record
+}
+
+/**
+ * One record of a session, with the attributes the derived views read.
+ *
+ * The record still carries its payload; the reduced attributes are handed
+ * over beside it so the caller can compare the two before adopting them.
+ */
+export type ProjectedSessionRecord = {
+  /** The record, in session order. */
+  record: CanonicalRecord
+  /** The attributes the derived views read, in place of the payload. */
+  attributes: Record<string, unknown>
+}
+
+/**
+ * The raw attributes the derived views read out of a record's payload.
+ *
+ * EVERY reader of `record.raw` in the projection path is listed here, because
+ * a key missing from this list is a key whose value the projection would
+ * silently lose:
+ *
+ *   - the session analysis (`canon/sessions.ts`): the model, the agent, the
+ *     repository and branch, the tool name and status, the operation, the
+ *     parent session, the subagent identity and description, and the tool
+ *     arguments the task summary reads;
+ *   - the twin-collector collapse (`canon/twin-dedupe.ts`): the join keys and
+ *     the record's provenance;
+ *   - the context-window derivation (`canon/context-window.ts`): the reported
+ *     and declared window attributes, and the model identity;
+ *   - the skills view (`canon/skills.ts`): the listing and invocation keys;
+ *   - the run derivation (`canon/runs.ts`) and its outcome (`canon/outcome.ts`):
+ *     the run, working-directory, parent-session and agent attributes, and the
+ *     termination attributes;
+ *   - the finding detectors (`analysis/findings.ts`, `analysis/compare.ts`,
+ *     `analysis/signals.ts`): the tool arguments, the tool result and the
+ *     command attributes.
+ */
+const PROJECTED_ATTRIBUTE_KEYS: ReadonlySet<string> = new Set([
+  // The session analysis (`canon/sessions.ts`).
+  'gen_ai.response.model',
+  'gen_ai.request.model',
+  'model',
+  'gen_ai.agent.name',
+  'agent.name',
+  'vcs.repository.name',
+  'repo',
+  'vcs.ref.head.name',
+  'branch',
+  'gen_ai.operation.name',
+  'gen_ai.tool.name',
+  'tool.name',
+  'gen_ai.tool.status',
+  'status',
+  'is_error',
+  'isError',
+  'gen_ai.is_subagent',
+  'is_subagent',
+  'parent_session',
+  'parent_session_id',
+  'gen_ai.parent_session_id',
+  'parentSession',
+  'parentSessionId',
+  'gen_ai.prompt',
+  'prompt',
+  'agent_id',
+  'agentId',
+  'subagent_id',
+  'subagentId',
+  'agent.id',
+  'gen_ai.agent.id',
+  'agent_type',
+  'agentType',
+  'gen_ai.agent.type',
+  'agent_name',
+  'agentName',
+  'agent',
+  'description',
+  'task_description',
+  'taskDescription',
+  'task',
+  'gen_ai.agent.description',
+  'summary',
+  'arguments',
+  'gen_ai.tool.arguments',
+  'tool.arguments',
+  'tool_arguments',
+  'parameters',
+  'gen_ai.agent.arguments',
+  'task.description',
+  // The context-window derivation (`canon/context-window.ts`).
+  'contextWindow',
+  'gen_ai.request.max_context_tokens',
+  'gen_ai.request.context_window',
+  'model_context_window',
+  'declaredContextWindow',
+  // The twin-collector collapse (`canon/twin-dedupe.ts`).
+  'gen_ai.response.id',
+  'request_id',
+  'requestId',
+  'provenance',
+  // The skills view (`canon/skills.ts`).
+  'kyber.skills.listed',
+  'kyber.skills.invoked',
+  'github.copilot.context.skills',
+  'gen_ai.skills',
+  'gen_ai.usage.skill_tokens',
+  // The run derivation (`canon/runs.ts`).
+  'process.working_directory',
+  'working_directory',
+  'cwd',
+  'workspace.root',
+  'project.path',
+  'gen_ai.run.id',
+  'run.id',
+  'run_id',
+  'runId',
+  'gen_ai.workflow.id',
+  'workflow.id',
+  'workflow_id',
+  'task.id',
+  'task_id',
+  // The run outcome (`canon/outcome.ts`).
+  'exitCode',
+  'exit_code',
+  'status_code',
+  'terminationReason',
+  'termination_reason',
+  'stop_reason',
+  'finish_reason',
+  'type',
+  'event',
+  'error',
+  'exception',
+  'editFailed',
+  'isCorrection',
+  'correctionRule',
+  'userMessage',
+  // The finding detectors (`analysis/findings.ts`, `analysis/compare.ts`,
+  // `analysis/signals.ts`).
+  'gen_ai.tool.arguments_hash',
+  'gen_ai.tool.result_bytes',
+  'result',
+  'output',
+  'tool_name',
+  'tool',
+  'tools',
+  'command',
+  'cmd',
+])
+
+/**
+ * The length above which a string value counts as payload rather than as an
+ * attribute: a harness's prompt, conversation or catalogue runs to tens of
+ * kilobytes, and an attribute the readers look up is a name, a path or a
+ * count. Values under the limit are kept whatever their key, so an attribute
+ * nobody listed still survives when it is small.
+ */
+const PROJECTED_VALUE_LIMIT = 4096
+
+/**
+ * A record's payload, reduced to the attributes the derived views read.
+ *
+ * Every key survives: the timeline's evidence scan reads the key names, and a
+ * key that names the evidence IS evidence. The values are what the projection
+ * cannot afford — the harness's prompt, conversation and catalogue — under
+ * keys no reader asks for. A value under `PROJECTED_VALUE_LIMIT` is kept
+ * whatever its key; a longer one is kept only when a reader asks for it by
+ * name.
+ */
+export function projectedAttributes(payload: unknown): Record<string, unknown> {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return {}
+  const attributes: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (typeof value === 'string') {
+      if (value.length <= PROJECTED_VALUE_LIMIT || PROJECTED_ATTRIBUTE_KEYS.has(key)) {
+        attributes[key] = value
+      }
+      continue
+    }
+    if (value !== null && typeof value === 'object') {
+      // An object or an array is payload unless a reader asks for it by name
+      // (`provenance`, the skills listing, the detector's tool list).
+      if (PROJECTED_ATTRIBUTE_KEYS.has(key)) attributes[key] = value
+      continue
+    }
+    attributes[key] = value
+  }
+  return attributes
+}
+
+/**
+ * Replace every record's payload with the attributes the derived views read.
+ *
+ * The payload is read and released one record at a time, so a session's
+ * payloads are never all live at once — which is the whole point: the
+ * measured corpus held 1.5 GB of them at once, and the heap spiked to 3.1 GB
+ * every projection.
+ */
+export function reduceRecordPayloads(records: readonly CanonicalRecord[]): void {
+  for (const record of records) record.raw = projectedAttributes(record.raw)
 }
 
 export type SessionDbRow = {
@@ -1284,6 +2164,269 @@ export function toSessionRow(row: SessionDbRow): SessionRow {
         : undefined,
     payload,
   }
+}
+
+/**
+ * The two materialized summary columns of one session payload, derived from
+ * the payload's own object.
+ *
+ * `summary_json` is the serialized `$.summary` object; `problems_count` is the
+ * length of the `$.problems` array. A payload carrying no such value writes
+ * NULL for that column: NULL is the "not materialized" sentinel, so the reader
+ * derives the value from the payload and lands on the answer it would have
+ * derived anyway. A fabricated `{}` or `0` would instead claim an empty
+ * summary, and a measured zero problem count, for a payload that was never
+ * measured.
+ *
+ * WHY this is the rule and `materializeSessionSummary` is its entry point:
+ * the rule has to be in ONE place, because two places is how a migrated
+ * corpus and a freshly written one end up describing the same session
+ * differently. The write path derives the columns from the serialized payload
+ * the row stores (`materializeSessionSummary`); the migration derives them
+ * from the object it has already parsed (`sessionSummaryOf`, this function).
+ * The context-limit column is shared the same way -- `contextLimitSourceOf`
+ * is the rule, `materializeContextLimitSource` is the write path's entry
+ * point -- so the two columns of a migrated row and a written row come from
+ * one derivation each.
+ */
+function sessionSummaryOf(record: Record<string, unknown>): {
+  summary_json: string | null
+  problems_count: number | null
+} {
+  const summary = record.summary
+  const problems = record.problems
+  return {
+    // A payload that carries no summary, or a null one, has no summary to
+    // materialize: NULL, never the string "null" and never an empty object.
+    summary_json: summary === undefined || summary === null ? null : JSON.stringify(summary),
+    // Only an array has a length to count. A missing or non-array `problems`
+    // is "never measured", not a count of zero.
+    problems_count: Array.isArray(problems) ? problems.length : null,
+  }
+}
+
+/**
+ * The two materialized summary columns of one session row, derived from the
+ * serialized payload the row stores.
+ *
+ * Derived from the serialized payload rather than from the caller's object, so
+ * the columns are exactly the `$.summary` and `$.problems` the stored payload
+ * holds -- the two cannot disagree. The rule itself is `sessionSummaryOf`,
+ * which the migration uses over the object it parses.
+ */
+function materializeSessionSummary(payloadJson: string): {
+  summary_json: string | null
+  problems_count: number | null
+} {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payloadJson)
+  } catch {
+    return { summary_json: null, problems_count: null }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { summary_json: null, problems_count: null }
+  }
+  return sessionSummaryOf(parsed as Record<string, unknown>)
+}
+
+/**
+ * The measured figures a session's summary carries.
+ *
+ * Every field is optional because the summary is optional: a session that
+ * measured nothing carries none of them, and a figure that is missing stays
+ * missing. A zero would claim a measured zero for a session that measured
+ * nothing.
+ */
+export type SessionSummaryFigureFields = {
+  turnCount?: number
+  totalInput?: number
+  totalOutput?: number
+  costStatus?: string
+  costValue?: number
+  costCurrency?: string
+  costUsdLegacy?: number
+}
+
+/** One session's measured figures, with the session they belong to. */
+export type SessionSummaryFigureRow = SessionSummaryFigureFields & { sessionId: string }
+
+/**
+ * The figures a summary carries, and where each one lives inside it.
+ *
+ * One list, two renderings: the materialized column holds the `$.summary`
+ * object itself, so its paths are `$.<path>`, while a payload holds that same
+ * object under `$.summary`, so its paths are `$.summary.<path>`. Deriving
+ * both statements from this one list is what stops the materialized read and
+ * the legacy read from drifting apart on which figure is which.
+ */
+const SESSION_FIGURE_FIELDS = [
+  { alias: 'turn_count', path: 'turn_count' },
+  { alias: 'total_input', path: 'total_input' },
+  { alias: 'total_output', path: 'total_output' },
+  { alias: 'cost_status', path: 'cost.status' },
+  { alias: 'cost_value', path: 'cost.value' },
+  { alias: 'cost_currency', path: 'cost.currency' },
+  { alias: 'cost_usd', path: 'cost.usd' },
+] as const
+
+/**
+ * The figures of a set of sessions, read out of the materialized column.
+ *
+ * `summary_json` holds the serialized `$.summary` object, so every figure is
+ * one JSON path inside it. The statement names no payload: naming `payload`
+ * at all, even inside `json_extract`, makes SQLite read and parse the whole
+ * blob of every row it touches, which is the cost this read exists to avoid.
+ * `summary_json` itself is selected beside the figures because its NULL is
+ * the writer's "not materialized" sentinel -- the only thing that says a row
+ * still has to be read out of its payload.
+ */
+function sessionFiguresSelect(placeholders: string): string {
+  const columns = SESSION_FIGURE_FIELDS.map(
+    (field) => `json_extract(summary_json, '$.${field.path}') AS ${field.alias}`,
+  ).join(', ')
+  return `SELECT session_id, summary_json, ${columns} FROM session WHERE session_id IN (${placeholders})`
+}
+
+/**
+ * The same figures, read out of a legacy row's own payload.
+ *
+ * The scope is the load-bearing part: `summary_json IS NULL` confines the
+ * payload read to the rows written before the materialization existed, so a
+ * materialized corpus never reads a byte of payload. A database whose schema
+ * predates the column has no materialized rows to scope to, and the scope is
+ * dropped for it -- every row there is a legacy row.
+ */
+function sessionFiguresLegacySelect(placeholders: string, scoped: boolean): string {
+  const columns = SESSION_FIGURE_FIELDS.map(
+    (field) => `json_extract(payload, '$.summary.${field.path}') AS ${field.alias}`,
+  ).join(', ')
+  const scope = scoped ? ' AND summary_json IS NULL' : ''
+  return `SELECT session_id, ${columns} FROM session WHERE session_id IN (${placeholders})${scope}`
+}
+
+/** One row of the figures read, with the aliases the field list names. */
+type SessionFigureDbRow = {
+  session_id: unknown
+  summary_json?: unknown
+  turn_count?: unknown
+  total_input?: unknown
+  total_output?: unknown
+  cost_status?: unknown
+  cost_value?: unknown
+  cost_currency?: unknown
+  cost_usd?: unknown
+}
+
+/**
+ * Whether a statement failed because the table has no such column.
+ *
+ * The one failure the reader recovers from: a database written before the
+ * materialized columns existed has no `summary_json` to read, and every row
+ * in it is a legacy row.
+ */
+function isMissingColumnError(err: unknown): boolean {
+  return err instanceof Error && /no such column/i.test(err.message)
+}
+
+/**
+ * The figures one row carries, with the guards this read has always applied.
+ *
+ * A figure the session did not measure stays missing: a summary without
+ * `turn_count` yields no turn count, never a zero. A status or a currency
+ * that is not a string is not a status or a currency. A number that is not
+ * finite is not a figure: a JSON document carrying `1e999` parses to Infinity,
+ * and an infinite total would poison every sum it enters.
+ */
+function sessionFigureFields(row: SessionFigureDbRow): SessionSummaryFigureFields {
+  const figure = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  const turnCount = figure(row.turn_count)
+  const totalInput = figure(row.total_input)
+  const totalOutput = figure(row.total_output)
+  const costValue = figure(row.cost_value)
+  const costUsdLegacy = figure(row.cost_usd)
+  return {
+    ...(turnCount !== undefined ? { turnCount } : {}),
+    ...(totalInput !== undefined ? { totalInput } : {}),
+    ...(totalOutput !== undefined ? { totalOutput } : {}),
+    ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
+    ...(costValue !== undefined ? { costValue } : {}),
+    ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
+    ...(costUsdLegacy !== undefined ? { costUsdLegacy } : {}),
+  }
+}
+
+/**
+ * The measured figures of a set of sessions.
+ *
+ * <remarks>
+ * One reader for both copies of this read: the store's own accessor and the
+ * bridge's direct-DB path differ only in which handle they hand over, so the
+ * two cannot disagree about what a session's figures are.
+ *
+ * The materialized column answers first. Only a row whose `summary_json` is
+ * NULL -- a row written before the materialization existed -- falls back to
+ * its own payload, and it falls back one row at a time, so a mixed corpus
+ * leaves the materialized rows alone and reads each legacy row's payload
+ * once.
+ * </remarks>
+ */
+export function readSessionSummaryFigures(
+  db: Database,
+  sessionIds: readonly string[],
+): SessionSummaryFigureRow[] {
+  const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+  const out: SessionSummaryFigureRow[] = []
+  const chunkSize = 900
+
+  for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+    const chunk = uniqueIds.slice(offset, offset + chunkSize)
+    for (const row of readSessionFigureRows(db, chunk)) {
+      if (typeof row.session_id !== 'string') continue
+      out.push({ sessionId: row.session_id, ...sessionFigureFields(row) })
+    }
+  }
+
+  return out
+}
+
+/**
+ * One chunk of the figures read: the materialized column, with the payload
+ * read for the rows the column could not serve.
+ */
+function readSessionFigureRows(db: Database, ids: string[]): SessionFigureDbRow[] {
+  const placeholders = ids.map(() => '?').join(', ')
+  let primary: SessionFigureDbRow[]
+  try {
+    primary = db.prepare(sessionFiguresSelect(placeholders)).all(...ids) as SessionFigureDbRow[]
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err
+    // A schema that predates the materialized column: every row in it is a
+    // legacy row, so the payload read serves the whole chunk.
+    return db.prepare(sessionFiguresLegacySelect(placeholders, false)).all(...ids) as SessionFigureDbRow[]
+  }
+
+  // NULL is the writer's "not materialized" sentinel, so these are exactly
+  // the rows whose figures still live in their payload.
+  const legacyIds = primary
+    .filter((row) => row.summary_json === null || row.summary_json === undefined)
+    .map((row) => row.session_id)
+    .filter((id): id is string => typeof id === 'string')
+  if (legacyIds.length === 0) return primary
+
+  const legacyPlaceholders = legacyIds.map(() => '?').join(', ')
+  const legacy = db
+    .prepare(sessionFiguresLegacySelect(legacyPlaceholders, true))
+    .all(...legacyIds) as SessionFigureDbRow[]
+  const byId = new Map<unknown, SessionFigureDbRow>(legacy.map((row) => [row.session_id, row]))
+  return primary.map((row) => {
+    if (row.summary_json !== null && row.summary_json !== undefined) return row
+    // The payload fills what the column could not serve. A row with no
+    // materialized summary has no materialized figures either, so nothing
+    // that was materialized is overwritten.
+    return byId.get(row.session_id) ?? row
+  })
 }
 
 export type RunDbRow = {
@@ -1501,9 +2644,156 @@ export type FindingsListOptions = {
   harness?: string
 }
 
+/** Payload bytes one quarantine page may hold; bounds startup memory for the relink pass. */
+const DEFAULT_QUARANTINE_PAGE_BYTES = 16 * 1024 * 1024
+
+/**
+ * Open a canon database with the pragmas every handle uses, and establish the
+ * metadata table the schema version is recorded in.
+ *
+ * <remarks>
+ * One open for both migration paths: the constructor's synchronous one and
+ * {@link migrateCanonDatabase}'s yielding one. They differ only in how the
+ * steps are driven, never in how the handle is set up.
+ */
+function openCanonDatabase(path: string): Database {
+  if (path !== ':memory:') {
+    mkdirSync(dirname(path), { recursive: true })
+  }
+  const db = new DatabaseSync(path)
+  // R2.5: under an ingest burst a second writer waits instead of failing,
+  // and WAL keeps batch commits cheap.
+  db.exec('PRAGMA busy_timeout = 5000')
+  db.exec('PRAGMA journal_mode = WAL')
+  // WAL's own default here is FULL, which fsyncs the sidecar on every commit
+  // — the dominant cost of a folder import, which commits per source unit.
+  // NORMAL is the documented pairing for WAL: a crash can lose the last
+  // commit, it cannot corrupt the database.
+  db.exec('PRAGMA synchronous = NORMAL')
+  // Bound the sidecar. Without this a checkpoint reclaims nothing on disk:
+  // the file keeps its high-water mark for the life of the database.
+  db.exec(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`)
+  db.exec(METADATA_SQL)
+  return db
+}
+
+/**
+ * Hand the event loop back for one turn.
+ *
+ * <remarks>
+ * The real `setImmediate`, imported from `node:timers` rather than taken off
+ * the global: a test that fakes timers replaces the global, and a caller
+ * waiting for a turn nobody delivers hangs.
+ *
+ * The projection has the same three lines (`projection.ts`), and they are not
+ * imported from there: that module imports this one, so the cycle would make
+ * the initialization order of the two modules depend on which was loaded
+ * first. The helper is small enough to be worth owning twice.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleImmediate(resolve)
+  })
+}
+
+/**
+ * Bring a store file up to this build's schema, without blocking the event
+ * loop.
+ *
+ * <remarks>
+ * The store's constructor migrates in one blocking pass: the v21 -> v22 step
+ * walks every session in the corpus, parsing and rewriting each payload, and
+ * on the live corpus that is tens of megabytes of JSON in one go. An opening
+ * server is blocked for the whole of it — no handler answers, and no CLI
+ * caller sees progress, until the last session is written.
+ *
+ * This is the same migration, driven so the backfill hands the event loop
+ * back between sessions. The step stays one transaction: the transaction and
+ * its write lock live on the SQLite connection, not on the JavaScript stack,
+ * so a yield between two sessions neither commits nor rolls back, and a
+ * failure still rolls the whole step back. The connection is this function's
+ * own and is never handed out, so no other writer can join the transaction
+ * through it; another connection cannot write at all while the lock is held.
+ *
+ * The store is left at this build's schema version, so opening it afterwards
+ * — with the constructor, or with anything else — finds the migration done.
+ * Migrate before opening a store on the same file, not while one is open:
+ * the migration holds the write lock for the whole pass.
+ */
+export async function migrateCanonDatabase(
+  path: string,
+  options: MigrationOptions = {},
+): Promise<void> {
+  const db = openCanonDatabase(path)
+  try {
+    const existing = readSchemaVersion(db)
+    // A store with no version stamp is a fresh one: the constructor creates
+    // its schema, and there is nothing to migrate.
+    if (existing === undefined) return
+    const from = Number(existing)
+    if (from > SCHEMA_VERSION) {
+      throw new Error(schemaVersionRefusal(path, from, SCHEMA_VERSION))
+    }
+    const yieldToLoop = options.yield ?? yieldToEventLoop
+    for (let version = from; version < SCHEMA_VERSION; version += 1) {
+      const step = MIGRATIONS[version]
+      if (step === undefined) {
+        throw new Error(
+          `canon store at ${path} is at schema version ${version} with no migration ` +
+            `to ${version + 1}; rebuild the store`,
+        )
+      }
+      db.exec('BEGIN')
+      try {
+        // The step may hand the event loop back between sessions. The
+        // transaction stays open across the await: it belongs to the
+        // connection, and this connection belongs to this function.
+        await step(db, { yield: yieldToLoop })
+        db
+          .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+          .run('schema_version', String(version + 1))
+        db.exec('COMMIT')
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
+      }
+    }
+    // The same order the constructor uses: the version steps first, then the
+    // full schema, whose statements are all `IF NOT EXISTS` and are genuine
+    // no-ops by then. The file is left in the shape this build expects, so
+    // opening it afterwards finds everything in place.
+    db.exec(SCHEMA_SQL)
+    // The covering index, and the statistics for it when this pass created
+    // it: an index created after the last analysis carries no statistics, and
+    // the planner then keeps choosing a different index for the sessions
+    // list.
+    if (createSessionDenormIndex(db)) db.exec('ANALYZE session')
+  } finally {
+    db.close()
+  }
+}
+
+/** The schema version a database records, or undefined when it records none. */
+function readSchemaVersion(db: Database): string | undefined {
+  const row = db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get() as
+    | { value: string }
+    | undefined
+  return row?.value
+}
+
 export class CanonStore {
   private readonly db: Database
   private readonly upsertStatement: StatementSync
+
+  /**
+   * Whether the turn table has been materialized on this handle.
+   *
+   * The turn table is not part of `SCHEMA_SQL`: it exists where turns are, and
+   * a store that has never held a turn row does not carry it. That is what
+   * keeps a store that predates the turn table the store it was, instead of
+   * growing a table from the build that happens to open it.
+   */
+  private sessionTurnTableReady = false
 
   /**
    * Opens (or creates) the store at `path` and brings its schema up to
@@ -1513,35 +2803,26 @@ export class CanonStore {
    * silently misread.
    */
   constructor(path: string) {
-    if (path !== ':memory:') {
-      mkdirSync(dirname(path), { recursive: true })
-    }
-    this.db = new DatabaseSync(path)
-    // R2.5: under an ingest burst a second writer waits instead of failing,
-    // and WAL keeps batch commits cheap.
-    this.db.exec('PRAGMA busy_timeout = 5000')
-    this.db.exec('PRAGMA journal_mode = WAL')
-    // WAL's own default here is FULL, which fsyncs the sidecar on every commit
-    // — the dominant cost of a folder import, which commits per source unit.
-    // NORMAL is the documented pairing for WAL: a crash can lose the last
-    // commit, it cannot corrupt the database.
-    this.db.exec('PRAGMA synchronous = NORMAL')
-    // Bound the sidecar. Without this a checkpoint reclaims nothing on disk:
-    // the file keeps its high-water mark for the life of the database.
-    this.db.exec(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`)
+    this.db = openCanonDatabase(path)
 
     // Order matters. `SCHEMA_SQL` is every statement in its current shape,
     // and some of them — an index over a column a later version added —
     // cannot run against an older store. So: establish `metadata`, read the
     // version, migrate the old shapes forward, and only then apply the full
     // schema, by which point every `IF NOT EXISTS` is a genuine no-op.
-    this.db.exec(METADATA_SQL)
     const existing = this.getMetadata('schema_version')
     if (existing !== undefined && Number(existing) !== SCHEMA_VERSION) {
       this.migrate(path, Number(existing))
     }
 
     this.db.exec(SCHEMA_SQL)
+
+    // The covering index for the sessions list, created here so a fresh store
+    // is born with it: it lives outside `SCHEMA_SQL` because its DDL is
+    // unconditional and a store whose session table predates the columns it
+    // covers cannot carry it. Presence-guarded, so this is a no-op on every
+    // open once the index exists.
+    const createdDenormIndex = createSessionDenormIndex(this.db)
 
     if (existing === undefined) {
       this.db
@@ -1550,6 +2831,29 @@ export class CanonStore {
       this.db
         .prepare('INSERT INTO metadata (key, value) VALUES (?, ?)')
         .run('detector_version', String(DETECTOR_VERSION))
+    }
+
+    if (existing === undefined || createdDenormIndex) {
+      // The planner's cost information for `session`, written from creation
+      // rather than whenever an optimizer happens to run: real statistics for
+      // the covering index and the table as the corpus grows, and the same
+      // plan on every path — which is what the contract's EXPLAIN pin
+      // asserts. The covering index is the mechanism, not these statistics:
+      // on this build the planner already picks it with no `sqlite_stat1`
+      // rows at all.
+      //
+      // A fresh store's session table is empty and SQLite skips empty
+      // tables, so this creates `sqlite_stat1` without a row for `session`;
+      // the close-time `PRAGMA optimize` populates it once rows exist.
+      //
+      // A store that reached this open without the covering index, and got it
+      // here from the constructor's own creation path, is analyzed for the
+      // same reason: an index created after the last analysis carries no
+      // statistics, and without them the planner keeps choosing
+      // `session_by_started` over the covering index — a non-covering scan
+      // that reads every row's payload. The analysis is the same one the
+      // v21 -> v22 migration writes for a store that arrives without it.
+      this.db.exec('ANALYZE session')
     }
 
     this.upsertStatement = this.db.prepare(UPSERT_RECORD_SQL)
@@ -1565,10 +2869,7 @@ export class CanonStore {
   private migrate(path: string, from: number): void {
     if (from > SCHEMA_VERSION) {
       this.db.close()
-      throw new Error(
-        `canon store at ${path} was built with schema version ${from}, ` +
-          `but this build understands version ${SCHEMA_VERSION}; upgrade KyberDash`,
-      )
+      throw new Error(schemaVersionRefusal(path, from, SCHEMA_VERSION))
     }
     for (let version = from; version < SCHEMA_VERSION; version += 1) {
       const step = MIGRATIONS[version]
@@ -1581,7 +2882,27 @@ export class CanonStore {
       }
       this.db.exec('BEGIN')
       try {
-        step(this.db)
+        const outcome = step(this.db)
+        if (outcome instanceof Promise) {
+          // The synchronous open path cannot commit a step that yields: the
+          // transaction would close before the step finished. No step
+          // returns a promise here — the only step that can yields does so
+          // only when a caller hands it a yield seam, and this path never
+          // does — so this is a guard, not a branch.
+          void outcome.catch((asyncErr: unknown) => {
+            // The sync path cannot await the step, so its rejection would
+            // otherwise vanish behind the guard below. Report it rather than
+            // swallowing it with a no-op.
+            console.error(
+              `canon store migration step ${version} -> ${version + 1} rejected asynchronously: ` +
+                `${asyncErr instanceof Error ? (asyncErr.stack ?? asyncErr.message) : String(asyncErr)}`,
+            )
+          })
+          throw new Error(
+            `canon store migration step ${version} -> ${version + 1} is asynchronous; ` +
+              'the synchronous open path cannot run it',
+          )
+        }
         this.db
           .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
           .run('schema_version', String(version + 1))
@@ -1607,14 +2928,9 @@ export class CanonStore {
    */
   upsertMany(records: readonly CanonicalRecord[]): void {
     if (records.length === 0) return
-    this.db.exec('BEGIN')
-    try {
+    this.writeRecords(() => {
       for (const record of records) this.writeRecord(record)
-      this.db.exec('COMMIT')
-    } catch (err) {
-      this.db.exec('ROLLBACK')
-      throw err
-    }
+    })
   }
 
   private writeRecord(record: CanonicalRecord): void {
@@ -1641,8 +2957,9 @@ export class CanonStore {
       JSON.stringify(record.cost),
       record.measurability === undefined ? null : JSON.stringify(record.measurability),
       // Parts repeat the content text, so they are compressed like `raw`
-      // rather than stored verbatim (R12.4).
-      record.parts === undefined ? null : compressRaw(record.parts),
+      // rather than stored verbatim (R12.4). The column holds the deflated
+      // form, and the plain form only where deflating it would not pay.
+      record.parts === undefined ? null : compressColumn(record.parts),
       record.raw === undefined ? null : compressRaw(record.raw),
     )
   }
@@ -1708,16 +3025,11 @@ export class CanonStore {
     provenance: readonly RecordProvenance[]
     checkpoint: SourceCheckpoint
   }): void {
-    this.db.exec('BEGIN')
-    try {
+    this.writeRecords(() => {
       for (const record of input.records) this.writeRecord(record)
       for (const row of input.provenance) this.writeProvenance(row)
       this.writeCheckpoint(input.checkpoint)
-      this.db.exec('COMMIT')
-    } catch (err) {
-      this.db.exec('ROLLBACK')
-      throw err
-    }
+    })
   }
 
   /**
@@ -1968,13 +3280,59 @@ export class CanonStore {
    */
   setContent(spanId: string, content: CanonicalRecord['content'], parts?: readonly ContentPart[]): void {
     const hasParts = parts !== undefined && parts.length > 0
-    this.db
-      .prepare('UPDATE records SET content_json = ?, parts_json = ? WHERE span_id = ?')
-      .run(
-        hasParts ? '{}' : JSON.stringify(content),
-        hasParts ? compressRaw(parts) : null,
-        spanId,
-      )
+    this.writeRecords(() => {
+      this.db
+        .prepare('UPDATE records SET content_json = ?, parts_json = ? WHERE span_id = ?')
+        .run(
+          hasParts ? '{}' : JSON.stringify(content),
+          hasParts ? compressColumn(parts) : null,
+          spanId,
+        )
+    })
+  }
+
+  /**
+   * Empty the content columns of every record older than `cutoffUtc`, in ONE
+   * transaction and ONE set-based statement.
+   *
+   * WHY set-based: the purge used to walk every span id, read the record, and
+   * write it back one row at a time — 9,740 expired rows measured in
+   * production, each its own autocommit `UPDATE` and its own fsync. One
+   * statement over the expired set does the same work in one transaction.
+   *
+   * The cutoff is an ISO instant and the stored timestamps are ISO instants
+   * (`writeRecord` normalizes a `Date` on the way in, but passes a string
+   * through verbatim), so the comparison is on instants — `datetime()` on
+   * both sides — rather than on strings, which would retain a row like
+   * `2026-08-29T13:00:00+02:00` past a noon-Z cutoff it predates.
+   * `content_json` is `'{}'` for a record with no content and `parts_json`
+   * holds the parts (the empty array stored as `'[]'`), so "has content" is
+   * "either column holds a non-empty value" — an already-purged row, or one
+   * that never held content, matches neither and is left alone, which keeps
+   * the purge idempotent.
+   *
+   * The records-write marker moves only when a row actually changed: the
+   * marker is the corpus's change signal, and a purge that changed nothing
+   * must not look like a changed corpus.
+   */
+  purgeContentBefore(cutoffUtc: string): number {
+    this.db.exec('BEGIN')
+    try {
+      const info = this.db
+        .prepare(
+          `UPDATE records SET content_json = '{}', parts_json = NULL
+           WHERE datetime(timestamp) < datetime(?)
+             AND ((content_json IS NOT NULL AND content_json <> '{}') OR (parts_json IS NOT NULL AND parts_json <> '[]'))`,
+        )
+        .run(cutoffUtc)
+      const purged = typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
+      if (purged > 0) this.bumpRecordsWriteMarker()
+      this.db.exec('COMMIT')
+      return purged
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /**
@@ -1984,15 +3342,10 @@ export class CanonStore {
    */
   setCosts(changes: ReadonlyArray<{ spanId: string; cost: CostBlock }>): void {
     if (changes.length === 0) return
-    this.db.exec('BEGIN')
-    try {
+    this.writeRecords(() => {
       const update = this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?')
       for (const change of changes) update.run(JSON.stringify(change.cost), change.spanId)
-      this.db.exec('COMMIT')
-    } catch (err) {
-      this.db.exec('ROLLBACK')
-      throw err
-    }
+    })
   }
 
   /** Distinct trace ids, the unit attribution votes over. */
@@ -2031,9 +3384,11 @@ export class CanonStore {
     spanId: string,
     fields: { harness: string; source: string; op: string; tokens: TokenUsage },
   ): void {
-    this.db
-      .prepare('UPDATE records SET harness = ?, source = ?, op = ?, tokens_json = ? WHERE span_id = ?')
-      .run(fields.harness, fields.source, fields.op, JSON.stringify(fields.tokens), spanId)
+    this.writeRecords(() => {
+      this.db
+        .prepare('UPDATE records SET harness = ?, source = ?, op = ?, tokens_json = ? WHERE span_id = ?')
+        .run(fields.harness, fields.source, fields.op, JSON.stringify(fields.tokens), spanId)
+    })
   }
 
   /**
@@ -2081,24 +3436,21 @@ export class CanonStore {
       timestampVal = timestamp ?? null
     }
 
-    this.db.exec("BEGIN")
-    try {
+    this.writeRecords(() => {
       this.db
         .prepare(
           "INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload, harness) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal, rawPayloadVal, harnessVal)
       this.db.prepare("DELETE FROM records WHERE span_id = ?").run(spanId)
-      this.db.exec("COMMIT")
-    } catch (err) {
-      this.db.exec("ROLLBACK")
-      throw err
-    }
+    })
   }
 
   /** Attach the harness's conversation id to a stored record. */
   setSessionId(spanId: string, sessionId: string | null): void {
-    this.db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run(sessionId, spanId)
+    this.writeRecords(() => {
+      this.db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run(sessionId, spanId)
+    })
   }
 
   /** Find one span by the exact OTLP correlation identity. */
@@ -2107,6 +3459,54 @@ export class CanonStore {
       .prepare('SELECT * FROM records WHERE trace_id = ? AND span_id = ?')
       .get(traceId, spanId) as RecordRow | undefined
     return row === undefined ? undefined : toRecord(row)
+  }
+
+  /**
+   * The matcher's view of every `claude-code` model call (`llm.invoke`) in one
+   * trace: id, start and duration only. This is the candidate set for
+   * correlating a Claude request-body log stamped with a parent span rather
+   * than the call itself (D11); it reads through the `trace_id` index and never
+   * scans the table. The chosen call is fetched whole with `get`, so scoring a
+   * session never decompresses every candidate's raw payload and content.
+   */
+  claudeModelCallCandidatesInTrace(traceId: string): ModelCallCandidate[] {
+    const rows = this.db
+      .prepare(
+        "SELECT span_id, timestamp, duration_ms FROM records WHERE trace_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'",
+      )
+      .all(traceId) as CandidateRow[]
+    return rows.map(toCandidate)
+  }
+
+  /**
+   * The same lightweight candidates for one session — the candidate set for a
+   * Claude request-body log that carries no trace id (D13). Reads through the
+   * `session_id` index.
+   */
+  claudeModelCallCandidatesInSession(sessionId: string): ModelCallCandidate[] {
+    const rows = this.db
+      .prepare(
+        "SELECT span_id, timestamp, duration_ms FROM records WHERE session_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'",
+      )
+      .all(sessionId) as CandidateRow[]
+    return rows.map(toCandidate)
+  }
+
+  /**
+   * Store one entry under a key of a record's `raw` object without rewriting
+   * the rest of the row. A record with no `raw` gets a fresh object; a `raw`
+   * that is not a plain object is left alone and the call reports `false`.
+   */
+  setRawEntry(spanId: string, key: string, value: unknown): boolean {
+    const existing = this.get(spanId)
+    if (existing === undefined) return false
+    const raw: unknown = existing.raw
+    if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) return false
+    const next = { ...(raw as Record<string, unknown> | undefined), [key]: value }
+    this.writeRecords(() => {
+      this.db.prepare('UPDATE records SET raw = ? WHERE span_id = ?').run(compressRaw(next), spanId)
+    })
+    return true
   }
 
   /**
@@ -2136,8 +3536,10 @@ export class CanonStore {
     const content = { ...existing.content } as Record<string, unknown>
     if (log.body !== undefined && log.body !== null) content.log_body = log.body
     if (log.attributes !== undefined) Object.assign(content, log.attributes)
-    this.db.prepare('UPDATE records SET content_json = ?, session_id = COALESCE(session_id, ?) WHERE span_id = ?')
-      .run(JSON.stringify(content), log.sessionId ?? null, spanId)
+    this.writeRecords(() => {
+      this.db.prepare('UPDATE records SET content_json = ?, session_id = COALESCE(session_id, ?) WHERE span_id = ?')
+        .run(JSON.stringify(content), log.sessionId ?? null, spanId)
+    })
     return true
   }
 
@@ -2153,9 +3555,11 @@ export class CanonStore {
       measurability === undefined || Object.keys(measurability).length === 0
         ? null
         : JSON.stringify(measurability)
-    this.db
-      .prepare('UPDATE records SET measurability_json = ? WHERE span_id = ?')
-      .run(json, spanId)
+    this.writeRecords(() => {
+      this.db
+        .prepare('UPDATE records SET measurability_json = ? WHERE span_id = ?')
+        .run(json, spanId)
+    })
   }
 
   /**
@@ -2228,6 +3632,49 @@ export class CanonStore {
     return entry
   }
 
+  /**
+   * Quarantined logs tagged with `harness` whose rowid is above `afterRowid`,
+   * lowest rowid first, at most `limit`. The rowid is the insertion cursor a
+   * one-shot pass stores so it never re-reads rows it has already passed.
+   *
+   * A page stops once `maxPayloadBytes` of payload have been read, but always
+   * holds at least one row so a single oversized payload cannot stall the
+   * cursor. Sizes are read first, so a row past the cap is never loaded. A
+   * payload that does not parse is returned flagged `unreadable` rather than
+   * thrown or dropped: the caller must still move its cursor past it, and a
+   * throw here would pin the cursor below every later row.
+   */
+  quarantinedLogsAfter(
+    harness: string,
+    afterRowid: number,
+    limit: number,
+    maxPayloadBytes: number = DEFAULT_QUARANTINE_PAGE_BYTES,
+  ): { rowid: number; logId: string; log: unknown; unreadable?: true }[] {
+    const sizes = this.db
+      .prepare('SELECT rowid AS rowid, log_id, LENGTH(CAST(payload AS BLOB)) AS bytes FROM quarantined_logs WHERE harness = ? AND rowid > ? ORDER BY rowid LIMIT ?')
+      .all(harness, afterRowid, limit) as { rowid: number; log_id: string; bytes: number }[]
+    const readPayload = this.db.prepare('SELECT payload FROM quarantined_logs WHERE rowid = ?')
+    const page: { rowid: number; logId: string; log: unknown; unreadable?: true }[] = []
+    let total = 0
+    for (const size of sizes) {
+      if (page.length > 0 && total + size.bytes > maxPayloadBytes) break
+      total += size.bytes
+      const row = readPayload.get(size.rowid) as { payload: string } | undefined
+      if (row === undefined) continue
+      try {
+        page.push({ rowid: size.rowid, logId: size.log_id, log: JSON.parse(row.payload) as unknown })
+      } catch {
+        page.push({ rowid: size.rowid, logId: size.log_id, log: undefined, unreadable: true })
+      }
+    }
+    return page
+  }
+
+  /** Remove one quarantined log, for example once it has been correlated. */
+  deleteQuarantinedLog(logId: string): void {
+    this.db.prepare('DELETE FROM quarantined_logs WHERE log_id = ?').run(logId)
+  }
+
   quarantinedLogCount(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM quarantined_logs').get() as { n: number }).n
   }
@@ -2277,11 +3724,12 @@ export class CanonStore {
   /**
    * Derived sessions one at a time, newest first.
    *
-   * `listSessions` materializes every payload at once. The rollup only reduces
-   * each one to a handful of scalars, and the payloads are the largest objects
-   * in the store — 995 MB of JSON on the measured corpus, one session of it
-   * 270 MB — so building that array took the rebuild's heap high-water mark to
-   * 4.4 GB. Streaming keeps one payload live at a time.
+   * Materializing every session row at once held the whole table's payloads in
+   * memory. The rollup only reduces each one to a handful of scalars, and the
+   * payloads are the largest objects in the store — 995 MB of JSON on the
+   * measured corpus, one session of it 270 MB — so building that array took the
+   * rebuild's heap high-water mark to 4.4 GB. Streaming keeps one payload live
+   * at a time.
    */
   *iterateSessions(harnessId?: string): Generator<SessionRow> {
     const rows =
@@ -2305,15 +3753,70 @@ export class CanonStore {
   }
 
   /**
-   * A session's measured input and output totals, read out of the stored
-   * payload without parsing it.
+   * A session's measured input and output totals, read out of the materialized
+   * `summary_json` column, with the stored payload as the legacy fallback.
    *
    * The delegation-overhead dimension needs two numbers per execution and was
    * parsing the whole payload for each — the most expensive way to read
-   * `summary.total_input`. A total the session recorded as not measurable is
-   * not a number, and comes back here as `undefined` rather than a coerced 0.
+   * `summary.total_input`. The `session` table now carries that summary as the
+   * `summary_json` column, written from the same payload in the same statement
+   * (see `upsertSession`), so the common case answers from a small column and
+   * never reads the payload blob.
+   *
+   * A row written before the materialization existed carries NULL there, and
+   * only such a row falls back to the payload — per row, not per query, so a
+   * mixed corpus leaves the materialized rows alone and reads each legacy
+   * row's payload once.
+   *
+   * A total the session recorded as not measurable is not a number, and comes
+   * back here as `undefined` rather than a coerced 0.
    */
   sessionTokenTotals(sessionId: string): { input: number; output: number } | undefined {
+    const row = this.db
+      .prepare(
+        // The column first, and the same extraction the payload path used:
+        // `summary_json` holds the same `$.summary` object the payload holds,
+        // so reading `$.total_input` out of it answers exactly what
+        // `$.summary.total_input` out of the payload answers, without the
+        // blob. `payload` is not named here at all — naming it, even inside
+        // `json_extract`, makes SQLite read and parse the whole payload of
+        // every row this read touches.
+        `SELECT summary_json,
+                json_extract(summary_json, '$.total_input') AS input,
+                json_extract(summary_json, '$.total_output') AS output
+         FROM session WHERE session_id = ?`,
+      )
+      .get(sessionId) as { summary_json: unknown; input: unknown; output: unknown } | undefined
+    if (row === undefined) return undefined
+    // NULL is the "not materialized" sentinel: this row predates the
+    // materialization, so its totals still live in its payload.
+    if (row.summary_json === null || row.summary_json === undefined) {
+      return this.sessionTokenTotalsFromPayload(sessionId)
+    }
+    // Open thread harnesses.ts:416 — a total the session recorded as
+    // not_measurable is an object, not a number. Coercing it to 0 invents a
+    // measured zero for the delegation denominator; unknown stays unknown.
+    if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
+    return {
+      input: row.input,
+      output: row.output,
+    }
+  }
+
+  /**
+   * One session's token totals, read out of its own stored payload.
+   *
+   * <remarks>
+   * The legacy path: a row whose `summary_json` is NULL was written before
+   * the materialization existed, so the payload is the only place its totals
+   * can come from. The statement is scoped to the one id, so it reads one
+   * row's payload and never the table's, and `json_extract` keeps the blob
+   * inside SQLite — only the extracted fragment crosses into JS.
+   * </remarks>
+   */
+  private sessionTokenTotalsFromPayload(
+    sessionId: string,
+  ): { input: number; output: number } | undefined {
     const row = this.db
       .prepare(
         `SELECT json_extract(payload, '$.summary.total_input') AS input,
@@ -2322,9 +3825,6 @@ export class CanonStore {
       )
       .get(sessionId) as { input: unknown; output: unknown } | undefined
     if (row === undefined) return undefined
-    // Open thread harnesses.ts:416 — a total the session recorded as
-    // not_measurable is an object, not a number. Coercing it to 0 invents a
-    // measured zero for the delegation denominator; unknown stays unknown.
     if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
     return {
       input: row.input,
@@ -2370,6 +3870,42 @@ export class CanonStore {
       )
       .all(key) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * One session's records, in timestamp order, each with the attributes the
+   * derived views read.
+   *
+   * WHY this exists: a record's payload is the harness's whole span attribute
+   * map, and the projection reads a handful of attributes out of it. On the
+   * measured corpus one session held 10,933 model calls whose payloads
+   * inflated and parsed to 1.5 GB, all of it live at once: `toRecord` makes
+   * the payload a lazy property (the `defineLazy` pattern, for a 3.5 GB peak)
+   * and that property CACHES what it computed, so the first reader of a
+   * payload kept it alive for as long as the record was — and the record was
+   * as long as the session. The session's records stay (the twin collapse, the
+   * descendant collection and the subagent projection all need the whole
+   * session); their payloads do not.
+   *
+   * The reduced attributes are handed over BESIDE the record rather than
+   * written onto it, so a caller that can compare the two — the session
+   * projection compares the timeline's evidence reading, which the payload's
+   * string values decide — decides what to adopt. A caller with nothing to
+   * compare adopts them directly: `record.raw = attributes` releases the
+   * payload the reduction read.
+   */
+  *recordsForSessionProjected(key: string): Generator<ProjectedSessionRecord> {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+      )
+      .iterate(key) as IterableIterator<RecordRow>
+    for (const row of rows) {
+      const record = toRecord(row)
+      // The reduction reads the payload, so it is materialized here and
+      // released as soon as the caller adopts the reduced attributes.
+      yield { record, attributes: projectedAttributes(record.raw) }
+    }
   }
 
   /**
@@ -2452,52 +3988,272 @@ export class CanonStore {
   }
 
   /**
+   * Materialize the turn table on this handle, once.
+   *
+   * The table is created where turns are written and read: by the migration
+   * that backfills them, by the session write path that stores a session, and
+   * by the raw-handle accessor a consumer queries directly. `IF NOT EXISTS`
+   * makes every one of those a no-op once the table is there, so the guard
+   * below only saves the statement itself.
+   */
+  private ensureSessionTurnTable(): void {
+    if (this.sessionTurnTableReady) return
+    this.db.exec(SESSION_TURN_TABLE_SQL)
+    this.sessionTurnTableReady = true
+  }
+
+  /**
+   * Run a write as one unit, atomic whether or not a transaction is open.
+   *
+   * WHY a savepoint and not BEGIN/COMMIT: a write that lands inside a
+   * caller's transaction must not open a second one -- SQLite refuses a
+   * nested BEGIN -- and must not commit the caller's work either. A savepoint
+   * nests inside an open transaction and stands alone outside one, so the
+   * same write is atomic in both cases, and a failure rolls back only what
+   * this call wrote.
+   */
+  private atomically(change: () => void): void {
+    this.db.exec('SAVEPOINT kyber_write')
+    try {
+      change()
+      this.db.exec('RELEASE SAVEPOINT kyber_write')
+    } catch (err) {
+      this.db.exec('ROLLBACK TO SAVEPOINT kyber_write')
+      this.db.exec('RELEASE SAVEPOINT kyber_write')
+      throw err
+    }
+  }
+
+  /**
    * Store a derived session. These rows are a cache over `records`: dropping
    * them all and rebuilding loses nothing, which is why the payload is
    * replaced wholesale rather than merged.
    */
   upsertSession(row: SessionRow): void {
-    this.db
-      .prepare(
-        // An upsert, not INSERT OR REPLACE: a replace deletes the row, which would reset the
-        // transcript sync columns (offset, status, settled_at) that the sync job owns.
-        `INSERT INTO session (
-           session_id, harness, label, is_subagent, parent_session,
-           agent_name, repo, branch, started, ended, payload
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET
-           harness = excluded.harness,
-           label = excluded.label,
-           is_subagent = excluded.is_subagent,
-           parent_session = excluded.parent_session,
-           agent_name = excluded.agent_name,
-           repo = excluded.repo,
-           branch = excluded.branch,
-           started = excluded.started,
-           ended = excluded.ended,
-           payload = excluded.payload`,
-      )
-      .run(
-        row.sessionId,
-        row.harness,
-        row.label ?? null,
-        row.isSubagent ? 1 : 0,
-        row.parentSession ?? null,
-        row.agentName ?? null,
-        row.repo ?? null,
-        row.branch ?? null,
-        row.started ?? null,
-        row.ended ?? null,
-        JSON.stringify(row.payload),
-      )
+    // A session row and its turns are written together, so the session write
+    // path materializes the table the turn rows go into: a store that holds a
+    // session holds the table its turns live in.
+    this.ensureSessionTurnTable()
+    // The blob and the turn rows are one session, split in two: the row keeps
+    // the session's metadata, the rows keep its turns. A payload with no
+    // `turns` key is stored whole, byte for byte -- there was nothing to
+    // split, so there is nothing to rewrite.
+    const split = splitSessionTurns(JSON.stringify(row.payload))
+    const payload = split.payload
+    // One payload, one serialization: the stored blob and the three materialized
+    // columns are derived from the same object, so the columns cannot drift
+    // from the payload they describe.
+    const { summary_json, problems_count } = materializeSessionSummary(payload)
+    // The window provenance is materialized here as well, so a row written
+    // after the v22 migration carries the same value the migration's backfill
+    // would have written for it. A count that reads the column then finds the
+    // row it would have found in the payload.
+    const context_limit_source = materializeContextLimitSource(payload)
+
+    this.atomically(() => {
+      this.db
+        .prepare(
+          // An upsert, not INSERT OR REPLACE: a replace deletes the row, which would reset the
+          // transcript sync columns (offset, status, settled_at) that the sync job owns. Those
+          // five -- synced_at, sync_status, settled_at, transcript_path, transcript_offset --
+          // belong to the sync job alone: this statement never names them, so a re-upsert
+          // cannot disturb them.
+          //
+          // `payload`, `summary_json`, `problems_count` and `context_limit_source` are the
+          // projection's, and this one statement writes all four: the columns take their new
+          // values from `excluded`, so an insert and a re-upsert materialize exactly what the
+          // stored payload holds.
+          `INSERT INTO session (
+             session_id, harness, label, is_subagent, parent_session,
+             agent_name, repo, branch, started, ended, summary_json, problems_count,
+             context_limit_source, payload
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET
+             harness = excluded.harness,
+             label = excluded.label,
+             is_subagent = excluded.is_subagent,
+             parent_session = excluded.parent_session,
+             agent_name = excluded.agent_name,
+             repo = excluded.repo,
+             branch = excluded.branch,
+             started = excluded.started,
+             ended = excluded.ended,
+             summary_json = excluded.summary_json,
+             problems_count = excluded.problems_count,
+             context_limit_source = excluded.context_limit_source,
+             payload = excluded.payload`,
+        )
+        .run(
+          row.sessionId,
+          row.harness,
+          row.label ?? null,
+          row.isSubagent ? 1 : 0,
+          row.parentSession ?? null,
+          row.agentName ?? null,
+          row.repo ?? null,
+          row.branch ?? null,
+          row.started ?? null,
+          row.ended ?? null,
+          summary_json,
+          problems_count,
+          context_limit_source,
+          payload,
+        )
+
+      // The turn rows are replaced wholesale -- delete, then insert -- exactly
+      // the way the migration replaced them. The turn set is the session's, not
+      // an accumulation of it: a re-upsert that only added rows would leave
+      // the turns of the previous build behind, and a re-upsert that only
+      // replaced them would leave two rows for one turn. Both are wrong, and
+      // the index cannot catch the second one -- the table's index is
+      // deliberately not unique -- so the delete comes first, every time.
+      this.db.prepare('DELETE FROM session_turn WHERE session_id = ?').run(row.sessionId)
+      if (split.turns.length > 0) {
+        const insertTurn = this.db.prepare(
+          'INSERT INTO session_turn (session_id, turn_index, turn_json) VALUES (?, ?, ?)',
+        )
+        for (const turn of split.turns) insertTurn.run(row.sessionId, turn.index, turn.stored)
+      }
+    })
   }
 
-  /** One derived session's payload, or undefined when it has not been built. */
+  /**
+   * One derived session's payload, or undefined when it has not been built.
+   *
+   * <remarks>
+   * The payload the store holds is the session's metadata; the turns live in
+   * `session_turn` beside it. The read puts the two back together, because
+   * this method is the ASAD contract the dashboard reads (ADR 0011), and the
+   * bridge's copy of the same rule does the same: a session read here answers
+   * with its turns, whether they are still inline in the blob or in the child
+   * table.
+   *
+   * The two copies must answer alike (the both-copies rule): a session read
+   * here answers with its turns, whether they are still inline in the blob or
+   * in the child table, and the bridge's reader answers the same. The rule
+   * they read with is one definition (`canon/session-read.ts`), and
+   * `dash/src/server/session-read-contract.test.ts` pins that the two readers
+   * answer alike for the same session.
+   * </remarks>
+   */
   getSessionPayload(sessionId: string): unknown | undefined {
+    const assembled = this.readSessionWithTurns(sessionId)
+    // `null` is "no such session"; `undefined` is "this handle cannot serve
+    // the split read", and the whole blob is the fallback then.
+    if (assembled === null) return undefined
+    if (assembled !== undefined) return assembled
+    const row = this.db.prepare(SESSION_PAYLOAD_SELECT).get(sessionId) as
+      | { payload: string }
+      | undefined
+    if (row === undefined) return undefined
+    const payload = JSON.parse(row.payload) as unknown
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return payload
+    return this.attachSessionTurns(payload as Record<string, unknown>, sessionId)
+  }
+
+  /**
+   * One session's payload with its turns back, read from the split store.
+   *
+   * <remarks>
+   * `null` when the store holds no such session, and `undefined` when this
+   * handle cannot serve the split read at all -- the caller's whole-payload
+   * read is the fallback then.
+   */
+  private readSessionWithTurns(sessionId: string): Record<string, unknown> | null | undefined {
+    let row: { payload_json?: unknown; turns_type?: unknown; turns_json?: unknown } | undefined
+    try {
+      row = this.db.prepare(SESSION_PAYLOAD_FRAGMENTS_SELECT).get(sessionId) as typeof row
+    } catch (err) {
+      // This handle cannot take the payload apart -- no JSON functions in its
+      // SQLite build. Anything else (a locked store, I/O, corruption) is not
+      // a missing capability and must not read as an empty session.
+      if (err instanceof Error && /no such function/i.test(err.message)) return undefined
+      throw err
+    }
+    if (row === undefined) return null
+    const payload = parseJsonObject(row.payload_json)
+    if (payload === undefined) return undefined
+
+    // The turns: the payload's own when it still carries them, the split rows
+    // when they have been moved out. The range scan is issued either way -- it
+    // is one indexed lookup that answers whether the session has turn rows of
+    // its own, and hands over every one of them when it does.
+    //
+    // Which of the two wins is the shared contract's rule, not this reader's:
+    // the store's reader and the bridge's reader must answer alike, so the
+    // decision lives in one place (`canon/session-read.ts`).
+    const splitTurns = this.sessionTurnRows(sessionId)
+    payload['turns'] = sessionTurnsOf(row.turns_type, row.turns_json, splitTurns)
+    return payload
+  }
+
+  /**
+   * One session's turns, read from the turns table in one range scan.
+   *
+   * <remarks>
+   * `undefined` when the store carries no turns table at all: the table is
+   * materialized on demand, so a store that never held a turn row may not
+   * have one -- and a session in such a store has no turns anywhere. Any
+   * other read failure is rethrown rather than served as an empty turn list.
+   */
+  private sessionTurnRows(sessionId: string): Array<Record<string, unknown>> | undefined {
+    if (!this.hasSessionTurnTable()) return undefined
+    let rows: Array<{ turn_json?: unknown }>
+    try {
+      rows = this.db.prepare(SESSION_TURNS_SELECT).all(sessionId) as Array<{ turn_json?: unknown }>
+    } catch (err) {
+      // The table is materialized on demand, so a race that drops it between
+      // the existence check and the range scan reads as no turns. Anything
+      // else (a locked store, I/O, corruption) must not launder a session
+      // with turns on disk into one served as empty.
+      if (err instanceof Error && /no such table/i.test(err.message)) return undefined
+      throw err
+    }
+    const turns: Array<Record<string, unknown>> = []
+    for (const row of rows) {
+      // The turn row holds the deflated turn, and the plain JSON a row
+      // written before the compression landed holds. Both are read.
+      const turn = turnObjectOf(row.turn_json)
+      // A row that does not parse is not a turn: it is dropped rather than
+      // served as an empty object, which would read as "measured, and there
+      // was nothing there".
+      if (turn !== undefined) turns.push(turn)
+    }
+    return turns
+  }
+
+  /**
+   * Attach the session's split-out turns to a payload that carries none.
+   *
+   * <remarks>
+   * A payload that still carries its turns is left alone: those are its own
+   * turns, and they are the fresh ones.
+   */
+  private attachSessionTurns(
+    payload: Record<string, unknown>,
+    sessionId: string,
+  ): Record<string, unknown> {
+    if (Array.isArray(payload['turns'])) return payload
+    const turns = this.sessionTurnRows(sessionId)
+    if (turns !== undefined) payload['turns'] = turns
+    return payload
+  }
+
+  /**
+   * Whether this handle carries the turn table.
+   *
+   * <remarks>
+   * The table is materialized on demand -- by the migration that backfills the
+   * turns, by the session write path that stores a session, and by the
+   * raw-handle accessor a consumer queries directly -- so a store that never
+   * held a turn row may not have one. The read path asks rather than creates:
+   * a read that creates a table is a read with a side effect.
+   */
+  private hasSessionTurnTable(): boolean {
     const row = this.db
-      .prepare('SELECT payload FROM session WHERE session_id = ?')
-      .get(sessionId) as { payload: string } | undefined
-    return row === undefined ? undefined : JSON.parse(row.payload)
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?")
+      .get('session_turn')
+    return row !== undefined
   }
 
   /** Session ids currently built, for pruning a rebuild's leftovers. */
@@ -2509,12 +4265,29 @@ export class CanonStore {
 
   /** Drop a derived session. Safe by construction: the row is a cache. */
   deleteSession(sessionId: string): void {
-    this.db.prepare('DELETE FROM session WHERE session_id = ?').run(sessionId)
+    // The turn rows go with the session: they are its turns, and nothing else
+    // names them. Left behind, they are orphans a reader would still find.
+    this.ensureSessionTurnTable()
+    this.atomically(() => {
+      this.db.prepare('DELETE FROM session_turn WHERE session_id = ?').run(sessionId)
+      this.db.prepare('DELETE FROM session WHERE session_id = ?').run(sessionId)
+    })
   }
 
   /** Drop derived sessions for a harness. */
   deleteSessionsByHarness(harness: string): void {
-    this.db.prepare('DELETE FROM session WHERE harness = ?').run(harness)
+    // The turn rows go with their sessions, and the session rows are the only
+    // thing that names them: the subquery finds the turns while the session
+    // rows are still there to be found by.
+    this.ensureSessionTurnTable()
+    this.atomically(() => {
+      this.db
+        .prepare(
+          'DELETE FROM session_turn WHERE session_id IN (SELECT session_id FROM session WHERE harness = ?)',
+        )
+        .run(harness)
+      this.db.prepare('DELETE FROM session WHERE harness = ?').run(harness)
+    })
   }
 
   wipeHarnesses(harnesses: readonly string[]): StoreWipeReport {
@@ -2524,15 +4297,12 @@ export class CanonStore {
       this.stampClean(canonical)
       return { harnesses: canonical, records: 0, provenance: 0, checkpoints: 0 }
     }
-    this.db.exec('BEGIN')
-    let report: StoreWipeReport
-    try {
+    // Assigned inside the transaction, which either commits it or throws.
+    let report!: StoreWipeReport
+    this.ensureSessionTurnTable()
+    this.writeRecords(() => {
       report = { harnesses: canonical, ...wipeHarnessRows(this.db, rawNames) }
-      this.db.exec('COMMIT')
-    } catch (err) {
-      this.db.exec('ROLLBACK')
-      throw err
-    }
+    })
     // The stamp must survive the case the wipe throws: it never participates
     // in the wiped transaction.
     this.stampClean(canonical)
@@ -2552,9 +4322,13 @@ export class CanonStore {
    * which is what let a wiped store still occupy 442 MB on disk.
    */
   wipeAll(): StoreWipeReport {
-    this.db.exec('BEGIN')
-    let report: StoreWipeReport
-    try {
+    // Assigned inside the transaction, which either commits it or throws.
+    let report!: StoreWipeReport
+    // The turn table has to exist for the wipe to clear it: a store that
+    // never held a session never had the table, and the wipe still has to
+    // leave one behind that holds nothing.
+    this.ensureSessionTurnTable()
+    this.writeRecords(() => {
       const countAll = (table: string): number => {
         const info = this.db.prepare(`DELETE FROM ${table}`).run() as unknown as {
           changes?: unknown
@@ -2568,6 +4342,9 @@ export class CanonStore {
         checkpoints: countAll('source_checkpoint'),
       }
       this.db.exec('DELETE FROM session')
+      // The turn rows are the sessions' turns; with the session rows gone,
+      // nothing names them. The whole wipe clears them with the sessions.
+      this.db.exec('DELETE FROM session_turn')
       this.db.exec('DELETE FROM run')
       this.db.exec('DELETE FROM execution')
       this.db.exec('DELETE FROM harness_rollup')
@@ -2578,11 +4355,7 @@ export class CanonStore {
       this.db.exec('DELETE FROM pending_logs')
       this.db.exec('DELETE FROM quarantined_logs')
       this.db.exec('DELETE FROM enriched_logs')
-      this.db.exec('COMMIT')
-    } catch (err) {
-      this.db.exec('ROLLBACK')
-      throw err
-    }
+    })
     this.stampClean(['*'])
     this.reclaimSpace()
     return report
@@ -2646,16 +4419,6 @@ export class CanonStore {
       .prepare('SELECT * FROM session WHERE session_id = ?')
       .get(sessionId) as SessionDbRow | undefined
     return row === undefined ? undefined : toSessionRow(row)
-  }
-
-  /** List derived sessions, optionally narrowed to one harness; newest first. */
-  listSessions(harnessId?: string): SessionRow[] {
-    const rows = (
-      harnessId === undefined
-        ? this.db.prepare('SELECT * FROM session ORDER BY started DESC').all()
-        : this.db.prepare('SELECT * FROM session WHERE harness = ? ORDER BY started DESC').all(harnessId)
-    ) as SessionDbRow[]
-    return rows.map(toSessionRow)
   }
 
   /**
@@ -3058,11 +4821,13 @@ export class CanonStore {
    * as "all clear". Reads the provenance the session builder persists
    * (`payload.context.contextLimitSource`); legacy payloads without it are
    * not counted either way.
+   *
+   * The provenance is read from the `context_limit_source` column schema v22
+   * materialized it into, so the count stops paging every payload blob in the
+   * table -- table-wide when no harness is given.
    */
   countUnknownWindowSessions(harness?: string): number {
-    const conditions = [
-      `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`,
-    ]
+    const conditions = [this.sessionWindowSourceCondition()]
     const params: string[] = []
     if (harness !== undefined && harness !== '') {
       conditions.push('harness = ?')
@@ -3072,6 +4837,30 @@ export class CanonStore {
       .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conditions.join(' AND ')}`)
       .get(...params) as { n: number } | undefined
     return row?.n ?? 0
+  }
+
+  /**
+   * The condition that selects the sessions whose context window no source
+   * reported.
+   *
+   * Schema v22 materializes the window provenance into a `context_limit_source`
+   * column, and the column carries the payload's `$.context.contextLimitSource`
+   * verbatim, so the two paths count the same rows: a payload with no source
+   * leaves the column NULL, and `NULL IN ('default', 'absent')` is not true,
+   * so such a session is not counted either way.
+   *
+   * The payload expression stays the fallback for a handle whose session table
+   * predates the column. The store migrates the handle it owns, so that is the
+   * shape a caller that reaches the same database another way can present --
+   * the fallback answers there instead of failing on a missing column.
+   */
+  private sessionWindowSourceCondition(): string {
+    const columns = (this.db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map(
+      (column) => column.name,
+    )
+    return columns.includes('context_limit_source')
+      ? `context_limit_source IN ('default', 'absent')`
+      : `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`
   }
 
   /** Delete one finding by id. */
@@ -3278,6 +5067,12 @@ export class CanonStore {
    * The runs list (issue #183) needs every run's turn count, token totals and
    * priced cost; parsing each session payload would inflate megabytes per
    * row, so only the summary fields are extracted.
+   *
+   * The figures come out of the materialized `summary_json` column, and only
+   * a row written before the materialization existed -- a row whose
+   * `summary_json` is NULL -- falls back to its own payload. The read itself
+   * lives in `readSessionSummaryFigures`, which the bridge's direct-DB path
+   * uses as well, so the two copies of this read cannot drift apart.
    */
   sessionSummaryFigures(
     sessionIds: readonly string[],
@@ -3291,63 +5086,7 @@ export class CanonStore {
     costCurrency?: string
     costUsdLegacy?: number
   }> {
-    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
-    const out: Array<{
-      sessionId: string
-      turnCount?: number
-      totalInput?: number
-      totalOutput?: number
-      costStatus?: string
-      costValue?: number
-      costCurrency?: string
-      costUsdLegacy?: number
-    }> = []
-    const chunkSize = 900
-
-    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
-      const chunk = uniqueIds.slice(offset, offset + chunkSize)
-      const placeholders = chunk.map(() => '?').join(', ')
-      const rows = this.db
-        .prepare(
-          `SELECT session_id,
-                  json_extract(payload, '$.summary.turn_count') AS turn_count,
-                  json_extract(payload, '$.summary.total_input') AS total_input,
-                  json_extract(payload, '$.summary.total_output') AS total_output,
-                  json_extract(payload, '$.summary.cost.status') AS cost_status,
-                  json_extract(payload, '$.summary.cost.value') AS cost_value,
-                  json_extract(payload, '$.summary.cost.currency') AS cost_currency,
-                  json_extract(payload, '$.summary.cost.usd') AS cost_usd
-           FROM session WHERE session_id IN (${placeholders})`,
-        )
-        .all(...chunk) as Array<{
-        session_id: unknown
-        turn_count: unknown
-        total_input: unknown
-        total_output: unknown
-        cost_status: unknown
-        cost_value: unknown
-        cost_currency: unknown
-        cost_usd: unknown
-      }>
-
-      for (const row of rows) {
-        if (typeof row.session_id !== 'string') continue
-        const figure = (value: unknown): number | undefined =>
-          typeof value === 'number' && Number.isFinite(value) ? value : undefined
-        out.push({
-          sessionId: row.session_id,
-          ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
-          ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
-          ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
-          ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
-          ...(figure(row.cost_value) !== undefined ? { costValue: figure(row.cost_value)! } : {}),
-          ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
-          ...(figure(row.cost_usd) !== undefined ? { costUsdLegacy: figure(row.cost_usd)! } : {}),
-        })
-      }
-    }
-
-    return out
+    return readSessionSummaryFigures(this.db, sessionIds)
   }
 
   /**
@@ -3875,6 +5614,50 @@ export class CanonStore {
       .run(key, value)
   }
 
+  /**
+   * The records-write marker's current value; 0 when nothing has ever been written.
+   *
+   * A rebuild asks this to decide whether the corpus moved since the last one.
+   * See {@link RECORDS_WRITE_MARKER_KEY}.
+   */
+  recordsWriteMarker(): number {
+    const val = this.getMetadata(RECORDS_WRITE_MARKER_KEY)
+    if (val === undefined) return 0
+    const parsed = Number(val)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+
+  /**
+   * Bump the records-write marker: the corpus has changed.
+   *
+   * Called from inside the same transaction as the write that changed it, so a
+   * crash cannot leave a changed corpus with an unchanged marker (which would
+   * let a rebuild skip a corpus that really did move).
+   */
+  bumpRecordsWriteMarker(): void {
+    this.setMetadata(RECORDS_WRITE_MARKER_KEY, String(this.recordsWriteMarker() + 1))
+  }
+
+  /**
+   * Run a write to `records` and mark the corpus as changed, in one transaction.
+   *
+   * WHY one transaction: the marker and the write it describes must land
+   * together. A marker bumped after a failed write would make the next pass
+   * rebuild a corpus that never changed; a marker not bumped after a
+   * successful write would let the next pass skip a corpus that did.
+   */
+  private writeRecords(change: () => void): void {
+    this.db.exec('BEGIN')
+    try {
+      change()
+      this.bumpRecordsWriteMarker()
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
   /** Read the currently stamped detector version in metadata (Decision D17). */
   getDetectorVersion(): number | undefined {
     const val = this.getMetadata('detector_version')
@@ -3903,8 +5686,13 @@ export class CanonStore {
   /**
    * Underlying SQLite database handle for bridge/server consumers that query
    * the canonical store directly without reopening the file.
+   *
+   * The handle it hands out carries the whole schema: the turn table is
+   * materialized first, so a consumer that reads `session_turn` directly never
+   * meets a store that lacks it.
    */
   getDatabase(): Database {
+    this.ensureSessionTurnTable()
     return this.db
   }
 

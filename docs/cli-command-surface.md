@@ -271,9 +271,28 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`review gates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure` | Run the deterministic gates declared under `review.gates`. |
+| [`review gates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates`; with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | [`review duplicates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes / needs-human from findings and gates. |
+
+`review gates --agent <NAME>` selects the [task gates](code-review/architecture.md#task-gates)
+declared for that agent under `review.task-gates` and runs them against the files that agent
+changed, instead of running the repository-wide `review.gates`:
+
+- `--paths <PATH>` names a changed file, relative to the repository root, and repeats for
+  several. Without it the changed set is the diff against `--base` (default `HEAD`) plus
+  untracked files.
+- `--base <REF>` is the ref the working tree is diffed against when `--paths` is absent.
+- `--task <SLUG>` is substituted for `{task}` in the gate commands. It must be a lookup name:
+  lowercase alphanumerics separated by single hyphens.
+- `--fix` runs each gate's `fix` command before its verify command. The verify command still
+  decides the result.
+- `--paths`, `--base`, `--task` and `--fix` require `--agent`; given without it they are a
+  client-input error.
+- Two tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
+  becomes one argument per changed file the gate's `include` matches, and `{task}`, which may
+  sit inside an argument. Neither reaches a shell, and the program (the first element) is always
+  a literal, never a token.
 
 ### `update` — replace the Release binaries
 
@@ -353,6 +372,7 @@ risk. The three rules below mirror the contract in
 | `docs integrity-check` | a finding at or above `--fail-on` (default `none` gates nothing) |
 | `review verdict` | `0` approve, `1` request-changes, `2` needs-human |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
+| `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for a client-input error, an agent-only option given without `--agent`; else `0` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 

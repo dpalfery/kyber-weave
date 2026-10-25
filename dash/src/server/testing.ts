@@ -68,21 +68,37 @@ type MockRes = {
   statusCode: number
   headers: Record<string, string>
   body: string
+  /**
+   * Resolves once the handler has written the response body.
+   *
+   * WHY a promise and not a wait: the body handlers are asynchronous (a clean wipes,
+   * projects and re-ingests before it answers; a job trigger answers from a grace
+   * timer), so a fixed number of milliseconds raced the handler's own work and lost
+   * whenever the work was slower than the wait. Awaiting the answer makes the test
+   * depend on the route finishing, not on the machine being fast enough.
+   */
+  written: Promise<void>
   writeHead(status: number, headers?: Record<string, string>): void
   end(data?: string): void
 }
 
 function makeMockRes(): MockRes {
+  let markWritten: () => void = () => {}
+  const written = new Promise<void>((resolve) => {
+    markWritten = resolve
+  })
   const res: MockRes = {
     statusCode: 200,
     headers: {},
     body: '',
+    written,
     writeHead(status, headers) {
       res.statusCode = status
       res.headers = { ...res.headers, ...(headers ?? {}) }
     },
     end(data) {
       if (data) res.body += data
+      markWritten()
     },
   }
   return res
@@ -129,7 +145,11 @@ export async function callRoute(
       : [typeof options.payload === 'string' ? options.payload : JSON.stringify(options.payload)])
   for (const chunk of chunks) req.emit('data', chunk)
   req.emit('end')
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  // Wait for the answer itself. A handler that took the request owes a response, so
+  // this resolves when the body is written - which is after the route's own work
+  // (the clean, the projection, the grace window) has finished. A handler that declined
+  // the request owes no answer, and there is nothing to wait for.
+  if (handled) await res.written
   let body: unknown
   try {
     body = res.body === '' ? undefined : JSON.parse(res.body)

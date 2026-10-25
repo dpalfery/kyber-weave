@@ -15,7 +15,9 @@ the closed vocabulary fits — inventing a doc-type is not.
 
 ## Inventory
 
-_This folder is empty._
+| Page | Covers |
+|---|---|
+| [Autonomous gates inventory](autonomous-gates.md) | Every gate reachable in autonomous mode, with disposition and irreversible-action justifications (issue #386 item A) |
 
 Kyber-Weave's reference material predates the folder and sits at the root of the corpus:
 [`configuration.md`](../configuration.md), [`install.md`](../install.md),

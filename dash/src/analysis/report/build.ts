@@ -13,6 +13,7 @@
 import type { MetricAvailability } from '../../canon/types.js'
 import type {
   KyberBridge,
+  SessionContextRead,
   SessionCostContribution,
   SessionSummary,
 } from '../../server/bridge.js'
@@ -351,6 +352,29 @@ function buildHarnesses(bridge: KyberBridge, scope: ReportScope): ReportHarness[
 }
 
 /**
+ * The latest session's context block, read as narrowly as the bridge allows.
+ *
+ * <remarks>
+ * The bounded read is the bridge's `getSessionContext`: one narrow fragment of
+ * the session payload, never the blob the payload used to be. A bridge that
+ * does not implement it — the report's own unit stub, which is handed the
+ * payload to derive from — still answers from that payload, so the
+ * derivation those cases cover is the derivation the bounded read feeds.
+ */
+function readSessionContext(bridge: KyberBridge, sessionId: string): SessionContextRead | null {
+  const bounded = (bridge as Partial<KyberBridge>).getSessionContext
+  if (typeof bounded === 'function') return bounded.call(bridge, sessionId)
+  const payload = bridge.getSessionPayload<{ context?: unknown; turns?: unknown[] }>(sessionId)
+  if (!payload) return null
+  const turns = Array.isArray(payload.turns) ? payload.turns : []
+  const last = turns[turns.length - 1]
+  return {
+    context: asObject(payload.context),
+    lastTurnIndex: finiteNumber(asObject(last)?.index),
+  }
+}
+
+/**
  * The latest session's current context state (R8.2–R8.4, R11.7).
  *
  * Every figure here is `Measured`. A harness that does not export message structure
@@ -361,13 +385,16 @@ function buildLatestSession(
   bridge: KyberBridge,
   session: SessionSummary,
 ): ReportLatestSession {
-  // The derived `context` a latest-turn measurement needs lives only in the
-  // persisted session payload behind `getSessionPayload()` (R8.2).
+  // The derived `context` a latest-turn measurement needs lives in the
+  // session's persisted context block (R8.2). It is read as a narrow fragment
+  // of the payload, because the payload also carries the session's whole turn
+  // list and this block needs none of it.
   // `getSessionContent()` is the unclipped `{ sessionId, parts }` inspector
   // view and never carries context — reading it here measured nothing and
   // always fell through to the no-structure reason.
-  const payload = safely(() => bridge.getSessionPayload(session.session_id), null)
-  const context = extractContext(payload ?? undefined)
+  const analysis = safely(() => readSessionContext(bridge, session.session_id), null)
+  const context =
+    analysis === null ? null : extractContext(analysis.context, analysis.lastTurnIndex)
 
   const unmeasured = (reason: string) => ({
     index: 0,
@@ -471,18 +498,22 @@ type LatestContext = {
   flagged: number[]
 }
 
-/** Pull whatever independent pressure/window facts survive from a persisted context analysis. */
-function extractContext(payload: { context?: unknown; turns?: unknown[] } | undefined): LatestContext | null {
-  const context = asObject(payload?.context)
-  if (context === undefined) return null
+/**
+ * Pull whatever independent pressure/window facts survive from a persisted context analysis.
+ *
+ * <remarks>
+ * The analysis block and the session's last turn index arrive as narrow
+ * fragments of the payload, so the derivation never needs the payload itself.
+ */
+function extractContext(context: unknown, lastTurnIndex: number | undefined): LatestContext | null {
+  const block = asObject(context)
+  if (block === undefined) return null
 
-  const analysisTurns = Array.isArray(context.turns) ? context.turns : []
+  const analysisTurns = Array.isArray(block.turns) ? block.turns : []
   const turn = asObject(analysisTurns[analysisTurns.length - 1])
-  const payloadTurns = Array.isArray(payload?.turns) ? payload.turns : []
-  const payloadTurn = asObject(payloadTurns[payloadTurns.length - 1])
-  const last = asObject(context.last)
+  const last = asObject(block.last)
   const lastBuckets = asObject(last?.buckets)
-  const rawLimitSource = context.contextLimitSource
+  const rawLimitSource = block.contextLimitSource
   const contextLimitSource =
     rawLimitSource === 'reported' ||
     rawLimitSource === 'declared' ||
@@ -491,9 +522,9 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
     rawLimitSource === 'absent'
       ? rawLimitSource
       : undefined
-  const contextLimit = finiteNumber(context.contextLimit)
+  const contextLimit = finiteNumber(block.contextLimit)
   const reportedInput = finiteNumber(last?.reported_input)
-  const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
+  const turnIndex = finiteNumber(turn?.index) ?? lastTurnIndex ?? 0
   const turnPressure = finiteNumber(turn?.pressure)
   const pressure =
     contextLimitSource === 'default' || contextLimitSource === 'absent'
@@ -508,7 +539,7 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
     const reason = asObject(lastBuckets?.[key])?.reason
     if (typeof reason === 'string' && reason.length > 0) bucketReasons[key] = reason
   }
-  const declaredReason = typeof context.reason === 'string' ? context.reason : undefined
+  const declaredReason = typeof block.reason === 'string' ? block.reason : undefined
   const firstBucketReason = BUCKET_KEYS.map((key) => bucketReasons[key]).find(
     (reason): reason is string => reason !== undefined,
   )
@@ -534,7 +565,7 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   return {
     contextLimit: contextLimit !== undefined && contextLimit > 0 ? contextLimit : undefined,
     contextLimitSource,
-    measurable: context.measurable === true,
+    measurable: block.measurable === true,
     unavailableReason,
     bucketReasons,
     turn: {
@@ -544,8 +575,8 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
       residualTokens,
       toolDefinitionsByServer,
     },
-    flagged: Array.isArray(context.flaggedTurns)
-      ? context.flaggedTurns.filter((value): value is number => typeof value === 'number')
+    flagged: Array.isArray(block.flaggedTurns)
+      ? block.flaggedTurns.filter((value): value is number => typeof value === 'number')
       : [],
   }
 }

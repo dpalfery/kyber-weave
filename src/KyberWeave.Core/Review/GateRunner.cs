@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -58,9 +59,69 @@ public static class GateRunner
             CoverageCollector.ReadAll(workingDirectory, startedUtc));
     }
 
+    /// <summary>
+    /// Runs one agent's planned task gates in the order they were declared. A fix command, when
+    /// requested, runs before its verify command; a fix that does not succeed is reported beside the
+    /// run and never decides the gate on its own, because the verify command is what the change must pass.
+    /// </summary>
+    /// <param name="gates">The gates that will start, already expanded by <see cref="TaskGateSelection.Plan"/>.</param>
+    /// <param name="workingDirectory">The repository root the gates run against.</param>
+    /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
+    /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
+    public static TaskGateRun RunTaskGates(
+        IReadOnlyList<PlannedTaskGate> gates,
+        string workingDirectory,
+        bool fix,
+        bool stopOnBlockingFailure = false)
+    {
+        ArgumentNullException.ThrowIfNull(gates);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+
+        if (!Directory.Exists(workingDirectory))
+            throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
+
+        List<GateResult> results = new(gates.Count);
+        List<GateResult> fixFailures = [];
+        DateTime startedUtc = DateTime.UtcNow;
+
+        foreach (PlannedTaskGate gate in gates)
+        {
+            if (fix && gate.Fix.Count > 0)
+            {
+                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, workingDirectory);
+                if (!applied.Passed)
+                    fixFailures.Add(applied);
+            }
+
+            GateResult result = RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, workingDirectory);
+            results.Add(result);
+
+            if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
+                break;
+        }
+
+        GateReport report = new(
+            GateReport.CurrentSchema,
+            results,
+            CoverageCollector.ReadNewest(workingDirectory, startedUtc),
+            CoverageCollector.ReadAll(workingDirectory, startedUtc));
+
+        return new TaskGateRun(report, fixFailures);
+    }
+
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)
     {
-        ProcessStartInfo startInfo = new(gate.Run[0])
+        return RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, workingDirectory);
+    }
+
+    private static GateResult RunArgv(
+        string id,
+        bool blocking,
+        IReadOnlyList<string> argv,
+        int timeoutSeconds,
+        string workingDirectory)
+    {
+        ProcessStartInfo startInfo = new(argv[0])
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -70,17 +131,17 @@ public static class GateRunner
             WorkingDirectory = workingDirectory
         };
 
-        foreach (string argument in gate.Run.Skip(1))
+        foreach (string argument in argv.Skip(1))
             startInfo.ArgumentList.Add(argument);
 
         long start = Stopwatch.GetTimestamp();
-        TimeSpan timeout = TimeSpan.FromSeconds(gate.TimeoutSeconds);
+        TimeSpan timeout = TimeSpan.FromSeconds(timeoutSeconds);
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
             return new GateResult(
-                gate.Id,
-                gate.Blocking,
+                id,
+                blocking,
                 process.ExitCode,
                 Summarize(process),
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
@@ -88,22 +149,22 @@ public static class GateRunner
         catch (TimeoutException ex)
         {
             return new GateResult(
-                gate.Id,
-                gate.Blocking,
+                id,
+                blocking,
                 -1,
-                $"timed out after {gate.TimeoutSeconds} seconds: {ex.Message}",
+                $"timed out after {timeoutSeconds} seconds: {ex.Message}",
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
             // A gate that cannot start has not passed. Reporting it as a failure with the
             // reason keeps the distinction visible: "the tests failed" and "the test command
             // does not exist here" both block, but they are fixed very differently.
             return new GateResult(
-                gate.Id,
-                gate.Blocking,
+                id,
+                blocking,
                 -1,
-                $"could not start '{gate.Run[0]}': {ex.Message}",
+                $"could not start '{argv[0]}': {ex.Message}",
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
     }

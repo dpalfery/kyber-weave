@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>One deterministic gate the host declares.</summary>
@@ -14,6 +16,32 @@ namespace KyberWeave.Core.Configuration;
 /// injection surface closed at the point the value is written.
 /// </remarks>
 public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true, int TimeoutSeconds = 900);
+
+/// <summary>
+/// One gate a developer agent runs against its own working tree before a reviewer sees the change.
+/// </summary>
+/// <param name="Id">Slug identifying the gate within its agent.</param>
+/// <param name="Include">Glob patterns selecting the changed files the gate applies to.</param>
+/// <param name="Os">
+/// <c>windows</c> or <c>unix</c> to run only on that platform; null to run everywhere.
+/// </param>
+/// <param name="Run">The verifying command, as argv. <c>{changed}</c> and <c>{task}</c> stay literal here.</param>
+/// <param name="Fix">The command that applies the fix, as argv, with the same token rules as <see cref="Run"/>.</param>
+/// <param name="Blocking">Whether a failing gate blocks the change.</param>
+/// <param name="TimeoutSeconds">Seconds before the runner kills the process tree.</param>
+/// <remarks>
+/// Like <see cref="ReviewGate"/>, both commands are argv lists and never a command line. The
+/// runner expands the <c>{changed}</c> and <c>{task}</c> tokens; this record only carries them,
+/// so a token that is not a whole argument is refused at the point the operator wrote it.
+/// </remarks>
+public sealed record ReviewTaskGate(
+    string Id,
+    IReadOnlyList<string> Include,
+    string? Os,
+    IReadOnlyList<string> Run,
+    IReadOnlyList<string> Fix,
+    bool Blocking = true,
+    int TimeoutSeconds = 900);
 
 /// <summary>The unit-coverage floor a change must clear.</summary>
 /// <param name="FileLinePercent">Minimum line coverage across files.</param>
@@ -82,11 +110,27 @@ public sealed class ReviewConfig
     /// <summary>The deterministic gates, in declaration order.</summary>
     public IReadOnlyList<ReviewGate> Gates { get; init; } = [];
 
+    /// <summary>
+    /// The gates each developer agent runs on its own change, keyed by agent slug, each list in
+    /// declaration order. Empty when the host declares none.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> TaskGates { get; init; } =
+        new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(
+            new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal));
+
     /// <summary>The unit-coverage floor.</summary>
     public ReviewCoverage Coverage { get; init; } = new();
 
     /// <summary>The duplicate-detection threshold.</summary>
     public ReviewDuplicates Duplicates { get; init; } = ReviewDuplicates.Default;
+
+    /// <summary>Maximum concurrent workers the ready-queue dispatcher may run.</summary>
+    /// <remarks>
+    /// Bounds MSBuild node and Roslyn server contention across parallel workers. The default
+    /// of four keeps parallelism while giving each worker its own <c>obj/</c> tree through
+    /// per-task artifacts paths; a host that names another value gets that value instead.
+    /// </remarks>
+    public int MaxConcurrentWorkers { get; init; } = 4;
 
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;

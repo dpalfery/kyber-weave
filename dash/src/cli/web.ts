@@ -15,7 +15,7 @@ import {
   handleKyberRequest,
   ERR_SERVICES_STARTING as ROUTE_ERR_SERVICES_STARTING,
 } from '../server/routes.js'
-import { CanonStore } from '../canon/store.js'
+import { CanonStore, migrateCanonDatabase, type MigrationYield } from '../canon/store.js'
 import { resolveCanonDbPath } from '../canon/paths.js'
 import { readSetting, SETTING_KEYS } from '../settings/shared-settings.js'
 import { JobHost, type JobSpawner } from '../jobs/host.js'
@@ -638,6 +638,16 @@ export type WebDashboardServices = {
    * directory; injectable so a test points the whole server at a temporary one.
    */
   capture?: CaptureRouteSettings
+  /**
+   * The seam the startup migration hands the event loop back through.
+   *
+   * <remarks>
+   * The startup path migrates the store before it opens it, and the migration
+   * hands the event loop back between sessions. The seam is injected so a
+   * test can COUNT those hand-backs: the count is the contract, not a timing
+   * threshold. The default is the migration's own event-loop turn.
+   */
+  migrationYield?: MigrationYield
 }
 
 /**
@@ -700,10 +710,61 @@ const hostedServicesStarting = new Map<string, Promise<HostedServices>>()
  * same canon.db is a second SQLite connection to the same file for no benefit.
  */
 let defaultStore: CanonStore | null = null
-function resolveHostStore(injected: CanonStore | undefined): CanonStore {
+
+/**
+ * The default store being opened, so two servers starting in this process at once
+ * share one migration and one handle rather than racing to migrate the same file.
+ *
+ * <remarks>
+ * The migration holds SQLite's write lock for the whole pass, so a second
+ * migration over the same file would wait for the first and then find the
+ * store already current -- and a second handle on the same file is a second
+ * connection for no benefit. The pair is published once it is up, exactly as
+ * a host pair is.
+ */
+let defaultStoreStarting: Promise<CanonStore> | null = null
+
+/**
+ * The engine's store, migrated and then opened.
+ *
+ * <remarks>
+ * The migration runs BEFORE the store is opened, and never while a store is
+ * open on the same file: the v21 -> v22 backfill holds SQLite's write lock
+ * for the whole pass, so a store opened beside it would wait on that lock.
+ * The store's own constructor migration is then a no-op -- the file is
+ * already at this build's schema version.
+ *
+ * The migration is the asynchronous one, so the event loop is handed back
+ * between sessions: the v21 -> v22 step parses and rewrites every session
+ * payload (339 sessions and 80 MB of payloads on the live corpus), and the
+ * constructor's one blocking pass froze the whole process for the duration
+ * of it -- no handler answered, and nothing could be cancelled.
+ *
+ * An injected store is used as it is. It is already open, and its own
+ * constructor already migrated it when it was opened; migrating its file now
+ * would run the write lock under a live handle.
+ */
+async function resolveHostStore(
+  injected: CanonStore | undefined,
+  options: { yield?: MigrationYield } = {},
+): Promise<CanonStore> {
   if (injected !== undefined) return injected
-  defaultStore ??= new CanonStore(resolveCanonDbPath())
-  return defaultStore
+  if (defaultStore !== null) return defaultStore
+  defaultStoreStarting ??= openDefaultStore(options)
+  try {
+    const store = await defaultStoreStarting
+    defaultStore = store
+    return store
+  } finally {
+    defaultStoreStarting = null
+  }
+}
+
+/** The default store: migrated first, then opened. */
+async function openDefaultStore(options: { yield?: MigrationYield }): Promise<CanonStore> {
+  const path = resolveCanonDbPath()
+  await migrateCanonDatabase(path, options)
+  return new CanonStore(path)
 }
 
 /**
@@ -717,6 +778,9 @@ function resolveHostStore(injected: CanonStore | undefined): CanonStore {
 function closeDefaultStoreIfUnused(injected: CanonStore | undefined): void {
   if (injected !== undefined || defaultStore === null) return
   if (hostedServicesStarting.size > 0) return
+  // A store being opened right now is about to be published: closing it
+  // here would take the handle out from under the start that is opening it.
+  if (defaultStoreStarting !== null) return
   for (const services of hostedServices.values()) {
     if (services.seams.store === defaultStore) return
   }
@@ -761,7 +825,7 @@ async function acquireHostedServices(
 }> {
   const stateDir = opts.stateDir ?? join(homedir(), '.kyberdash')
   const seams: HostedSeams = {
-    store: resolveHostStore(opts.store),
+    store: await resolveHostStore(opts.store, { yield: opts.migrationYield }),
     // Default to re-running THIS process's own CLI, so a source checkout
     // (`tsx src/launcher.ts web`) runs the same code rather than a `kyberdash` that may
     // not be on PATH - and in a SEA, where process.argv[1] is the unexpanded argv0, to
@@ -976,7 +1040,6 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // Resolved once, at server start: the embedded-asset case parses `web.json` here
   // rather than per request (D1-A).
   const staticSource = resolveStaticSource(runningAsSea, embeddedTextAsset)
-  const bridge = opts.kyberBridge ?? new KyberBridge()
   const writeStdout = opts.writeStdout ?? ((text: string) => { process.stdout.write(text) })
 
   // The hosted background services (rule R1). The server owns them: the tray and the web
@@ -1011,7 +1074,18 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // Read-write: the hosts write settings, and the maintenance pass purges and reprojects.
   // The store is resolved up front (it is one handle per process, shared by every server),
   // so the settings routes work from the first accepted connection.
-  const store = resolveHostStore(opts.store)
+  //
+  // Resolving the store MIGRATES the store first, and the migration runs before any
+  // handle on the canon file is open - which is why the bridge is opened below and not
+  // above. The v21 -> v22 backfill holds SQLite's write lock for the whole pass, so it
+  // must not run beside a handle on the same file; and the store's own constructor
+  // migration, which is one blocking pass over every session payload, becomes a no-op
+  // because the file is already at this build's schema version.
+  const store = await resolveHostStore(opts.store, { yield: opts.migrationYield })
+  // The bridge opens its own read-only handle on the canon file, so it is opened after
+  // the migration rather than before it: a handle that predates the migration is a
+  // handle onto a schema that is about to change underneath it.
+  const bridge = opts.kyberBridge ?? new KyberBridge()
 
   const serveIndexHtml = async (res: import('http').ServerResponse, filePath: string): Promise<void> => {
     const html = applyHtmlBrand(await readFile(filePath, 'utf8'))

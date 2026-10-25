@@ -101,7 +101,7 @@ if ! command -v nvm >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   . "$NVM_DIR/nvm.sh"
 fi
-NODE_VERSION="$(cat "$REPO_ROOT/dash/.nvmrc" 2>/dev/null || echo 24.21.0)"
+NODE_VERSION="$(cat "$REPO_ROOT/dash/.nvmrc" 2>/dev/null || echo 24.22.1)"
 if ! nvm which "$NODE_VERSION" >/dev/null 2>&1; then
   log "installing Node $NODE_VERSION"
   nvm install "$NODE_VERSION"

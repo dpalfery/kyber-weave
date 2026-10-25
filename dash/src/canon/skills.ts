@@ -26,6 +26,8 @@ import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from 
 const COPILOT_LISTING_KEY = 'github.copilot.context.skills'
 /** Antigravity's listing: `Active Skills: a, b` on the model-call span. */
 const ANTIGRAVITY_LISTING_KEY = 'gen_ai.skills'
+/** OpenCode's listing: a JSON-array string of skill names on the context span (plan 2026-10-23 §5-T5, D6). */
+const OPENCODE_LISTING_KEY = 'opencode.context.skills'
 const ANTIGRAVITY_LISTING_PREFIX = 'Active Skills: '
 /** Harness per-turn resident skill-token counter; never summed, never split across skills. */
 const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
@@ -35,6 +37,8 @@ const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
  * `claude-desktop`; `harnessFamily` folds every Claude front-end onto this id.
  */
 const CLAUDE_FAMILY = 'claude-code'
+/** Antigravity's family id; `harnessFamily` folds `antigravity-cli` and `antigravity-ide` onto it. */
+const ANTIGRAVITY_FAMILY = 'antigravity'
 const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'skill'])
 const SKILL_TOOL_OP = 'tool.invoke'
 const AGENT_ROLLUP_OP = 'agent.invoke'
@@ -79,6 +83,12 @@ export type MeasuredSkillsView = {
   reportedSkillTokens?: number
   /** Set when the invocation source is unmeasurable; `invocations` is then omitted per row. */
   invocationsAvailability?: NotMeasurable
+  /**
+   * Set only for an Antigravity session where some turns carry the invoked key and
+   * some do not (D30): the invocation figures cover `measuredTurns` of `totalTurns`.
+   * Absent when every turn, or no turn, is covered, so the figures read as before.
+   */
+  invocationsCoverage?: { measuredTurns: number; totalTurns: number }
 }
 
 /** `buildSkillsView(records, turnRecords, measurability, countTokens)`. */
@@ -87,7 +97,8 @@ export type SkillsView = MeasuredSkillsView | NotMeasurable
 /** A listing as the record declares it: whether it replaces or extends the list. */
 type Listing = { isInitial: boolean; skills: ListedSkill[] }
 
-type ListingResult = ({ measurable: true } & Listing) | NotMeasurable
+/** What a record's listing reads as: a measured list, or a declared absence. */
+export type ListingResult = ({ measurable: true } & Listing) | NotMeasurable
 
 /** A session-level listing event, placed in time order within its session. */
 type ListingEvent = {
@@ -107,6 +118,33 @@ export function extractListedSkills(record: CanonicalRecord): ListedResult {
   return { measurable: true, skills: listing.skills }
 }
 
+/**
+ * The listing a record states, read from the parts the caller holds.
+ *
+ * WHY the parts are a parameter: the projection reduces a record's parts into
+ * the values the derived views read and releases the text, so the listing —
+ * which is read out of the system prompt's text — is derived where the text is
+ * in hand and handed on as a value. A caller with no reduced listing reads
+ * the record's own parts.
+ */
+export function readListingOf(
+  record: CanonicalRecord,
+  parts: readonly ContentPart[] | undefined,
+): ListingResult {
+  const raw = rawOf(record)
+  if (raw[SKILLS_LISTED_KEY] !== undefined) return readClaudeListing(record, raw[SKILLS_LISTED_KEY])
+  if (raw[COPILOT_LISTING_KEY] !== undefined) return readCopilotListing(record, raw[COPILOT_LISTING_KEY], parts)
+  if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
+  if (raw[OPENCODE_LISTING_KEY] !== undefined) return readOpencodeListing(record, raw[OPENCODE_LISTING_KEY])
+  const fromPrompt = readSystemPromptListing(record, parts)
+  if (fromPrompt !== undefined) return fromPrompt
+  const fromBody = readRequestBodyListing(record, parts)
+  if (fromBody !== undefined) return fromBody
+  return notMeasurable(
+    `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY}, ${ANTIGRAVITY_LISTING_KEY} or ${OPENCODE_LISTING_KEY}, so the skills listed are not measurable.`,
+  )
+}
+
 export function extractInvokedSkills(records: readonly CanonicalRecord[]): InvokedResult {
   const hasInvocationSource = records.some(
     // An invoked key counts as a measured source only when it holds an array, `[]`
@@ -116,6 +154,14 @@ export function extractInvokedSkills(records: readonly CanonicalRecord[]): Invok
       isClaudeFamily(record) || isSkillToolCall(record) || Array.isArray(rawOf(record)[SKILLS_INVOKED_KEY]),
   )
   if (!hasInvocationSource) {
+    // Antigravity has no Skill tool call: its invocations come from the transcript
+    // (see providers/antigravity-transcript.ts). A session with no such key has no
+    // transcript behind it, so the reason says where the figure would have come from.
+    if (records.some((record) => harnessFamily(record.harness) === ANTIGRAVITY_FAMILY)) {
+      return notMeasurable(
+        `No skill invocation is recorded: the Antigravity records carry no ${SKILLS_INVOKED_KEY} key. Skill invocations are read from the conversation transcript, and none was available for this session, so skills invoked are not measurable.`,
+      )
+    }
     return notMeasurable(
       `No skill invocation is recorded: the records carry no Skill tool call and no ${SKILLS_INVOKED_KEY} key, so skills invoked are not measurable.`,
     )
@@ -167,8 +213,9 @@ export function buildSkillsView(
   turnRecords: readonly CanonicalRecord[],
   measurability: Measurability,
   countTokens: (text: string) => number,
+  listings?: ReadonlyMap<string, ListingResult>,
 ): SkillsView {
-  return skillsForSession(records, turnRecords, measurability, countTokens).view
+  return skillsForSession(records, turnRecords, measurability, countTokens, listings).view
 }
 
 /** A session's skills view and its per-turn listing, produced by one shared fold. */
@@ -190,6 +237,7 @@ export function skillsForSession(
   turnRecords: readonly CanonicalRecord[],
   measurability: Measurability,
   countTokens: (text: string) => number,
+  listings?: ReadonlyMap<string, ListingResult>,
 ): SessionSkills {
   const declaredListing = measurability.skills_listed
   if (declaredListing !== undefined && isNotMeasurable(declaredListing)) return { view: declaredListing, listed: undefined }
@@ -203,9 +251,9 @@ export function skillsForSession(
     }
   }
 
-  const byTurn = effectiveListingsOf(all, turns)
+  const byTurn = effectiveListingsOf(all, turns, listings)
   if (byTurn.size === 0) {
-    return { view: notMeasurable(firstListingReason(turns)), listed: undefined }
+    return { view: notMeasurable(firstListingReason(turns, listings)), listed: undefined }
   }
 
   return { view: measuredView(all, turns, byTurn, measurability, countTokens), listed: byTurn }
@@ -261,6 +309,15 @@ function measuredView(
   const reportedSkillTokens = latestReportedSkillTokens(turns)
   if (reportedSkillTokens !== undefined) view.reportedSkillTokens = reportedSkillTokens
   if (invocationsAvailability !== undefined) view.invocationsAvailability = invocationsAvailability
+  // Antigravity counts an invocation only on a turn that carries the key (D30), so
+  // a partly covered session says how many turns its figures cover.
+  if (invocationsAvailability === undefined) {
+    const antigravityTurns = turns.filter((turn) => harnessFamily(turn.harness) === ANTIGRAVITY_FAMILY)
+    const measuredTurns = antigravityTurns.filter((turn) => Array.isArray(rawOf(turn)[SKILLS_INVOKED_KEY])).length
+    if (measuredTurns > 0 && measuredTurns < antigravityTurns.length) {
+      view.invocationsCoverage = { measuredTurns, totalTurns: antigravityTurns.length }
+    }
+  }
   return view
 }
 
@@ -273,8 +330,9 @@ function measuredView(
 export function listedByTurn(
   records: readonly CanonicalRecord[],
   turnRecords: readonly CanonicalRecord[],
+  listings?: ReadonlyMap<string, ListingResult>,
 ): Map<string, Map<string, string | undefined>> {
-  return effectiveListingsOf(uniqueBySpan([...records, ...turnRecords]), uniqueBySpan(turnRecords))
+  return effectiveListingsOf(uniqueBySpan([...records, ...turnRecords]), uniqueBySpan(turnRecords), listings)
 }
 
 /**
@@ -291,8 +349,9 @@ export function listedByTurn(
 function effectiveListingsOf(
   all: readonly CanonicalRecord[],
   turns: readonly CanonicalRecord[],
+  listings?: ReadonlyMap<string, ListingResult>,
 ): Map<string, Map<string, string | undefined>> {
-  const { sessionEvents, rollups } = collectListings(all)
+  const { sessionEvents, rollups } = collectListings(all, listings)
 
   const eventsBySession = new Map<string, ListingEvent[]>()
   for (const event of sessionEvents) {
@@ -359,15 +418,7 @@ function parentSkills(turn: CanonicalRecord, rollups: ReadonlyMap<string, Rollup
 // ---------------------------------------------------------------------------
 
 function readListing(record: CanonicalRecord): ListingResult {
-  const raw = rawOf(record)
-  if (raw[SKILLS_LISTED_KEY] !== undefined) return readClaudeListing(record, raw[SKILLS_LISTED_KEY])
-  if (raw[COPILOT_LISTING_KEY] !== undefined) return readCopilotListing(record, raw[COPILOT_LISTING_KEY])
-  if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
-  const fromPrompt = readSystemPromptListing(record)
-  if (fromPrompt !== undefined) return fromPrompt
-  return notMeasurable(
-    `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY} or ${ANTIGRAVITY_LISTING_KEY}, so the skills listed are not measurable.`,
-  )
+  return readListingOf(record, record.parts)
 }
 
 function readClaudeListing(record: CanonicalRecord, value: unknown): ListingResult {
@@ -384,7 +435,11 @@ function readClaudeListing(record: CanonicalRecord, value: unknown): ListingResu
   return { measurable: true, isInitial: value.isInitial, skills: uniqueByName(skills) }
 }
 
-function readCopilotListing(record: CanonicalRecord, value: unknown): ListingResult {
+function readCopilotListing(
+  record: CanonicalRecord,
+  value: unknown,
+  parts: readonly ContentPart[] | undefined,
+): ListingResult {
   if (typeof value !== 'string') {
     return notMeasurable(`${COPILOT_LISTING_KEY} is not a string, so the Copilot skill listing is not measurable.`)
   }
@@ -399,10 +454,37 @@ function readCopilotListing(record: CanonicalRecord, value: unknown): ListingRes
       `${COPILOT_LISTING_KEY} is not a JSON array of skill names, so the Copilot skill listing is not measurable.`,
     )
   }
-  const descriptions = xmlDescriptions(systemPromptText(record))
+  const descriptions = xmlDescriptions(systemPromptText(record, parts))
   const skills = (parsed as string[])
     .filter((name) => name !== '')
     .map((name) => listedSkill(record, name, descriptions.get(name)))
+  return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+}
+
+/**
+ * The opencode context listing (D6): a JSON array of skill names, the Copilot
+ * `github.copilot.context.skills` pattern. The context span is a request-assembly
+ * event, so its listing is the session's initial list. A malformed value names
+ * its key in the not-measurable reason, never an empty list.
+ */
+function readOpencodeListing(record: CanonicalRecord, value: unknown): ListingResult {
+  if (typeof value !== 'string') {
+    return notMeasurable(`${OPENCODE_LISTING_KEY} is not a string, so the opencode skill listing is not measurable.`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return notMeasurable(`${OPENCODE_LISTING_KEY} is not valid JSON, so the opencode skill listing is not measurable.`)
+  }
+  if (!Array.isArray(parsed) || !parsed.every((name) => typeof name === 'string')) {
+    return notMeasurable(
+      `${OPENCODE_LISTING_KEY} is not a JSON array of skill names, so the opencode skill listing is not measurable.`,
+    )
+  }
+  const skills = (parsed as string[])
+    .filter((name) => name !== '')
+    .map((name) => listedSkill(record, name))
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 
@@ -426,13 +508,72 @@ function readAntigravityListing(record: CanonicalRecord, value: unknown): Listin
  * listing key (VS Code Copilot sends a `<skills>` block). It is what the model was
  * given, so it is measured; a prompt with no such block says nothing either way.
  */
-function readSystemPromptListing(record: CanonicalRecord): ListingResult | undefined {
+function readSystemPromptListing(
+  record: CanonicalRecord,
+  parts: readonly ContentPart[] | undefined,
+): ListingResult | undefined {
   // Parts are the source of truth when present; the flat `content` is only for records without them.
-  const text = record.parts !== undefined ? partsSystemPrompt(record.parts) : systemPromptText(record)
+  const text = parts !== undefined ? partsSystemPrompt(parts) : systemPromptText(record, parts)
   if (!/<(?:available_)?skills>/.test(text)) return undefined
   const skills = [...xmlDescriptions(text)].map(([name, description]) => listedSkill(record, name, description))
   if (skills.length === 0) return undefined
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+}
+
+/** The marker Claude Code writes before the `- name: description` skill entries. */
+const BODY_LISTING_MARKER = 'The following skills are available for use with the Skill tool:'
+
+/**
+ * The listing a Claude request body carries (D14, D21): from `system_prompt`
+ * parts and system-role `conversation_history` parts only, so text a user or
+ * the assistant quoted, and parts with no recorded role, never count. A body
+ * that did not parse produced no parts, so there is nothing partial to read.
+ */
+function readRequestBodyListing(
+  record: CanonicalRecord,
+  parts: readonly ContentPart[] | undefined,
+): ListingResult | undefined {
+  if (!isClaudeFamily(record) || parts === undefined) return undefined
+  for (const part of parts) {
+    const eligible = part.part === 'system_prompt' || (part.part === 'conversation_history' && part.role === 'system')
+    if (!eligible) continue
+    const skills = parseBodyListing(record, part.text)
+    if (skills.length > 0) return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+  }
+  return undefined
+}
+
+/**
+ * The `- name: description` entries that follow the marker. The name is the
+ * non-whitespace run before the first colon that is followed by whitespace or
+ * the end of the line, so a plugin-namespaced `plugin:skill` stays whole and a
+ * description may contain colons. An indented line continues the previous
+ * entry's description (joined with one space); a blank line or any other
+ * unindented non-entry line ends the listing.
+ */
+function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] {
+  const at = text.indexOf(BODY_LISTING_MARKER)
+  if (at < 0) return []
+  const entries: Array<{ name: string; description: string }> = []
+  for (const line of text.slice(at + BODY_LISTING_MARKER.length).split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') {
+      if (entries.length > 0) break
+      continue
+    }
+    const last = entries[entries.length - 1]
+    if (last !== undefined && /^\s/.test(line)) {
+      last.description = last.description === '' ? trimmed : `${last.description} ${trimmed}`
+      continue
+    }
+    const entry = /^- (\S+?):(?:\s+(.*))?$/.exec(line.trimEnd())
+    if (entry === null) {
+      if (entries.length > 0) break
+      continue
+    }
+    entries.push({ name: entry[1]!, description: (entry[2] ?? '').trim() })
+  }
+  return entries.map((entry) => listedSkill(record, entry.name, nonEmptyString(entry.description)))
 }
 
 /** Skill names and optional descriptions from the system prompt's `<skill>` XML blocks. */
@@ -460,8 +601,8 @@ function partsSystemPrompt(parts: readonly ContentPart[]): string {
     .join('\n')
 }
 
-function systemPromptText(record: CanonicalRecord): string {
-  const fromParts = partsSystemPrompt(record.parts ?? [])
+function systemPromptText(record: CanonicalRecord, parts: readonly ContentPart[] | undefined): string {
+  const fromParts = partsSystemPrompt(parts ?? [])
   if (fromParts !== '') return fromParts
   return record.content.system_prompt ?? ''
 }
@@ -474,14 +615,17 @@ function systemPromptText(record: CanonicalRecord): string {
  * Split the measured listings into session-level events (fold in time order)
  * and rollup listings (applied to their direct children only).
  */
-function collectListings(records: readonly CanonicalRecord[]): {
+function collectListings(
+  records: readonly CanonicalRecord[],
+  listings?: ReadonlyMap<string, ListingResult>,
+): {
   sessionEvents: ListingEvent[]
   rollups: Map<string, RollupListing>
 } {
   const sessionEvents: ListingEvent[] = []
   const rollups = new Map<string, RollupListing>()
   records.forEach((record, order) => {
-    const read = readListing(record)
+    const read = listings?.get(record.spanId) ?? readListing(record)
     if ('availability' in read) return
     if (record.op === AGENT_ROLLUP_OP) {
       rollups.set(record.spanId, { listing: read })
@@ -500,9 +644,12 @@ function applySkills(effective: Map<string, string | undefined>, skills: readonl
 }
 
 /** The reason a turn's listing is not measurable, naming the first turn that declares one. */
-function firstListingReason(turns: readonly CanonicalRecord[]): string {
+function firstListingReason(
+  turns: readonly CanonicalRecord[],
+  listings?: ReadonlyMap<string, ListingResult>,
+): string {
   for (const turn of turns) {
-    const read = readListing(turn)
+    const read = listings?.get(turn.spanId) ?? readListing(turn)
     if ('availability' in read) return read.reason
   }
   return 'No skill listing applies to these turns, so the skills listed are not measurable.'

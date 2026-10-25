@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  claudeCodeAdapter,
   claudeApiRequestBodyFailureReason,
   parseClaudeApiRequestBody,
 } from './claude-code.js'
+import type { ContentPart } from '../types.js'
 
 /**
  * The Claude Code API request body, as the harness emits it once
@@ -214,5 +216,102 @@ describe('claudeApiRequestBodyFailureReason', () => {
 
   it('reports no reason for a body it parsed', () => {
     expect(claudeApiRequestBodyFailureReason(JSON.stringify(REQUEST))).toBeUndefined()
+  })
+})
+
+function parsedParts(body: unknown): ContentPart[] {
+  return parseClaudeApiRequestBody(body) as ContentPart[]
+}
+
+describe('parseClaudeApiRequestBody — message roles on parts (D21)', () => {
+  // Why: the skill listing reader must tell a system-role reminder from text a
+  // user quoted, and the parser drops the role today, so both land as the same
+  // conversation_history part. Roles are recorded per message, not per bucket.
+
+  it('records each message role on the parts that message produces', () => {
+    const parts = parsedParts(JSON.stringify(REQUEST))
+
+    // system_prompt and tool_definitions come from top-level fields, and the
+    // thinking-only assistant message produces no part at all.
+    expect(parts.map((part) => part.role)).toEqual([
+      undefined,
+      undefined,
+      'user',
+      'user',
+      'assistant',
+      'assistant',
+      'user',
+      'user',
+    ])
+  })
+
+  it('records the system role on a system-role message, so a system reminder is not a user message', () => {
+    const parts = parsedParts(
+      JSON.stringify({
+        system: SYSTEM_TEXT,
+        messages: [
+          {
+            role: 'system',
+            content: [{ type: 'text', text: 'Synthetic system reminder block.' }],
+          },
+          { role: 'user', content: 'Synthetic user prompt.' },
+        ],
+      }),
+    )
+
+    expect(parts.map((part) => [part.part, part.role])).toEqual([
+      ['system_prompt', undefined],
+      ['conversation_history', 'system'],
+      ['conversation_history', 'user'],
+    ])
+  })
+
+  it('keeps the role on a message the parser keeps whole as JSON', () => {
+    const parts = parsedParts(
+      JSON.stringify({ messages: [{ role: 'system', content: { type: 'unexpected_shape' } }] }),
+    )
+
+    expect(parts.map((part) => part.role)).toEqual(['system'])
+  })
+
+  it('does not give a system prompt or tool definition part a role', () => {
+    const parts = parsedParts(JSON.stringify(REQUEST))
+    const topLevel = parts.filter((part) => part.part === 'system_prompt' || part.part === 'tool_definitions')
+
+    expect(topLevel.map((part) => part.part)).toEqual(['system_prompt', 'tool_definitions'])
+    for (const part of topLevel) expect(part).not.toHaveProperty('role')
+  })
+
+  it.each([
+    ['no role key', { content: 'Synthetic text without a role.' }],
+    ['a non-string role', { role: 7, content: [{ type: 'text', text: 'Synthetic text with a numeric role.' }] }],
+  ])('gives the parts of a message with %s no role at all', (_label, message) => {
+    const parts = parsedParts(JSON.stringify({ messages: [message] }))
+
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).not.toHaveProperty('role')
+  })
+})
+
+describe('claudeCodeAdapter.normalize — tool spans', () => {
+  const span = (name: string, attributes: Record<string, unknown>) => ({
+    spanId: name,
+    traceId: 't',
+    name,
+    kind: 'internal',
+    source: 'otel',
+    attributes: { 'session.id': 's', ...attributes },
+  })
+
+  it('classifies a claude_code.tool span as tool.invoke, once', () => {
+    const tool = claudeCodeAdapter.normalize(
+      span('claude_code.tool', { 'span.type': 'tool', tool_name: 'Bash' }) as never,
+    )
+    expect(tool.op).toBe('tool.invoke')
+
+    const execution = claudeCodeAdapter.normalize(
+      span('claude_code.tool.execution', { 'span.type': 'tool.execution' }) as never,
+    )
+    expect(execution.op).not.toBe('tool.invoke')
   })
 })

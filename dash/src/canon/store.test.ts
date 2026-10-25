@@ -196,6 +196,47 @@ describe('CanonStore round trip', () => {
   })
 })
 
+describe('CanonStore Claude model-call candidate lookups', () => {
+  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
+    record({
+      spanId,
+      traceId: 'trace-claude',
+      harness: 'claude-code',
+      sessionId: 'session-claude',
+      op: 'llm.invoke',
+      raw: telemetryPayload(2 * 1024, 'Synthetic heavy raw payload.'),
+      ...overrides,
+    })
+
+  it('returns only id, start and duration for a trace, and only Claude model calls', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      claudeCall('call-a', { timestamp: '2026-08-29T12:00:00.000Z', durationMs: 250 }),
+      claudeCall('call-tool', { op: 'tool.execute' }),
+      claudeCall('call-pi', { harness: 'pi' }),
+      claudeCall('call-other-trace', { traceId: 'trace-other' }),
+    ])
+
+    expect(store.claudeModelCallCandidatesInTrace('trace-claude')).toEqual([
+      { spanId: 'call-a', timestamp: '2026-08-29T12:00:00.000Z', durationMs: 250 },
+    ])
+    store.close()
+  })
+
+  it('returns the same lightweight shape for a session', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      claudeCall('call-s1'),
+      claudeCall('call-s2', { traceId: 'trace-two', sessionId: 'session-claude', timestamp: '2026-08-29T12:00:01.000Z' }),
+    ])
+
+    const candidates = store.claudeModelCallCandidatesInSession('session-claude')
+    expect(candidates.map((c) => c.spanId).sort()).toEqual(['call-s1', 'call-s2'])
+    for (const c of candidates) expect(Object.keys(c).sort()).toEqual(['durationMs', 'spanId', 'timestamp'])
+    store.close()
+  })
+})
+
 describe('CanonStore finding waste persistence (coverage-gap)', () => {
   function measuredFinding(): Finding {
     return {
@@ -1712,7 +1753,7 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
   it('initializes a fresh database at the current schema with the v17 quarantine and problems columns', () => {
     // Plan 2026-10-10 (B10) moves the schema past the live codex store's 18, so
     // the version pin here tracks SCHEMA_VERSION rather than a fixed 17.
-    expect(SCHEMA_VERSION).toBe(20)
+    expect(SCHEMA_VERSION).toBe(22)
 
     const path = tempStorePath()
     const store = new CanonStore(path)

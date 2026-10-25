@@ -185,7 +185,6 @@ interface SessionRow {
   settled_at: string | null
   started: string | null
   ended: string | null
-  payload: string
 }
 
 /**
@@ -232,9 +231,13 @@ function syncSessions(store: CanonStore, clock: TranscriptSyncClock): number {
   const now = clock.now()
   const nowIso = new Date(now).toISOString()
 
+  // Only the sync job's own columns are fetched here. `payload` is the session's whole
+  // JSON blob -- up to 15.3 MB for a single session -- and this loop never reads it, so
+  // naming it here made every pass over the unsettled rows pay for a blob it discarded.
+  // Do not add it back: nothing in this job needs it.
   const rows = db
     .prepare(
-      `SELECT session_id, harness, transcript_path, transcript_offset, sync_status, settled_at, started, ended, payload
+      `SELECT session_id, harness, transcript_path, transcript_offset, sync_status, settled_at, started, ended
        FROM session
        WHERE sync_status NOT IN ('settled', 'unavailable') OR sync_status IS NULL`,
     )

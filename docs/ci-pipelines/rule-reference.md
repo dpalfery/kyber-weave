@@ -174,6 +174,10 @@ number, and a missing report is the same class of signal rather than a failed ga
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
+| `KW-REVIEW-026` | Info | A task gate was skipped: its `os` does not match the host, or no changed file matches its `include` (`--agent`) |
+| `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran (`--agent`) |
+| `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 
 ### Duplicates — `review duplicates`
 

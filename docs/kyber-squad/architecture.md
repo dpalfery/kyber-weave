@@ -16,6 +16,7 @@ decided-by:
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
+  - adr/0040-flat-agent-dir-discovery-guarded-resources
 keywords:
   - multi-harness
   - deployment
@@ -64,8 +65,8 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["22 Canonical Agents\n(agents/*.md)"]
-        Skills["24 Canonical Skills\n(skills/*)"]
+        Agents["24 Canonical Agents\n(agents/*.md)"]
+        Skills["28 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
     end
@@ -111,8 +112,8 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 68 supplemental files, giving 92 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+  identities. The canonical tree separately retains 82 supplemental files, giving 110 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -142,10 +143,10 @@ Targets without native agent primitives use **agent-to-role-skill lowering**, go
 this projection; Antigravity was previously classified as fallback and has been reclassified to native
 ([ADR 0022](../adr/0022-antigravity-native-agents.md)).
 
-The current canonical agent and skill namespaces intersect at eight names. Two of those
+The current canonical agent and skill namespaces intersect at eleven names. Two of those
 intersections — `product-owner` and `bug-crusher` — are **primary shared identities**: root agents
 whose body is a thin wrapper pointing at the same-name canonical skill, which carries the role
-([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining six are
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining nine are
 distinct-body collisions. The primary shared identities reuse the canonical skill as their entry
 point, so no `role-` projection is generated for them:
 
@@ -154,7 +155,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
 
     Intersection -->|"Two Primary Shared Identities\n(product-owner, bug-crusher)"| SharedPath["Thin Wrapper: Canonical Skill\nIs the Entry Point"]
-    Intersection -->|"Six Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"Nine Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
     Intersection -->|"No Skill Collision\n(conductor)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> SharedCheck{"Target Native\nAgent Support?"}
@@ -181,7 +182,7 @@ flowchart TD
      canonical skill and no duplicate; a target that lowers a primary onto a skill or command
      (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
    - No `role-<name>` projection is generated, and no skill projection is suppressed.
-2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `python-dev`, `test-dev`)**:
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, `typescript-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
@@ -501,7 +502,8 @@ and validates.
   owns it — `ClaudeRenderer` for `.claude/agents/*.md` and a primary-agent entry-point skill at
   `.claude/skills/conductor/SKILL.md`, `CopilotRenderer` for `.github/agents/*.agent.md` and
   `.github/skills/*/SKILL.md`, `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
-  `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`,
+  `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`; a primary agent
+  without a declared shared skill also gets an entry-point skill,
   `AntigravityRenderer` for native per-agent directory emission to `.agents/agents/*/agent.md` and canonical skills to `.agents/skills/*/SKILL.md` ([ADR 0022](../adr/0022-antigravity-native-agents.md)),
   `OpenCodeRenderer` for `.opencode/agents/*.md` and `.opencode/skills/*/SKILL.md`,
   `KiloRenderer` for `.kilo/agents/*.md` and `.kilo/skills/*/SKILL.md`,
@@ -516,7 +518,7 @@ and validates.
 | `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md`; primary agents also at `.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` | Native |
 | `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md` | `.github/skills/<name>/SKILL.md` | Native |
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
-| `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` | Native |
+| `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` (canonical skills and derived primary entry points) | Native |
 | `antigravity` | `AntigravityRenderer` | `.agents/agents/<name>/agent.md` | `.agents/skills/<name>/SKILL.md` | Native |
 | `opencode` | `OpenCodeRenderer` | `.opencode/agents/<name>.md` | `.opencode/skills/<name>/SKILL.md` | Native |
 | `kilo` | `KiloRenderer` | `.kilo/agents/<name>.md` | `.kilo/skills/<name>/SKILL.md` | Native |
@@ -526,6 +528,14 @@ and validates.
 | `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; primary agents lower to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
 | `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 
+- **Codex primary-agent entry points**: the renderer keeps every native agent at
+  `.codex/agents/<name>.toml`. For a primary agent without a same-name canonical skill, it also
+  derives `.codex/skills/<name>/SKILL.md` from the agent's description and instruction body, and
+  projects the agent's resource closure beside that skill. The declared primary shared identities
+  `product-owner` and `bug-crusher` reuse their canonical skills as entry points instead of
+  producing duplicate skills. A same-name canonical skill on an identity not declared shared is
+  an unresolved path collision; rendering fails closed rather than overwriting or renaming either
+  artifact. Global scope removes the `.codex/` prefix from both output roots.
 - **Target-scoped projection inputs**: each canonical agent declares exact `copilot-tools`, and may
   name a target-scoped `copilot-capability-profile` or `devin-capability-profile`. These fields
   validate and render that one target's allow-list and safety degradation only. They do not replace
@@ -549,10 +559,20 @@ and validates.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
-  would alias another principal's output is a validation error, never an overwrite. There are
-  two target-specific exceptions to "verbatim":
-  - **ZCode** rewrites declared-resource links to `../skills/…` (ADR 0021); the rewrite stays
-    relative.
+  would alias another principal's output is a validation error, never an overwrite. The rule for
+  a target whose agent discovery registers nested markdown is property-based: an agent-owned
+  markdown resource must deploy in a form the harness scanner ignores, keeping it co-located
+  with its principal, with the deviation recorded as a `resource-links-rewritten` degradation.
+  The three target-specific forms of that rule today are:
+  - **ZCode** relocates agent resources under `.zcode/skills/<owner>/…` and rewrites
+    declared-resource links to `../skills/…` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md));
+    the rewrite stays relative.
+  - **OpenCode and Kilo** keep resources co-located beside their principal but deploy every
+    agent-owned `.md` resource with a `.markdown` extension, rewriting in-closure authored links
+    `.md` → `.markdown` ([ADR 0040](../adr/0040-flat-agent-dir-discovery-guarded-resources.md)).
+    Both scanners match only `{agent,agents}/**/*.md` recursively, so `.markdown` is invisible
+    to discovery while each file stays beside — and wholly owned by — its agent. An agent closure
+    holding both `x.md` and `x.markdown` fails closed rather than merging one path.
   - **Copilot, global scope only.** A global-scope agent is read from outside any workspace, so
     a relative link has no base the model can resolve. Each link in the agent body whose target
     exactly equals one of that agent's declared resource paths is rewritten to an absolute
@@ -573,9 +593,10 @@ and validates.
   naming the missing input, rather than shipping relative links. Rendered global content therefore
   embeds the machine's resolved root (`$COPILOT_HOME` or `~/.copilot`). The closure-driven rewrite
   lives in the internal `SquadResourceLinkRewriter` helper (taking the resources and a
-  target-path mapping), which only ZCode and Copilot (global) use today; `SquadResourceProjection`
-  is unchanged. No ADR — ADR waiver: a narrow, target-specific refinement of this rule following
-  the ADR 0021 pattern; this bullet is the record.
+  target-path mapping), which ZCode, Copilot (global), OpenCode, and Kilo use today —
+  OpenCode and Kilo through the `SquadAgentResourceDiscoveryGuard` extension-map wrapper,
+  and `SquadResourceProjection` is unchanged. No ADR for the Copilot-global form — ADR waiver: a narrow, target-specific refinement of this rule following
+  the ADR 0021 pattern; this bullet is its record.
 - **An omitted permission is not a withheld one on `opencode`.** Agent permissions merge with
   OpenCode's global config, whose documented behaviour is that most permissions default to
   `allow` (`external_directory` and `doom_loop` are the stated exceptions). A renderer that
@@ -643,8 +664,8 @@ and validates.
   directory that sidecar would need). Each tells the role to initialise a destination that
   does not exist before editing. `architect`'s `PLAN_READY`
   contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
-  `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
-  Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
+  `docs drift` to pass. `docs-dev` deliberately names no
+  Devin profile and keeps narrowing: it has no an execution-dependent completion contract, and a
   grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
   also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
   and `spec-path` references pre-create an empty destination before dispatching, and again before
@@ -671,19 +692,19 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 123 files — 22 agents, 24 skills, plus projected
+  the principal. A fresh Copilot render is 140 files — 24 agents, 28 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
-  contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
-  Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
+  contract in [requirements](requirements.md) (KS-001 and the render requirement). The
+  earlier 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill golden bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad
-  and has no Hotshot baseline. Every imported canonical raw `SKILL.md` except the
+- **Skill canonical bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad.
+  Every imported canonical raw `SKILL.md` except the
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
-  `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
+  `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 68 skill resources (92 files under
+  recursive package formats retain all 82 skill resources (110 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -749,20 +770,19 @@ The worker's inner 3-iteration cap applies to each implementation or rework disp
 
 ### Task session continuity
 
-Each implementation task keeps its original worker session through review fixes and
+Each implementation task keeps its original worker session through task-gate rework and
 verification when the current harness supports continuation. The conductor records
-the task identity, specialist type, actual `worker-session-id`, and a separate
-`reviewer-session-id` on the execution artifact. Calling the same role by name does
-not by itself resume a conversation. The same independent reviewer can continue the
-second and third audit passes with its prior findings and current evidence; it never
-shares the author's conversation.
+the task identity, specialist type, and actual `worker-session-id` on the execution
+artifact. Calling the same role by name does not by itself resume a conversation.
+No reviewer session exists: a missing or failing `TASK_GATE:` line is rejected back to
+the original worker.
 
 Self-contained packets define scope and support recovery; they do not require every
 dispatch to discard history. The conductor retains a recovery brief with decisions,
 failed approaches, evidence, findings, and retry tallies. It replaces a session only
 when continuation is unsupported, the session cannot be recovered, or its context is
 unreliable. A busy owner waits in the queue. Unrelated tasks use separate sessions,
-and retained sessions stay available until task audits and run-level findings settle.
+and retained sessions stay available until task gates and run-level findings settle.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned
@@ -832,7 +852,7 @@ Operational contracts remain in
 `products/kyber-squad/agents/test-dev.md`, and
 `products/kyber-squad/agents/github-devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
-`HotshotGoldenContractTests.cs`.
+`tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
 ---
 

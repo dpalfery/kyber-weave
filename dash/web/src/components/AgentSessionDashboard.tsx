@@ -9,7 +9,7 @@ import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
-import { SessionCostPanel, SessionTokenTotals } from './SessionCostPanel.js'
+import { SessionCostPanel } from './SessionCostPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
@@ -111,6 +111,10 @@ export interface ToolRow {
   result_tokens?: number | null
   in_definitions?: boolean
   results_not_recorded?: number | null
+  /** The invocation's arguments, as the engine previewed them. Absent when not carried. */
+  arguments_preview?: string | null
+  /** The invocation's result, as the engine previewed it. Absent when not carried. */
+  result_preview?: string | null
 }
 
 export interface ServerRow {
@@ -255,6 +259,34 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   execute_hook: '#ec4899', // pink
   hook: '#ec4899',
   embeddings: '#8b5cf6', // purple
+}
+
+/** Drawer-content key carrying the "definitions not exported" notice; never rendered as data. */
+const TOOL_DEFINITION_UNAVAILABLE_KEY = 'definitionUnavailableNotice'
+
+/**
+ * Copilot CLI journals carry no tool schemas at all. Its system prompt's
+ * `<tools>` section is usage guidance, so the notice says so rather than
+ * presenting that section as the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+function toolDefinitionsUnavailableReason(harness: string | undefined): string {
+  if (harness === 'copilot' || harness === 'copilot-cli') return COPILOT_TOOL_DEFINITIONS_REASON
+  return `${harness || 'This harness'} does not export tool definitions for this session, so only the invocation row is shown.`
+}
+
+function drawerNoticeOf(content: unknown): string | undefined {
+  if (content === null || typeof content !== 'object') return undefined
+  const notice = (content as Record<string, unknown>)[TOOL_DEFINITION_UNAVAILABLE_KEY]
+  return typeof notice === 'string' ? notice : undefined
+}
+
+function stripNotice<T>(content: T): T {
+  if (content === null || typeof content !== 'object') return content
+  const { [TOOL_DEFINITION_UNAVAILABLE_KEY]: _notice, ...rest } = content as Record<string, unknown>
+  return rest as T
 }
 
 function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = null): TimelineNode {
@@ -611,6 +643,19 @@ export function AgentSessionContent({
         ? defs.find((d) => (d.name || d.function?.name) === tool.name)
         : undefined
 
+      // No turn carries definitions and the session lists no offered tools:
+      // the harness exported none. Say so instead of issuing a content request
+      // that can only come back empty and read as a load failure.
+      if (!turnWithDefs && !Array.isArray(session?.summary?.tools_offered)) {
+        setDrawerContent({
+          tool,
+          definition: null,
+          [TOOL_DEFINITION_UNAVAILABLE_KEY]: toolDefinitionsUnavailableReason(session?.harness),
+        })
+        setDrawerOpen(true)
+        return
+      }
+
       setDrawerContent({
         tool,
         definition: def ?? null,
@@ -682,13 +727,18 @@ export function AgentSessionContent({
 
   // Tool definitions grouping
   const toolRows = session.tools || []
-  const schemaOffered = toolRows.filter((t) => t.in_definitions)
-  const isSchemaMeasurable = schemaOffered.length > 0
+  // The server serialises resident cost on every offered row and does not emit
+  // `in_definitions`, so a priced row is as good a signal as the legacy flag.
+  const schemaPayload = (session as { schema?: SchemaCostAnalysis }).schema
+  const isSchemaMeasurable =
+    schemaPayload?.measurable === true ||
+    toolRows.some((t) => t.in_definitions || (typeof t.total_schema_cost === 'number' && Number.isFinite(t.total_schema_cost)))
 
   // Which content-route request the drawer should issue for what it is
   // showing: a whole-turn lossless request, an explicit span selection, the
   // tool-definition drawer, a bucket drill-down onto its turn's span, or the
   // span the drawer is inspecting.
+  const drawerNotice = drawerNoticeOf(drawerContent)
   const drawerContentRequest = (() => {
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
@@ -1131,11 +1181,6 @@ export function AgentSessionContent({
             </div>
           </Card>
         </div>
-
-        {/* Moved, not duplicated: the same Underlying Token Totals section from
-            the lower cost panel, kept inside Session Overview above the later
-            detail sections. */}
-        <SessionTokenTotals summary={u} />
       </div>
 
       {/* ---------------------------------------------------------------------
@@ -1392,9 +1437,18 @@ export function AgentSessionContent({
         onClose={() => setDrawerOpen(false)}
         title={drawerTitle}
         subtitle={drawerSubtitle}
-        rawContent={drawerContent}
+        rawContent={drawerNotice === undefined ? drawerContent : stripNotice(drawerContent)}
         contentRequest={drawerContentRequest}
-      />
+      >
+        {drawerNotice !== undefined && (
+          <p
+            className="rounded border border-border bg-card px-3 py-2 text-xs text-tertiary-foreground"
+            data-testid="tool-definition-unavailable"
+          >
+            {drawerNotice}
+          </p>
+        )}
+      </SessionInspectorDrawer>
     </div>
   )
 }

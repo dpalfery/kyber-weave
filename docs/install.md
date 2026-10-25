@@ -241,6 +241,58 @@ The `--ignore-missing` flag allows you to verify a subset of files if you downlo
 only some of the release assets. A mismatch causes the command to exit with a non-zero
 status and print a `FAILED` line.
 
+## The SBOM: what each release ships
+
+Every release also publishes `kyber-weave-sbom-<version>.cdx.json` — a **Software Bill of
+Materials** in [CycloneDX](https://cyclonedx.org/) JSON, format version 1.6. It is a
+machine-readable inventory of the third-party components the release depends on, across
+the three ecosystems this repository ships:
+
+| Ecosystem | What the SBOM covers | Where it comes from |
+|---|---|---|
+| .NET (NuGet) | `KyberWeave.Cli`, `KyberWeave.Mcp`, `KyberWeave.Core` | the resolved `*.deps.json` of a throwaway publish |
+| Node (npm) | KyberDash, the web dashboard, the tray UI, the npm wrapper | `package-lock.json` |
+| Rust (Cargo) | the KyberDash tray | `Cargo.lock` |
+
+It exists so that the inventory can be fed to a vulnerability scanner or a licence audit
+without unpacking every binary. See
+[issue #383](https://github.com/dpalfery/kyber-weave/issues/383) for the rationale.
+
+### Verifying the SBOM
+
+The SBOM is listed in `SHA256SUMS.txt` like every other asset, so the same command that
+verifies the binaries verifies it — there is nothing extra to download or trust:
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+### What the SBOM does and does not tell you
+
+It is a dependency inventory, not a statement about what is running on your machine, and
+not a scan of the published archives. Four limits are worth stating plainly.
+
+- **It describes the repository's dependency closure, not any individual RID's binary.**
+  Every asset in a release is built from the same locked dependency set, so the closure
+  is the same for all of them — but this is an inventory of the inputs, not a
+  measurement of the bytes inside an archive.
+- **The embedded .NET runtime is not in it.** The shipped `kyber-weave` and
+  `kyber-weave-mcp` binaries are self-contained: they embed the entire .NET runtime,
+  which is the single largest component of what actually ships. The SBOM is built from
+  a *framework-dependent* publish, because that is what produces the readable
+  dependency manifest, and a framework-dependent manifest lists NuGet packages only.
+  The .NET runtime therefore does not appear as a component.
+- **The embedded Node runtime is not in it either.** `kyberdash` is a Node
+  single-executable, and the runtime is a platform input rather than an npm
+  dependency.
+- **Test-only dependencies are not in it.** The SBOM covers what the release ships,
+  not the test suite.
+
+So: the SBOM answers *"which third-party libraries does this release depend on?"*. It
+does not answer *"what is in this archive?"*, and in particular it does not account
+for the two runtimes the release embeds. For a byte-level inventory, scan the published
+archives themselves.
+
 ## Windows: unsigned binaries and SmartScreen
 
 The Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) and all Windows `.exe`

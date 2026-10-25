@@ -6,13 +6,14 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-21
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
   - purgeExpiredContent
   - runTranscriptSync
   - formatSessionTitle
+  - relinkQuarantinedClaudeLogs
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -346,6 +347,29 @@ The dashboard reaches it at `POST /api/kyber/import-history` with a body carryin
 `{weeks?, harness | harnesses}`, from the Maintenance panel's **Import folder history**
 control; the tray reaches the same route from its popover.
 
+**Importing `antigravity-cli`.** `--harness antigravity` selects only the `~/.gemini/antigravity`
+descriptor. `antigravity-cli` and `antigravity-ide` are separate descriptors, so name them
+explicitly. To import the `antigravity-cli` conversations, name that harness and use a window of at
+least 2 weeks. The window is counted in whole weeks back from the run, so an older conversation is
+not read:
+
+```bash
+node dash/dist/cli.js dash import-history --weeks 2 --harness antigravity-cli
+```
+
+The dashboard's import picker offers only harnesses that already hold samples (`sampleCount > 0`,
+`dash/web/src/components/maintenance/MaintenancePanel.tsx`). Until `antigravity-cli` holds samples,
+the command above is the way to import it. The picker cannot offer it today (todo
+[antigravity-cli-backfill-import-picker](../todo/antigravity-cli-backfill-import-picker.md)).
+
+A `--harness antigravity` import, or a refresh run with that id, does not include `antigravity-cli`
+or `antigravity-ide`. The family scope is shadowed by the descriptor id (todo
+[antigravity-family-scope-resolve-harness](../todo/antigravity-family-scope-resolve-harness.md)), so
+name each descriptor. Use a window of at least two weeks, so that the chosen conversation falls inside it.
+After an import, the transcript activity appears only for sessions whose conversation database was
+imported. OTLP-only sessions with no conversation database, and those with a slug session id, get
+no transcript activity (see the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing)).
+
 ### 2d. Shared settings and Pause
 
 For the user-facing configure surface — the shipped `kyberdash dash settings` commands and
@@ -478,6 +502,13 @@ validate before touching the live store:
 node dash/dist/cli.js kyber build --db /tmp/canon.db
 ```
 
+**Antigravity descriptions after an edit.** Antigravity skill descriptions are read from each skill's
+`SKILL.md` when its session payload is built. The lookup is cached by file path and revalidated by
+the file's mtime and size, so an edited `SKILL.md` is read again with no engine restart. The new
+text appears on the next projection pass that rebuilds the session. To see an edit at once, run
+`kyber build`, which calls `buildSessions` directly. The maintenance pass alone may skip projection
+while the corpus is unchanged, so it may not show the edit until the next pass.
+
 **Capture fixtures.** The sanitized G0 captures live in `dash/src/canon/fixtures/skills/<harness>/`,
 one folder for each of `claude-code`, `copilot-chat`, `copilot-cli`, `antigravity`, `pi`, and
 `opencode`. Each folder has a README stating what was found or not found. The `copilot-cli`,
@@ -553,6 +584,79 @@ job (`dash/src/sync/transcript-sync.ts`):
   the sync job runs exclusively inside the CLI engine's `JobHost` under `kyberdash web`. The tray and
   the web dashboard contain no job runners or schedulers; they query the resulting sessions and rollups
   via `/api/kyber/*`.
+
+### 2i. Claude request-body relink and quarantined count
+
+Before the request-body correlation fix, a Claude Code `api_request_body` log that arrived before
+its model call was quarantined and never reconnected. The rule that now matches it is described in
+the [architecture](architecture.md#claude-request-body-log-correlation) and the
+[telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
+
+**What runs on start.** When the OTLP collector service starts (the receiver that `kyberdash web`
+hosts, or `kyberdash otel`), it runs `relinkQuarantinedClaudeLogs` once, after the store opens. The pass:
+
+- reads the `quarantined_logs` rows with `harness = 'claude-code'` above the watermark, in log
+  timestamp order, and applies the same matcher as the live path;
+- on a match, enriches the record, removes the quarantined row, and marks the log enriched;
+- skips a body whose matched record is older than the 14-day content window. Its row stays
+  quarantined, because the content it would attach has already been purged;
+- leaves unmatched, tied, and skipped rows in quarantine;
+- isolates each log: one whose matching or enrichment throws is counted, its row stays in quarantine,
+  and the pass continues. One warning at the end gives the count and up to ten log ids, never a
+  payload;
+- treats a matched record whose timestamp does not parse as expired, so its row stays quarantined;
+- prints one line, `Relinked N of M quarantined Claude request bodies in T ms`, and, when N is above
+  zero, requests the derived-session projection as the live batch paths do. A failure is logged and
+  does not stop the service.
+
+**Startup cost.** The pass is synchronous and runs once per start, before the receiver accepts traffic.
+It reads quarantined rows in bounded pages: at most 100 rows and 16 MiB of stored payload per page. A
+page always holds at least one row, so one oversized payload cannot stall the pass, and memory stays
+flat however large the quarantine is. A store with a large backlog pays one scan; later starts scan
+nothing past the watermark. The elapsed time is in the `Relinked N of M ... in T ms` line. A
+quarantined row whose stored payload is not valid JSON is skipped and kept in quarantine. The pass
+prints one warning per start with the count and up to ten log ids, never the payload. The skip does
+not stop the pass, and the watermark still moves past such a row, so later starts do not retry it.
+
+**The watermark.** The pass stores the highest rowid it left in quarantine in `metadata` under
+`claude_body_relink_watermark` (never lower than the previous value), written after every page so a
+crash mid-pass keeps the progress made. A later start scans only rows
+above it, so a row the pass left in quarantine is **not retried by later starts**. The live path
+handles bodies that arrive while the service runs, and it does not re-match rows already in
+quarantine. No shipped command resets the watermark.
+
+**Checking the quarantined count.** Snapshot the store first, so the query does not read a live WAL
+database (the same method the T0 measurement used):
+
+```bash
+sqlite3 ~/.kyberdash/canon.db ".backup /path/to/canon-copy.db"
+
+# Quarantined Claude request bodies, and why they were left there
+sqlite3 /path/to/canon-copy.db "SELECT reason, COUNT(*) FROM quarantined_logs WHERE harness = 'claude-code' GROUP BY reason;"
+
+# Bodies still waiting for a call
+sqlite3 /path/to/canon-copy.db "SELECT COUNT(*) FROM pending_logs WHERE harness = 'claude-code';"
+
+# The relink watermark (absent before the first pass)
+sqlite3 /path/to/canon-copy.db "SELECT value FROM metadata WHERE key = 'claude_body_relink_watermark';"
+```
+
+The per-reason counts are also in the Status panel and in `GET /api/kyber/coverage`. After a restart
+with a healthy sender, expect the count to fall to the accepted residual: about 0.44% of trace-bearing
+body logs, plus any context-free body that carries no session id, which quarantines at once. A
+context-free body that names a session pends for the 15-minute window and is counted only if it
+outlasts it. Bodies older than the 14-day window stay quarantined, so a store with older history keeps
+a higher count. This is expected, not a fault.
+
+**Derived session rows.** The relink changes stored records, not the derived session rows (the session
+payload, which includes the Skills view). A relink that enriched at least one call requests the
+projection itself; otherwise a `dash refresh`, an accepted OTLP batch, or a manual build rebuilds
+them. If a session still shows no skill listing after a restart,
+run the build against the store:
+
+```bash
+node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
+```
 
 ### 3. Raw Content Backfill and Re-normalization
 
@@ -830,6 +934,24 @@ filters, so narrowing one page's scope never touches the A/B selectors.
     text for the first turn listed. Per-harness availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
+    - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
+      and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
+      reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
+      CLI shows the listed names, descriptions and derived tokens from the `<available_skills>` block
+      of the system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
+      `skill` tool requests the parser reads on each message; a session with none shows not measurable.
+      Copilot CLI tool invocations are not ingested yet (todo
+      [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
+    - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
+      for an Antigravity session, or no system prompt in the journal for Copilot CLI (a session older than
+      the 14-day content purge keeps no prompt). For that
+      side the payload carries a not-measurable object, not a count. A count of `0` is a measured
+      none: the transcript or journal was read and no skill was invoked.
+    - *Partly covered Antigravity sessions.* A turn the transcript does not cover shows no
+      `skills_invoked` and is not counted as a none. When only some turns are covered, the invoked
+      figures cover those turns, and the panel reads "Invocations measured on X of Y turns". A fully
+      covered session shows no such line; the coverage rule is in the
+      [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
   - *Execution Timeline / Call Tree* (`5 · Execution Timeline`): Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare**: Phase-aligned run comparison (`page-compare`), reached from the top
@@ -1040,7 +1162,7 @@ same engine. Both run the one implementation
 dashboard holds no capture logic of its own
 ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
-**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all six) and
+**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all seven) and
 `--endpoint <url>` (OTLP/HTTP only; default `http://127.0.0.1:4318`):
 
 ```bash
@@ -1057,11 +1179,56 @@ touches the receiver setting.
 
 **Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
 and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
-**Codex**, **pi**, and **Antigravity** are status-only: status reports them, `enable` and
-`disable` do not write them, and the drawer shows them read-only. OpenCode reads its OTLP
-endpoint from the process environment, so `enable` writes only its flag; the drawer and
+**Codex**, **pi** and **Antigravity** are status-only: status reports them, `enable` and
+`disable` do not write them, and the drawer shows them read-only. **Kilo Code** is a file plugin
+rather than a key writer: `enable` installs one plugin file, `disable` removes it, and the drawer
+shows it with Enable and Disable. OpenCode reads its
+OTLP endpoint from the process environment, so `enable` writes only its flag; the drawer and
 `status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
 KyberDash cannot see whether the shell that launches OpenCode has it set.
+
+**Kilo Code row.** The `kilo` row is not a key writer (ADR 0031, 2026-10-21 amendments): Kilo
+has no config key that turns on local telemetry export, and `experimental.openTelemetry` is its
+product-analytics switch, so the row's Enable installs the capture plugin file instead and never
+touches `kilo.jsonc` or the OTLP receiver. The row reports whether Kilo is installed and carries one manual step,
+`kilo-folder-import`, with no environment variable:
+
+```bash
+# either turn on Maintenance → Scheduled folder import,
+# or import once from the shared-runtime store:
+kyberdash dash import-history --harness kilo-shared-runtime
+```
+
+It is detected from any **one** of three traces, and nothing else counts as detected:
+
+| Probe | Path |
+|---|---|
+| config directory | `<home>/.config/kilo` |
+| shared-runtime database | `<home>/.local/share/kilo/kilo.db` |
+| VS Code Stable globalStorage directory | `…/Code/User/globalStorage/kilocode.kilo-code` (`%APPDATA%` on Windows, `~/Library/Application Support` on macOS) |
+
+VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
+installed only there has none of the three traces, so the row says not detected while Kilo itself
+works — run the import above and ignore the row.
+**OpenCode plugin (`kyberdash-opencode`).** The dash-CLI-managed plugin observes
+session/turn/span hooks plus the `session.context` hook (system prompt, tool definitions,
+skills listing, session/model identity) from opencode's own plugin directories (`~/.config/opencode/plugins/`,
+`.opencode/plugins/`; loadable entry `entry.ts` covers both the v2 CLI `Plugin.define` shape
+and the v1 Desktop hooks map) and posts span-anchored OTLP/HTTP spans to the loopback receiver
+through the bounded outbox, which spools offline and retries with backoff. Capture owns
+the plugin keys declare-only: the writer declares the plugin id and its `plugins` config
+keys, but `enable` writes only `experimental.openTelemetry` — the registration installs by
+file and the endpoint stays process-env-only, so neither ever enters a receipt. Context
+content rides only under the sender-owned consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
+default; unset or any other value drops content pre-emit while identity/markers still flow).
+After enabling, install/upgrade the plugin file, set the consent where opencode launches,
+and restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
+Desktop: disable plugins, clear cache, restart) with `OTEL_EXPORTER_OTLP_ENDPOINT` set
+where it launches, then emit a turn; a green enable is not capture. Restart-to-upgrade note:
+spans stamped contract `'1'` by a pre-upgrade plugin quarantine under `unknown opencode
+contract version` after the `'2'` bump — reinstall the plugin file and re-emit so the turn
+is stamped `'2'`. Live check: emit one opencode turn and confirm the session's Context view
+shows the system prompt and tool definitions and the Skills view shows the listing.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows
@@ -1130,6 +1297,9 @@ as a detached background hand-off — it cannot delay or corrupt the status line
 it silently when `kyberdash` is not on `PATH`. Do not edit `agy` settings to call it
 directly, and do not replace or edit an existing status-line implementation as part of this
 setup.
+
+The recorder writes no transcript path, and a status-line row carries no pairing id, so a
+status-line row gets no transcript tool calls or skill reads.
 
 The command is implemented and synthetically verified, but it collects nothing until the
 owner deploys the `agy` variant and activates it by hand. No live collection is claimed
@@ -1226,6 +1396,48 @@ here.
   cache-creation rate to state a surcharge.
 - **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
   "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
+
+### 10. Kilo shows no data
+
+- **Cause, most often:** scheduled folder import is off. Kilo's usage and messages reach KyberDash
+  only through a harness-source job over kilo.db (no OTLP adapter claims its spans).
+  `settings.folder_import.scheduled` is off by default, and the last manual import may predate the
+  sessions you are looking at.
+- **Fix:** import once, or turn scheduled import on in Maintenance:
+  ```bash
+  kyberdash dash import-history --harness kilo-shared-runtime
+  ```
+  Then check the harness's checkpoint: `source_checkpoint` rows for `kilo-shared-runtime` and
+  `kilo-vscode-legacy` are the evidence that a job actually read the store.
+- **Check the store is where KyberDash looks:** `~/.local/share/kilo/kilo.db` (the XDG data home is
+  honoured). The legacy Cline-style task tree under
+  `…/Code/User/globalStorage/kilocode.kilo-code` is a separate harness, `kilo-vscode-legacy`; it
+  carries no reader-compatible content, so its turns show counters with honest not-measured
+  content rather than empty content.
+- **A `PROVIDER_PARSE_ERROR` naming kilo.db** means the file exists but will not open, or is
+  missing an expected table (`session`, `message`, `part`). That is a reported problem, not an
+  empty history — an absent store stays silent. A store that was locked or corrupt and has since
+  healed leaves the old job-level row behind: `reconcileSourceProblems` reconciles source-unit rows
+  only, so the row stays until that harness is cleaned. Workaround: a per-harness
+  [`dash clean`](#2b-database-clean-dash-clean) removes the harness's problem rows — it also wipes
+  its records and checkpoints, so the next refresh re-reads them.
+- **System prompt, tool definitions or skills show "not measurable":** those come from the Kilo
+  capture plugin, not kilo.db. Install it with the **Enable** button on the Kilo Code row in
+  Settings, or `kyberdash kyber capture enable --harness kilo`,
+  restart Kilo (CLI, VS Code window or desktop app), and check `kyberdash kyber capture status
+  --harness kilo`: `plugin: installed` and `captured calls: N` mean it is recording. Only turns made
+  after the install carry the buckets. `disable` removes the plugin and keeps what it captured under
+  `~/.kyberdash/capture/kilo`; delete that directory to discard it, since the prompt can contain text
+  from your instruction files.
+- **Do not set `OTEL_EXPORTER_OTLP_ENDPOINT` for Kilo to "turn OTel on".** Kilo's OTLP stream
+  carries no model spans, usage or content (AI SDK span recording is off upstream), and its
+  `Session.*` spans are claimed by the OpenCode adapter, so they land as quarantined non-model
+  spans attributed to the **OpenCode** source. That is noise, not Kilo records. The Settings row
+  says the same and deliberately offers no endpoint variable.
+- **Settings row says "not detected":** see the three probe paths under
+  [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS
+  Code Insiders, JetBrains or a non-standard Windows location is not detected by design; the
+  import above still works.
 
 ---
 

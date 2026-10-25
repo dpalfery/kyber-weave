@@ -306,6 +306,32 @@ describe('runCaptureAction: disable', () => {
   })
 })
 
+describe('runCaptureAction: the Kilo plugin harness', () => {
+  const pluginPath = (home: string): string => join(home, '.config', 'kilo', 'plugin', 'kyberdash-capture.js')
+
+  it('enable installs the plugin, reports one wrote event and leaves kilo.jsonc and the key receipt alone', async () => {
+    const home = makeHome()
+    const configPath = join(home, '.config', 'kilo', 'kilo.jsonc')
+    writeConfig(configPath, '{\n  // synthetic kilo fixture\n  "model": "synthetic"\n}\n')
+    const before = readFileSync(configPath, 'utf8')
+
+    const result = await runCaptureAction(request(home, 'kilo', 'enable'))
+
+    expect(result.outcome).toBe('wrote')
+    expect(result.events).toMatchObject([{ kind: 'wrote', harness: 'kilo', fileId: 'plugin' }])
+    expect(existsSync(pluginPath(home))).toBe(true)
+    expect(readFileSync(configPath, 'utf8')).toBe(before)
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
+
+  it('disable with nothing installed is a noop', async () => {
+    const home = makeHome()
+    const result = await runCaptureAction(request(home, 'kilo', 'disable'))
+    expect(result.outcome).toBe('noop')
+    expect(existsSync(pluginPath(home))).toBe(false)
+  })
+})
+
 describe('runCaptureAction: disable with removeUnreceiptedKeys (Settings-only)', () => {
   const manualClaude = {
     env: {

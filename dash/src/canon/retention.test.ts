@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, decompressRaw } from './store.js'
+import { measurabilityFor } from './measurability.js'
 import { CONTENT_RETENTION_DAYS, contentRetentionFloorMs, purgeExpiredContent } from './retention.js'
 import type { CanonicalRecord, TokenUsage } from './types.js'
 
@@ -127,5 +128,177 @@ describe('purgeExpiredContent', () => {
     expect(staleParts!.parts_json).toBeNull()
     expect(staleParts!.raw).not.toBeNull()
     expect(decompressRaw(staleParts!.raw as Uint8Array)).toEqual({ keep: 'stale-parts-raw' })
+  })
+
+  it('compares instants, not strings, so a non-Z offset timestamp purges by its instant', () => {
+    // A row stored verbatim with an offset names the same instant as its Z
+    // form; a lexical comparison retains it while the epoch comparison the
+    // purge replaced would purge it. 13:00+02:00 is 11:00Z, before the noon
+    // cutoff, but sorts after it as a string.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'offset-stale',
+          timestamp: '2026-08-29T13:00:00+02:00',
+          content: { system_prompt: 'stale' },
+        }),
+      ])
+      const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+      expect(result.purged).toBe(1)
+    } finally {
+      store.close()
+    }
+    const columns = loadColumns(path)
+    expect(columns.get('offset-stale')!.content_json).toBe('{}')
+  })
+
+  it('leaves rows with no stored content alone, even when parts_json holds the empty array', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'empty-parts',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: {},
+          parts: [],
+        }),
+      ])
+      const before = loadColumns(path).get('empty-parts')!
+      expect(before.parts_json).not.toBeNull()
+      const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+      expect(result.purged).toBe(0)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('purgeExpiredContent runs in one transaction', () => {
+  it('issues a single BEGIN/COMMIT pair with every content UPDATE inside it', () => {
+    // WHY: the purge walked `spanIds` and called `setContent` per expired row -
+    // one autocommit UPDATE per row (9,740 expired ids measured in production).
+    // The fix is structural, not a duration: the statements must run inside one
+    // transaction. A stopwatch would pin the machine, not the behaviour; the
+    // statement stream pins the behaviour on any machine.
+    // RED today: the purge issues no transaction statements at all, so the
+    // single-BEGIN/COMMIT assertion fails.
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([
+        record({ spanId: 'txn-fresh', timestamp: '2026-09-10T12:00:00.000Z', content: { system_prompt: 'fresh' } }),
+        record({ spanId: 'txn-stale-1', timestamp: '2026-08-20T12:00:00.000Z', content: { system_prompt: 'one' } }),
+        record({ spanId: 'txn-stale-2', timestamp: '2026-08-20T12:00:00.000Z', content: { system_prompt: 'two' } }),
+        record({
+          spanId: 'txn-stale-3',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: { system_prompt: 'three' },
+          parts: [{ part: 'system_prompt', text: 'three', order: 0 }],
+        }),
+      ])
+
+      // The raw handle, as `projection.test.ts` reaches it: the store owns no
+      // transaction API of its own, so the BEGIN/COMMIT must be visible here.
+      const db = (store as unknown as { db: DatabaseSync }).db
+      const events: Array<{ kind: 'exec' | 'prepare'; sql: string }> = []
+      const originalPrepare = db.prepare.bind(db)
+      const originalExec = db.exec.bind(db)
+      db.prepare = ((sql: string) => {
+        events.push({ kind: 'prepare', sql })
+        return originalPrepare(sql)
+      }) as typeof db.prepare
+      db.exec = ((sql: string) => {
+        events.push({ kind: 'exec', sql })
+        return originalExec(sql)
+      }) as typeof db.exec
+      try {
+        const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+        expect(result.purged).toBe(3)
+      } finally {
+        db.prepare = originalPrepare
+        db.exec = originalExec
+      }
+
+      const isBegin = (sql: string): boolean => sql.trim().toUpperCase() === 'BEGIN'
+      const isCommit = (sql: string): boolean => sql.trim().toUpperCase() === 'COMMIT'
+      const isRollback = (sql: string): boolean => sql.trim().toUpperCase() === 'ROLLBACK'
+      const execs = events.filter((event) => event.kind === 'exec')
+      expect(execs.filter((event) => isBegin(event.sql))).toHaveLength(1)
+      expect(execs.filter((event) => isCommit(event.sql))).toHaveLength(1)
+      expect(execs.filter((event) => isRollback(event.sql))).toHaveLength(0)
+
+      const beginAt = events.findIndex((event) => event.kind === 'exec' && isBegin(event.sql))
+      const commitAt = events.findIndex((event) => event.kind === 'exec' && isCommit(event.sql))
+      expect(beginAt).toBeGreaterThanOrEqual(0)
+      expect(commitAt).toBeGreaterThan(beginAt)
+      const updates = events.filter((event) => /^UPDATE\s+records\b/i.test(event.sql))
+      // Three expired rows collapse into the set-based statement(s); whatever
+      // their number, none may run as an autocommit write outside the pair.
+      expect(updates.length).toBeGreaterThan(0)
+      for (const update of updates) {
+        const at = events.indexOf(update)
+        expect(at).toBeGreaterThan(beginAt)
+        expect(at).toBeLessThan(commitAt)
+      }
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('purgeExpiredContent leaves a lifted measurability declaration as stated (D29)', () => {
+  it('empties the parts of an expired Copilot CLI carrier and its tool child, and states the same measurability after the purge', () => {
+    // The purge clears content and parts. It must not rewrite the measurability a record
+    // carries: a carrier's lifted system_prompt stays measured, and its tool child's
+    // system_prompt stays not measurable with the declared reason, after the content is gone.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const now = new Date('2026-09-12T12:00:00.000Z')
+    const carrierMeasurability = { ...measurabilityFor('copilot-cli'), system_prompt: 'measured' as const }
+    const childMeasurability = { ...measurabilityFor('copilot-cli'), duration: 'measured' as const }
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'cli-carrier',
+          harness: 'copilot-cli',
+          source: 'copilot-cli',
+          name: 'copilot:gpt-5',
+          op: 'llm.invoke',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: { system_prompt: 'root prompt' },
+          parts: [{ part: 'system_prompt', text: 'root prompt', order: 0 }],
+          measurability: carrierMeasurability,
+        }),
+        record({
+          spanId: 'cli-carrier-tool',
+          parentSpanId: 'cli-carrier',
+          harness: 'copilot-cli',
+          source: 'copilot-cli',
+          name: 'view',
+          op: 'tool.invoke',
+          timestamp: '2026-08-20T12:00:01.000Z',
+          content: {},
+          parts: [{ part: 'tool_result_content', text: 'file body', order: 0 }],
+          measurability: childMeasurability,
+        }),
+      ])
+
+      const result = purgeExpiredContent(store, now)
+      expect(result.purged).toBe(2)
+
+      expect(store.get('cli-carrier')?.measurability).toEqual(carrierMeasurability)
+      expect(store.get('cli-carrier-tool')?.measurability).toEqual(childMeasurability)
+      expect(store.get('cli-carrier-tool')?.measurability?.['system_prompt']).toEqual(
+        measurabilityFor('copilot-cli')['system_prompt'],
+      )
+    } finally {
+      store.close()
+    }
+
+    const columns = loadColumns(path)
+    expect(columns.get('cli-carrier')!.parts_json).toBeNull()
+    expect(columns.get('cli-carrier-tool')!.parts_json).toBeNull()
   })
 })

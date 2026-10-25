@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-18
+last-reviewed: 2026-10-22
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -22,6 +22,7 @@ decided-by:
   - adr/0033-kyberdash-surfaces-are-display-layers
   - adr/0035-kyberdash-quarantine-raw-packet-evidence
   - adr/0038-post-run-transcript-sync-subagent-hierarchy
+  - adr/0041-kyberdash-retire-legacy-context-schema-routes
 keywords:
   - dashboard
   - codeburn
@@ -57,6 +58,9 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - isOpencodeEnvelopeSpan
+  - OPENCODE_CONTRACT_VERSION
+  - createInstalledOpencodePlugin
   - ClaudeContentReader
   - ingestProviders
   - CompareRuns
@@ -74,6 +78,16 @@ code-refs:
   - listedByTurn
   - runTranscriptSync
   - formatSessionTitle
+  - relinkQuarantinedClaudeLogs
+  - claudeModelCallCandidatesInTrace
+  - upsertSession
+  - getSessionSummary
+  - fetchKyberSession
+  - measurabilityForRecord
+  - measurabilityForChild
+  - segmentTranscript
+  - antigravitySkillDescription
+  - readAntigravityMcpCatalogue
 ---
 
 # KyberDash architecture
@@ -176,7 +190,7 @@ the table above is the whole layout.
 |---|---|---|
 | Upstream provider parser | `dash/src/` | Existing. Produces parsed calls plus its deduplication set. Not modified. |
 | `Synthesizer` | `dash/src/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). Implements child `tool.invoke` span extraction, 64KiB result truncation, and structured error status (contracts below). |
-| `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. |
+| `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. The session key is read from `session_id`, falling back to `session.id` (the key Claude Code sends), in both the JSON and protobuf decoders. |
 | `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
 | `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
 
@@ -206,6 +220,145 @@ change and no second projection. An empty log reads as unknown downstream — "n
 activity recorded" — never as stopped or running, because receiver liveness is not
 observable from the web server.
 
+### Claude request-body log correlation
+
+A Claude Code `api_request_body` log is written when a model request starts, but the
+`llm_request` span it describes is exported only when the request ends, so the log usually
+arrives first. The log is also stamped with the parent span that was active (the interaction, or
+the tool execution a sub-agent call follows), not with the call's own span. The matcher therefore
+scopes by trace, or by session for a body with no trace id, and never by parent. The contract:
+
+- **Exact span first.** A body whose `(traceId, spanId)` names a record enriches that record.
+- **Nearest start within the trace.** Otherwise the candidates are the `claude-code` `llm.invoke`
+  records in the trace (or the session). A candidate qualifies when its start is within 2 s of the
+  log and the call had not ended when the body was logged. The nearest start wins; a tie, or no
+  candidate, leaves the body pending.
+- **One body per record, later body wins.** A record already holding a body stays a candidate. The
+  body with the later log timestamp supplies the body-derived parts; the earlier body is marked
+  enriched as superseded and applies nothing. Neither waits or quarantines. The claim is stored by
+  `CanonStore.setRawEntry` under `raw['kyber.claude_request_body']` with the log id, its timestamp,
+  the `request_body_id` when present, and `suppliedBuckets`, the buckets that body supplied. When a
+  later body replaces an earlier claimed body, it drops exactly the buckets the earlier body
+  supplied, even when the later body has no `tools` array, so the earlier body's tools or history
+  cannot mask the not-measurable reason or stack on the new body. Parts in any other bucket came from
+  the span or a transcript and stay. A claim written before `suppliedBuckets` existed falls back to
+  dropping `system_prompt` and `tool_definitions` wholesale. Two bodies with an identical timestamp
+  go to the higher log id, so arrival order never decides, and a claim whose timestamp does not parse
+  counts as older than any valid body.
+- **Pending lifetime.** `CLAUDE_REQUEST_BODY_PENDING_TTL_MS` (15 minutes) applies to body logs inside
+  `reconcileExpiredPending`; every other log keeps `DEFAULT_PENDING_TTL_MS` (5 seconds).
+- **Context-free bodies.** A body with no trace id but a `session.id` pends against its session for
+  the full 15-minute window. Tool invocations are never candidates, so a tool record neither claims
+  the body nor quarantines it. A body with no trace id, no span id, and no session id quarantines at
+  once.
+- **Tool definitions.** A parseable body with no `tools` array declares `tool_definitions` not
+  measurable, naming the sender's omission; the turn inspector shows that reason, not an empty list.
+- **Startup relink.** `relinkQuarantinedClaudeLogs` (`dash/src/tools/backfill.ts`) runs once when the
+  OTLP collector service starts, applying the same matcher to the quarantined backlog. Its procedure
+  is in the [runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count). A log whose
+  enrichment throws is counted and left in quarantine without stopping the pass, the watermark is
+  written after every page, and a relink that enriched anything requests the derived-session
+  projection, as the live batch paths do.
+
+No schema changed: state lives in the existing `pending_logs`, `quarantined_logs`, `enriched_logs`,
+`records.raw`, and `metadata` tables. The matcher decides from the trace or session candidates and the log timestamp alone, and it never
+attaches a body to a call that had already ended.
+
+```mermaid
+flowchart TD
+    LOG["Claude api_request_body log"] --> EXACT{"Exact traceId and spanId match a record?"}
+    EXACT -->|yes| ENRICH["Enrich that record"]
+    EXACT -->|no| SCOPE{"Log carries a traceId?"}
+    SCOPE -->|yes| TRACE["Candidates: claude-code llm.invoke in the trace"]
+    SCOPE -->|"no, session.id present"| SESSION["Candidates: claude-code llm.invoke in the session"]
+    SCOPE -->|"no session either"| ONCE["Quarantine at once"]
+    TRACE --> NEAR{"Started within 2 s and not ended before the log?"}
+    SESSION --> NEAR
+    NEAR -->|"one nearest start"| CLAIM["Enrich, or later body wins over the claim"]
+    NEAR -->|"none, or a tie"| PEND["Pending: 15 minutes for request bodies"]
+    PEND -->|"span arrives, retried per batch"| NEAR
+    PEND -->|"TTL expires"| EXPIRED["Quarantine: unmatched past pending expiry"]
+```
+
+Measured behaviour, residuals, and the counts behind them are in the
+[telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
+
+### OpenCode plugin span/turn envelope (`kyberdash-opencode`)
+
+The dash-CLI-managed plugin (`dash/src/capture/harnesses/opencode-plugin/`, one codebase
+for opencode Desktop and CLI v2 installed by file into opencode's plugin dirs) is a
+**sender**, not a surface: it emits span-anchored OTLP/HTTP spans to the loopback receiver
+(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline
+spool with retry, backoff, and drop-oldest accounting), and every hook is best-effort with
+a 250 ms delivery budget, so a delivery failure never fails the host session. It writes no
+database directly and serves no API: rows reach `canon.db` only through the receiver →
+`ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
+`/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
+`enable` writes only `experimental.openTelemetry`; the `plugins` registration key and
+`OTEL_EXPORTER_OTLP_ENDPOINT` never enter a receipt.
+
+The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
+
+- **Version key.** Every envelope span names its emitting contract under
+  `opencode.contract_version` (`OPENCODE_CONTRACT_VERSION`, currently `'2'`); a contract
+  bump invalidates stale checkpoints, following the parser-contract invalidation precedent.
+- **Version guard.** `ingestBatchWithAdapters` (`dash/src/canon/ingest.ts`) quarantines an
+  envelope span with an unknown or missing version under the fixed reason
+  `unknown opencode contract version` before the adapter vote, so no adapter claims it
+  and it is never misattributed to any harness. Spans stamped `'1'` by a pre-upgrade
+  plugin quarantine after the bump — intended; stale checkpoints invalidate and re-emit
+  under `'2'`. The decoded packet stays as the audit
+  evidence, as on every other quarantine path.
+- **Context keys (contract `'2'`).** New marker prefix `opencode.context.` with
+  `opencode.context.system` (string), `opencode.context.tools` (JSON-serialized tool
+  definitions array), and `opencode.context.skills` (JSON array of skill names). A span
+  carrying any `opencode.context.*` key is the envelope. The v2 `session.context` hook
+  payload (system, tools, skills, session/model identity, pinned in
+  `fixtures/context-payload.json` at `@opencode/plugin` 2.1.4) rides these attributes
+  via the mapper; `eventToSpan` includes them on the wire span. Model markers map when
+  the payload names them.
+- **Entry.** The loadable entry (`entry.ts`) exports both the v2 CLI shape
+  (`Plugin.define({ id, setup })` registering `ctx.session.hook("context", …)`) and the
+  v1 Desktop default-export hooks map (including `session.context`), both bridging to
+  `createInstalledOpencodePlugin` + `registerOpencodePlugin`. `session.context` is
+  registered on both the v2 namespaced and v1 dotted host surfaces; lifecycle kinds are
+  unchanged.
+- **Consent.** System prompt, tool definitions, and the skills listing are content and
+  flow only under the sender-owned env consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
+  default; true only for exactly `1`). With consent absent the context event still emits
+  identity/markers with content fields dropped pre-emit. Capture never writes or receipts
+  the key (declare-only, the `OTEL_EXPORTER_OTLP_ENDPOINT` pattern).
+- **Claim rule.** The `opencode` adapter claims only the supported envelope (a supported
+  envelope span scores 1; an envelope span under any other version scores 0). A bare
+  `opencode.session.id` with no turn/model/tool/prompt/call/message/hook marker is not
+  the envelope and keeps the legacy non-model path — that is why the envelope is opt-in
+  by marker rather than by namespace.
+- **Mapping.** Session identity rides verbatim and is never synthesized. A tool marker
+  (`opencode.tool.name`) wins over the model markers and maps to `tool.invoke`; model
+  markers map to `llm.invoke`. A context span with context markers but no model identity
+  still maps `llm.invoke` (a context event is pre-LLM-call request assembly), never
+  fabricating counters. Context content buckets after every existing part: system text
+  as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
+  Prompt text (`opencode.prompt.text`) buckets as
+  conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
+  as non-model — the correct taxonomy for a boundary, not a rejection — with zero
+  fabricated counters and session anchoring.
+- **Assembly.** The installed entry (`plugin.ts`, reached via the `opencode.ts`
+  declare-only re-export) wires hook→mapper→turn→outbox→sender
+  (`createInstalledOpencodePlugin`): every hook boundary maps through the mapper and turn
+  stages onto bounded evidence, then delivers through the outbox (or the sender directly
+  when unspooled). Either way the never-fail-host contract holds, and one codebase serves
+  both Desktop and CLI v2 targets.
+
+Content follows the sender-opt-in rule: counters always flow; prompt text flows only
+under sender opt-in, and assembled text honors the 14-day content purge. Operator steps
+(enable, restart matrix, green-enable≠capture) are in the
+[runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
+T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
+verification on Desktop and CLI v2 (owner enablement, plugin install, live turn) is still
+open, tracked by [kyberdash-opencode-plugin-live-verification](../todo/kyberdash-opencode-plugin-live-verification.md) —
+nothing here is live-verified on this checkout.
+
 ## Local harness-source refresh
 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
@@ -232,7 +385,7 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '3'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '4'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`, raised from `'3'` when the kilo.db reader began attaching conversation and tool-result parts) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
 sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
 falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
 bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
@@ -255,6 +408,26 @@ surface's **Refresh data** asks the engine to run this lifecycle over
 run that always imports ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
+
+**A present-but-unreadable store is a problem, not an empty history.** Discovery
+(`discoverSqliteSessions` in `dash/src/providers/sqlite-session-parser.ts`) no longer `continue`s
+past a SQLite store that exists but will not open, or that fails its required-table check. It
+returns a marker source carrying `unreadableStoreError`, and `parse()` throws that recorded reason
+**unconditionally** rather than re-opening: a transient cause (a `SQLITE_BUSY` lock) may have
+cleared by parse time, and a second successful open would present the failure as an empty store.
+The job-level catch in `refreshHarnessSources` (`dash/src/refresh/orchestrator.ts`) then records
+exactly one `PROVIDER_PARSE_ERROR` on `harness:<harnessId>:job`, attributed to the harness and
+naming the database, and the run continues for every other harness. This is the R1.2/R1.3 split
+documented in `dash/src/synth/provider.ts` applied to a database rather than a file: an **absent**
+store stays silent, and a store discovered earlier but gone by open time stays silent too, because
+absence is a negative existence check. The shape is the same for the OpenCode databases.
+
+**The job row is not reconciled after a repair.** `reconcileSourceProblems`
+(`dash/src/canon/store.ts`) owns `harness:<harnessId>:<sourceKey>:<code>` rows only (#243), so a
+job-level row survives the store healing and stays in the Problems list until that harness is
+cleaned. Per-harness Clean deletes the harness's problem rows along with its records, provenance
+and checkpoints. This is a recorded gap, not a measured zero and not a reconciliation contract:
+the repair is deliberately deferred, and the runbook carries the workaround.
 
 ### Claude Desktop and CLI file-synth content
 
@@ -281,6 +454,49 @@ counters-only: `purgeExpiredContent` empties their parts in the same run
 ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). The
 bucket table and repair boundary are in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
+
+### Kilo Code content reader and id-based pairing
+
+Kilo's shared runtime stores one `message` row per turn and one `part` row per fragment in
+`~/.local/share/kilo/kilo.db`. `kiloReader` (`dash/src/synth/readers/kilo.ts`) reads the session
+tree through the parser's own recursive CTE and the parser's own source shape
+`<kilo.db>:<sessionId>` (the final colon segment is the session id). It yields one turn per
+**token-bearing** assistant message, in `time_created, id` order, with `nativeRecordId` equal to
+the Kilo `message.id`. A missing store or session yields zero turns without throwing; a store that
+exists but will not open keeps the open error, so the ingest seam reports it instead of reading an
+empty history.
+
+Pairing is by id, never by index. `createSqliteSessionParser` also emits a call for a zero-token
+assistant message that still carries text (a router reply), so the call list and the reader's turn
+list are different lengths, and index pairing would attach each turn's content to its neighbour's
+call. The `pairingIdFromMessageId` opt-in on `SqliteProviderConfig` stamps
+`pairingId = message.id`; only `kilo-code` sets it, and OpenCode's parser output stays
+byte-identical. `turnId` remains span identity and `pairingId` is pairing-only, which is the key
+`matchingTurns` already honours. The reader declares `positionalPairingUnsafe` for the same reason.
+
+Measurability follows the store rather than the harness's ambition. `kilo`, `kilo-code` and
+`kilo-shared-runtime` declare `['schema_cost', 'system_prompt', 'tool_definitions',
+'instruction_context']` in `READER_UNMEASURABLE` as the default, and the synthesizer drops
+`system_prompt` and `tool_definitions` from a Kilo record's measurability when the reader supplied
+them for that turn from the capture plugin's store (`dash/src/synth/readers/kilo-capture.ts`), and `kilo-vscode-legacy` declares every canonical
+content key because the legacy task tree carries no reader-compatible parts. The buckets and what
+supplies them are tabulated in the
+[telemetry inventory](telemetry-inventory.md#kilo-code-capture-plugin-and-why-not-otlp).
+`KILO_PARSER_CONTRACT_VERSION` is `'4'`: the reader now attaches conversation and tool-result
+parts, so counters-only checkpoints under `'3'` are re-read rather than migrated, per ADR 0016's
+repair contract.
+
+**Per-record measurability keys on the harness id for `kilo-vscode-legacy` only.**
+`synthesizeRecord` (`dash/src/synth/synth.ts`) stamps `measurabilityFor(call.provider)` because the
+reader rows are declared per provider. `kilo-vscode-legacy` shares `kilo-code`'s provider string
+and reader registration but reads the legacy task tree, so keying on `call.provider` alone would
+make those records measurable-by-absence — a content claim the store cannot support. The stamp
+therefore selects the envelope's harness id (`harnessIdFor`) for that one id, while
+`call.provider`, `deduplicationKey`, `nativeRecordIdentity` and every other harness's stamps stay
+untouched: re-keying on `harness` for every record would re-stamp other split surfaces
+(`claude-cli`, `copilot-vscode`) whose providers already carry the right row. `call.provider`
+itself must not be renamed, because `nativeRecordIdentity` slices the deduplication key on the
+provider prefix.
 
 ## The shared canonical projection
 
@@ -317,8 +533,30 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   10 minutes, so derived sessions trail the last accepted batch by roughly the idle
   window after the stream quiets, and worst-case by the 10-minute caps.
 
+The scheduled maintenance pass — the retention purge followed by the shared
+projection — once held the main thread for ~26 s every 30 s: a full corpus
+re-projection blocking every HTTP handler, so a request's latency was `max(handler
+cost, time left in the current block)`. It now yields between units of work (per
+session, per run key, per finding batch), so a handler waits on at most one unit plus
+its own cost; it skips the projection entirely when the corpus is unchanged, through a
+change-detection gate over a records-write marker (bumped by every records write —
+ingest, wipe, and the projection's own repricing write-back, which converges because
+a stable corpus writes nothing), the detector version, a parser-contract fingerprint,
+a pricing fingerprint, and the store's schema version; and it purges expired content
+in one set-based transaction rather than a per-record N+1. The purge keeps its
+time-based cadence — its trigger is the retention deadline, not a records change. A
+failed child refresh no longer records bundled source as its summary: the recorded
+`lastFailure` names the actual error from the child's captured stderr, retained in a
+bounded on-disk artifact.
+
+The projection holds one decompressed payload and one decompressed parts set at a
+time; the per-run readers are the exception — they still hold a run's parts while
+serving it.
+
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
-`session` cache. Raw `records` are never synthesized into sessions for reporting: until the
+`session` cache — and only the twelve columns the `session_denorm_idx` covering index
+carries, never `payload` (see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21)).
+Raw `records` are never synthesized into sessions for reporting: until the
 projection has turned accepted spans into derived rows, a record-only group is not a session
 and appears on no report surface or selector inventory.
 
@@ -359,6 +597,28 @@ Upstream provider parsers produce `ParsedProviderCall` turns consumed by `Synthe
 
 - **Token extraction precedence and finite validation:** Nested usage structures (`data.tokens` or `data.usage`) take precedence over flat counters (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) used by stores such as KiloCode. Every candidate — nested or flat — passes through `finiteOrUndefined` on its own: strings, `NaN`, and `Infinity` are rejected as absent so the next candidate (and finally 0) applies, rather than corrupting downstream token and cost arithmetic.
 - **Substantive part recognition:** Assistant turns with zero-token and zero-cost values are retained as substantive activity if they contain text output. Both `type: 'text'` and `type: 'markdown'` parts are recognized as substantive text in `hasTextOutput` and `hasAnySubstantiveParts`, preventing assistant markdown responses from being dropped as silent no-op calls. User prompt extraction similarly accepts markdown parts, and model resolution normalizes both string identifiers and `{ id, providerID }` object descriptors.
+
+### Transcript-paired and journal-paired activity
+
+Two readers attach activity to records by pairing, and neither pairs by time.
+
+- **Antigravity.** Tool calls and `SKILL.md` reads come from the conversation transcript. Each model
+  call owns the transcript steps whose index lies in `(lsi[N], lsi[N+1]]`, where `lsi` is its
+  `gen_metadata.last_step_index`. The last call's range is open above. Each call carries the pairing
+  id `agy-step:<lsi>`, and a call before the transcript's first step gets nothing. The provider
+  (`dash/src/providers/antigravity.ts`) and the content reader
+  (`dash/src/synth/readers/antigravity.ts`) share one segmentation. The reader reaches file-based
+  sessions only. OTLP-only sessions get no transcript activity unless their conversation database is
+  imported under the `antigravity-cli` harness. The contract, the coverage rule, and the
+  owner-store observation are in the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
+- **Copilot CLI.** The reader yields one turn per journal `assistant.message`, keyed by its
+  `messageId`, and each turn carries the latest `system.message` the agent (root or subagent) wrote
+  before it. The provider pairs each call with the turn of its own message. Journal tool invocations
+  are not yet ingested as records; that follow-up is a todo. See the
+  [Copilot CLI journal](telemetry-inventory.md#copilot-cli-journal-and-system-prompt).
+
+Declared limits that a reader can measure on some records only are lifted per record, as described
+in [per-record lift](#per-record-lift-child-records-and-non-resident-parts).
 
 ## Canonical model
 
@@ -512,7 +772,7 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
 - `summary.skills_listed` and `summary.skills_invoked` are name arrays. Each key is absent when
   that side is not measured.
 - `skills` is either `{availability: 'not_measurable', reason}`, or
-  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, rows}`.
+  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, invocationsCoverage?, rows}`.
   - `reported_skill_tokens` is a single per-turn resident size, taken from the latest turn that
     carries it. It is never summed across turns and never split across skills. Antigravity
     reports it as `gen_ai.usage.skill_tokens`.
@@ -520,23 +780,32 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
     absent when invocation is not measured, which is the same case in which every row's
     `invocations` is the `not_measurable` object. A row is never counted while one of its
     sides is unmeasured.
+  - `invocationsCoverage` is `{measuredTurns, totalTurns}`. It is set only for an Antigravity
+    session where some turns carry `kyber.skills.invoked` and some do not, so `0 < measuredTurns <
+    totalTurns`. The invocation figures and `listed_uninvoked_count` then cover the measured turns
+    only. It is absent when every turn is measured, and absent when no turn is.
   - `rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
     description?, derived_tokens?}`.
     - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
       least one turn, and `false` for a skill that was only invoked.
-    - `invocations` is a number when invocation is measured, and `0` is a measured none. When the
-      harness has no invocation source (Copilot, Antigravity), it is always
-      `{availability: 'not_measurable', reason}`: never omitted, and never `0`.
+    - `invocations` is a number when invocation is measured, and `0` is a measured none. For
+      Copilot CLI and Antigravity it is that
+      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise.
+      Antigravity counts over the measured turns (see `invocationsCoverage`).
+      An unmeasured side is never omitted from the row and never reported as `0`.
     - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
       the skill was listed on no turn.
     - `description` is the first listing text observed for that skill in the session, stored
       once. `derived_tokens` is estimated from the description and is labelled derived. Both are
       absent when no listing carried a description.
 - `turns[i].skills_listed` is present only for measured turns. `turns[i].skills_invoked` lists
-  names, with `[]` as a measured none, and is absent when invocation is not measured.
+  names, with `[]` as a measured none, and is absent when invocation is not measured. For an
+  Antigravity turn it is absent unless that turn's record carries `kyber.skills.invoked` as an array,
+  so a turn the transcript did not cover is never shown as a measured none.
 - `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
-  carries that same reason. A partly measured view (Copilot or Antigravity, where invocation is
-  not measurable) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
+  carries that same reason. A partly measured view (Antigravity when no
+  record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
+  record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
   `invocations` object) and by the absent `summary.skills_invoked`, turn `skills_invoked`, and
   `listed_uninvoked_count` keys.
 
@@ -548,14 +817,24 @@ session payload; the narrow turn-content route never walks session records. A pa
 
 **Known limits.**
 
+- A listing read from a Claude request body (`system`-role message) is used only when the record has no
+  transcript listing, and never from a body cut at the sender's size limit, which does not parse. Records
+  enriched before the role field existed carry no role and show no body listing until re-enriched.
 - If a later listing in the same session changes a skill's description, earlier turns still show
   the first text observed.
 - After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
   Claude descriptions survive because they are kept in raw attributes. Copilot descriptions that
   came from stored system-prompt parts are absent, while the skill names remain.
+- Antigravity descriptions are read from each skill's `SKILL.md` when the session payload is built.
+  The cache is keyed by file path and valid while the file's mtime and size are unchanged, so an
+  edited description shows at the next payload build without a restart, and an absent file is never
+  cached. A skill that no Antigravity root holds has no description
+  ([telemetry inventory](telemetry-inventory.md#antigravity-skill-descriptions)).
 
 **Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
 their listed and invoked sets from `skills.ts` (see [Pure Signals Engine](#pure-signals-engine-dashsrcanalysissignalsts)).
+On a partly covered Antigravity session the invoked set is the names read on the covered turns,
+since an uncovered turn carries no key. The finding does not state that coverage.
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
@@ -572,6 +851,16 @@ a row opens a skill drawer with the listed and invoked state, the turns listed, 
 text for the first turn listed. The unit tests render these states in a simulated DOM and the
 bundle builds. The states have not yet been checked against a live dashboard session.
 
+### Message role on content parts
+
+`ContentPart` carries an optional `role` (`'system' | 'user' | 'assistant'`). `parseClaudeApiRequestBody`
+sets it on parts derived from a request-body message, and only when that message carries one of those
+three roles. Parts from top-level fields (`system`, `tools`) and parts from role-less messages carry no
+role. The field is additive: it does not change any bucket, the compressed `parts_json` gains one
+optional key, and readers that predate it ignore it. The skills reader is the consumer: it trusts a
+listing only in a `system`-role message, so quoted text in a user or assistant message is not read as
+a listing. The rule is in the [telemetry inventory](telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies).
+
 ### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
@@ -584,17 +873,40 @@ into input-side `ReaderTurn` snapshots without attributing current response text
 inventing unobserved prefix history. Where total tokens and context window are known, pressure is
 measured independently from whether individual composition buckets are available.
 
+### Per-record lift, child records, and non-resident parts
+
+- **Per-record lift (D8).** A key a reader declares not measurable (`READER_UNMEASURABLE`) is lifted
+  to `measured` on a record only where that record's paired reader turn carries parts of the key.
+  This applies to `copilot-cli`, `antigravity`, `antigravity-cli` and `antigravity-ide`
+  (`PER_RECORD_LIFT_HARNESSES`, `measurabilityForRecord` in `dash/src/canon/measurability.ts`). A
+  sibling turn the reader did not pair keeps the declared reason. Copilot CLI lifts only
+  `system_prompt`; `tool_definitions` is never lifted. Other readers keep their declaration whole.
+- **Child records (D29).** A `tool.invoke` child is not a paired reader turn, so it does not inherit
+  its parent's lifted state. For a harness in the per-record lift set, `measurabilityForChild` gives
+  each child the declared reason for every key it does not carry itself. `tool_result_content` is
+  measured on a child only when the tool result it was handed carries a `content` value. Other
+  harnesses copy the parent's map unchanged.
+- **Stored text can be gone.** Measurability is stamped at ingest and not re-derived. The 14-day
+  purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)) empties `content_json` and
+  `parts_json` and leaves `measurability_json` as it was, so a record can read as measured while no
+  text is stored for it.
+- **Non-resident parts.** `ContentPart.resident: false` marks a tool definition the turn was offered
+  but did not keep resident. It adds no tokens to the context composition (`dash/src/analysis/context.ts`),
+  is counted in `TurnPressure.nonResidentToolDefinitions`, and stays on the part for the turn-content
+  route. The session inspector labels such a catalogue entry `offered (MCP catalogue)`.
+
 ### Store
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 20;
+schema is a version-controlled constant executed on construction, currently at version 22;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
 `session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
-`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
+`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, `refresh_run`,
+and `session_turn`.
 Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
 schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, schema 14 rekeyed that identity by span, code, and location,
 schema 15 made finding estimated waste nullable (`estimated_waste_tokens INTEGER` NULL for coverage-gap findings with unmeasured estimates),
@@ -602,7 +914,9 @@ schema 16 added `history_weeks INTEGER` to `refresh_run`,
 schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
 schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)),
 schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
-schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)), and
+schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
+schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22).
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
@@ -614,11 +928,186 @@ where the source names no session it falls back to the trace id. `parts_json` ho
 deflate-compressed structured content parts, each with its canonical bucket, its text, an
 optional harness-reported token count, and an optional ground-truth MCP server name. Where
 parts are present they are the authority: the flat content map is derived from them on read,
-so the same text is never stored twice.
+so the same text is never stored twice. Turn rows and record parts share one codec
+contract: content is stored compressed (deflate, level 6) and read back through a
+tolerant codec, and a value whose deflated form is not smaller is stored as plain
+text instead — the measured "does not pay" boundary is ~74 bytes. Measured on
+40,621 realistic turns, level 6 stores 7.82 MB against 15.31 MB plain (0.51×), at
+~364 ms of deflate and ~146 ms of inflate for a full-corpus read.
 
 The `session` table holds derived sessions, one row per conversation. Each payload is built by
 running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
+
+#### Materialized session summary columns and the sessions-list covering index (schema 21)
+
+The sessions list once read the entire `payload` blob of every session row to compute two
+values — `json_extract(payload, '$.summary')` and
+`json_array_length(json_extract(payload, '$.problems'))` — with no SQL `LIMIT`. On a corpus
+whose payloads total tens of megabytes, every list request demand-paged the whole payload
+store (measured 15.6–26.1 s cold, intermittently, as the machine's own background I/O
+evicted the page cache). Schema 21 materializes both values at write time so the list never
+reads `payload`.
+
+**Columns.** `session` gains `summary_json TEXT` and `problems_count INTEGER`, both nullable
+with no `DEFAULT`. `NULL` is the per-column sentinel meaning "this column was not
+materialized", never "this row is whole": a row that predates the columns keeps `NULL`
+until the projection rewrites it, and the reader derives such rows from `payload` instead
+of misreading them as an empty summary or a zero count. A `DEFAULT` would erase exactly
+that distinction. The migration is presence-guarded and idempotent with no backfill; legacy
+rows self-heal on the next projection rebuild, and the legacy state is never worse than the
+pre-change baseline.
+
+**The writer owns those columns.** `upsertSession` derives both values from the same
+serialized payload it writes, in the same statement, so they cannot drift from `payload`.
+The column-ownership split with the transcript-sync job is preserved: the upsert names none
+of `synced_at`, `sync_status`, `settled_at`, `transcript_path`, or `transcript_offset`, so
+a re-upsert leaves the sync job's columns intact.
+
+**The reader reads those columns only.** `KyberBridge.listSessions` selects the twelve
+index-covered columns and orders by `started DESC`, with a legacy fallback
+(`WHERE summary_json IS NULL OR problems_count IS NULL`) that serves unmaterialized rows
+from `payload`; the pre-existing full-payload read stays as the last resort when JSON
+functions are unavailable. The `?limit` slice still applies after subagent nesting and
+rollup — deliberately not pushed into SQL, because a SQL-level limit would cut the children
+of returned parents and change the rollup output. `buildContextReport` inherits the fix
+through this method, and `sessionTokenTotals` reads `summary_json` first with a per-row
+payload fallback, keeping its `not_measurable`-stays-`undefined` contract.
+
+**The covering index is the mechanism, not the columns alone.** `ALTER TABLE … ADD COLUMN`
+appends the new columns after `payload`, so a table-row read for `summary_json` still
+traverses the payload's overflow chain — the denormalization alone relocates the cost without
+an index (cold unchanged, ~18 ms warm). `session_denorm_idx` over the reader's exact column
+list turns the list into an index-only scan
+(`SCAN session USING COVERING INDEX session_denorm_idx`, 211 pages / ~864 KB). The lesson
+carries forward: every future payload-derived field needs the column *plus* an index that
+covers its reader, and the reader's SELECT must stay inside the index's columns — adding a
+column to one without the other silently brings the payload walk back. The index DDL lives
+in one module-scope constant (`SESSION_DENORM_INDEX_SQL`), applied by the presence-guarded
+`createSessionDenormIndex` helper from both the migration step and the constructor's
+fresh-create path — never inline in `SCHEMA_SQL`, whose unconditional DDL would fail to open
+a store whose `session` table predates the reader's columns. Planner statistics
+(`ANALYZE session` in the migration and on fresh creation, maintained thereafter by the
+existing close-time `PRAGMA optimize`) are hygiene and determinism for the planner's cost
+model, not the index's unlock: the index alone flips the plan on the supported build. A
+read-only connection cannot write `sqlite_stat1`, which is why the writer is the only place
+the statistics are written.
+
+**Rejected alternatives (all measured, do not revisit).** Extracting only `$.summary`
+still materializes the whole blob (0.077 s vs 0.072 s warm); `PRAGMA cache_size`,
+`mmap_size`, and `temp_store` tuning moved nothing on either end; an expression index
+over `json_extract(payload, …)` matched the read but cost 3.5× per-refresh upserts and
+hard-fails the INSERT on malformed JSON; a separate summary table and a payload-last
+rebuild matched the read at higher migration or write-site cost; `VACUUM` halves the
+file with list latency unchanged, because freelist pages are never read.
+
+**One adjudicated exception to byte-identity.** A row carrying `problems` but no
+`summary` — a shape the payload builder never writes — reports its true materialized
+count, where the pre-change JSON-capable path reported `0` (that path's own bug; its
+no-JSON fallback already reported the true count). The two columns are consumed
+independently downstream and the legacy merge fills only what a row is missing, so a
+materialized value is never overwritten by the payload.
+
+**The bounded summary route.** `GET /api/kyber/session/:id/summary` serves the ten-key
+bounded shape (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`,
+`agent_name`, `started`, `ended`, `summary`, `problems_count`) from the columns, with a
+per-row legacy fallback and no `_clip` — the content is bounded by construction. The
+fallback is per column, not whole-row: a row is incomplete when either materialized
+column is NULL, and only the missing column is filled from the payload — through the
+same `isMissingSessionColumn` / `fillMissingSessionColumns` mechanism the sessions list
+uses, so the two surfaces cannot disagree on `problems_count`. It serves
+no run or execution linkage, deliberately: those fields exist in neither the payload nor
+the table, and serving them would push a `{level:'run'}` spine entry that does not exist
+today. The web client's `fetchKyberSession` targets this route, so deep-link ancestry
+lookup stops pulling the whole payload; the resolved spine stays
+`[doctor, harness, execution]` with no run level. Deployment coupling: the web client
+requires the engine's new route — against an older engine the request 404s and the client
+degrades to a not-found spine rather than crashing, so server and client ship together.
+
+**Measured result.** Cold list 37.5–47.2 ms against the < 1 s target; warm median 2.174 ms
+against ≤ 10 ms. List output is byte-identical across the materialized, forced-legacy,
+index-dropped, and pre-change-reader states (279,991 bytes), and all 7 harness-filtered
+responses match the pre-change reader. The index is not a write tax (full projection within
+0.5% with or without it), and the legacy state self-heals on the next projection rebuild.
+
+#### Session turn split and the narrow-read columns (schema 22)
+
+The sessions list no longer reads `payload` at all; the detail path still did — one
+whole-blob read per session to reach a single turn. Schema 22 removes that read by
+moving the turns out of the blob:
+
+```sql
+CREATE TABLE IF NOT EXISTS session_turn (
+  session_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  turn_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_turn_by_session ON session_turn (session_id, turn_index);
+ALTER TABLE session ADD COLUMN context_limit_source TEXT; -- presence-guarded; NULL = not materialized
+```
+
+`session_turn` holds one row per turn; `turn_json` is the deflated turn JSON (zlib,
+level 6), compressed from birth. The column's declared type stays `TEXT` while SQLite's
+dynamic typing keeps the deflated bytes a `BLOB` value in that column all the same, and
+readers tell the two stored forms apart by the storage class the value comes back with;
+the `(session_id, turn_index)` index is deliberately not unique because a legacy payload
+may repeat an index. `session.payload` is rewritten without the `turns`
+key — every other top-level key byte-identical, in its original order — so metadata
+readers see the same document minus turns. The migration also populates
+`context_limit_source` from `payload.context.contextLimitSource` on every row it
+rewrites, and the writer materializes it on every write thereafter, so a fresh corpus
+is never under-counted.
+
+The table shape is the read shape: the detail path reassembles `{...metadata,
+turns}` with one ordered range scan per session — no per-turn N+1 — and `_clip`
+applies to the assembled document exactly as before. A per-turn read served from the
+payload would still pay the whole-blob server cost (`json_extract` materializes the
+row), so the bounded per-turn read below is born reading one `session_turn` row.
+Readers discriminate the two stored turn forms by SQLite's storage class, so a row
+written before the change still reads.
+
+The migration is presence-guarded and idempotent — a row whose payload carries no
+`turns` key is skipped, so re-running on a split store writes nothing — in one
+transaction per step, like every migration before it. Older binaries refuse a v22
+store by design (fail-closed).
+
+The per-column `NULL` sentinel carries over from schema 21: a `NULL`
+`context_limit_source` means "this column was not materialized", never "this row is
+whole". A row with a NULL source is not counted by `countUnknownWindowSessions`,
+matching the old `NULL IN ('default','absent')` behavior of the payload expression
+the column replaced.
+
+`session_denorm_idx` stays load-bearing: the split shrinks the largest payloads but
+leaves their non-turn keys (`problems`, `reconciliation`, `timeline`, `requests`) at
+MB scale, so the payload overflow chain persists and the list remains an index-only
+scan. Steady-state passes skip unchanged turn rows, and the full-rebuild write budget
+is ≤ baseline + 750 ms (deflate level 1 is the escape hatch if the gate misses).
+
+**Measured corpus.** 336 sessions, 79.6 MB of payload holding 40,621 turns; after the
+split the payload total is 48.3 MB and `session_turn` holds 40,719 rows over 9,031
+pages (36,990,976 bytes).
+
+**Deployment fact.** A store must be migrated to v22 by the new build before the list
+is fast: the v21 migration added the materialized columns without backfilling them,
+so until the new build's projection — or the v22 migration — rewrites a row, its
+columns stay NULL and the reader serves it from payload. Deploy the new build first;
+the migration lands on open.
+
+**Operator reclamation.** `kyberdash dash vacuum` reclaims the freelist the split
+leaves behind. `--dry-run` reports the reclaimable space from SQLite's own
+`page_count`/`freelist_count`/`page_size` counters, opening the store read-only —
+the file's size and mtime are unchanged afterwards. A real run reports the before
+size, the after size, the reclaimed bytes, and the freelist count it reclaimed; it
+holds the same writer lock a refresh holds, and it refuses a store it cannot open
+with the store's own upgrade message. Measured: the live store is 3.33 GB with a
+286,441-page freelist of 813,331 pages (~35% dead). There is no recurring vacuum
+cadence — freelist pages are never read (`VACUUM` halves the file with list latency
+unchanged), and the quarantine family is evidence retention by design under the
+existing purge policy ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
+so retention is unchanged. The one-time live vacuum is an owner-operated step: stop
+the engine, run `kyberdash dash vacuum`, start the engine. In WAL mode the main file
+is rewritten only at the final checkpoint, so the engine must be stopped, not merely
+idle.
 
 #### Subagent session hierarchy and read-time spend rollups (ADR 0038)
 
@@ -838,7 +1327,7 @@ prefers the fuller row as keeper, and joined counters are never summed. File+fil
 pairs under the folded `cursor` share are admitted, not only OTel+file. Raw ingest rows
 remain provenance; the join applies when derived tables rebuild.
 
-**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, then to `4` for issue #216 (PR #276, synth parts), and the current Claude contract is `7` (bumped for skill listings; see the [skills view contract](#skills-view-contract)), with Codex and Kilo at `3`, invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
+**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, then to `4` for issue #216 (PR #276, synth parts), and the current Claude contract is `7` (bumped for skill listings; see the [skills view contract](#skills-view-contract)), with Codex at `3` and Kilo at `4` (bumped when the kilo.db reader began attaching content), invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
 
 Copilot OTLP sessions are excluded from the `tool_yield` digest deliberately. No Copilot
 producer path can yet vouch that tool-call telemetry is complete, so an absent
@@ -933,7 +1422,9 @@ compares three implementations (design D2, Requirement 11.14;
 `dash/src/cli/report-api-parity.test.ts` proves CLI and REST equality).
 
 The builder reads only what the shared projection derived. The latest-session section reads
-the persisted session payload through `getSessionPayload()`, so a measurable session shows
+the materialized columns (`summary_json` and the columns the report consumes) instead of
+the payload blob — the report response is unchanged, and the tray's `/api/kyber/report`
+endpoint no longer reaches a full payload read — so a measurable session shows
 measured latest-turn context while a truly absent context keeps the honest
 "harness exported no message structure" reason rather than a fabricated figure.
 `coverage.harnesses` is selector/navigation metadata required by Requirement 8.8: the
@@ -1101,6 +1592,41 @@ enable becomes a no-op rather than a race; another process is not covered.
 Paths resolve through a platform seam (`dash/src/capture/paths.ts`), so macOS, Linux and
 Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 
+**The registry is seven harnesses.** `CAPTURE_HARNESS_REGISTRY`
+(`dash/src/capture/harnesses/registry.ts`) declares three managed writers — `copilot`,
+`claude-code` and `opencode` — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
+and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
+(`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
+`enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` answers
+**400** because `MANAGED_IDS` excludes it. Adding one needs no web change: `readHarness`
+(`dash/web/src/lib/kyberApi.ts`) falls back to `status-only` for a `mode` it does not recognise,
+and `CAPTURE_MAX_HARNESSES` bounds the list.
+
+**The exception is a pending writer that declares a `filePlugin` (Kilo).** `enable` installs the
+capture plugin file and `disable` removes it, each with its own digest receipt
+(`~/.kyberdash/kilo-plugin-receipt.json`, never the key receipt). `MANAGED_IDS` includes any writer
+with a `filePlugin`, so the route accepts `kilo`; `GET` reports it as `managed` with its state from
+`kiloPluginState` (`on`, `off`, `partial` for an older plugin of ours, `unknown` for an edited,
+foreign or unreadable file); and the web drawer needs no change, because a managed row with a state
+gets Enable and Disable. A file plugin never turns the OTLP receiver on, never promises to in its
+preview, and is excluded from `lastManagedHarnessDisabled`. A corrupt shared key receipt does not
+block a run that selects only file plugins, because they never read it.
+
+**Kilo Code is not a key writer, by decision** (ADR 0031, 2026-10-21 amendments): its row is a
+file plugin, switched from Settings or the CLI as above. Kilo
+has no config key that turns on local telemetry export: `OTEL_EXPORTER_OTLP_ENDPOINT` is
+environment-only and no config field sets it, while the one on/off key,
+`experimental.openTelemetry`, gates Kilo's PostHog product analytics. Writing that key would breach
+decision 1's "only the keys that enable telemetry export" and could re-enable vendor analytics for
+an owner who opted out. Install detection probes three traces — the config directory
+`<home>/.config/kilo`, the shared-runtime database `<home>/.local/share/kilo/kilo.db`, and the VS
+Code Stable globalStorage directory `kilocode.kilo-code` (win32 under the application-data root,
+darwin under `~/Library/Application Support`, linux under `~/.config`, through the same platform
+seam Copilot's settings paths use) — and its single manual step, `kilo-folder-import`, carries no
+`env` because a folder import is a setting or a command rather than a variable. Only those three
+paths count as detected; VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config are not
+probed. The `statusLines` are fixed facts and never echo text the owner wrote in `kilo.jsonc`.
+
 ### Turn inspection numbering and resolution contracts (issue #184)
 
 The turn inspection drawer and turn-content endpoints follow explicit numbering and resolution conventions:
@@ -1156,7 +1682,10 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). Since schema 22 the served document is assembled — the metadata payload plus one ordered `session_turn` scan — with identical content and unchanged `_clip` bounds. |
+| `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the materialized columns without touching `payload`; 404 for an unknown id. No run or execution linkage is served, deliberately ([below](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21)). |
+| `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
+| `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without the whole-blob `getSessionPayload` reassembly; the shape the client already parses is unchanged. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
@@ -1180,7 +1709,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries exactly one scope (`all: true` or a non-empty `harnesses` list), explicit `confirm: true`, and the optional `reingestWeeks` window (1–52; absent or null means no re-ingest, which is the default). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 413 body over 64KB; 500 bounded failure. |
 | `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |
 
-All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
+All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed. `GET /api/kyber/context` and `GET /api/kyber/schema` are gone — deleted with no live caller ([ADR 0041](../adr/0041-kyberdash-retire-legacy-context-schema-routes.md)) — and answer this generic 404 like any unknown path; a non-GET on either answers 404 rather than 405.
 
 ### User-initiated database clean (ADR 0032)
 
@@ -1296,6 +1825,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) — harness-source jobs, split client identity, schema-11 checkpoints, and `dash refresh`.
 - [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) — stored content with a 14-day automatic purge after refresh.
 - [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — post-run transcript synchronization, stable-identity subagent session hierarchy, Schema v20, and read-time spend rollups.
+- [ADR 0041](../adr/0041-kyberdash-retire-legacy-context-schema-routes.md) — the legacy context and schema routes are deleted with no live caller; the timeline clause of ADR 0007 D3 stands.
 - [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).

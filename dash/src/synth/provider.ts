@@ -41,6 +41,8 @@ import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
 import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
+import { antigravityReader } from './readers/antigravity.js'
+import { commandcodeReader } from './readers/commandcode.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
 import type { DateRange } from '../types.js'
@@ -119,6 +121,10 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['cursor', cursorReader],
   ['cursor-agent', cursorReader],
   ['pi', piReader],
+  ['antigravity', antigravityReader],
+  ['antigravity-cli', antigravityReader],
+  ['antigravity-ide', antigravityReader],
+  ['commandcode', commandcodeReader],
 ])
 
 function readerFor(identity: string): ContentReader | undefined {
@@ -141,7 +147,10 @@ function callsAndTurns(
   // straight off it here.
   const calls = load.calls.length === 0
     ? provider === 'copilot' || provider === 'copilot-cli'
-      ? loadCopilotCliCalls(load.filePath)
+      // A `.jsonl` path is Copilot CLI's events journal, not the SQLite session
+      // store the loader opens, so the journal path must not reach the loader; its
+      // calls stay empty and the content reader alone runs (D24).
+      ? !load.filePath.endsWith('.jsonl') ? loadCopilotCliCalls(load.filePath) : []
       : provider === 'claude' || provider === 'claude-code' || provider.startsWith('claude-')
         ? loadClaudeCalls(load.filePath)
         : load.calls

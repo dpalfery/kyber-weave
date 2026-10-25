@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -21,17 +20,24 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
     /// <summary>
     /// A roster shrink must remove only an unchanged file owned by the prior receipt. A locally
     /// edited owned file remains an operator conflict, and an unmanaged neighbor remains outside
-    /// Squad ownership, while the replacement receipt names the exact 48-file golden render.
+    /// Squad ownership, while the replacement receipt names the exact shrunken roster.
     /// </summary>
     [Fact]
-    public async Task UpdateToGoldenRosterRemovesOnlyUnchangedObsoleteOwnedFileAndWritesExactReceipt()
+    public async Task UpdateToShrunkenRosterRemovesOnlyUnchangedObsoleteOwnedFileAndWritesExactReceipt()
     {
-        string[] goldenPaths = ReadGoldenPaths();
+        string[] rosterPaths =
+        [
+            ".github/agents/architect.agent.md",
+            ".github/agents/conductor.agent.md",
+            ".github/agents/task-reviewer.agent.md",
+            ".github/skills/code-review/SKILL.md",
+            ".github/skills/product-owner/SKILL.md"
+        ];
         string targetRoot = Path.Combine(_temp.Path, "hotshot-update");
         Directory.CreateDirectory(targetRoot);
         SquadStateStore stateStore = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-data")));
         using FakeSquadReleaseSource releaseSource = new();
-        RosterShrinkingRenderer renderer = new(goldenPaths);
+        RosterShrinkingRenderer renderer = new(rosterPaths);
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
         SquadLifecycleResult install = await service.InstallAsync(new SquadInstallRequest(
@@ -73,32 +79,15 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
             .Select(file => file.RelativePath)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(goldenPaths, persistedPaths);
-        Assert.Equal(48, persistedPaths.Length);
+        Assert.Equal(rosterPaths, persistedPaths);
+        Assert.Equal(5, persistedPaths.Length);
         Assert.Equal(persistedPaths.Length, persistedPaths.Distinct(StringComparer.Ordinal).Count());
-    }
-
-    private static string[] ReadGoldenPaths()
-    {
-        string path = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "kyber-squad-hotshot-golden.json");
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-        JsonElement root = document.RootElement;
-        return root.GetProperty("agents").EnumerateArray()
-            .Concat(root.GetProperty("skills").EnumerateArray())
-            .Select(entry => entry.GetProperty("path").GetString() ?? throw new InvalidDataException("Golden path is not a string."))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
     }
 
     private static string ResolveTargetPath(string root, string relativePath) =>
         Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-    private sealed class RosterShrinkingRenderer(IReadOnlyList<string> goldenPaths) : ISquadRenderer
+    private sealed class RosterShrinkingRenderer(IReadOnlyList<string> rosterPaths) : ISquadRenderer
     {
         private int _renderCount;
 
@@ -111,7 +100,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
             ArgumentNullException.ThrowIfNull(request);
             cancellationToken.ThrowIfCancellationRequested();
             _renderCount++;
-            List<string> paths = [.. goldenPaths];
+            List<string> paths = [.. rosterPaths];
             if (_renderCount == 1)
             {
                 paths.Add(ObsoletePath);

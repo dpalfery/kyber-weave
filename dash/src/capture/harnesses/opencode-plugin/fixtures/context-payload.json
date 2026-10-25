@@ -1,0 +1,49 @@
+{
+  "t0": "opencode context payload skeleton — survey only, no emission logic",
+  "pinned_package": {
+    "name": "@opencode/plugin",
+    "version": "2.1.4",
+    "pinned_on": "2026-10-23",
+    "tarball": "https://registry.npmjs.org/@opencode/plugin/-/plugin-2.1.4.tgz",
+    "authority": "tarball .d.ts files below (opencode.ai/docs/plugin/ returns 404; opencode.ai/docs/plugins/ covers v1 only)"
+  },
+  "registration_verbatim": {
+    "source_file": "package/dist/promise/session.d.ts",
+    "session_domain": "export type SessionDomain = Pick<SessionApi, \"list\" | \"create\" | \"get\" | \"remove\" | \"switchAgent\" | \"switchModel\" | \"prompt\" | \"generate\" | \"command\" | \"compact\" | \"synthetic\" | \"interrupt\" | \"update\" | \"move\" | \"wait\" | \"context\"> & { readonly hook: ModelHooks<SessionHooks>; };",
+    "note": "No standalone session.context() call exists on SessionDomain. Registration is ctx.session.hook(\"context\", callback)."
+  },
+  "hook_signature_verbatim": {
+    "source_file": "package/dist/promise/registration.d.ts",
+    "model_hooks": "export type ModelHooks<Spec> = <Name extends keyof Spec>(name: Name, callback: (input: Spec[Name]) => Promise<void> | void, options?: Spec[Name] extends { readonly model: unknown } ? ModelHookOptions : never) => Promise<Registration>;",
+    "registration": "export interface Registration { readonly dispose: () => Promise<void>; }",
+    "session_hooks_key": {
+      "source_file": "package/dist/promise/session.d.ts",
+      "verbatim": "readonly context: SessionContext;"
+    }
+  },
+  "plugin_entry_verbatim": {
+    "source_file": "package/dist/promise/plugin.d.ts",
+    "define": "export declare function define(plugin: Plugin): Plugin;",
+    "plugin": "export interface Plugin { readonly id: string; readonly setup: (context: Context) => Promise<Cleanup | void> | Cleanup | void; }",
+    "session_on_context": "session is one domain on Context (readonly session: SessionDomain)"
+  },
+  "session_context_fields_verbatim": {
+    "source_file": "package/dist/promise/session.d.ts",
+    "session_request": "export interface SessionRequest { readonly sessionID: Session.ID; readonly model: Model.Ref; system: Array<SystemPart>; messages: Array<Message>; options: SessionRequestOptions; }",
+    "session_context": "export interface SessionContext extends SessionRequest { readonly agent: Agent.ID; tools: Record<string, { description: string; input: JsonSchema.JsonSchema; }>; }",
+    "mutability": "system, messages, tools are mutable on the input object; sessionID, model, agent are readonly",
+    "options": "export type SessionRequestOptions = Types.DeepMutable<GenerationOptionsFields> & Record<string, unknown>;"
+  },
+  "v1_fallback_signatures": {
+    "authority": "NOT in the 2.1.4 tarball (v2 promise/effect API only; grep for chat.params/system.transform/tool.definition across dist/promise/*.d.ts and dist/*.d.ts returns no match). Pinned from the live-proven Kilo precedent at dash/src/capture/kilo-plugin/source.ts, which runs on the same v1 fork surface.",
+    "chat.params": "async (input, output) — input carries sessionID, message { id }, agent, model { id }, provider { info.id | id }",
+    "experimental.chat.system.transform": "async (input, output) — input carries sessionID; output.system is the assembled system-parts array",
+    "tool.definition": "async (input, output) — input carries toolID; output carries description and jsonSchema (fallback: parameters)"
+  },
+  "file_installed_dir_loadability": {
+    "authority": "fixtures/install-targets.json v2_package_forms",
+    "legal_forms": ["relative path", "absolute path", "file: URL"],
+    "local_discovery": [".opencode/plugins/", "~/.config/opencode/plugins/"],
+    "conclusion": "a file-installed directory is a legal v2 plugin target"
+  }
+}

@@ -100,16 +100,16 @@ public sealed class SquadSourceTests
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "spark1.3 contributor")]
-    [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
+    [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("fast", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=low]")]
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
     [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.7 (copilot)")]
     [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
-    [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
+    [InlineData("general", "opencode", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("general", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=medium]")]
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
@@ -247,7 +247,7 @@ public sealed class SquadSourceTests
             source.ModelProfiles.Profiles.ContainsKey("reviewer"),
             "models.yml does not declare a 'reviewer' profile.");
 
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
         int reviewerMemberCount = source.Agents.Count(agent => reviewerAgents.Contains(agent.Name));
         Assert.True(
             reviewerMemberCount > 0,
@@ -265,10 +265,10 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void CodeReviewerReviewLensReviewTriageTaskReviewerDeclareReviewerProfile()
+    public void CodeReviewerReviewLensReviewTriageDeclareReviewerProfile()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
 
         foreach (string agentName in reviewerAgents)
         {
@@ -498,6 +498,159 @@ public sealed class SquadSourceTests
 
         Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("copilot-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan D7/D8: the optional flat <c>pi-extensions</c> / <c>pi-tools</c> frontmatter keys
+    /// are accepted by the closed agent schema, and the parsed <c>SquadAgent.PiExtensions</c>
+    /// / <c>PiTools</c> values round-trip exactly (not just <c>CopilotTools</c>).
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithValidPiOverlayLoadsSuccessfully()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: [pi-mcp-adapter]\n" +
+            "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]");
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+
+        Assert.Equal(["vscode", "read"], architect.CopilotTools);
+        Assert.Equal(["pi-mcp-adapter"], architect.PiExtensions);
+        Assert.Equal(
+            ["ext:pi-mcp-adapter/mcp", "ext:pi-mcp-adapter/mcp__context7__resolve_library_id"],
+            architect.PiTools);
+    }
+
+    /// <summary>
+    /// Plan D8: each <c>ext:</c> entry must name a non-empty extension and a non-empty
+    /// tool around the <c>/</c> separator — a missing separator, an empty extension part,
+    /// or an empty tool part fails closed at load time per the loader's well-formed rule.
+    /// </summary>
+    [Theory]
+    [InlineData("ext:pi-mcp-adapter")]
+    [InlineData("ext:/mcp")]
+    [InlineData("ext:pi-mcp-adapter/")]
+    public void LoadAgentWithMalformedPiToolReferenceRejectsWellFormedRule(string piTool)
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: [pi-mcp-adapter]\n" +
+            $"pi-tools: [{piTool}]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "well-formed");
+
+        Assert.Contains("pi-tools", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan D8: <c>pi-tools</c> entries are restricted to the <c>ext:</c> form — a bare
+    /// built-in name would bypass the capability lattice (e.g. smuggling <c>bash</c> past
+    /// <c>process.execute: deny</c>), so it fails closed.
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithBarePiToolNameRejectsExtForm()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: [pi-mcp-adapter]\n" +
+            "pi-tools: [bash]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "ext:");
+
+        Assert.Contains("pi-tools", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan D8: every <c>ext:</c> entry's extension must be declared in <c>pi-extensions</c>
+    /// (cross-check modeled on <c>ValidateCopilotToolCapabilities</c>).
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithPiToolExtensionNotDeclaredRejectsCrossCheck()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: [pi-mcp-adapter]\n" +
+            "pi-tools: [ext:other-adapter/mcp]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "declared in");
+
+        Assert.Contains("pi-extensions", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan D8: both keys are optional, but when present they must be non-empty.
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithEmptyPiExtensionsRejectsRequiredMembership()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: []\n" +
+            "pi-tools: [ext:pi-mcp-adapter/mcp]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "at least one");
+
+        Assert.Contains("pi-extensions", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan D8: duplicate <c>pi-tools</c> entries fail closed, like every other
+    /// distinct-list field the loader enforces.
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithDuplicatePiToolsRejectsDuplicate()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            "pi-extensions: [pi-mcp-adapter]\n" +
+            "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "duplicate");
+
+        Assert.Contains("Remove", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Plan D8: extension ids use the portable charset (no <c>/</c> — it is the
+    /// <c>ext:</c> separator) and the tool part reuses the loader's portable MCP-name
+    /// charset.
+    /// </summary>
+    [Theory]
+    [InlineData("pi/mcp-adapter")]
+    [InlineData("Pi-Adapter!")]
+    public void LoadAgentWithNonPortablePiExtensionRejectsCharset(string extension)
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read]\n" +
+            $"pi-extensions: [{extension}]\n" +
+            $"pi-tools: [ext:{extension}/mcp]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "portable");
+
+        Assert.Contains("pi-extensions", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -41,10 +41,9 @@ export function reasonOf(value: KyberSkillAvailability): string {
   return typeof value.reason === 'string' && value.reason.length > 0 ? value.reason : 'not exported by this harness'
 }
 
-/** Transport turn indices are 0-based; the screen shows 1-based turn numbers. */
+/** How many turns listed the skill; the turn numbers themselves are not shown. */
 export function skillTurnLabel(turnsListed: number[]): string {
-  const shown = turnsListed.map((index) => index + 1).join(', ')
-  return turnsListed.length === 1 ? `Listed in turn ${shown}` : `Listed in turns ${shown}`
+  return turnsListed.length === 1 ? 'Listed in 1 turn' : `Listed in ${fmtNum(turnsListed.length)} turns`
 }
 
 function tile(testId: string, label: string, count: number | undefined, detail: string) {
@@ -61,7 +60,7 @@ function tile(testId: string, label: string, count: number | undefined, detail: 
   )
 }
 
-function renderRow(row: KyberSkillRow, onSelectSkill?: (skill: KyberSkillRow) => void) {
+function renderRow(row: KyberSkillRow, maxTokens: number, onSelectSkill?: (skill: KyberSkillRow) => void) {
   const listedUnmeasured = unmeasured(row.listed)
   const listed = row.listed === true
   const invocationsUnmeasured = unmeasured(row.invocations)
@@ -109,8 +108,21 @@ function renderRow(row: KyberSkillRow, onSelectSkill?: (skill: KyberSkillRow) =>
         )}
       </div>
 
-      {listed && row.turns_listed.length > 0 && (
-        <p className="mt-1.5 text-[11px] text-tertiary-foreground">{skillTurnLabel(row.turns_listed)}</p>
+      {typeof row.derived_tokens === 'number' && maxTokens > 0 && (
+        <div
+          data-testid={`skill-token-bar-${row.name}`}
+          className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className="h-full rounded-full bg-emerald-500/70"
+            style={{ width: `${Math.max(2, Math.round((row.derived_tokens / maxTokens) * 100))}%` }}
+          />
+        </div>
+      )}
+      {typeof row.description === 'string' && row.description.length > 0 && (
+        <p data-testid={`skill-description-${row.name}`} className="mt-1.5 line-clamp-3 text-[11px] text-muted-foreground">
+          {row.description}
+        </p>
       )}
       {unmeasured(row.listed) && (
         <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">{reasonOf(row.listed)}</p>
@@ -156,6 +168,7 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
   }
 
   const rows = skills.rows ?? []
+  const maxTokens = Math.max(0, ...rows.map((row) => (typeof row.derived_tokens === 'number' ? row.derived_tokens : 0)))
 
   const listedCount = Array.isArray(summary?.skills_listed) ? summary.skills_listed.length : undefined
   const invokedCount = Array.isArray(summary?.skills_invoked) ? summary.skills_invoked.length : undefined
@@ -182,6 +195,12 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
             {headline}
           </p>
         )}
+        {skills.invocationsCoverage !== undefined && (
+          <p data-testid="skills-invocations-coverage" className="mt-1 text-xs text-muted-foreground">
+            Invocations measured on {skills.invocationsCoverage.measuredTurns} of {skills.invocationsCoverage.totalTurns}{' '}
+            turns
+          </p>
+        )}
         {typeof skills.reported_skill_tokens === 'number' && (
           <p data-testid="skills-reported-tokens" className="mt-1 text-xs text-muted-foreground">
             Reported by the harness:{' '}
@@ -195,13 +214,12 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
         {rows.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">No skill was recorded for this session.</p>
         ) : (
-          rows.map((row) => renderRow(row, onSelectSkill))
+          rows.map((row) => renderRow(row, maxTokens, onSelectSkill))
         )}
       </div>
 
       <p className="text-[11px] text-tertiary-foreground">
         Derived tokens are estimated from each skill&apos;s listing; the reported total is the harness&apos;s own figure.
-        Turn numbers start at 1.
       </p>
     </div>
   )

@@ -130,8 +130,17 @@ export type ContentPart = {
   tokens?: number
   /** Ground-truth MCP server; `tool_definitions` parts only. */
   server?: string
+  /** Role of the request-body message this part came from; absent for top-level parts and role-less messages. */
+  role?: 'system' | 'user' | 'assistant'
   /** Position within the turn, so ordering survives a store round trip. */
   order?: number
+  /**
+   * `false` marks a tool definition the turn offered but did not keep resident
+   * in its context (deferred or loaded on demand). It is still a fact about the
+   * turn, so it stays on the record, but it adds no tokens to the context
+   * composition. Absent means resident, which is what every existing part means.
+   */
+  resident?: false
 }
 
 /**

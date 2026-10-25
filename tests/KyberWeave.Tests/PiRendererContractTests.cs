@@ -44,9 +44,14 @@ public sealed class PiRendererContractTests : IDisposable
 
     /// <summary>
     /// The capability→tool lowering this suite pins, transcribed independently from plan
-    /// section 6 rather than read from the renderer. <c>network.read</c> and
-    /// <c>network.publish</c> are absent because Pi has no built-in tool for either
-    /// (R8); <c>delegate</c> is handled separately because it produces
+    /// section 6 rather than read from the renderer. <c>network.read</c> has no expressible
+    /// built-in Pi tool (R8 re-confirmed 2026-10-24: bare <c>mcp</c> is not a built-in —
+    /// plain <c>tools:</c> names must be built-ins and subagents inherit the
+    /// <c>-builtin:mcp</c> global opt-out — so it is refused under the unknown-name rule).
+    /// Web access arrives only via the canonical agent-file overlay (<c>pi-extensions</c> /
+    /// <c>pi-tools</c>, pinned by <c>RenderAsync_Pi_ResearchAgentRendersVerifiedOverlayWiring</c>).
+    /// <c>network.publish</c> remains absent because Pi has no built-in tool for it.
+    /// <c>delegate</c> is handled separately because it produces
     /// <c>allowed_subagents</c>, not a tool.
     /// </summary>
     private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
@@ -59,6 +64,18 @@ public sealed class PiRendererContractTests : IDisposable
 
     /// <summary>Fixed emission order for the <c>tools</c> CSV, per plan section 6.</summary>
     private static readonly string[] ToolOrder = ["read", "grep", "find", "ls", "edit", "write", "bash"];
+
+    /// <summary>
+    /// The live-verified overlay wiring (plan D10, probe sequence 2026-10-24): the only
+    /// <c>pi-tools</c> entries any canonical agent may declare. The renderer appends them
+    /// after the capability-derived CSV in declared canonical order.
+    /// </summary>
+    private static readonly string[] ResearchAgentOverlayTools =
+    [
+        "ext:pi-mcp-adapter/mcp",
+        "ext:pi-mcp-adapter/mcp__context7__resolve_library_id",
+        "ext:pi-mcp-adapter/mcp__context7__query_docs",
+    ];
 
     /// <summary>
     /// Shared identities are read from the loaded fallback profiles so this suite follows
@@ -253,8 +270,8 @@ public sealed class PiRendererContractTests : IDisposable
             {
                 "architect" => "zai/glm-5.3",
                 "deep-planning" => "zai/glm-5.3",
-                "fast" => "opencode/muse-spark-1.3-contributor-free",
-                "general" => "opencode/muse-spark-1.3-contributor-free",
+                "fast" => "opencode-go/muse-spark-1.3-contributor",
+                "general" => "opencode-go/muse-spark-1.3-contributor",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "orchestration" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
@@ -311,10 +328,20 @@ public sealed class PiRendererContractTests : IDisposable
 
             SquadCapabilityProfile capabilityProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> expectedTools = ComputeExpectedTools(capabilityProfile);
+            if (string.Equals(agent.Name, "research-agent", StringComparison.Ordinal))
+            {
+                // D10 overlay scope: research-agent alone carries the live-verified wiring.
+                // The renderer appends the declared pi-tools after the capability-derived CSV.
+                expectedTools = [.. expectedTools, .. ResearchAgentOverlayTools];
+            }
+
             string rawTools = RequireScalar(frontmatter, "tools", agent.Name);
             IReadOnlyList<string> actualTools = ParseCsvList(rawTools);
 
-            Assert.All(actualTools, tool => Assert.Contains(tool, ToolOrder));
+            Assert.All(actualTools, tool => Assert.True(
+                ToolOrder.Contains(tool, StringComparer.Ordinal) ||
+                    tool.StartsWith("ext:", StringComparison.Ordinal),
+                $"Agent '{agent.Name}' tool '{tool}' is neither a built-in nor an ext: overlay tool."));
             Assert.True(
                 actualTools.Distinct(StringComparer.Ordinal).Count() == actualTools.Count,
                 $"Agent '{agent.Name}' has duplicate tool entries: {string.Join(", ", actualTools)}.");
@@ -324,7 +351,14 @@ public sealed class PiRendererContractTests : IDisposable
                 Assert.Equal("none", rawTools);
             }
 
-            Assert.Equal("false", RequireScalar(frontmatter, "extensions", agent.Name));
+            if (string.Equals(agent.Name, "research-agent", StringComparison.Ordinal))
+            {
+                AssertExtensionsSequence(frontmatter, "research-agent", ["pi-mcp-adapter"]);
+            }
+            else
+            {
+                Assert.Equal("false", RequireScalar(frontmatter, "extensions", agent.Name));
+            }
 
             bool delegateAllowed =
                 capabilityProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -372,6 +406,70 @@ public sealed class PiRendererContractTests : IDisposable
             string expectedBody = NormalizeBody(agent.InstructionBody);
             Assert.Contains(expectedBody, body, StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>
+    /// Deployed-wiring pin for the 2026-10-24 reversal (plan D1/D9/D10/D11): the read-only
+    /// <c>research-agent</c> renders the verified overlay wiring — <c>extensions:</c> as the
+    /// YAML sequence <c>[pi-mcp-adapter]</c> (the exact form proven live) and the three
+    /// <c>ext:</c> tools appended after the seven-tool capability CSV — with <c>bash</c>
+    /// absent, proving the read-only no-shell boundary survived the change. No <c>mcp</c>
+    /// token: bare <c>mcp</c> is refused by the loader's unknown-name rule. This renders the
+    /// real canonical source, so it transitively guards both the canonical declaration and
+    /// the renderer emission.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_ResearchAgentRendersVerifiedOverlayWiring()
+    {
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".pi/agents/research-agent.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "research-agent");
+
+        Assert.Equal(
+            ["read", "grep", "find", "ls", .. ResearchAgentOverlayTools],
+            ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
+        Assert.DoesNotContain("bash", ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
+        Assert.DoesNotContain("mcp", ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
+        AssertExtensionsSequence(frontmatter, "research-agent", ["pi-mcp-adapter"]);
+        Assert.Contains(
+            "extensions: [pi-mcp-adapter]",
+            Encoding.UTF8.GetString(file.Content.Span),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An agent whose capability profile denies every built-in must still render a
+    /// <c>tools</c> CSV carrying exactly its declared <c>pi-tools</c> overlay entries:
+    /// the overlay is appended after the (here empty) capability-derived CSV rather than
+    /// collapsing to <c>none</c> or leaking a built-in.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools()
+    {
+        using PiOverlayOnlyFixture fixture = PiOverlayOnlyFixture.Create();
+
+        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{PiOverlayOnlyFixture.TestAgentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            PiOverlayOnlyFixture.TestAgentName);
+
+        Assert.Equal(
+            ["ext:pi-mcp-adapter/mcp", "ext:pi-mcp-adapter/mcp__context7__resolve_library_id"],
+            ParseCsvList(RequireScalar(frontmatter, "tools", PiOverlayOnlyFixture.TestAgentName)));
+        AssertExtensionsSequence(frontmatter, PiOverlayOnlyFixture.TestAgentName, ["pi-mcp-adapter"]);
     }
 
     [Fact]
@@ -585,9 +683,11 @@ public sealed class PiRendererContractTests : IDisposable
             }
         }
 
-        // Non-primary permission-not-expressible: network.read/publish allowed, or an empty
-        // delegate-allow roster (R9/R10). No corpus agent hits the empty-roster case today,
-        // but the predicate is written generically rather than pinned to the current set.
+        // Non-primary permission-not-expressible: network.read allowed (R8 re-confirmed
+        // 2026-10-24 — no built-in Pi tool expresses it; the overlay supplies web access
+        // outside the renderer), network.publish allowed, or an empty delegate-allow roster
+        // (R9/R10). No corpus agent hits the empty-roster case today, but the predicate is
+        // written generically rather than pinned to the current set.
         string[] expectedNonPrimaryPermissionNotExpressible = subagentAgents
             .Where(a =>
             {
@@ -982,8 +1082,8 @@ public sealed class PiRendererContractTests : IDisposable
     /// with their approved thinking levels. Against the real corpus, the D2 profiles resolve to:
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
-    /// general → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>medium</c>;
-    /// fast → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>low</c>;
+    /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
     /// </summary>
@@ -991,8 +1091,8 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("architect", "zai/glm-5.3", "high")]
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
-    [InlineData("general", "opencode/muse-spark-1.3-contributor-free", "medium")]
-    [InlineData("fast", "opencode/muse-spark-1.3-contributor-free", "low")]
+    [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,
         string expectedModel,
@@ -1051,6 +1151,22 @@ public sealed class PiRendererContractTests : IDisposable
         Assert.False(
             frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
             "Conductor lowered skill should omit 'thinking' (pi: inherit).");
+    }
+
+    /// <summary>
+    /// Asserts the <c>extensions</c> frontmatter node is a YAML sequence with exactly the
+    /// expected extension ids in order (plan D9: the verified probe form is the sequence,
+    /// not the CSV scalar).
+    /// </summary>
+    private static void AssertExtensionsSequence(YamlMappingNode frontmatter, string identity, string[] expected)
+    {
+        Assert.True(
+            frontmatter.Children.TryGetValue(new YamlScalarNode("extensions"), out YamlNode? value),
+            $"Agent '{identity}' is missing the 'extensions' key.");
+        YamlSequenceNode sequence = Assert.IsType<YamlSequenceNode>(value);
+        Assert.Equal(
+            expected,
+            sequence.Children.OfType<YamlScalarNode>().Select(child => child.Value ?? string.Empty));
     }
 
     /// <summary>Splits a rendered file into its parsed YAML frontmatter and body, failing the test if either delimiter is missing.</summary>
@@ -1177,6 +1293,73 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
              """,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
+        return fixture;
+    }
+
+    public void Dispose() => _temp.Dispose();
+}
+
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus, adds a capability profile denying
+/// every built-in, and repoints one delegate-free agent at it with a <c>pi-tools</c>
+/// overlay, so <see cref="PiRendererContractTests.RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools"/>
+/// can observe an overlay-only <c>tools</c> CSV. The agent keeps only capability-free
+/// Copilot tools (<c>vscode/toolSearch</c>, <c>vscode/askQuestions</c>, <c>todo</c>) so the
+/// repointed profile still passes the Copilot cross-check.
+/// </summary>
+internal sealed class PiOverlayOnlyFixture : IDisposable
+{
+    internal const string TestAgentName = "review-lens";
+
+    private readonly TempDirectory _temp = new();
+
+    private PiOverlayOnlyFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static PiOverlayOnlyFixture Create()
+    {
+        PiOverlayOnlyFixture fixture = new();
+        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+
+        string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
+        File.AppendAllText(
+            capabilitiesPath,
+            """
+              pi-overlay-only:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: deny
+            """,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
+        string original = File.ReadAllText(agentPath);
+        string mutated = original
+            .Replace("capability-profile: read-only", "capability-profile: pi-overlay-only", StringComparison.Ordinal)
+            .Replace(
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kyber-weave/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]\n" +
+                "pi-extensions: [pi-mcp-adapter]\n" +
+                "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]",
+                StringComparison.Ordinal);
+
+        if (string.Equals(original, mutated, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{agentPath}' to carry the read-only profile and full Copilot roster to repoint.");
+        }
+
+        File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return fixture;
     }
 

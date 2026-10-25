@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import { Command, CommanderError } from 'commander'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -49,6 +49,20 @@ function tomlWriter(home: string, id = 'test-toml'): CaptureHarnessWriter {
 function writeConfig(path: string, content: string): void {
   mkdirSync(join(path, '..'), { recursive: true })
   writeFileSync(path, content)
+}
+
+/** Every path under `root`, relative and sorted, so a fresh home lists as empty. */
+function listTree(root: string): string[] {
+  const out: string[] = []
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      out.push(relative(root, full))
+      if (entry.isDirectory()) walk(full)
+    }
+  }
+  walk(root)
+  return out.sort()
 }
 
 const NO_LISTENER = async (): Promise<{ status: number; body: string }> => {
@@ -246,6 +260,85 @@ describe('capture enable and disable', () => {
   })
 })
 
+describe('capture enable and disable on the Kilo plugin harness', () => {
+  const kiloConfigPath = (home: string): string => join(home, '.config', 'kilo', 'kilo.jsonc')
+  const pluginPath = (home: string): string => join(home, '.config', 'kilo', 'plugin', 'kyberdash-capture.js')
+  const run = (action: 'enable' | 'disable', home: string, dryRun = false) =>
+    runCapture(action, { homeDir: home, harnessIds: ['kilo'], fetchHealth: NO_LISTENER, dryRun })
+
+  it('enable installs the plugin and never writes the key receipt', async () => {
+    const home = makeHome()
+    const result = await run('enable', home)
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(pluginPath(home))).toBe(true)
+    expect(existsSync(join(home, '.kyberdash', 'kilo-plugin-receipt.json'))).toBe(true)
+    expect(existsSync(join(home, '.kyberdash', 'capture-receipt.json'))).toBe(false)
+    expect(result.events).toMatchObject([{ kind: 'wrote', harness: 'kilo', fileId: 'plugin' }])
+  })
+
+  it('enable dry run writes nothing under HOME', async () => {
+    const home = makeHome()
+    const before = listTree(home)
+    const result = await run('enable', home, true)
+    expect(result.exitCode).toBe(0)
+    expect(listTree(home)).toEqual(before)
+    expect(result.events).toMatchObject([{ kind: 'would-write' }])
+  })
+
+  it('disable removes what enable installed and leaves captured data', async () => {
+    const home = makeHome()
+    await run('enable', home)
+    const store = join(home, '.kyberdash', 'capture', 'kilo')
+    mkdirSync(store, { recursive: true })
+    writeFileSync(join(store, 'index.jsonl'), '{}\n')
+    const result = await run('disable', home)
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(pluginPath(home))).toBe(false)
+    expect(existsSync(join(store, 'index.jsonl'))).toBe(true)
+  })
+
+  it('disable on a machine that never enabled writes nothing', async () => {
+    const home = makeHome()
+    const before = listTree(home)
+    const result = await run('disable', home)
+    expect(result.exitCode).toBe(0)
+    expect(listTree(home)).toEqual(before)
+  })
+
+  it.each(['enable', 'disable'] as const)('%s leaves an existing kilo.jsonc byte-for-byte unchanged', async (action) => {
+    const home = makeHome()
+    const configPath = kiloConfigPath(home)
+    writeConfig(configPath, '{\n  // synthetic kilo fixture\n  "model": "synthetic"\n}\n')
+    const before = readFileSync(configPath, 'utf8')
+    const result = await run(action, home)
+    expect(result.exitCode).toBe(0)
+    expect(readFileSync(configPath, 'utf8')).toBe(before)
+  })
+
+  it.each(['enable', 'disable'] as const)(
+    '%s works for kilo alone when the shared key receipt is corrupt, because the plugin keeps its own',
+    async (action) => {
+      const home = makeHome()
+      mkdirSync(join(home, '.kyberdash'), { recursive: true })
+      writeFileSync(join(home, '.kyberdash', 'capture-receipt.json'), '{ not json')
+      if (action === 'disable') await run('enable', home)
+      const result = await run(action, home)
+      expect(result.exitCode).toBe(0)
+      expect(readFileSync(join(home, '.kyberdash', 'capture-receipt.json'), 'utf8')).toBe('{ not json')
+    },
+  )
+
+  it('enable refuses to overwrite a plugin file the owner wrote', async () => {
+    const home = makeHome()
+    mkdirSync(join(home, '.config', 'kilo', 'plugin'), { recursive: true })
+    writeFileSync(pluginPath(home), 'export default {}\n')
+    const result = await run('enable', home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatch(/not written by KyberDash/)
+    expect(readFileSync(pluginPath(home), 'utf8')).toBe('export default {}\n')
+  })
+})
+
 describe('capture status and receiver liveness', () => {
   it('reports per-harness state and tells no listener apart', async () => {
     const home = makeHome()
@@ -291,6 +384,7 @@ describe('capture status and receiver liveness', () => {
     expect(result.stdout).toContain('harness opencode (OpenCode)')
     expect(result.stdout).toContain('harness pi (Pi)')
     expect(result.stdout).toContain('harness antigravity (Antigravity)')
+    expect(result.stdout).toContain('harness kilo (Kilo Code)')
     expect(result.stdout).toContain('no [otel] table is present; coverage comes from session files')
     expect(result.stdout).toContain('statusline bridge')
     expect(result.stdout).toContain('declaredContextWindow')

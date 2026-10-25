@@ -74,9 +74,20 @@ const ERR_FAILED = 'Capture failed'
 const NOT_HOSTED_DETAIL =
   'this KyberDash server does not host the OTLP receiver; liveness was not probed'
 
+/**
+ * Harnesses a Settings request may switch: key writers, and file plugins (Kilo), which are
+ * pending for the key machinery but own one file the same engine installs and removes.
+ */
 const MANAGED_IDS: readonly string[] = CAPTURE_HARNESS_REGISTRY.filter(
-  (writer) => writer.kind === 'managed',
+  (writer) => writer.kind === 'managed' || (writer.kind === 'pending' && writer.filePlugin !== undefined),
 ).map((writer) => writer.id)
+
+/** A file plugin writes local files and needs no OTLP receiver, so it never turns the receiver on. */
+const FILE_PLUGIN_IDS: ReadonlySet<string> = new Set(
+  CAPTURE_HARNESS_REGISTRY.filter((writer) => writer.kind === 'pending' && writer.filePlugin !== undefined).map(
+    (writer) => writer.id,
+  ),
+)
 
 function statusContext(settings: CaptureRouteSettings): StatusContext {
   return {
@@ -254,7 +265,12 @@ async function answerPost(
   let hosted = readSetting(store, SETTING_KEYS.receiverHosted) === 'on'
   let enabled = false
   let enableFailed = false
-  if (request.action === 'enable' && !request.dryRun && (result.outcome !== 'refused' || wroteSomething)) {
+  if (
+    request.action === 'enable' &&
+    !request.dryRun &&
+    !FILE_PLUGIN_IDS.has(request.harness) &&
+    (result.outcome !== 'refused' || wroteSomething)
+  ) {
     if (!hosted) {
       try {
         writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
@@ -290,8 +306,9 @@ async function answerPost(
     request.action === 'disable' &&
     !request.dryRun &&
     result.outcome === 'wrote' &&
+    !FILE_PLUGIN_IDS.has(request.harness) &&
     statuses
-      .filter((status) => status.mode === 'managed')
+      .filter((status) => status.mode === 'managed' && !FILE_PLUGIN_IDS.has(status.id))
       .every((status) => status.state !== 'on' && status.state !== 'partial')
 
   io.sendJson(res, 200, {
@@ -303,7 +320,7 @@ async function answerPost(
     harnessState,
     receiver: {
       hosted,
-      willEnable: request.action === 'enable' && request.dryRun,
+      willEnable: request.action === 'enable' && request.dryRun && !FILE_PLUGIN_IDS.has(request.harness),
       enabled,
       enableFailed,
       lastManagedHarnessDisabled,

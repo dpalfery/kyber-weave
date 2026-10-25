@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { parseClaudeApiRequestBody } from './adapters/claude-code.js'
 import { turn } from './fixtures/records.js'
 import { buildSkillsView, extractInvokedSkills, extractListedSkills } from './skills.js'
 import { contentFromParts, notMeasurable } from './types.js'
@@ -844,6 +845,128 @@ describe('buildSkillsView, Antigravity', () => {
   })
 })
 
+// Antigravity invocations come from the transcript (D6): a transcript-covered turn
+// carries `kyber.skills.invoked`, even as `[]` (measured, none invoked). A session
+// whose records carry no such key has no transcript behind it.
+const SYNTHETIC_AGY_LISTING = 'Active Skills: synthetic-alpha, synthetic-beta'
+
+/** An Antigravity model turn carrying the synthetic listing and, when given, the transcript's invoked list. */
+function antigravityTurn(spanId: string, invoked?: string[]): CanonicalRecord {
+  return modelTurn('antigravity', spanId, {
+    source: 'antigravity',
+    raw: {
+      [ANTIGRAVITY_LISTING_KEY]: SYNTHETIC_AGY_LISTING,
+      ...(invoked !== undefined ? { [INVOKED_KEY]: invoked } : {}),
+    },
+  })
+}
+
+describe('buildSkillsView, Antigravity invocations from the transcript', () => {
+  it('a transcript-covered session with no skill load reports every listed skill as measured zero', () => {
+    const turns = [antigravityTurn('turn-1', []), antigravityTurn('turn-2', [])]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    for (const name of ['synthetic-alpha', 'synthetic-beta']) {
+      expect(rowNamed(view, name).invocations, name).toBe(0)
+    }
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toBeUndefined()
+  })
+
+  it('counts each skill once per covered turn that names it', () => {
+    const turns = [
+      antigravityTurn('turn-1', ['synthetic-alpha']),
+      antigravityTurn('turn-2', ['synthetic-alpha', 'synthetic-beta']),
+      antigravityTurn('turn-3', []),
+    ]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(rowNamed(view, 'synthetic-alpha').invocations).toBe(2)
+    expect(rowNamed(view, 'synthetic-beta').invocations).toBe(1)
+  })
+
+  it('a session with no kyber.skills.invoked key reports invocations not measurable, naming the transcript', () => {
+    const turns = [antigravityTurn('turn-1')]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/transcript/i),
+    })
+    expect(rowNamed(view, 'synthetic-alpha')).not.toHaveProperty('invocations')
+  })
+
+  it('a Copilot session without a skill record keeps its wording: the reason does not name a transcript', () => {
+    const rollup = copilotRollup('conductor-agent')
+    const chat = copilotChat('chat-1', 'conductor-agent')
+    const view = buildSkillsView([rollup, chat], [chat], {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    const availability = (view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability
+    expect(availability).toMatchObject({ availability: 'not_measurable' })
+    expect(availability!.reason).not.toMatch(/transcript/i)
+  })
+})
+
+// D30: an Antigravity turn is measured for invocations only where its record carries
+// `kyber.skills.invoked`, `[]` included. When some turns are covered and some are not,
+// the figures are measured over the covered turns and the view says how many they were.
+describe('buildSkillsView, Antigravity invocations per covered turn (D30)', () => {
+  // turn-1 carries no key (not covered), turn-2 is measured none, turn-3 names alpha.
+  const partiallyCovered = (): CanonicalRecord[] => [
+    antigravityTurn('turn-1'),
+    antigravityTurn('turn-2', []),
+    antigravityTurn('turn-3', ['synthetic-alpha']),
+  ]
+
+  it('measures invocations over the covered turns: alpha once, beta measured none', () => {
+    const turns = partiallyCovered()
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).toMatchObject({ measurable: true })
+    expect(rowNamed(view, 'synthetic-alpha').invocations).toBe(1)
+    expect(rowNamed(view, 'synthetic-beta').invocations).toBe(0)
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toBeUndefined()
+  })
+
+  it('states the covered and total turn counts when only some turns are covered', () => {
+    const turns = partiallyCovered()
+    const view = buildSkillsView(turns, turns, {}, characterCount())
+
+    expect(view).toHaveProperty('invocationsCoverage', { measuredTurns: 2, totalTurns: 3 })
+  })
+
+  it('omits invocationsCoverage when every Antigravity turn is covered', () => {
+    const turns = [antigravityTurn('turn-1', []), antigravityTurn('turn-2', ['synthetic-alpha'])]
+    const view = buildSkillsView(turns, turns, {}, characterCount())
+
+    expect(view).toMatchObject({ measurable: true })
+    expect(view).not.toHaveProperty('invocationsCoverage')
+  })
+
+  it('omits invocationsCoverage when no turn is covered, and the invocations stay not measurable', () => {
+    const turns = [antigravityTurn('turn-1'), antigravityTurn('turn-2')]
+    const view = buildSkillsView(turns, turns, {}, characterCount()) as SkillsView
+
+    expect(view).not.toHaveProperty('invocationsCoverage')
+    expect((view as { invocationsAvailability?: NotMeasurable }).invocationsAvailability).toMatchObject({
+      availability: 'not_measurable',
+    })
+  })
+
+  it('leaves a Claude Code session, which has no transcript coverage, without invocationsCoverage', () => {
+    const turn1 = claudeTurn('turn-1', '2026-01-01T00:00:01.000Z')
+    const records = [
+      turn1,
+      toolCall('claude-code', 'tool-1', 'turn-1', 'Skill', { skill: 'docs' }, '2026-01-01T00:00:01.000Z'),
+    ]
+    const view = buildSkillsView(records, [turn1], {}, characterCount())
+
+    expect(view).not.toHaveProperty('invocationsCoverage')
+  })
+})
+
 describe('buildSkillsView, not measurable and wording', () => {
   it('a Pi session returns not_measurable with a reason naming skills, never rows', () => {
     const pi = modelTurn('pi', 'pi-turn', { source: 'pi', raw: {} })
@@ -867,5 +990,294 @@ describe('buildSkillsView, not measurable and wording', () => {
 
     expect(JSON.stringify(claudeListingView)).not.toMatch(/waste/i)
     expect(JSON.stringify(piView)).not.toMatch(/waste/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Claude request-body listing (D6, D14, D21)
+//
+// Claude Code Desktop writes its skill listing into a `role: "system"` message
+// of the API request body, not into a transcript attachment. The body parser
+// turns that message into a `conversation_history` part, and the role is what
+// separates the sender's reminder from text a user quoted. A listing is read
+// only from system-role parts and system-prompt parts. A body that does not
+// parse yields no parts, so no listing, and the reader never parses partial text.
+// ---------------------------------------------------------------------------
+
+/** The skill-listing reminder as the sender writes it inside a system-role message. */
+const BODY_LISTING_MARKER = 'The following skills are available for use with the Skill tool:'
+const BODY_LISTED = [
+  { name: 'synthetic-skill-alpha', description: 'Synthetic description for alpha.' },
+  { name: 'synthetic-skill-beta', description: 'Synthetic description for beta.' },
+]
+const BODY_LISTING_TEXT = [
+  BODY_LISTING_MARKER,
+  '',
+  ...BODY_LISTED.map((skill) => `- ${skill.name}: ${skill.description}`),
+].join('\n')
+
+/** The T0 Desktop OTLP fixture, sanitized; its `api_request_body` logs carry real request-body structure. */
+const DESKTOP_LOGS_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'otel',
+  'fixtures',
+  'claude-desktop',
+  'logs.otlp.json',
+)
+
+/** The `api_request_body` log bodies in the T0 Desktop fixture, in file order. */
+function desktopRequestBodies(): string[] {
+  const exported = JSON.parse(readFileSync(DESKTOP_LOGS_PATH, 'utf8')) as {
+    resourceLogs: Array<{
+      scopeLogs: Array<{
+        logRecords: Array<{ attributes: Array<{ key: string; value: { stringValue?: string } }> }>
+      }>
+    }>
+  }
+  return exported.resourceLogs
+    .flatMap((resource) => resource.scopeLogs.flatMap((scope) => scope.logRecords))
+    .map((log) => log.attributes.find((attribute) => attribute.key === 'body')?.value.stringValue)
+    .filter((body): body is string => body !== undefined)
+}
+
+/** The one fixture body that carries the skill-listing reminder, failing by name if it is gone. */
+function desktopListingBody(): string {
+  const body = desktopRequestBodies().find((candidate) => candidate.includes(BODY_LISTING_MARKER))
+  expect(body, 'the T0 fixture should carry one body with the skill listing').toBeDefined()
+  return body!
+}
+
+/** A Claude model-call record whose parts came from a request body, with no transcript listing. */
+function bodyRecord(parts: ContentPart[], over: Partial<CanonicalRecord> = {}): CanonicalRecord {
+  return modelTurn('claude-code', 'body-turn', {
+    source: 'claude-code',
+    sessionId: CLAUDE_SESSION,
+    raw: {},
+    ...withParts(parts),
+    ...over,
+  })
+}
+
+describe('extractListedSkills, Claude request-body listing in a system-role message', () => {
+  it('reads the names and descriptions from a system-role part when no transcript listed the skills', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it.each(['claude-code', 'claude-desktop'])(
+    'reads the body listing for a %s record, which the Claude family covers',
+    (harness) => {
+      const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }], {
+        harness,
+        source: harness,
+      })
+
+      expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+    },
+  )
+
+  it('reads the listing from a system_prompt part that carries the marker', () => {
+    const record = bodyRecord([{ part: 'system_prompt', text: BODY_LISTING_TEXT }])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it('reads the listing from the T0 Desktop fixture body, which keeps the sender structure', () => {
+    const record = bodyRecord(parseClaudeApiRequestBody(desktopListingBody()))
+
+    const result = extractListedSkills(record)
+    expect(result).toMatchObject({ measurable: true })
+    const skills = (result as { skills: ListedSkill[] }).skills
+    expect(namesOf(skills)).toEqual(Array.from({ length: 12 }, (_unused, index) => `sanitized-skill-${index + 1}`))
+  })
+
+  it.each(['user', 'assistant'] as const)(
+    'a listing quoted in %s message yields no listing',
+    (role) => {
+      const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role }])
+
+      expect(extractListedSkills(record)).toMatchObject({ availability: 'not_measurable' })
+      expect(extractListedSkills(record)).not.toHaveProperty('skills')
+    },
+  )
+
+  it('reads only the system-role listing when the marker is also quoted in a user message', () => {
+    const quoted = [BODY_LISTING_MARKER, '', '- synthetic-quoted-skill: Quoted by the user.'].join('\n')
+    const record = bodyRecord([
+      { part: 'conversation_history', text: quoted, role: 'user' },
+      { part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' },
+    ])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it('ignores a marker in a conversation_history part that carries no role', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT }])
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toMatch(/skill/i)
+  })
+
+  it('stays not measurable when the marker has no entries after it', () => {
+    const record = bodyRecord([
+      { part: 'conversation_history', text: `${BODY_LISTING_MARKER}\n\n`, role: 'system' },
+    ])
+
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toMatch(/skill/i)
+    expect(result).not.toHaveProperty('skills')
+  })
+
+  it('does not read a system-role marker as a listing for a harness that is not Claude', () => {
+    const parts: ContentPart[] = [{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }]
+    const copilot = modelTurn('copilot', 'copilot-body-turn', { source: 'github-copilot', ...withParts(parts) })
+
+    expect(extractListedSkills(copilot)).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('a truncated body that cuts the listing short yields no listing and no partial parse', () => {
+    const body = desktopListingBody()
+    const cutAt = body.indexOf('- sanitized-skill-6') + '- sanitized-skill-6'.length
+    const truncated = body.slice(0, cutAt)
+    expect(truncated).toContain(BODY_LISTING_MARKER)
+
+    const parts = parseClaudeApiRequestBody(truncated)
+    expect(parts).toEqual([])
+    expect(extractListedSkills(bodyRecord(parts))).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('a transcript listing keeps priority over the body listing', () => {
+    const record = bodyRecord(
+      [{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }],
+      {
+        raw: {
+          [LISTED_KEY]: {
+            isInitial: true,
+            skills: [{ name: 'synthetic-transcript-skill', description: 'Listed by the transcript.' }],
+          },
+        },
+      },
+    )
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: [{ name: 'synthetic-transcript-skill' }] })
+  })
+
+  it('feeds the skills view: body-listed skills become listed rows with a derived token count', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }])
+
+    const view = buildSkillsView([record], [record], {}, characterCount()) as SkillsView
+
+    expect(rowNamed(view, 'synthetic-skill-alpha')).toMatchObject({ listed: true, turnsListed: 1 })
+    expect(rowNamed(view, 'synthetic-skill-alpha').derivedTokens).toBe(BODY_LISTED[0]!.description.length)
+  })
+})
+
+describe('extractListedSkills, request-body entry grammar', () => {
+  const listing = (...lines: string[]): CanonicalRecord =>
+    bodyRecord([{ part: 'conversation_history', text: [BODY_LISTING_MARKER, '', ...lines].join('\n'), role: 'system' }])
+
+  it('keeps a plugin-namespaced name whole and a description that itself contains a colon', () => {
+    const result = extractListedSkills(listing('- plugin:skill-name: Description with: a colon'))
+
+    expect(result).toMatchObject({
+      measurable: true,
+      skills: [{ name: 'plugin:skill-name', description: 'Description with: a colon' }],
+    })
+  })
+
+  it('splits the real namespaced listings on the first colon followed by whitespace', () => {
+    const result = extractListedSkills(
+      listing(
+        '- code-review:code-review: Code review a pull request',
+        '- engineering:debug: Structured debugging session: reproduce, isolate, diagnose',
+      ),
+    )
+
+    expect(result).toMatchObject({
+      skills: [
+        { name: 'code-review:code-review', description: 'Code review a pull request' },
+        { name: 'engineering:debug', description: 'Structured debugging session: reproduce, isolate, diagnose' },
+      ],
+    })
+  })
+
+  it('keeps a name whose internal colon is not followed by whitespace', () => {
+    const result = extractListedSkills(listing('- a:b:c: tail text'))
+
+    expect(result).toMatchObject({ skills: [{ name: 'a:b:c', description: 'tail text' }] })
+  })
+
+  it('reads a name with no description', () => {
+    const result = extractListedSkills(listing('- bare-skill:', '- other: Has one'))
+
+    expect(result).toMatchObject({
+      skills: [{ name: 'bare-skill' }, { name: 'other', description: 'Has one' }],
+    })
+  })
+
+  it('joins an indented continuation line onto the previous description and keeps later entries', () => {
+    const result = extractListedSkills(
+      listing('- first: Starts here', '  and wraps onto a second line', '    and a third', '- second: Plain', '- third: Last'),
+    )
+
+    expect(result).toMatchObject({
+      measurable: true,
+      skills: [
+        { name: 'first', description: 'Starts here and wraps onto a second line and a third' },
+        { name: 'second', description: 'Plain' },
+        { name: 'third', description: 'Last' },
+      ],
+    })
+  })
+
+  it('ends the listing at a blank line, so entries after it are not read', () => {
+    const result = extractListedSkills(listing('- one: First', '- two: Second', '', '- three: After the blank'))
+
+    expect(result).toMatchObject({ skills: [{ name: 'one' }, { name: 'two' }] })
+    expect((result as { skills: unknown[] }).skills).toHaveLength(2)
+  })
+
+  it('ends the listing at an unindented non-entry line', () => {
+    const result = extractListedSkills(listing('- one: First', 'Some other prose', '- two: Not read'))
+
+    expect((result as { skills: unknown[] }).skills).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// extractListedSkills: opencode context listing (plan 2026-10-23 §5-T5, D6)
+// ---------------------------------------------------------------------------
+
+describe('extractListedSkills, opencode context listing', () => {
+  const OPENCODE_LISTING_KEY = 'opencode.context.skills'
+
+  // T5 RED: no listing source reads this key — these fail until skills.ts
+  // gains the opencode.context.skills source (the Copilot pattern).
+  it('reads the JSON-array skill listing as an initial measurable list', () => {
+    const record = modelTurn('opencode', 'opencode-ctx-turn', {
+      source: 'opencode',
+      raw: { [OPENCODE_LISTING_KEY]: JSON.stringify(['review', 'build']) },
+    })
+    const result = extractListedSkills(record) as ListedResult
+
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['review', 'build'])
+  })
+
+  it('a malformed value is not measurable with a reason naming the key', () => {
+    const record = modelTurn('opencode', 'opencode-ctx-malformed', {
+      source: 'opencode',
+      raw: { [OPENCODE_LISTING_KEY]: '["review",' },
+    })
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toContain(OPENCODE_LISTING_KEY)
+    expect(result).not.toHaveProperty('skills')
   })
 })

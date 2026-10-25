@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-24
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -23,7 +23,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 22 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 68 supplemental resources, for 92 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 24 canonical agent instruction bodies and 28 canonical skill identities under `products/kyber-squad/`. The skill tree retains 82 supplemental resources, for 110 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A target-scoped internal capability profile (`copilot-capability-profile`, `devin-capability-profile`) may validate exact target tool membership but must not replace or widen the shared capability profile or metadata; a profile marked `target: <name>` is rejected when assigned as an agent's shared `capability-profile`; a `<target>-capability-profile` naming a profile without that marker is rejected; and a primary agent naming `devin-capability-profile` is rejected because Devin lowers primaries to skills with no tool allow-list ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)). |
 | **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 12-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. Lock and receipt state is kept under the user home (`~/.kyber-weave/squad/`), never in the repository ([ADR 0037](../adr/0037-squad-state-in-user-home.md)). |
@@ -50,9 +50,9 @@ Mechanics live in [architecture §9](architecture.md#9-conductor-execution-circu
 
 No ADR: the decisions constrain instruction bodies, not the render or transaction engine.
 
-Implementation ownership remains with the original task session through review fixes
-and verification wherever the harness supports continuation. Review uses a separate
-session; later audit passes preserve prior findings and inspect current evidence.
+Implementation ownership remains with the original task session through task-gate rework
+and verification wherever the harness supports continuation. There is no reviewer session;
+a failing or missing `TASK_GATE:` line returns to the original worker.
 Self-contained packets and recovery briefs remain mandatory for unsupported or lost
 sessions and for context that has become unreliable. The conductor records actual
 session handles or the reason they are unavailable; unrelated tasks do not share a
@@ -64,12 +64,12 @@ task session. See [task session continuity](architecture.md#task-session-continu
 
 Harnesses differ in their native capabilities (e.g. support for primary agents, subagent spawning, interactive confirmation prompts, and tool filtering). When a target harness cannot natively execute a canonical capability, Kyber-Squad degrades safely according to explicit rules.
 
-The product currently has eight agent/skill intersections. Two — `product-owner` and `bug-crusher`
+The product currently has eleven agent/skill intersections. Two — `product-owner` and `bug-crusher`
 — are **primary shared identities**: root agents whose body is a thin wrapper that loads the
 same-name canonical skill, which carries the role ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)).
 Their canonical skill is the entry point and is emitted on every target; a target that renders a
 primary through an additional entry-point form (Claude, Factory) does not duplicate it, and a target
-that lowers a primary (Cursor, Pi, ZCode, Devin, Warp) reuses it. The remaining six are distinct-body
+that lowers a primary (Cursor, Pi, ZCode, Devin, Warp) reuses it. The remaining nine are distinct-body
 collisions: fallback targets (Warp) preserve each of those skills and emit the matching agent as
 `role-<name>`. `conductor` has an unoccupied skill identity and on Warp lowers to a same-name
 role skill.
@@ -101,7 +101,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution; every documented permission key is pinned explicitly, because an omitted key inherits OpenCode's default-allow rather than being withheld |
 | **Kilo** | Native `.kilo/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Antigravity** | Native `.agents/agents` (directory per agent) | Implemented and registered | Supported (`enable_subagent_tools: true`, `invoke_subagent`) | Not lowered (native conductor with `mainAgent: true`) | Native execution via tool allowlist (`tools:`) and execution switches (`enable_write_tools`); safety-narrowed; capability-not-isolable for shell-implies-write; permission-not-expressible for unenforceable delegates-to roster |
-| **Pi** | Native `.pi/agents` + lowered primary agents | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agents; the two root wrappers reuse their canonical skill) | Native execution + safety-narrowed |
+| **Pi** | Native `.pi/agents` + lowered primary agents | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agents; the two root wrappers reuse their canonical skill) | Native execution + safety-narrowed; seven-tool vocabulary `read, grep, find, ls, edit, write, bash` — `network.read` has no expressible built-in Pi tool (bare `mcp` in `tools:` is a loader `tools-error`) and still records `permission-not-expressible`; read-only MCP access arrives via the canonical per-target overlay (`pi-extensions`/`pi-tools`) on `research-agent`, which renders `extensions: [pi-mcp-adapter]` plus the verified `ext:` tool entries; `network.publish` still has no built-in tool and still records `permission-not-expressible`, as does the lowered primary |
 | **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` + an entry-point skill per primary agent at `.factory/skills/<name>/SKILL.md` ([ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)) | Implemented and registered | Supported | Not lowered; primary agents additionally exposed as an entry-point skill (`role-skill-fallback`). `product-owner` and `bug-crusher` reuse their canonical skill | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate`, `mcpServers: []`, and the unenforced entry-point skill (runs under session permissions: the droid's tools array and `mcpServers: []` do not apply to it) |
 | **ZCode** | Native `.zcode/agents` + primary agents lowered to `.zcode/commands` | Implemented and registered | Supported (project and global scope) | Lowered (primary agents to a slash command; the two root wrappers reuse their canonical skill) | Native execution + safety-narrowed; always a non-empty tool list because `tools: []` is ZCode's inherit-everything signal; permission-not-expressible for `network.publish`, the unenforceable `delegate` roster, and MCP withheld from the pure orchestrator. MCP is granted to every other agent by enumerated tool name from `toolchain.yml`, and `squad doctor` fails a ZCode install that does not declare those servers |
@@ -120,13 +120,13 @@ Kyber-Squad enforces a strict non-broadening guarantee across all translations:
 
 If a target harness cannot guarantee the containment or authorization boundaries specified in an agent's capability profile, the engine will narrow the permission or omit the component entirely.
 
-## Golden-render and knowledge-retention requirement
+## Render and knowledge-retention requirement
 
-`code-review-loop` is authored in Kyber-Squad and has no Hotshot baseline. Every imported
+`code-review-loop` is authored in Kyber-Squad. Every imported
 canonical raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
-Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
-skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive
+canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
+skill is folded into `create-pull-request`, and the three retired `-v3` agent identities survive
 only as folded provenance in their canonical migration reports. Renderers project every file an
 owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 123
 files with no dangling link; every skill resource reaches this render except
