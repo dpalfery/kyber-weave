@@ -132,6 +132,27 @@ describe('bounded streaming JSON column reader', () => {
     }
   })
 
+  it('caps literal accumulation so a corrupt run of letters cannot grow the token', async () => {
+    // WHY the message assertion: any literal longer than `false` (5 chars) is
+    // invalid either way, so only the length-cap error proves the bound fires
+    // promptly instead of at the next delimiter or EOF.
+    // WHY the `n` prefix: the reader only enters literal mode on `t`, `f`
+    // or `n`, so the corrupt run must start with one of those to accumulate.
+    const reader = new StreamingJsonReader(chunkReader(Buffer.from(`[n${'a'.repeat(10_000)}]`, 'utf8'), 'text'))
+    try {
+      let failure: unknown
+      try {
+        await pumpToEof(reader, () => {})
+      } catch (error: unknown) {
+        failure = error
+      }
+      expect(failure).toMatchObject({ code: 'corrupt_column' })
+      expect(String((failure as Error).message)).toContain('literal too long')
+    } finally {
+      reader.dispose()
+    }
+  })
+
   it('rejects trailing commas while still decoding empty containers exactly', async () => {
     for (const json of ['{"a":1,}', '[1,]', '{"a":{"b":[1,2,]},}', '{"a":1,"b":2,}']) {
       const reader = new StreamingJsonReader(chunkReader(Buffer.from(json, 'utf8'), 'text'))
