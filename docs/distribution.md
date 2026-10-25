@@ -173,13 +173,15 @@ git tag v0.2.0 && git push origin v0.2.0
 ```
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
-each RID, builds the Squad archives via `squad pack`, generates the SBOM, and runs a
+each RID, builds the Squad archives via `squad pack`, generates the aggregate SBOM plus
+one SBOM per published archive, attests every SBOM, and runs a
 pre-publish manifest check before creating a GitHub Release. This check verifies that
-`SHA256SUMS.txt` names exactly the expected 21 assets (see
+`SHA256SUMS.txt` names exactly the expected 41 assets (20 archives, 20 per-artifact
+SBOMs, and the aggregate SBOM — see
 [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
 and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
 
-On success, the workflow creates a GitHub Release with the 21 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
+On success, the workflow creates a GitHub Release with the 41 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs post-publish verification steps that check the published assets against the expected set, byte-compare the manifest, and verify each archive's CycloneDX SBOM attestation. If a post-publish check detects a mismatch, it fails the job (the release is already public, so these checks are detective only).
 
 ### Release notes
 
@@ -278,7 +280,7 @@ Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1
 
 ## Code signing status
 
-Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 20 archives and installers. A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). A post-publish check verifies the published assets after the release is live; on mismatch it fails the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
+Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 41 assets (20 archives, 20 per-artifact SBOMs, and the aggregate SBOM). A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). Post-publish checks verify the published assets and each archive's SBOM attestation after the release is live; on mismatch they fail the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
 Azure signing was ruled out on cost; GPG-signed manifests are not implemented; SignPath
 Foundation is a possible but unverified future option. See [ADR 0027](adr/0027-release-integrity-checksums-signing-deferred.md)
 for the complete decision record.
@@ -294,10 +296,10 @@ for the complete decision record.
 
 ### Manifest completeness and the pre-publish check
 
-The release workflow enforces that `SHA256SUMS.txt` lists exactly the 21 expected assets and
-never itself. The published release contains those 21 assets plus `SHA256SUMS.txt` (22 files total).
+The release workflow enforces that `SHA256SUMS.txt` lists exactly the 41 expected assets and
+never itself. The published release contains those 41 assets plus `SHA256SUMS.txt` (42 files total).
 
-The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. A post-publish check runs after the release is created and compares the published asset names against the 21 expected assets plus `SHA256SUMS.txt` and byte-compares the published manifest; on mismatch it fails the job (the release is already public, so this check is detective only).
+The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. Post-publish checks run after the release is created and compare the published asset names against the 41 expected assets plus `SHA256SUMS.txt`, byte-compare the published manifest, and verify each archive's SBOM attestation; on mismatch they fail the job (the release is already public, so these checks are detective only).
 
 - **5** CLI: `kyber-weave-linux-x64.tar.gz`, `kyber-weave-linux-arm64.tar.gz`,
   `kyber-weave-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-win-x64.zip`
@@ -307,7 +309,11 @@ The pre-publish check runs before `gh release create` and fails the job if the m
   `kyberdash-linux-arm64.tar.gz`, `kyberdash-linux-x64.tar.gz`, `kyberdash-win-x64.zip`
 - **3** Tray: `kyberdash-tray-darwin-arm64.zip`, `kyberdash-tray-darwin-x64.zip`, `kyberdash-tray-win-x64-setup.exe`
 - **2** Squad: `kyber-squad-<version>.zip`, `kyber-squad-plugin-<version>.zip`
-- **1** SBOM: `kyber-weave-sbom-<version>.cdx.json`
+- **20** Per-artifact SBOMs: one `<archive-stem>.cdx.json` per published archive above
+  (`artifact_sbom_name` in `scripts/syft-bootstrap.sh`), e.g.
+  `kyber-weave-linux-x64.cdx.json`, `kyberdash-tray-win-x64-setup.cdx.json`,
+  `kyber-squad-<version>.cdx.json`
+- **1** Aggregate SBOM: `kyber-weave-sbom-<version>.cdx.json`
 
 If an expected asset is missing or an unexpected file is present, the release fails before
 publish with a diagnostic naming the cause. Each new asset requires updating the `EXPECTED_ASSETS` array in `scripts/verify-release-checksums.sh`; the matching build job and the count test must also be updated. Adding a supported platform or distribution format is a
@@ -316,24 +322,31 @@ deliberate step that must be coordinated with the release automation.
 ### The SBOM asset
 
 Every release carries one aggregate Software Bill of Materials, `kyber-weave-sbom-<version>.cdx.json`
-(CycloneDX JSON, format version 1.6). It is a machine-readable inventory of the third-party
-components the release depends on — NuGet, npm and Cargo — so that a consumer can feed it to
-a vulnerability scanner or a licence audit without unpacking the binaries. What it covers, and
-what it deliberately does not, is documented in
+(CycloneDX JSON, format version 1.6), plus one per-artifact SBOM per published
+archive (`<archive-stem>.cdx.json`, 20 in total). The aggregate is a
+machine-readable inventory of the third-party components the release depends on
+— NuGet, npm and Cargo — so that a consumer can feed it to a vulnerability
+scanner or a licence audit without unpacking the binaries. Each per-artifact
+SBOM is a byte-level file inventory of one archive. What each covers, and what
+each deliberately does not, is documented in
 [install.md](install.md#the-sbom-what-each-release-ships).
 
-It is generated by `scripts/generate-sbom.sh <out-dir> <version>`, which is shared by the
+The aggregate is generated by `scripts/generate-sbom.sh <out-dir> <version>`, which is shared by the
 release workflow, the CI validation job and `scripts/release-local.sh`, so all three produce
 the same document for the same version.
 
-What the SBOM covers, and what it deliberately does not, is documented in
+What the aggregate SBOM covers, and what it deliberately does not, is documented in
 [install.md](install.md#the-sbom-what-each-release-ships). In short: it is the
 repository's dependency closure, not a byte-level scan of a published archive, and it
 does **not** list the .NET runtime that the self-contained CLI and MCP binaries embed
 (the single largest component of what actually ships), the Node runtime that the
-KyberDash single-executable embeds, or test-only dependencies. A byte-level inventory
-requires scanning the published archives; that and SBOM attestation are tracked as a
-follow-up.
+KyberDash single-executable embeds, or test-only dependencies. The per-artifact
+SBOMs close the byte-level half of that gap: each lists its archive's shipped
+files, and states via `kyber-weave:sbom:not-measured` where runtime coverage was
+not measurable (`dotnet-single-file`, `node-sea`, `tauri-bundle`; Squad bundles
+carry no marker). The Node single-executables carry both the file catalogue and
+the marker. SBOM attestation, once a follow-up, now ships with every release —
+see below.
 
 Two properties of that generator are worth knowing before changing it:
 
@@ -353,6 +366,72 @@ The generated document is validated against the vendored CycloneDX 1.6 JSON sche
 it is accepted; see [`scripts/schemas/PROVENANCE.md`](../scripts/schemas/PROVENANCE.md) for
 the schema's provenance and the validator's scope.
 
+#### Per-artifact SBOMs
+
+Each of the 20 published archives ships beside a sibling `<archive-stem>.cdx.json`,
+named by `artifact_sbom_name` in `scripts/syft-bootstrap.sh` (strip `.tar.gz` /
+`.zip` / `.exe`, append `.cdx.json`) so the generator and
+`scripts/verify-release-checksums.sh` share one mapping and cannot drift apart.
+They are generated by `scripts/generate-artifact-sboms.sh <assets-dir> <version>`,
+which unpacks each archive into a throwaway directory and scans the extracted
+tree with the same pinned Syft 1.55.0 the aggregate uses (one pin source in
+`scripts/syft-bootstrap.sh`, re-verified on every run including from cache).
+The scan runs with the file cataloger enabled
+(`SYFT_FILE_METADATA_SELECTION=all`), so every shipped byte is listed as a file
+component even when no package cataloger fires.
+
+Unlike the aggregate generator, per-artifact validation does **not** require
+npm/cargo/nuget ecosystems — an extracted archive rarely contains lockfiles, so
+demanding them would fail every binary-only archive. The vendored schema, the
+non-empty component list, and the resolvable dependency graph are still
+enforced, and a rejected SBOM is removed so a later step cannot publish it
+(fail-closed).
+
+In `.github/workflows/release.yml` this is the `artifact-sboms` job: it runs
+after `build`, `build-kyberdash`, `build-tray`, and `pack-squad` so every
+archive exists, downloads only the build outputs (not the parallel aggregate
+`sbom` job's upload, to avoid racing it), runs
+`scripts/generate-artifact-sboms.sh`, and uploads the `*.cdx.json` siblings as
+the `artifact-sboms` artifact for the release job.
+
+#### SBOM attestations
+
+Every SBOM is attested before anything publishes, in the `attest-sbom` job
+(`needs: version, build, build-kyberdash, build-tray, pack-squad, sbom,
+artifact-sboms`). The job downloads all archives plus both SBOM shapes, then
+attests each one with `actions/attest@v4.1.1` in SBOM mode — not the deprecated
+`attest-sbom` action — with the archive as the subject and the SBOM as the
+predicate:
+
+```yaml
+- name: Attest kyber-weave-linux-x64 SBOM
+  uses: actions/attest@v4.1.1
+  with:
+    subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
+    sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
+```
+
+Each per-artifact SBOM is attested against its own archive (20 attestations);
+the aggregate SBOM is attested once against all archives via a glob over
+`*.tar.gz`, `*.zip`, and `*.exe` (never the `*.cdx.json` predicates beside
+them). Subject is always the archive; predicate is always the SBOM; the
+predicate type is `https://cyclonedx.org/bom`, which the release job's
+post-publish `Verify SBOM attestations` step pins when it runs
+`gh attestation verify <archive> --repo <owner/repo> --predicate-type
+https://cyclonedx.org/bom` over every published archive.
+
+The job needs exactly four permissions: `id-token: write` (mints the OIDC token
+for the Sigstore signing certificate), `attestations: write` (persists the
+attestation), `artifact-metadata: write` (creates the storage record), and
+`contents: read` (reads the repo context). No extra secrets or services.
+
+Cost bound: attestation is one additional `ubuntu-latest` job with 21
+`actions/attest` steps (20 per-artifact plus the aggregate). Each step is
+seconds of Sigstore signing with no downloads beyond the already-built assets,
+so the release's added cost is bounded by minutes on the standard hosted
+runner — no new runner class, no paid service, no per-attestation billing
+beyond normal Actions minutes.
+
 ### Verification paths
 
 Users and maintainers can verify asset integrity by:
@@ -365,7 +444,10 @@ Users and maintainers can verify asset integrity by:
 3. **Whole-release download verification**: `shasum -a 256 --ignore-missing -c SHA256SUMS.txt`
    (macOS) or `sha256sum --ignore-missing -c SHA256SUMS.txt` (Linux) verifies the entire
    downloaded release. The `--ignore-missing` flag allows verification of a partial download
-   if you have only a subset of the 21 assets.
+   if you have only a subset of the 41 assets.
+4. **SBOM attestation**: `gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://cyclonedx.org/bom`
+   verifies that an archive is the one its SBOM was attested against (see
+   [install.md](install.md#verifying-sbom-attestations)).
 
 SmartScreen reputation is tracked per file, so binaries from a new release will typically warn
 again. The documented hash-verification and **More info → Run anyway** flow in
