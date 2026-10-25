@@ -165,6 +165,7 @@ public sealed class ReviewScopeExclusionTests
         Assert.Equal(67, scope.EffectiveChangedLines);
     }
 
+    /// <summary>
     /// Guard: scoping must never become a way to slip under the ceiling — 21k lines of
     /// real source still escalates under the documented 20,000 host ceiling, with the
     /// <c>KW-REVIEW-009</c> diagnostic and the size-escalation exit code.
