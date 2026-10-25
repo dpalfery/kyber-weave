@@ -90,8 +90,7 @@ SYFT_BIN="$(resolve_syft "$PLATFORM")"
 # One throwaway parent for every extraction; a single EXIT trap cleans them all
 # even when a later archive fails after earlier ones succeeded.
 WORK_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/kw-artifact-sboms-XXXXXX")"
-# shellcheck disable=SC2064  # expand now, not at trap time
-trap "rm -rf '${WORK_PARENT}'" EXIT
+trap 'rm -rf -- "$WORK_PARENT"' EXIT
 
 log "scanning archives in ${ASSETS_DIR} with Syft ${SYFT_VERSION}"
 
@@ -140,7 +139,7 @@ esac
 
 process_archive() {
     local archive="$1"
-    local archive_base sbom_name stem out_file extract_dir raw_file
+    local archive_base sbom_name stem out_file extract_dir raw_file tar_list zip_list
     archive_base="$(basename "$archive")"
     sbom_name="$(artifact_sbom_name "$archive_base")"
     stem="${sbom_name%.cdx.json}"
@@ -154,13 +153,35 @@ process_archive() {
     case "$archive_base" in
         *.tar.gz)
             command -v tar >/dev/null 2>&1 || die "tar is required to unpack ${archive_base}"
+            # WHY pre-list: tar extracts absolute paths and ../ entries outside
+            # -C, and symlinks inside the tree would let a later scan follow
+            # build-machine paths. Own-build archives make this low-likelihood,
+            # but a traversal fixture must still fail closed here, not at publish.
+            tar_list="$(tar -tzf "$archive")" \
+                || die "failed to list ${archive_base}"
+            if printf '%s\n' "$tar_list" | grep -Eq '(^/)|(^|/)\.\.(/|$)'; then
+                die "refusing to unpack ${archive_base}: archive contains absolute or parent-directory entries"
+            fi
             tar -xzf "$archive" -C "$extract_dir" \
                 || die "failed to unpack ${archive_base}"
+            if [[ -n "$(find "$extract_dir" -type l -print -quit)" ]]; then
+                die "refusing to scan ${archive_base}: archive contains symlinks"
+            fi
             ;;
         *.zip)
             command -v unzip >/dev/null 2>&1 || die "unzip is required to unpack ${archive_base}"
+            # WHY -Z1: one filename per line, portable across Info-ZIP on Linux
+            # and macOS, so the same absolute/.. check applies as for tar.
+            zip_list="$(unzip -Z1 "$archive")" \
+                || die "failed to list ${archive_base}"
+            if printf '%s\n' "$zip_list" | grep -Eq '(^/)|(^|/)\.\.(/|$)'; then
+                die "refusing to unpack ${archive_base}: archive contains absolute or parent-directory entries"
+            fi
             unzip -q "$archive" -d "$extract_dir" \
                 || die "failed to unpack ${archive_base}"
+            if [[ -n "$(find "$extract_dir" -type l -print -quit)" ]]; then
+                die "refusing to scan ${archive_base}: archive contains symlinks"
+            fi
             ;;
         *.exe)
             # A Windows installer is opaque to tar/unzip: stage the file itself
@@ -172,10 +193,13 @@ process_archive() {
 
     # BSD mktemp only replaces a trailing run of Xs, so the template must end
     # with them: a `.json` suffix after the Xs works on GNU but creates one
-    # literal file on macOS, which parallel workers then race over. The suffix
+    # literal file on macOS, which parallel workers would then race over. The suffix
     # is cosmetic (Syft writes JSON by -o mapping, python reads it back), so
     # the unique path carries no extension.
-    raw_file="$(mktemp "${TMPDIR:-/tmp}/kw-artifact-raw-XXXXXX")"
+    # WHY under WORK_PARENT: the EXIT trap cleans only WORK_PARENT, so a raw
+    # file under /tmp would leak when the normaliser exits before its explicit
+    # rm (set -e skips it). Inside WORK_PARENT the trap reclaims it.
+    raw_file="$(mktemp "${WORK_PARENT}/kw-artifact-raw-XXXXXX")"
 
     # The file cataloger is the provenance net: with selection=all every shipped
     # byte becomes a file component, so even an archive with no lockfiles or
@@ -217,6 +241,7 @@ if not isinstance(bom.get("version"), int) or bom.get("version", 0) < 1:
 
 components = bom.get("components")
 if not isinstance(components, list):
+    fail("components is %r, expected a list" % (components,))
     components = []
 
 # --- scrub the build machine's absolute paths out of the document ----------------
@@ -320,7 +345,11 @@ if not components:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         hashes = [{"alg": "SHA-256", "content": digest.hexdigest()}]
-    except OSError:
+    except OSError as exc:
+        # WHY fail closed: a hash-less synthetic would attest provenance it
+        # cannot verify. An unreadable archive is a pipeline failure, not an
+        # empty scan, so it must block publish rather than ship without hashes.
+        fail("cannot hash archive %s: %s" % (archive_base, exc))
         hashes = []
     synthetic = {
         "bom-ref": "%s-archive" % stem,
@@ -427,6 +456,13 @@ print("  %-40s %4d component(s)" % (archive_base, len(bom.get("components", []))
 # Nothing is written until every check has passed. A failed run must not leave an
 # SBOM on disk for a later step to pick up and publish.
 if errors:
+    # WHY remove stale out_path: a previous successful run may have left an
+    # SBOM behind, and publishing it after this run failed would attest the
+    # wrong bytes. The validator path already removes; the errors path must too.
+    try:
+        os.unlink(out_path)
+    except OSError:
+        pass
     print("")
     for message in errors:
         print("::error::%s" % message)
@@ -455,8 +491,10 @@ PY
 
 failed=0
 batch_pids=()
+processed=0
 for archive in "${archives[@]}"; do
     [[ -f "$archive" ]] || continue
+    processed=$((processed + 1))
     archive_base="$(basename "$archive")"
     process_archive "$archive" >"${STATUS_DIR}/${archive_base}.log" 2>&1 &
     batch_pids+=($!)
@@ -487,7 +525,10 @@ done
 # workers already removed their own SBOM above.
 [[ "$failed" -eq 0 ]] || die "per-artifact SBOM generation failed for one or more archives; no partial set is published"
 
-count="${#archives[@]}"
+# WHY count written, not glob total: non-regular matches are skipped above, so
+# reporting the glob size would claim SBOMs that were never written. On the
+# success path one SBOM was written per processed archive.
+count="$processed"
 
 log ""
 log "per-artifact SBOMs: ${count} written to ${ASSETS_DIR}"
