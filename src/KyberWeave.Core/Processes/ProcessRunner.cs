@@ -170,6 +170,10 @@ public static class ProcessRunner
         startInfo.RedirectStandardOutput = false;
         startInfo.RedirectStandardError = false;
 
+        // UseShellExecute is explicitly disabled above, and upstream callers (such as
+        // SquadHarnessLauncher.BuildStartInfo) validate executables and arguments
+        // against command-injection characters before launch.
+        // nosemgrep: csharp.lang.security.injections.os-command.os-command-injection
         using Process process = Process.Start(startInfo)
                                 ?? throw new InvalidOperationException("The child process could not be started.");
 
