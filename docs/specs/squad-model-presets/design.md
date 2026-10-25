@@ -15,7 +15,7 @@ keywords:
 
 # Design Document
 
-**Phase status:** Draft
+**Phase status:** Approved (dpalfery, 2026-10-24, on starting the tasks phase)
 
 ## Overview
 
