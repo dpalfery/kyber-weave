@@ -4,12 +4,13 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-10-25
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
   - SquadConfig
   - ConfigRegConfig
+  - ReviewConfig
 ---
 
 # Configuration
@@ -42,7 +43,7 @@ ontology:
   doc-types: [architecture, onboarding, requirements, adr, plan, spec,
               runbook, reference, rule, governance, index, coding-standard]
   statuses: [current, draft, needs-review, superseded]
-  technologies: [csharp, test]
+  technologies: [csharp, test, typescript]
   base-required-keys: [id, title, owner, last-reviewed, doc-type, status]
   required-keys:
     architecture: [component]
@@ -144,7 +145,8 @@ disable a requirement.
 
 `technologies` is the list of stacks this repository declares a coding standard for. It is
 empty by default, because no repository has a standard until it says what it writes code in,
-and a seeded list would scaffold standards for stacks a host does not have.
+and a seeded list would scaffold standards for stacks a host does not have. This repository
+declares C#, test, and TypeScript standards.
 
 Declaring one and re-running `docs init`:
 
@@ -329,6 +331,31 @@ The `squad:` section governs agent and skill deployment via `kyber-weave squad`.
 - **Version**: When omitted, installation uses the running CLI version. When specified, `squad.version` must match the CLI's semantic `X.Y.Z` version.
 - **Validation**: Unrecognized bundles, invalid target tokens, or unsupported translation modes fail immediately with `KW-CONFIG-001`.
 
+## Review
+
+The `review:` section declares the deterministic gates and the ready-queue
+concurrency cap (see `ReviewConfig`):
+
+| Key | Default | Effect |
+|---|---|---|
+| `max-concurrent-workers` | `4` | Maximum concurrent workers the ready-queue dispatcher may run. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
+| `gates` | `[]` | Repository-wide deterministic gates, in declaration order |
+| `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+
+Every .NET `dotnet build` invocation in the gate path carries
+`-nr:false -p:UseSharedCompilation=false` (no MSBuild node reuse, no shared
+Roslyn compilation across workers). Every `dotnet` task gate isolates its build
+output under a per-task path: `--artifacts-path .agent_scratchpad/{task}/artifacts`
+where the command accepts it, otherwise
+`-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/` and
+`-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/`. A gate
+that names `{task}` refuses the run when no `--task` slug was given.
+
+```yaml
+review:
+  max-concurrent-workers: 4
+```
+
 ## Harness profiles
 
 Harnesses differ in what they can express, so [agent parity](context-hygiene/agents.md)
@@ -347,9 +374,9 @@ drift.
 
 Kyber-Weave governs its own documentation with three overrides —
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml). The docs root moves to
-`docs/`, the inherited exclusions are cleared, and one technology is declared: this repository
-is C# and nothing else. Everything else is product default, which is the intended shape of a
-host config.
+`docs/`, the inherited exclusions are cleared, and three technologies are declared: this
+repository writes C#, TypeScript, and the tests that pin them. Everything else is product
+default, which is the intended shape of a host config.
 
 ## Related
 

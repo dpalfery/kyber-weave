@@ -28,6 +28,7 @@ const EXPECTED_FIGURES_ROW = {
   turnCount: 7,
   totalInput: 1200,
   totalOutput: 340,
+  costBasis: 'published',
   costStatus: 'priced',
   costValue: 0.06,
   costCurrency: 'USD',

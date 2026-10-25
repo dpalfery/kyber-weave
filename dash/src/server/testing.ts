@@ -10,10 +10,14 @@
 // where `jobHost` is structurally `Pick<JobHost, 'getStatus' | 'runNow' | 'runJob'>`.
 // Everything here is in memory; nothing touches the real home directory.
 import { EventEmitter } from 'node:events'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { closeSync, openSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
+import { join } from 'node:path'
 
 import { CanonStore } from '../canon/store.js'
 import type { JobHostStatus, JobKind, JobOutcome, ManualTrigger } from '../jobs/host.js'
+import { JOBS_LOCK_FILE } from '../jobs/lease.js'
 import type { KyberBridge } from './bridge.js'
 import type { CaptureRouteSettings } from './capture-routes.js'
 import { handleKyberRequest } from './routes.js'
@@ -158,3 +162,47 @@ export async function callRoute(
   }
   return { status: res.statusCode, body, raw: res.body, handled, destroyed }
 }
+
+/**
+ * Whether a path is there, by trying to OPEN it rather than by stat-then-use. A stat
+ * followed by an operation on the same path is a race, and here the other writer is a
+ * teardown on a later turn of the event loop.
+ */
+export function probeExists(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Quiesce and close an HTTP server, then await the job-host teardown promise if provided.
+ */
+export async function stopServer(
+  server: Server | undefined,
+  getHostClose?: () => Promise<void> | undefined,
+): Promise<void> {
+  if (server?.listening) {
+    server.closeAllConnections?.()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+  const hostClose = getHostClose?.()
+  if (hostClose) await hostClose
+}
+
+/**
+ * Wait for any pending lock file unlink from the job-host teardown, then recursively
+ * remove the temporary state directory with backstop retries.
+ */
+export async function removeTempStateDir(dir: string | undefined): Promise<void> {
+  if (!dir) return
+  const lock = join(dir, JOBS_LOCK_FILE)
+  const deadline = Date.now() + 3_000
+  while (probeExists(lock) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+}
+

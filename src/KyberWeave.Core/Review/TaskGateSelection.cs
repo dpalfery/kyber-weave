@@ -180,10 +180,18 @@ public static class TaskGateSelection
                 continue;
             }
 
-            IReadOnlyList<string> run = Expand(gate.Id, gate.Run, matches, task, refusals);
-            IReadOnlyList<string> fix = gate.Fix.Count == 0
+            IReadOnlyList<string>? run = Expand(gate.Id, gate.Run, matches, task, refusals);
+            IReadOnlyList<string>? fix = gate.Fix.Count == 0
                 ? []
                 : Expand(gate.Id, gate.Fix, matches, task, refusals);
+
+            // A gate whose argv still names the {task} token is suppressed: the caller must
+            // never start a process that writes to a literal {task} directory shared by
+            // every worker. The refusal above names the gate; nothing planned names it.
+            if (run is null || fix is null)
+            {
+                continue;
+            }
 
             planned.Add(new PlannedTaskGate(gate.Id, gate.Blocking, gate.TimeoutSeconds, fix, run));
         }
@@ -191,7 +199,12 @@ public static class TaskGateSelection
         return new TaskGatePlan(planned, skipped, refusals.Distinct(StringComparer.Ordinal).ToArray());
     }
 
-    private static IReadOnlyList<string> Expand(
+    /// <returns>
+    /// The expanded argv, or <see langword="null"/> when <paramref name="task"/> is
+    /// <see langword="null"/> and an element names the <c>{task}</c> token. A
+    /// <see langword="null"/> return suppresses the gate: the caller plans nothing for it.
+    /// </returns>
+    private static IReadOnlyList<string>? Expand(
         string gateId,
         IReadOnlyList<string> argv,
         IReadOnlyList<string> matches,
@@ -214,8 +227,7 @@ public static class TaskGateSelection
                     refusals.Add(
                         $"Task gate '{gateId}' uses {{task}}, but no --task was given. Pass --task <slug> " +
                         "naming the task.");
-                    expanded.Add(element);
-                    continue;
+                    return null;
                 }
 
                 expanded.Add(element.Replace(TaskToken, task, StringComparison.Ordinal));

@@ -1,11 +1,28 @@
 # Kyber-Weave
 
-**End-to-end agent governance and deployment system.**
+**Agentic coding framework and meta-harness. Plan. Build. Tune.**
 
-Kyber-Weave is the unified control plane for engineering agent ecosystems. It couples
-rigorous documentation governance (DocGraph), supply-chain skill and agent linting
-(ContextHygiene), atomic multi-harness deployment (Kyber-Squad), and unified CI diagnostics
-into a cohesive platform for teams operating coding agents at scale.
+Kyber-Weave turns coding assistants into a coordinated engineering team. It combines
+specialist agents and reusable skills with durable project knowledge, explicit delivery
+workflows, quality gates, and local observability.
+
+As a **meta-harness**, Kyber-Weave provides a shared workflow, knowledge, and quality layer
+across coding harnesses such as Claude Code, Codex, GitHub Copilot, Cursor, and OpenCode.
+People own the requirements, decisions, and approvals. Agents plan, build, test, review, and
+maintain the project documentation.
+
+### Plan. Build. Tune.
+
+- **Plan** — turn an idea into a reviewed plan or specification grounded in project knowledge.
+- **Build** — coordinate specialists through implementation, tests, review, and documentation
+  closeout.
+- **Tune** — inspect token and context costs, execution traces, and run comparisons to improve
+  agent instructions and workflows.
+
+Kyber-Weave provides the framework around the coding harnesses your team already uses: a
+canonical agent team, portable skills, project knowledge, workflow orchestration, automated
+quality checks, and local evidence about agent runs. Start with the feature map below, or
+install Kyber-Weave to put the framework to work.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
@@ -30,22 +47,24 @@ for detailed guidance.
 
 ---
 
-## Five Premier Features
+## The framework, in five parts
 
-Kyber-Weave provides five integrated features for agent governance and lifecycle management:
+Together, these parts cover the agent delivery loop—from durable project context, through
+coordinated implementation and review, to observable runs that teams can tune.
 
-1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
-2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
-3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 12 IDE/CLI harnesses with transactional recovery.
-4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
-5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across three local surfaces.
+1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Give agents durable, searchable project knowledge, and keep documentation aligned with the code.
+2. **[ContextHygiene](#feature-2--contexthygiene)** — Check that skills and agent instructions are clear, portable, consistent, and safe to route.
+3. **[Kyber-Squad](#feature-3--kyber-squad)** — Deploy one canonical team of agents and skills across 13 coding harnesses.
+4. **[CI Pipelines](#feature-4--ci-pipelines)** — Catch quality and policy problems before a change reaches a pull request.
+5. **[KyberDash](#feature-5--kyberdash)** — Understand local agent runs and tune context, tools, and workflows using execution evidence.
 
 ---
 
 ## Feature 1 — DocGraph
 
-A folder of Markdown is not a corpus. DocGraph makes documentation **typed, owned,
-cross-referenced, and queryable** — then holds it to that.
+Agents work better when project knowledge survives beyond a chat. DocGraph turns
+documentation into a **typed, owned, cross-referenced, searchable corpus** and checks that it
+stays aligned with the code.
 
 **The opinion.** Eleven closed doc-types, four statuses, a required-key matrix that varies
 by type, and a catalog that is the authoritative vocabulary for components and owners. A
@@ -132,8 +151,9 @@ work completely; only the code-join features degrade. [Architecture →](docs/do
 
 ## Feature 2 — ContextHygiene
 
-Skills and harness agent definitions are supply-chain artifacts: their text becomes
-instructions. ContextHygiene governs both, against different sources of truth.
+The framework depends on skills and agent definitions that work as intended across coding
+harnesses. ContextHygiene checks their format, routing clarity, sibling parity, and security
+against the appropriate source of truth.
 
 | Branch | Answers to | Commands |
 |---|---|---|
@@ -152,10 +172,11 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 ## Feature 3 — Kyber-Squad
 
-Managing agent roles and skill sets across disparate developer environments leads to
-configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
-**single, unified lifecycle and deployment control plane** for deploying 24 canonical agents
-and 28 skills across 12 coding harnesses.
+Kyber-Squad is the portable agent team at the center of the framework: 24 specialist agents
+and 28 reusable skills, coordinated by a primary conductor and deployed consistently across
+13 coding harnesses. The workflow carries work from planning through specialist
+implementation, testing, review, and documentation closeout. The same canonical definitions
+and capability rules keep that team recognizable across harnesses.
 
 **The canonical tree.** Maintains 24 canonical agent bodies and 28 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
@@ -171,7 +192,7 @@ leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf clai
 and compare-and-restore recovery that safely preserves local operator modifications.
 
 ```bash
-kyber-weave squad install                    # auto-detects targets across 12 harnesses
+kyber-weave squad install                    # auto-detects targets across 13 harnesses
 kyber-weave squad update                     # updates deployments while preserving local edits
 kyber-weave squad status                     # verifies file integrity and reports drift
 kyber-weave squad doctor                     # checks toolchain prerequisites
@@ -214,14 +235,34 @@ Doctor down to the individual context item: per-turn token breakdown (fresh inpu
 read, cache creation, output), context composition by part type, ranked tool-schema cost with unused-schema waste,
 hierarchical execution timelines, and an inspector that shows the unclipped assembled turn.
 
-**Three local surfaces.** Terminal report (`kyberdash report`), browser dashboard (`kyberdash web`), and a
-macOS/Windows tray (Tauri 2) — all reading the same store.
+**Four local views.** Use the terminal report (`kyberdash report`), browser dashboard
+(`kyberdash web`), macOS/Windows tray (Tauri 2), or a chat app connected to `kyberdash mcp`
+as an MCP client. The chat app is the fourth view; KyberDash supplies the MCP adapter and
+shared engine, not the chat app. The adapter exposes eight read-only analytics tools through
+the shared `/api/kyber/analytics/*` API and canonical store. It attaches to the running engine
+and does not start or stop it or read the store directly.
+
+Ask which sessions were most expensive, what filled their context, which tool schemas had
+high measured cost, or how cache use and delegation changed over time. Compare periods and
+inspect observed outcomes with supporting evidence; when data is missing or unavailable,
+the tools report that limitation. Search is metadata-only, and captured text requires an
+explicit content opt-in. Lower cost alone does not establish better work.
 
 ```bash
 kyberdash kyber otel        # OTLP receiver on 127.0.0.1:4318
 kyberdash web               # browser dashboard on :4747
 kyberdash report            # terminal report
+kyberdash web --no-open     # start or attach to the engine for MCP
+kyberdash mcp               # configure the MCP client to launch this stdio server
 ```
+
+The MCP tools are `dash_status`, `dash_catalog`, `dash_query`,
+`dash_search_sessions`, `dash_inspect`, `dash_findings`, `dash_compare`, and
+`dash_outcomes`. Register `kyberdash mcp` in the client’s own MCP configuration; KyberDash
+does not edit client configuration. Host-client integration remains
+**[not live-verified](docs/dash/onboarding.md#3-what-is-and-is-not-validated)**. See the
+[client setup guide](docs/dash/onboarding.md#ask-kyberdash-from-an-mcp-client) and
+[MCP architecture and tool contract](docs/dash/architecture.md#conversational-analytics-over-mcp-kyberdash-mcp).
 
 Installed by the same one-line installer as the CLI, from releases that publish it.
 KyberDash began as a fork of the MIT-licensed CodeBurn project and is now first-party code
