@@ -155,7 +155,13 @@ async function detectionFromDoctor(): Promise<Array<{ harness: string; detected:
 
 function openStoreReadOnly(path: string): { bridge: KyberBridge; close: () => void } {
   if (!existsSync(path)) {
-    process.stderr.write(`kyberdash report: cannot open store ${path}\n`)
+    // The store is built by `dash refresh`, not by this read-only command. Name
+    // the command that fills it, the same way the empty-store report does, so a
+    // first run on a machine that has never refreshed is not a dead end.
+    process.stderr.write(
+      `kyberdash report: cannot open store ${path}\n` +
+        `Run \`kyberdash dash refresh\` to build it.\n`,
+    )
     process.exit(1)
   }
   let db: Database
