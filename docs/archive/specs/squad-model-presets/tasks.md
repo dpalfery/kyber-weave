@@ -538,7 +538,7 @@ commands, what was observed, and the outcome. The outcome is one of: `<row> → 
 
 - **Commands:**
   - Canonical documentation updates (`docs/kyber-squad/onboarding.md`, `docs/kyber-squad/architecture.md`).
-  - Author ADR 0043 (`docs/adr/0043-squad-lock-v2-and-instance-deployment-scope.md`) and update ADR index.
+  - Author ADR 0044 (`docs/adr/0044-squad-lock-v2-and-instance-deployment-scope.md`) and update ADR index.
   - Author deferred work todo (`docs/todo/squad-model-presets-windows-e2e-and-spikes.md`) and update todo index.
   - Move spec bundle to `docs/archive/specs/squad-model-presets/` and update `docs/specs/README.md`.
 - **Observed:**

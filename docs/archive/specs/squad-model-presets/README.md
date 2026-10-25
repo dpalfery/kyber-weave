@@ -12,7 +12,7 @@ last-reviewed: 2026-10-25
 **Status:** Archived
 **Archive Date:** 2026-10-25
 
-Delivered and closed out 2026-10-25: every acceptance criterion traces to a completed task (see [tasks](tasks.md)). The durable decisions live in [ADR 0043](../../../adr/0043-squad-lock-v2-and-instance-deployment-scope.md), [`docs/kyber-squad/onboarding.md`](../../../kyber-squad/onboarding.md), and [`docs/kyber-squad/architecture.md`](../../../kyber-squad/architecture.md).
+Delivered and closed out 2026-10-25: every acceptance criterion traces to a completed task (see [tasks](tasks.md)). The durable decisions live in [ADR 0044](../../../adr/0044-squad-lock-v2-and-instance-deployment-scope.md), [`docs/kyber-squad/onboarding.md`](../../../kyber-squad/onboarding.md), and [`docs/kyber-squad/architecture.md`](../../../kyber-squad/architecture.md).
 
 ---
 

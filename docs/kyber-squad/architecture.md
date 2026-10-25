@@ -17,7 +17,7 @@ decided-by:
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
-  - adr/0043-squad-lock-v2-and-instance-deployment-scope
+  - adr/0044-squad-lock-v2-and-instance-deployment-scope
 keywords:
   - multi-harness
   - deployment
@@ -946,7 +946,7 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — Lock and receipt state in the user home, the project registry, the global anchor, and migration
-- [ADR 0043](../adr/0043-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

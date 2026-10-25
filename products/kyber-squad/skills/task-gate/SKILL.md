@@ -70,6 +70,14 @@ editing. When that happens, re-run the gate once after the other change settles,
 onto the latest base, before counting the failure as rework or escalating. Report the re-run
 in the completion digest beside the `TASK_GATE:` line, not inside its fixed fields.
 
+## .NET isolation
+
+.NET `dotnet build` task gates run with `-nr:false -p:UseSharedCompilation=false` and a
+per-task `--artifacts-path .agent_scratchpad/{task}/artifacts` (or `-p:BaseOutputPath=` /
+`-p:BaseIntermediateOutputPath=` naming `{task}` where the command takes no
+`--artifacts-path`). Always pass `--task <task-id>` so `{task}` expands; without it the
+run is refused and no gate process starts.
+
 ## Escalation
 
 When the 2-cycle cap is reached and the gate still fails, return this instead of a pass:

@@ -106,6 +106,47 @@ public class ReviewVerdictTests
     }
 
     /// <summary>
+    /// Q3 (issue #386, T2): Minor is the lowest finding severity — there is no Info
+    /// finding severity, Info is a diagnostic severity — and Minor findings never block.
+    /// Minor-only findings with green blocking gates approve; only the fixed
+    /// Critical and Major-threshold rules decide.
+    /// </summary>
+    [Fact]
+    public void MinorOnlyFindingsWithGreenBlockingGatesAreApproved()
+    {
+        ReviewOutcome outcome = Evaluate(
+            [Finding(ReviewSeverity.Minor, id: "a"), Finding(ReviewSeverity.Minor, id: "b")],
+            gates: [new GateResult("test", true, 0, "passed")]);
+
+        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal(RiskGrade.Medium, outcome.Risk);
+        Assert.Equal(2, outcome.Accepted.Count);
+        Assert.DoesNotContain(outcome.Diagnostics, d => d.Severity == Severity.Error);
+    }
+
+    /// <summary>
+    /// Unlike Major findings, Minor findings have no blocking threshold: any number of
+    /// surviving minors still approves when the blocking gates are green.
+    /// </summary>
+    [Fact]
+    public void AnyNumberOfMinorFindingsStillApprovesWhenBlockingGatesAreGreen()
+    {
+        ReviewOutcome outcome = Evaluate(
+            [
+                Finding(ReviewSeverity.Minor, id: "a"),
+                Finding(ReviewSeverity.Minor, id: "b"),
+                Finding(ReviewSeverity.Minor, id: "c"),
+                Finding(ReviewSeverity.Minor, id: "d")
+            ],
+            gates: [new GateResult("test", true, 0, "passed")]);
+
+        Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal(4, outcome.Accepted.Count);
+    }
+
+    /// <summary>
     /// The policy outranks the findings in both directions: a reserved path escalates a
     /// change with nothing wrong with it, and it escalates rather than merely adding to a
     /// changes-requested verdict, because "a human must look at this" is a different

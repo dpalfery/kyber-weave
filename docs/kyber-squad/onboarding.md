@@ -14,7 +14,7 @@ decided-by:
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
-  - adr/0043-squad-lock-v2-and-instance-deployment-scope
+  - adr/0044-squad-lock-v2-and-instance-deployment-scope
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -980,7 +980,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
-- [ADR 0043](../adr/0043-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

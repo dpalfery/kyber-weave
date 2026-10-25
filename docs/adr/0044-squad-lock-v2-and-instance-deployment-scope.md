@@ -1,5 +1,5 @@
 ---
-id: adr/0043-squad-lock-v2-and-instance-deployment-scope
+id: adr/0044-squad-lock-v2-and-instance-deployment-scope
 title: Squad Lock v2 and Instance Deployment Scope
 doc-type: adr
 status: current
@@ -16,7 +16,7 @@ code-refs:
   - ISquadLinkFileSystem
 ---
 
-# ADR 0043: Squad Lock v2 and Instance Deployment Scope
+# ADR 0044: Squad Lock v2 and Instance Deployment Scope
 
 ## Status
 
