@@ -493,15 +493,27 @@ describe('analytics routes map stable error codes to transport statuses', () => 
     expect(body).toMatchObject({ contractVersion: 1, error: { code } })
   })
 
-  it('answers 200 for a successful envelope and for an unknown future code it must not invent', async () => {
-    for (const code of [null, 'content_unavailable']) {
+  it('answers 500 for an error envelope with an unrecognized code instead of masking it as success', async () => {
+    // WHY 500 and not 200: an error envelope answered with 200 reads as
+    // success to any client that checks the status before parsing the body.
+    // Recognized client-error codes keep their 4xx mappings above; anything
+    // else is a server-side surprise, and success stays 200.
+    for (const code of ['content_unavailable', 'future_code_xyz']) {
       const result = await callAnalyticsDirect('POST', '/api/kyber/analytics/findings', stubService(envelopeWith(code)), {
         headers: { 'content-type': 'application/json' },
         chunks: ['{}'],
       })
+      const body = result.body as Record<string, unknown>
 
-      expect(result.status).toBe(200)
+      expect(result.status, code).toBe(500)
+      expect(body).toMatchObject({ contractVersion: 1, error: { code } })
     }
+    const ok = await callAnalyticsDirect('POST', '/api/kyber/analytics/findings', stubService(envelopeWith(null)), {
+      headers: { 'content-type': 'application/json' },
+      chunks: ['{}'],
+    })
+
+    expect(ok.status).toBe(200)
   })
 
   it('answers 503 engine_unavailable when the shared service is absent', async () => {
@@ -511,6 +523,56 @@ describe('analytics routes map stable error codes to transport statuses', () => 
     expect(result.handled).toBe(true)
     expect(result.status).toBe(503)
     expect(body).toMatchObject({ contractVersion: 1, data: null, error: { code: 'engine_unavailable' } })
+  })
+
+  it('logs a handler throw and still answers a safe 500 without leaking the cause', async () => {
+    const errors: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => { errors.push(args) }
+    try {
+      const failing: AnalyticsService = {
+        execute: async () => { throw new Error('SQLITE_BUSY /Users/secret/canon.db') },
+      }
+      const result = await callAnalyticsDirect('POST', '/api/kyber/analytics/query', failing, {
+        headers: { 'content-type': 'application/json' },
+        chunks: ['{}'],
+      })
+      const body = result.body as Record<string, unknown>
+
+      expect(result.status).toBe(500)
+      expect(body).toMatchObject({ contractVersion: 1, error: { code: 'internal_error' } })
+      expect(JSON.stringify(body)).not.toContain('SQLITE_BUSY')
+      expect(errors.length).toBeGreaterThan(0)
+    } finally {
+      console.error = original
+    }
+  })
+
+  it('does not write headers twice when the handler throws after headers went out', async () => {
+    const writes: string[] = []
+    const req = mockRequest('POST', { 'content-type': 'application/json' }, ['{}'])
+    const res = {
+      headersSent: true,
+      writableEnded: false,
+      writeHead: () => { writes.push('writeHead') },
+      end: () => { writes.push('end') },
+    } as unknown as ServerResponse
+    const failing: AnalyticsService = {
+      execute: async () => { throw new Error('boom after partial write') },
+    }
+    const errors: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => { errors.push(args) }
+    try {
+      const handled = handleAnalyticsRequest(req, res, new URL('http://127.0.0.1:4747/api/kyber/analytics/query'), failing)
+
+      expect(handled).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(writes).not.toContain('writeHead')
+      expect(errors.length).toBeGreaterThan(0)
+    } finally {
+      console.error = original
+    }
   })
 
   it('resolves an unknown session through the service as a 404 that keeps the R1 scope', async () => {

@@ -45,7 +45,11 @@ function statusFor(envelope: AnalyticsEnvelope): number {
     case 'internal_error':
       return 500
     default:
-      return 200
+      // WHY 500 and not 200: the envelope carries an error the table does not
+      // know — a future code or a domain miss. Answering it with 200 reads as
+      // success to status-checking clients; an unknown failure is a
+      // server-side surprise until it earns its own mapping.
+      return 500
   }
 }
 
@@ -160,7 +164,16 @@ export function handleAnalyticsRequest(
     req.once('aborted', () => controller.abort())
     const envelope = await service.execute(route.operation, request, { signal: controller.signal })
     sendJson(res, statusFor(envelope), envelope)
-  })().catch(() => {
+  })().catch((error: unknown) => {
+    // WHY log-and-guard: the throw site is unknown (body read, service, or
+    // serialization), so the cause is logged while the response stays a safe
+    // generic envelope. When headers already went out a second writeHead
+    // would throw, so only a still-open stream is closed.
+    console.error('[KyberRoutes] analytics request failed:', error)
+    if (res.headersSent || res.writableEnded) {
+      if (!res.writableEnded) res.end()
+      return
+    }
     sendJson(res, 500, transportError('internal_error', 'The analytics engine could not complete the request.', 'Retry the request.'))
   })
   return true
