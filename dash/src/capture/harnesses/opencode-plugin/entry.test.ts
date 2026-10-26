@@ -377,8 +377,8 @@ describe('content is capped before it is serialized and sent (C6)', () => {
   it('truncates oversized tools JSON with a marker, without serializing every tool past the cap', async () => {
     const { callback, events } = await boot({ env: ON })
     const given = input()
-    const tools: Record<string, unknown> = {}
-    for (let i = 0; i < 50; i += 1) tools[`tool${i}`] = { description: 'd'.repeat(MAX_CONTENT_CHARS / 4) }
+    const tools: typeof given.tools = {}
+    for (let i = 0; i < 50; i += 1) tools[`tool${i}`] = { description: 'd'.repeat(MAX_CONTENT_CHARS / 4), input: {} }
     given.tools = tools
     await callback(given)
     const text = (events()[0] as { toolsText?: string }).toolsText ?? ''
