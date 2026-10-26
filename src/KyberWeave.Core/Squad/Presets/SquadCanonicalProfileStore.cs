@@ -140,7 +140,7 @@ public sealed class SquadCanonicalProfileStore
 
             if (latest is null ||
                 write > latestWrite ||
-                (write == latestWrite && string.Compare(stem, latestStem, StringComparison.Ordinal) > 0))
+                (write == latestWrite && CompareVersionStems(stem, latestStem) > 0))
             {
                 latest = candidate;
                 latestWrite = write;
@@ -439,6 +439,51 @@ public sealed class SquadCanonicalProfileStore
     private string SnapshotPath(string version)
     {
         return Path.Combine(_profilesDirectory, $"{version}.yml");
+    }
+
+    /// <summary>Compares snapshot version stems so a tied write time still prefers the newer release.</summary>
+    /// <remarks>
+    ///     Release versions sort numerically per dot-separated component, not lexically: a plain
+    ///     ordinal tie-break crowns 1.9.0 over 1.10.0 because '9' sorts after '1', and show would
+    ///     then display the wrong release's models. Digit runs compare by length then ordinally
+    ///     (no parsing, so no overflow on hostile stems); anything else compares ordinally, and a
+    ///     stem with more components sorts after its own prefix. The order is total either way.
+    /// </remarks>
+    private static int CompareVersionStems(string left, string right)
+    {
+        string[] leftParts = left.Split('.');
+        string[] rightParts = right.Split('.');
+        int shared = Math.Min(leftParts.Length, rightParts.Length);
+        for (int index = 0; index < shared; index++)
+        {
+            int leftDigits = CountLeadingDigits(leftParts[index]);
+            int rightDigits = CountLeadingDigits(rightParts[index]);
+            int compared = leftDigits.CompareTo(rightDigits);
+            if (compared != 0)
+                return compared;
+            compared = string.Compare(
+                leftParts[index], 0,
+                rightParts[index], 0,
+                Math.Max(leftDigits, rightDigits),
+                StringComparison.Ordinal);
+            if (compared != 0)
+                return compared;
+            compared = leftParts[index].AsSpan(leftDigits).CompareTo(
+                rightParts[index].AsSpan(rightDigits),
+                StringComparison.Ordinal);
+            if (compared != 0)
+                return compared;
+        }
+
+        return leftParts.Length.CompareTo(rightParts.Length);
+    }
+
+    private static int CountLeadingDigits(string component)
+    {
+        int digits = 0;
+        while (digits < component.Length && char.IsAsciiDigit(component[digits]))
+            digits++;
+        return digits;
     }
 
     private List<string> ListSnapshotVersions()

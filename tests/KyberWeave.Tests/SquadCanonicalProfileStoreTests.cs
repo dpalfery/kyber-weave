@@ -113,6 +113,31 @@ public sealed class SquadCanonicalProfileStoreTests
     }
 
     [Fact]
+    public void TryReadLatestBreaksWriteTimeTiesByNumericVersion()
+    {
+        using TempDirectory temp = new();
+        FakeSquadUserPaths userPaths = new(temp.Path);
+        SquadCanonicalProfileStore store = new(userPaths);
+        store.Write(CreateSnapshot("1.9.0"));
+        store.Write(CreateSnapshot("1.10.0"));
+        DateTime tied = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        string profilesDirectory = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "profiles");
+        File.SetLastWriteTimeUtc(Path.Combine(profilesDirectory, "1.9.0.yml"), tied);
+        File.SetLastWriteTimeUtc(Path.Combine(profilesDirectory, "1.10.0.yml"), tied);
+
+        SquadCanonicalProfiles? latest = store.TryReadLatest();
+
+        // A lexical tie-break crowns 1.9.0 because '9' sorts after '1'; the
+        // newer release must win when the write times tie.
+        Assert.NotNull(latest);
+        Assert.Equal("1.10.0", latest.SquadVersion);
+    }
+
+    [Fact]
     public void TryReadReturnsNullWhenProfilesDirectoryIsMissing()
     {
         using TempDirectory temp = new();
