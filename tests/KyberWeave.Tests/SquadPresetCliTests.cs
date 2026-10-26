@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
+using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -341,6 +343,466 @@ public sealed class SquadPresetCliTests : IDisposable
 
     #endregion
 
+    #region Canonical snapshot resolution (issue #436)
+
+    /// <remarks>
+    ///     In-process coverage for the preset-verb rewiring: each verb resolves through the
+    ///     injected canonical-profile seam with the checkout forced absent, so a present
+    ///     snapshot drives per-category tokens for agents while skill files pass through
+    ///     byte-identical, and an unresolvable source or an unknown preset key fails closed
+    ///     with exit 1 before any file or state is touched. The child-process tests above keep
+    ///     pinning the checkout-backed surface.
+    /// </remarks>
+    private const string PerCategoryPresetYaml = """
+                                                 schema: kyber-squad.model-preset/v1
+                                                 profiles:
+                                                   architect:
+                                                     claude: percat-arch-claude
+                                                   general:
+                                                     claude: percat-general-claude
+                                                 """;
+
+    private const string BadPresetYaml = """
+                                         schema: kyber-squad.model-preset/v1
+                                         profiles:
+                                           nosuch:
+                                             default: whatever
+                                         """;
+
+    private const string BugCrusherSkillContent =
+        "---\nname: bug-crusher\nmodel: skill-model\n---\nYou are bug-crusher.\n";
+
+    private const string ArchitectProjectionContent =
+        "---\nname: architect\nmodel: projection-model\n---\nProjection.\n";
+
+    [Fact]
+    public void UseWithSnapshotPresentResolvesPerCategoryDryRun()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
+        string? seenVersion = "unset";
+        SquadPresetUseCommand command = CreateUseCommand(
+            SnapshotResolver("1.2.3", version => seenVersion = version));
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        Assert.Equal("1.2.3", seenVersion);
+        Assert.Contains(
+            "architect: bundled-arch-claude -> percat-arch-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "implementer: bundled-general-claude -> percat-general-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("bug-crusher", captured.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("projection", captured.Output, StringComparison.OrdinalIgnoreCase);
+        AssertAgentModel("architect", "bundled-arch-claude");
+        AssertAgentModel("implementer", "bundled-general-claude");
+        Assert.Null(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void UseWithSnapshotPresentAppliesPerCategoryAndLeavesSkillsUntouched()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
+        SquadPresetUseCommand command = CreateUseCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"]
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        AssertAgentModel("architect", "percat-arch-claude");
+        AssertAgentModel("implementer", "percat-general-claude");
+        Assert.Equal(
+            BugCrusherSkillContent,
+            File.ReadAllText(Path.Combine(_projectDir, ".claude", "skills", "bug-crusher", "SKILL.md")));
+        Assert.Equal(
+            ArchitectProjectionContent,
+            File.ReadAllText(Path.Combine(_projectDir, ".claude", "skills", "architect", "SKILL.md")));
+        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
+        Assert.NotNull(selection);
+        Assert.Equal("percat", selection.ModelPresets[SquadTarget.Claude]);
+    }
+
+    [Fact]
+    public void UseWithNoCanonicalSourceDryRunExits1WithRemedyAndTouchesNothing()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
+        string receiptBefore = ReadReceiptText();
+        string lockBefore = ReadLockText();
+        SquadPresetUseCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains(
+            "Could not resolve Squad model profiles",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("squad update", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "bundled-arch-claude");
+        AssertAgentModel("implementer", "bundled-general-claude");
+        Assert.Equal(receiptBefore, ReadReceiptText());
+        Assert.Equal(lockBefore, ReadLockText());
+        Assert.Null(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void UseWithNoCanonicalSourceApplyExits1WithRemedyAndTouchesNothing()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
+        string receiptBefore = ReadReceiptText();
+        string lockBefore = ReadLockText();
+        SquadPresetUseCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"]
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains(
+            "Could not resolve Squad model profiles",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("squad update", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "bundled-arch-claude");
+        AssertAgentModel("implementer", "bundled-general-claude");
+        Assert.Equal(receiptBefore, ReadReceiptText());
+        Assert.Equal(lockBefore, ReadLockText());
+        Assert.Null(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void ClearWithSnapshotPresentRestoresBundledModelsDryRun()
+    {
+        SeedCanonicalDeployment("percat-arch-claude", "percat-general-claude");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
+        SquadPresetClearCommand command = CreateClearCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetClearSettings settings = new()
+        {
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        Assert.Contains(
+            "architect: percat-arch-claude -> bundled-arch-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "implementer: percat-general-claude -> bundled-general-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("bug-crusher", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "percat-arch-claude");
+        AssertAgentModel("implementer", "percat-general-claude");
+    }
+
+    [Fact]
+    public void ClearWithSnapshotPresentAppliesAndLeavesSkillsUntouched()
+    {
+        SeedCanonicalDeployment("percat-arch-claude", "percat-general-claude");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
+        SquadPresetClearCommand command = CreateClearCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetClearSettings settings = new()
+        {
+            Path = _projectDir,
+            Targets = ["claude"]
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        AssertAgentModel("architect", "bundled-arch-claude");
+        AssertAgentModel("implementer", "bundled-general-claude");
+        Assert.Equal(
+            BugCrusherSkillContent,
+            File.ReadAllText(Path.Combine(_projectDir, ".claude", "skills", "bug-crusher", "SKILL.md")));
+        Assert.Equal(
+            ArchitectProjectionContent,
+            File.ReadAllText(Path.Combine(_projectDir, ".claude", "skills", "architect", "SKILL.md")));
+        Assert.Null(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void ClearWithNoCanonicalSourceDryRunExits1WithRemedyAndTouchesNothing()
+    {
+        SeedCanonicalDeployment("percat-arch-claude", "percat-general-claude");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
+        string receiptBefore = ReadReceiptText();
+        string lockBefore = ReadLockText();
+        SquadPresetClearCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+
+        SquadPresetClearSettings settings = new()
+        {
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains(
+            "Could not resolve Squad model profiles",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("squad update", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "percat-arch-claude");
+        AssertAgentModel("implementer", "percat-general-claude");
+        Assert.Equal(receiptBefore, ReadReceiptText());
+        Assert.Equal(lockBefore, ReadLockText());
+        Assert.NotNull(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void ClearWithNoCanonicalSourceApplyExits1WithRemedyAndTouchesNothing()
+    {
+        SeedCanonicalDeployment("percat-arch-claude", "percat-general-claude");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "percat");
+        string receiptBefore = ReadReceiptText();
+        string lockBefore = ReadLockText();
+        SquadPresetClearCommand command = new(_userPaths, _stateStore, null, (_, _) => null);
+
+        SquadPresetClearSettings settings = new()
+        {
+            Path = _projectDir,
+            Targets = ["claude"]
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains(
+            "Could not resolve Squad model profiles",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("squad update", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "percat-arch-claude");
+        AssertAgentModel("implementer", "percat-general-claude");
+        Assert.Equal(receiptBefore, ReadReceiptText());
+        Assert.Equal(lockBefore, ReadLockText());
+        Assert.NotNull(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void UseWithUnknownPresetCategoryExits1WithPathAndLine()
+    {
+        WritePreset("bad", BadPresetYaml);
+        SeedCanonicalDeployment("bundled-arch-claude", "bundled-general-claude");
+        string receiptBefore = ReadReceiptText();
+        string lockBefore = ReadLockText();
+        SquadPresetUseCommand command = CreateUseCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "bad",
+            Path = _projectDir,
+            Targets = ["claude"]
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains("nosuch", captured.Output, StringComparison.Ordinal);
+        Assert.Contains("bad.yml:3", captured.Output, StringComparison.Ordinal);
+        AssertAgentModel("architect", "bundled-arch-claude");
+        AssertAgentModel("implementer", "bundled-general-claude");
+        Assert.Equal(receiptBefore, ReadReceiptText());
+        Assert.Equal(lockBefore, ReadLockText());
+        Assert.Null(_selectionStore.Read(_projectDir));
+    }
+
+    [Fact]
+    public void UseWithSnapshotPresentResolvesUppercaseAgentNameThroughRoster()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedProjectDeployment(
+            _projectDir,
+            "claude",
+            (".claude/agents/architect.md",
+                "---\nname: ARCHITECT\nmodel: bundled-arch-claude\n---\nYou are architect.\n"));
+        SquadPresetUseCommand command = CreateUseCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        // The snapshot roster must match the checkout roster's case-insensitivity:
+        // ARCHITECT resolves to the architect entry instead of passing through.
+        Assert.Equal(0, captured.Result);
+        Assert.Contains(
+            "ARCHITECT: bundled-arch-claude -> percat-arch-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowWithSnapshotPresentResolvesNewestSnapshot()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
+        string? seenVersion = "unset";
+        SquadPresetShowCommand command = new(
+            _userPaths,
+            (preferredVersion, _) =>
+            {
+                seenVersion = preferredVersion;
+                return snapshotStore.TryReadLatest();
+            });
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        Assert.Null(seenVersion);
+        Assert.Contains("architect: percat-arch-claude", captured.Output, StringComparison.Ordinal);
+        Assert.Contains("general: percat-general-claude", captured.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("(bundled)", captured.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowNamesTheSnapshotVersionItResolved()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
+        SquadPresetShowCommand command = new(
+            _userPaths,
+            (_, _) => snapshotStore.TryReadLatest());
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        // Show can preview a different release than use would apply (newest snapshot vs
+        // lock-keyed snapshot), so it must name the version its rows came from.
+        Assert.Equal(0, captured.Result);
+        Assert.Contains("1.2.3", captured.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowNamesCheckoutWhenProfilesComeFromACheckout()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadCanonicalProfiles checkoutProfiles = CreateCanonicalSnapshot("1.2.3") with
+        {
+            SquadVersion = string.Empty
+        };
+        SquadPresetShowCommand command = new(
+            _userPaths,
+            (_, _) => checkoutProfiles);
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        Assert.Contains("checkout", captured.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ShowWithNoCanonicalSourceExits1WithRemedy()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadPresetShowCommand command = new(_userPaths, (_, _) => null);
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains(
+            "Could not resolve Squad model profiles",
+            captured.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("squad update", captured.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowWithUnknownPresetCategoryExits1WithPathAndLine()
+    {
+        WritePreset("bad", BadPresetYaml);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
+        SquadPresetShowCommand command = new(_userPaths, (_, _) => snapshotStore.TryReadLatest());
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "bad",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(1, captured.Result);
+        Assert.Contains("nosuch", captured.Output, StringComparison.Ordinal);
+        Assert.Contains("bad.yml:3", captured.Output, StringComparison.Ordinal);
+    }
+
+    #endregion
+
     #region Fixtures and Helpers
 
     private void WritePreset(string name, string yaml)
@@ -349,6 +811,99 @@ public sealed class SquadPresetCliTests : IDisposable
         Directory.CreateDirectory(presetDir);
         string filePath = Path.Combine(presetDir, $"{name}.yml");
         File.WriteAllText(filePath, yaml, Encoding.UTF8);
+    }
+
+    private static SquadCanonicalProfiles CreateCanonicalSnapshot(string version)
+    {
+        Dictionary<string, SquadModelProfile> profiles = new(StringComparer.Ordinal)
+        {
+            ["architect"] = new SquadModelProfile(
+                "bundled-arch-default",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "bundled-arch-claude" }),
+            ["general"] = new SquadModelProfile(
+                "bundled-general-default",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "bundled-general-claude" })
+        };
+        Dictionary<string, string> roster = new(StringComparer.Ordinal)
+        {
+            ["architect"] = "architect",
+            ["implementer"] = "general"
+        };
+        return new SquadCanonicalProfiles(
+            version,
+            new SquadModelProfiles("kyber-squad.model-profiles/v1", profiles, "models.yml"),
+            roster);
+    }
+
+    private Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> SnapshotResolver(
+        string version,
+        Action<string?>? onVersion = null)
+    {
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        snapshotStore.Write(CreateCanonicalSnapshot(version));
+        return (preferredVersion, _) =>
+        {
+            onVersion?.Invoke(preferredVersion);
+            return preferredVersion is null ? null : snapshotStore.TryRead(preferredVersion);
+        };
+    }
+
+    private SquadPresetUseCommand CreateUseCommand(
+        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> resolver)
+    {
+        return new SquadPresetUseCommand(_userPaths, _stateStore, null, resolver);
+    }
+
+    private SquadPresetClearCommand CreateClearCommand(
+        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> resolver)
+    {
+        return new SquadPresetClearCommand(_userPaths, _stateStore, null, resolver);
+    }
+
+    private static CommandContext CreateCommandContext()
+    {
+        return new CommandContext(
+            Array.Empty<string>(),
+            new FakeRemainingArguments(),
+            "preset",
+            new object());
+    }
+
+    private void SeedCanonicalDeployment(string architectModel, string implementerModel)
+    {
+        SeedProjectDeployment(
+            _projectDir,
+            "claude",
+            (".claude/agents/architect.md",
+                $"---\nname: architect\nmodel: {architectModel}\n---\nYou are architect.\n"),
+            (".claude/agents/implementer.md",
+                $"---\nname: implementer\nmodel: {implementerModel}\n---\nYou are implementer.\n"),
+            (".claude/skills/bug-crusher/SKILL.md", BugCrusherSkillContent),
+            (".claude/skills/architect/SKILL.md", ArchitectProjectionContent));
+    }
+
+    private void AssertAgentModel(string agentName, string expectedModel)
+    {
+        string content = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", $"{agentName}.md"));
+        Assert.Contains($"model: {expectedModel}", content, StringComparison.Ordinal);
+    }
+
+    private string ReadReceiptText()
+    {
+        return File.ReadAllText(_stateStore.ResolveReceiptPath(_projectDir, SquadDeploymentScope.Project));
+    }
+
+    private string ReadLockText()
+    {
+        return File.ReadAllText(_stateStore.ResolveLockPath(_projectDir, SquadDeploymentScope.Project));
+    }
+
+    private sealed class FakeRemainingArguments : IRemainingArguments
+    {
+        public ILookup<string, string?> Parsed =>
+            Array.Empty<string>().ToLookup(name => name, name => (string?)null);
+
+        public IReadOnlyList<string> Raw => [];
     }
 
     private void SeedProjectDeployment(

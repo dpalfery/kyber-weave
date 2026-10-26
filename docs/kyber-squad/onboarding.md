@@ -18,6 +18,9 @@ decided-by:
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
+  - SquadCanonicalProfileStore
+  - SquadLifecycleService
+  - SquadModelPresetValidator
 ---
 
 # Kyber-Squad adoption and usage guide
@@ -772,9 +775,11 @@ profiles:
   rendered agents, matching bundled behavior.
 - **Default token**: An optional `default` key per profile category specifies a fallback token for
   any harness not explicitly mapped in that category.
-- **Validation**: When applied or rendered, preset keys are strictly checked against the active
-  release's `models.yml`. Referencing an unknown profile category or harness fails validation
-  immediately with **exit code 1**, reporting the exact file path and line number before writing any files.
+- **Validation**: `squad preset use` and `squad preset show` strictly validate preset keys
+  against the resolved canonical profiles before any rewrite or print. Referencing an unknown
+  profile category or harness fails validation immediately with **exit code 1**, reporting the
+  exact file path and line number before writing any files. Install and update enforce the
+  same check at render time.
 
 ### 2. Managing Presets (`squad preset`)
 
@@ -803,6 +808,33 @@ kyber-weave squad preset show <name> --target claude
 - **Transactional updates**: `squad preset use` executes through the existing atomic `update`
   transaction engine. It updates `squad.lock.yml` to schema v2 (`kyber-squad.lock/v2`),
   recording the applied preset name and lowercase SHA-256 digest under `model-presets`.
+- **Canonical profile resolution**: `use`, `clear`, and `show` resolve canonical model profiles
+  in this order: the `products/kyber-squad` checkout when one is present, then the snapshot
+  stored for the deployment lock's `SquadVersion`, then the newest snapshot, then nothing.
+  `show` has no deployment context, so it resolves checkout first and then the newest snapshot.
+  Resolution from a checkout keeps repo-built behaviour; outside a checkout the snapshot is
+  what reflects the release the deployment was rendered from.
+- **Skills are never rewritten**: model rewrites apply only to deployed agent files. Any
+  receipt `.md` whose final path segment is `SKILL.md` or whose path contains a `skills/`
+  segment passes through byte-identical — canonical skills and primary-agent entry-point
+  skill projections alike — and only agent files whose profile category resolves are touched.
+  Files with an unresolvable identity keep their bytes and produce no diff row.
+- **Unresolvable profiles fail fast**: when no checkout and no snapshot resolve, `use` and
+  `clear` exit with **exit code 1** in both dry-run and apply, and `show` exits with
+  **exit code 1** as well — before any file rewrite, lock change, or printed plan. The error
+  names the remedy: run `kyber-weave squad update` to refresh the profile snapshot; running
+  from a kyber-weave checkout also works.
+- **Snapshot persistence**: committed `squad install` and `squad update` runs (including
+  `squad run` instance provisioning) write one snapshot per Squad release version to
+  `~/.kyber-weave/squad/profiles/<version>.yml` (schema `kyber-squad.canonical-profiles/v1`,
+  carrying the `models.yml` shape plus the agent-name-to-category map). Dry-run writes
+  nothing. A snapshot write that fails after the deployment commits produces a warning
+  naming the remedy (rerun `squad update`); the deployment itself is never failed for it.
+  One file is kept per distinct version and snapshots are never pruned.
+- **Migration for pre-snapshot deployments**: deployments installed before snapshots existed
+  have no snapshot file. After upgrading the CLI, the first `preset use/clear/show` fails
+  with the exit-1 remedy above; one `squad update` (global and/or in the project) re-renders
+  from the release and writes the snapshot, and preset verbs work from then on.
 - **Preserved versioning**: Switching presets never changes the release version of deployed agents.
 - **Dry run preview**: Passing `--dry-run` prints each agent whose resolved model changes in the format
   `<agent>: <old-model> -> <new-model>` and exits without modifying state or files.
@@ -983,7 +1015,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 | Exit Code | Meaning |
 |---|---|
 | `0` | Success, healthy/clean status, or successful dry run. |
-| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. Also preset file syntax error (`file:line`), unknown profile category / harness key validation failure, missing preset referenced by lock, harness executable missing on `PATH`, or filesystem link creation failure during `squad run`. |
+| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. Also preset file syntax error (`file:line`), unknown profile category / harness key validation failure, unresolvable canonical profiles for `preset use/clear/show` (remedy: `squad update`), missing preset referenced by lock, harness executable missing on `PATH`, or filesystem link creation failure during `squad run`. |
 | `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. Also `--projects` outside `squad update --global`, or a named project path that is neither registered nor holds importable in-repo state. Also unknown preset name, `squad run` with no preset selection for target, or attempting `squad run` against a harness with status `Unsupported` or `SpikePending`. |
 
 ---

@@ -257,6 +257,10 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 | [`squad status`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Verify deployed files and report drift against the receipt. |
 | [`squad doctor`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Diagnose prerequisites, toolchain availability, and deployment health. |
 | [`squad pack`](kyber-squad/onboarding.md#packaging-squad-pack) | `-f\|--format <FORMAT>` (`apm` \| `plugins` \| `all`; default `all`), `-o\|--out <DIR>`, `-v\|--version` | Package agents and skills into distribution archives. |
+| [`squad preset use`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `<name>`, `-t\|--target <TARGETS>`, `-g\|--global`, `--dry-run` | Apply a model preset to target harnesses, recording the selection. |
+| [`squad preset clear`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `-t\|--target <TARGETS>`, `-g\|--global` | Revert target harnesses to bundled model profiles. |
+| [`squad preset list`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | — | List available presets and their active deployments. |
+| [`squad preset show`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `<name>`, `--target <TARGET>` | Inspect resolved models for a preset and target harness. |
 
 ### `utilities` — Kyber-owned utility artifacts
 
@@ -382,6 +386,8 @@ risk. The three rules below mirror the contract in
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for a client-input error, an agent-only option given without `--agent`; else `0` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
+| `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
+| `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 
 ### `kyberdash`
