@@ -9,20 +9,20 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="SquadRunCommand"/> (<c>squad run &lt;harness&gt; [-- &lt;args&gt;]</c>).
-/// Acceptance criteria covered:
-/// - 7.1: Concurrent instance execution with isolated roots.
-/// - 7.2: Zero files written into project tree.
-/// - 7.6: Harness-neutral command syntax (<c>squad run &lt;harness&gt;</c>).
-/// - 7.7: Fails cleanly naming unsupported harness.
+///     Unit tests for <see cref="SquadRunCommand" /> (<c>squad run &lt;harness&gt; [-- &lt;args&gt;]</c>).
+///     Acceptance criteria covered:
+///     - 7.1: Concurrent instance execution with isolated roots.
+///     - 7.2: Zero files written into project tree.
+///     - 7.6: Harness-neutral command syntax (<c>squad run &lt;harness&gt;</c>).
+///     - 7.7: Fails cleanly naming unsupported harness.
 /// </summary>
 public sealed class SquadRunCommandTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
     private readonly string _home;
     private readonly string _projectDir;
-    private readonly FakeSquadUserPaths _userPaths;
     private readonly SquadModelPresetSelectionStore _selectionStore;
+    private readonly TempDirectory _temp = new();
+    private readonly FakeSquadUserPaths _userPaths;
 
     public SquadRunCommandTests()
     {
@@ -39,131 +39,6 @@ public sealed class SquadRunCommandTests : IDisposable
     {
         _temp.Dispose();
     }
-
-    #region Preset Selection Enforcement
-
-    [Fact]
-    public void NoSelectionRecordedForTargetExitsWithCodeTwoAndGuidance()
-    {
-        SquadRunCommand command = CreateCommand();
-        SquadRunSettings settings = new()
-        {
-            Harness = "claude"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(2, execution.Result);
-        Assert.Contains(
-            "No preset selected for claude in this project. Run `kyber-weave squad preset use <name> --target claude`.",
-            execution.Output,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MissingPresetFileOnDiskExitsWithCodeOneAndDoesNotCreateStubFile()
-    {
-        _selectionStore.Set(_projectDir, SquadTarget.Claude, "missing-preset");
-        SquadRunCommand command = CreateCommand(
-            _ => 0,
-            name => $"/usr/bin/{name}");
-        SquadRunSettings settings = new()
-        {
-            Harness = "claude"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(1, execution.Result);
-        Assert.Contains("missing-preset", execution.Output, StringComparison.OrdinalIgnoreCase);
-
-        string presetPath = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets",
-            "missing-preset.yml");
-        Assert.False(File.Exists(presetPath),
-            "Synthetic preset stub must not be created on disk when preset is missing.");
-    }
-
-    #endregion
-
-    #region Acceptance Criterion 7.7: Unsupported and SpikePending Harnesses Fail Cleanly
-
-    [Fact]
-    public void UnsupportedHarnessExitsWithCodeTwoAndNamesReason()
-    {
-        _selectionStore.Set(_projectDir, SquadTarget.Warp, "fast");
-        SquadRunCommand command = CreateCommand();
-        SquadRunSettings settings = new()
-        {
-            Harness = "warp"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        SquadInstanceRow warpRow = SquadInstanceCatalog.GetRow(SquadTarget.Warp);
-        Assert.Equal(2, execution.Result);
-        Assert.Contains("warp cannot run on a preset instance:", execution.Output, StringComparison.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(warpRow.Reason))
-        {
-            Assert.Contains(warpRow.Reason, execution.Output, StringComparison.Ordinal);
-        }
-    }
-
-    [Fact]
-    public void SpikePendingHarnessExitsWithCodeTwoAndNamesReason()
-    {
-        _selectionStore.Set(_projectDir, SquadTarget.OpenCode, "fast");
-        SquadRunCommand command = CreateCommand();
-        SquadRunSettings settings = new()
-        {
-            Harness = "opencode"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(2, execution.Result);
-        Assert.Contains("opencode cannot run on a preset instance:", execution.Output,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    #endregion
-
-    #region PATH and Linking Failure Handling
-
-    [Fact]
-    public void HarnessMissingFromPathExitsWithCodeOne()
-    {
-        WritePreset("fast");
-        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
-        SquadRunCommand command = CreateCommand(findOnPath: _ => null);
-        SquadRunSettings settings = new()
-        {
-            Harness = "claude"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(1, execution.Result);
-        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void SquadLinkExceptionDuringEnsureExitsWithCodeOne()
-    {
-        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
-        SquadRunCommand command = CreateCommand(
-            ensureOverride: (_, _) => throw new SquadLinkException("Simulated link creation failed."));
-        SquadRunSettings settings = new()
-        {
-            Harness = "claude"
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(1, execution.Result);
-        Assert.Contains("Simulated link creation failed.", execution.Output, StringComparison.Ordinal);
-    }
-
-    #endregion
 
     #region Successful Execution and Exit Code Pass-through
 
@@ -317,6 +192,147 @@ public sealed class SquadRunCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.True(launched, $"Harness '{harnessToken}' must launch successfully via neutral syntax.");
+    }
+
+    #endregion
+
+    #region Preset Selection Enforcement
+
+    [Fact]
+    public void NoSelectionRecordedForTargetExitsWithCodeTwoAndGuidance()
+    {
+        SquadRunCommand command = CreateCommand();
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains(
+            "No preset selected for claude in this project. Run `kyber-weave squad preset use <name> --target claude`.",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingPresetFileOnDiskExitsWithCodeOneAndDoesNotCreateStubFile()
+    {
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "missing-preset");
+        SquadRunCommand command = CreateCommand(
+            _ => 0,
+            name => $"/usr/bin/{name}");
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("missing-preset", execution.Output, StringComparison.OrdinalIgnoreCase);
+
+        string presetPath = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets",
+            "missing-preset.yml");
+        Assert.False(File.Exists(presetPath),
+            "Synthetic preset stub must not be created on disk when preset is missing.");
+    }
+
+    #endregion
+
+    #region Acceptance Criterion 7.7: Unsupported and SpikePending Harnesses Fail Cleanly
+
+    [Fact]
+    public void UnsupportedHarnessExitsWithCodeTwoAndNamesReason()
+    {
+        _selectionStore.Set(_projectDir, SquadTarget.Warp, "fast");
+        SquadRunCommand command = CreateCommand();
+        SquadRunSettings settings = new()
+        {
+            Harness = "warp"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        SquadInstanceRow warpRow = SquadInstanceCatalog.GetRow(SquadTarget.Warp);
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("warp cannot run on a preset instance:", execution.Output, StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(warpRow.Reason))
+            Assert.Contains(warpRow.Reason, execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SpikePendingHarnessExitsWithCodeTwoAndNamesReason()
+    {
+        _selectionStore.Set(_projectDir, SquadTarget.OpenCode, "fast");
+        SquadRunCommand command = CreateCommand();
+        SquadRunSettings settings = new()
+        {
+            Harness = "opencode"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("opencode cannot run on a preset instance:", execution.Output,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
+
+    #region PATH and Linking Failure Handling
+
+    [Fact]
+    public void HarnessMissingFromPathExitsWithCodeOne()
+    {
+        WritePreset("fast");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
+        SquadRunCommand command = CreateCommand(findOnPath: _ => null);
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SquadLinkExceptionDuringEnsureExitsWithCodeOne()
+    {
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
+        SquadRunCommand command = CreateCommand(
+            ensureOverride: (_, _) => throw new SquadLinkException("Simulated link creation failed."));
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude"
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("Simulated link creation failed.", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ArgumentContainingShellMetacharacterExitsWithCodeTwo()
+    {
+        WritePreset("fast");
+        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
+        SquadRunCommand command = CreateCommand();
+        SquadRunSettings settings = new()
+        {
+            Harness = "claude",
+            Args = ["echo", "foo&bar"]
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+
+        Assert.Equal(2, execution.Result);
+        Assert.Contains("dangerous characters", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion

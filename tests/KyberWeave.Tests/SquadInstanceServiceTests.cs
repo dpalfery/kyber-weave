@@ -180,6 +180,29 @@ public sealed class SquadInstanceServiceTests : IDisposable
         Assert.Equal(originalContent, await File.ReadAllTextAsync(mainSettingsFile, Encoding.UTF8));
     }
 
+    [Fact]
+    public async Task RemoveAsyncCallsDeleteTreeNoFollowOnInstanceStateDirectory()
+    {
+        using TestContext context = CreateContext();
+        SquadInstanceService service = context.CreateService();
+
+        SquadInstanceEnsureResult result = await service.EnsureAsync(SquadTarget.Claude, "default");
+        string instanceStateDir = Path.Combine(
+            context.UserPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instance-state",
+            "claude",
+            "default");
+
+        context.LinkFileSystem.DeletedTrees.Clear();
+
+        await service.RemoveAsync(SquadTarget.Claude, "default");
+
+        Assert.Contains(context.LinkFileSystem.DeletedTrees,
+            path => string.Equals(path, instanceStateDir, StringComparison.Ordinal));
+    }
+
     /// <summary>
     ///     Regression test: Path traversal attempt in RemoveAsync throws ArgumentException or
     ///     completes without touching any directories outside the designated instance path.

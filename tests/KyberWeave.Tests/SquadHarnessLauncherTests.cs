@@ -293,6 +293,55 @@ public sealed class SquadHarnessLauncherTests
         Assert.Contains(offending, ex.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("&")]
+    [InlineData("|")]
+    [InlineData("<")]
+    [InlineData(">")]
+    [InlineData(";")]
+    [InlineData("$")]
+    [InlineData("`")]
+    [InlineData("(")]
+    [InlineData(")")]
+    public void ArgumentContainingShellMetacharacterThrowsArgumentExceptionNamingOffendingArgument(string metacharacter)
+    {
+        string instanceRoot = "/tmp/instances/claude/fast";
+        string offending = $"prefix{metacharacter}suffix";
+        string[] args = ["--safe", offending];
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+            SquadHarnessLauncher.BuildStartInfo(
+                ClaudeRow,
+                instanceRoot,
+                args,
+                _ => null,
+                _ => "/bin/claude",
+                false));
+
+        Assert.Contains(offending, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(SquadTarget.Warp)]
+    [InlineData(SquadTarget.Antigravity)]
+    public void BuildStartInfoThrowsArgumentExceptionWhenRowStatusIsNotReadyOrVariableIsNullOrEmpty(SquadTarget target)
+    {
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(target);
+        string instanceRoot = $"/tmp/instances/{SquadTargetCatalog.GetToken(target)}/fast";
+        string[] args = ["--version"];
+
+        ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+            SquadHarnessLauncher.BuildStartInfo(
+                row,
+                instanceRoot,
+                args,
+                _ => null,
+                _ => $"/bin/{SquadTargetCatalog.GetToken(target)}",
+                false));
+
+        Assert.Contains(SquadTargetCatalog.GetToken(target), ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void CleanArgumentsArePreservedWithoutModification()
     {

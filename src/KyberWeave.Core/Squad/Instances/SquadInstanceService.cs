@@ -224,7 +224,7 @@ public sealed partial class SquadInstanceService
         if (Directory.Exists(instanceRoot) || _linkFileSystem.IsLink(instanceRoot))
             _linkFileSystem.DeleteTreeNoFollow(instanceRoot);
 
-        if (Directory.Exists(instanceStateDir)) Directory.Delete(instanceStateDir, true);
+        if (Directory.Exists(instanceStateDir)) _linkFileSystem.DeleteTreeNoFollow(instanceStateDir);
 
         return Task.CompletedTask;
     }

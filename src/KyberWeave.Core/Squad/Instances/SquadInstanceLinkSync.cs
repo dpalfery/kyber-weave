@@ -37,7 +37,7 @@ public static class SquadInstanceLinkSync
     {
         WriteIndented = true,
         NewLine = "\n",
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, false) }
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, true) }
     };
 
     /// <summary>
@@ -118,6 +118,8 @@ public static class SquadInstanceLinkSync
         string instanceStateDirectory)
     {
         List<SquadLinkRecord> recordedLinks = ReadRecordedLinks(instanceStateDirectory);
+        ValidateRecordedLinks(instanceRoot, recordedLinks);
+
         List<SquadLinkRecord> mainListing = EnumerateMainHome(mainHome, renderedPaths, row.ExtraLinks);
         List<string> instanceListing = EnumerateInstanceRoot(instanceRoot);
 
@@ -129,24 +131,34 @@ public static class SquadInstanceLinkSync
             instanceListing);
 
         // 1. Apply Remove actions for stale recorded links whose target in main home no longer exists
+        List<SquadLinkRecord> retainedStaleLinks = [];
+        List<string> warnings = [];
+
         foreach (SquadLinkAction.Remove remove in actions.OfType<SquadLinkAction.Remove>())
         {
             string linkPath = Path.Combine(instanceRoot, remove.Record.RelativePath);
-            if (remove.Record.Kind == SquadLinkKind.Directory)
-                fileSystem.DeleteTreeNoFollow(linkPath);
-            else
-                try
+            try
+            {
+                if (remove.Record.Kind == SquadLinkKind.Directory)
                 {
-                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath)) File.Delete(linkPath);
+                    if (Directory.Exists(linkPath) || fileSystem.IsLink(linkPath))
+                        fileSystem.DeleteTreeNoFollow(linkPath);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                else
                 {
+                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath))
+                        File.Delete(linkPath);
                 }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warnings.Add($"Failed to remove stale link '{remove.Record.RelativePath}': {ex.Message}");
+                retainedStaleLinks.Add(remove.Record);
+            }
         }
 
         // 2. Record warnings for unmanaged instance copies kept by planner
         HashSet<string> keptPaths = new(StringComparer.Ordinal);
-        List<string> warnings = [];
 
         foreach (SquadLinkAction.Keep keep in actions.OfType<SquadLinkAction.Keep>())
         {
@@ -238,6 +250,8 @@ public static class SquadInstanceLinkSync
                 }
         }
 
+        activeLinks.AddRange(retainedStaleLinks);
+
         List<SquadLinkRecord> sortedLinks = activeLinks
             .OrderBy(l => l.RelativePath, StringComparer.Ordinal)
             .ToList();
@@ -245,6 +259,30 @@ public static class SquadInstanceLinkSync
         WriteLinksJson(instanceStateDirectory, sortedLinks);
 
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
+    }
+
+    private static void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)
+    {
+        string canonicalRoot = Path.GetFullPath(instanceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        foreach (SquadLinkRecord record in recordedLinks)
+        {
+            if (string.IsNullOrWhiteSpace(record.RelativePath))
+                throw new InvalidDataException("Recorded link relative path is empty or whitespace.");
+
+            if (Path.IsPathRooted(record.RelativePath))
+                throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' is rooted and escapes instance root.");
+
+            string normalized = record.RelativePath.Replace('\\', '/');
+            string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Any(s => s == ".."))
+                throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' contains directory traversal segments.");
+
+            string fullPath = Path.GetFullPath(Path.Combine(instanceRoot, record.RelativePath));
+            if (!fullPath.StartsWith(canonicalRoot, comparison))
+                throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' escapes instance root '{instanceRoot}'.");
+        }
     }
 
     private static List<SquadLinkRecord> ReadRecordedLinks(string instanceStateDirectory)
@@ -256,11 +294,11 @@ public static class SquadInstanceLinkSync
         {
             string json = File.ReadAllText(linksJsonPath, Encoding.UTF8);
             List<SquadLinkRecord>? deserialized = JsonSerializer.Deserialize<List<SquadLinkRecord>>(json, JsonOptions);
-            return deserialized ?? [];
+            return deserialized ?? throw new InvalidDataException($"Corrupt instance link state file '{linksJsonPath}'.");
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (JsonException ex)
         {
-            return [];
+            throw new InvalidDataException($"Corrupt instance link state file '{linksJsonPath}'.", ex);
         }
     }
 

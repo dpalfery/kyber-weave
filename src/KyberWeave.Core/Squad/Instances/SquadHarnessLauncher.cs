@@ -14,7 +14,7 @@ namespace KyberWeave.Core.Squad.Deployment;
 public static class SquadHarnessLauncher
 {
     private static readonly SearchValues<char>
-        DangerousCharacters = SearchValues.Create('"', '%', '!', '^', '\r', '\n');
+        DangerousCharacters = SearchValues.Create('"', '%', '!', '^', '\r', '\n', '&', '|', '<', '>', ';', '$', '`', '(', ')');
 
     /// <summary>
     ///     Builds process start information for launching a harness instance with the specified configuration.
@@ -47,6 +47,9 @@ public static class SquadHarnessLauncher
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(getEnv);
         ArgumentNullException.ThrowIfNull(findOnPath);
+
+        if (row.Status != SquadInstanceStatus.Ready || string.IsNullOrWhiteSpace(row.Variable))
+            throw new ArgumentException($"Harness '{row.Target}' is not ready for instance execution.", nameof(row));
 
         foreach (string arg in args)
             if (arg.AsSpan().IndexOfAny(DangerousCharacters) >= 0)

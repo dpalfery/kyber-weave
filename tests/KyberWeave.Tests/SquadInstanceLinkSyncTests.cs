@@ -8,22 +8,22 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit and integration tests for <see cref="SquadInstanceLinkSync"/>, verifying launch-time
-/// link synchronization, atomic link state recording, and file split detection.
+///     Unit and integration tests for <see cref="SquadInstanceLinkSync" />, verifying launch-time
+///     link synchronization, atomic link state recording, and file split detection.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Acceptance criterion 7.4: An instance SHALL share the main home's settings and history through links.
-/// WHERE the harness stores sign-in in a file, the instance SHALL share sign-in through a link too.
-/// </para>
-/// <para>
-/// Acceptance criterion 7.4a: Exception: WHERE a harness rewrites its sign-in file by rename,
-/// the instance SHALL NOT link that file, and the user SHALL sign in at most once per instance.
-/// </para>
-/// <para>
-/// Acceptance criterion 7.8: WHEN Squad removes or refreshes an instance THEN it SHALL delete
-/// only the instance's own files and links. It SHALL NOT delete or change any link's target.
-/// </para>
+///     <para>
+///         Acceptance criterion 7.4: An instance SHALL share the main home's settings and history through links.
+///         WHERE the harness stores sign-in in a file, the instance SHALL share sign-in through a link too.
+///     </para>
+///     <para>
+///         Acceptance criterion 7.4a: Exception: WHERE a harness rewrites its sign-in file by rename,
+///         the instance SHALL NOT link that file, and the user SHALL sign in at most once per instance.
+///     </para>
+///     <para>
+///         Acceptance criterion 7.8: WHEN Squad removes or refreshes an instance THEN it SHALL delete
+///         only the instance's own files and links. It SHALL NOT delete or change any link's target.
+///     </para>
 /// </remarks>
 public sealed class SquadInstanceLinkSyncTests : IDisposable
 {
@@ -52,8 +52,8 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
             "copilot",
             SquadInstanceKind.ConfigLayer,
             "COPILOT_CONFIG_DIR",
-            ExtraLinks: [],
-            NeverLinked: [],
+            [],
+            [],
             SquadInstanceStatus.Ready,
             null);
 
@@ -399,8 +399,8 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
             "codex",
             SquadInstanceKind.HomeReplace,
             "CODEX_HOME",
-            ExtraLinks: [],
-            NeverLinked: ["session.json"],
+            [],
+            ["session.json"],
             SquadInstanceStatus.Ready,
             null);
 
@@ -582,12 +582,143 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         Assert.True(fakeFileSystem.IsLinkTo("/virtual/instance/settings.json", mainSettings));
     }
 
+    [Fact]
+    public void SyncRejectsPathTraversalInRecordedLinksAndLeavesVictimFileUntouched()
+    {
+        string outsideVictim = Path.Combine(_tempDirectory.Path, "outside-victim.txt");
+        File.WriteAllText(outsideVictim, "do-not-delete", Encoding.UTF8);
+
+        string instanceRoot = Path.Combine(_tempDirectory.Path, "traversal-instance");
+        string mainHome = Path.Combine(_tempDirectory.Path, "traversal-main");
+        string stateDirectory = Path.Combine(_tempDirectory.Path, "traversal-state");
+        Directory.CreateDirectory(instanceRoot);
+        Directory.CreateDirectory(mainHome);
+        Directory.CreateDirectory(stateDirectory);
+
+        string linksJsonPath = Path.Combine(stateDirectory, "links.json");
+        string json = """
+                      [
+                        {
+                          "RelativePath": "../outside-victim.txt",
+                          "TargetPath": "/nonexistent/target",
+                          "Kind": 0,
+                          "LastSeenSize": 0,
+                          "LastSeenModifiedUtc": "2026-01-01T00:00:00Z"
+                        }
+                      ]
+                      """;
+        File.WriteAllText(linksJsonPath, json, Encoding.UTF8);
+
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
+        ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
+
+        Assert.Throws<InvalidDataException>(() => SquadInstanceLinkSync.Sync(
+            instanceRoot,
+            mainHome,
+            row,
+            FrozenSet<string>.Empty,
+            fileSystem,
+            stateDirectory));
+
+        Assert.True(File.Exists(outsideVictim),
+            "Path traversal in links.json must not delete files outside instanceRoot.");
+    }
+
+    [Fact]
+    public void SyncWhenDeleteStaleFileThrowsUnauthorizedAccessExceptionReturnsWarningAndPreservesLinkRecord()
+    {
+        string instanceRoot = Path.Combine(_tempDirectory.Path, "locked-instance");
+        string mainHome = Path.Combine(_tempDirectory.Path, "locked-main");
+        string stateDirectory = Path.Combine(_tempDirectory.Path, "locked-state");
+        string lockedDir = Path.Combine(instanceRoot, "locked");
+        Directory.CreateDirectory(instanceRoot);
+        Directory.CreateDirectory(mainHome);
+        Directory.CreateDirectory(stateDirectory);
+        Directory.CreateDirectory(lockedDir);
+
+        string staleFile = Path.Combine(lockedDir, "stale.txt");
+        File.WriteAllText(staleFile, "stale", Encoding.UTF8);
+
+        string linksJsonPath = Path.Combine(stateDirectory, "links.json");
+        string json = """
+                      [
+                        {
+                          "RelativePath": "locked/stale.txt",
+                          "TargetPath": "/nonexistent/target",
+                          "Kind": 0,
+                          "LastSeenSize": 5,
+                          "LastSeenModifiedUtc": "2026-01-01T00:00:00Z"
+                        }
+                      ]
+                      """;
+        File.WriteAllText(linksJsonPath, json, Encoding.UTF8);
+
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
+        ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                File.SetAttributes(staleFile, FileAttributes.ReadOnly);
+            else
+                File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+
+            SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+                instanceRoot,
+                mainHome,
+                row,
+                FrozenSet<string>.Empty,
+                fileSystem,
+                stateDirectory);
+
+            Assert.Contains(result.Warnings, warning => warning.Contains("stale.txt", StringComparison.Ordinal));
+
+            string savedLinksJson = File.ReadAllText(linksJsonPath, Encoding.UTF8);
+            Assert.Contains("stale.txt", savedLinksJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                if (File.Exists(staleFile)) File.SetAttributes(staleFile, FileAttributes.Normal);
+            }
+            else
+            {
+                if (Directory.Exists(lockedDir))
+                    File.SetUnixFileMode(lockedDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+    }
+
+    [Fact]
+    public void SyncWhenLinksJsonIsCorruptThrowsInvalidDataException()
+    {
+        string instanceRoot = Path.Combine(_tempDirectory.Path, "corrupt-instance");
+        string mainHome = Path.Combine(_tempDirectory.Path, "corrupt-main");
+        string stateDirectory = Path.Combine(_tempDirectory.Path, "corrupt-state");
+        Directory.CreateDirectory(instanceRoot);
+        Directory.CreateDirectory(mainHome);
+        Directory.CreateDirectory(stateDirectory);
+
+        string linksJsonPath = Path.Combine(stateDirectory, "links.json");
+        File.WriteAllText(linksJsonPath, "{ corrupt json : [", Encoding.UTF8);
+
+        SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
+        ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
+
+        Assert.Throws<InvalidDataException>(() => SquadInstanceLinkSync.Sync(
+            instanceRoot,
+            mainHome,
+            row,
+            FrozenSet<string>.Empty,
+            fileSystem,
+            stateDirectory));
+    }
+
     private static ISquadLinkFileSystem CreatePlatformFileSystem()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return new WindowsSquadLinkFileSystem();
-        }
+        if (OperatingSystem.IsWindows()) return new WindowsSquadLinkFileSystem();
 
         return new UnixSquadLinkFileSystem();
     }
@@ -619,14 +750,10 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
             string normalizedExpected = Normalize(expectedTarget);
 
             if (_fileLinks.TryGetValue(normalizedLink, out string? actualTarget))
-            {
                 return string.Equals(actualTarget, normalizedExpected, StringComparison.Ordinal);
-            }
 
             if (_folderLinks.TryGetValue(normalizedLink, out string? actualFolderTarget))
-            {
                 return string.Equals(actualFolderTarget, normalizedExpected, StringComparison.Ordinal);
-            }
 
             return false;
         }
@@ -634,19 +761,18 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         public void DeleteTreeNoFollow(string directoryPath)
         {
             string prefix = Normalize(directoryPath) + "/";
-            List<string> fileKeysToRemove = _fileLinks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
-            foreach (string key in fileKeysToRemove)
-            {
-                _fileLinks.Remove(key);
-            }
+            List<string> fileKeysToRemove =
+                _fileLinks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            foreach (string key in fileKeysToRemove) _fileLinks.Remove(key);
 
-            List<string> folderKeysToRemove = _folderLinks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
-            foreach (string key in folderKeysToRemove)
-            {
-                _folderLinks.Remove(key);
-            }
+            List<string> folderKeysToRemove =
+                _folderLinks.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            foreach (string key in folderKeysToRemove) _folderLinks.Remove(key);
         }
 
-        private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
+        private static string Normalize(string path)
+        {
+            return path.Replace('\\', '/').TrimEnd('/');
+        }
     }
 }
