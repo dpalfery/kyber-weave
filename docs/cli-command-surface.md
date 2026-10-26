@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 ---
 
 # CLI command surface
@@ -85,7 +85,11 @@ kyberdash --version
 `kyber-weave update` replaces the running Release binaries — the CLI, the sibling
 `kyber-weave-mcp`, the installed `kyberdash`, and an installed KyberDash tray — after
 SHA-256 verification. It delegates the tray step to `kyberdash menubar --update`. It does not
-wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. See
+wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. After the binaries
+commit, it reconciles KyberDash in one run: `kyberdash engine ensure --if-running`, the tray
+relaunch when needed, then `kyberdash kyber capture plugin install --harness opencode --preserve
+--if-installed`. The reconciliation also runs when the release is unchanged ("already on").
+When the plugin file changed, it prints a line to restart OpenCode. See
 [Updating](install.md#updating).
 
 ```bash
@@ -93,6 +97,7 @@ kyber-weave update                      # latest stable, all components
 kyber-weave update --release-candidate  # newest release, including RC and -dev tags
 kyber-weave update --no-kyberdash       # leave the KyberDash binary alone
 kyber-weave update --no-menubar         # leave the tray alone
+kyber-weave update --no-restart         # replace binaries; skip the engine and tray restart (plugin still upgrades if installed)
 ```
 
 The tray alone updates with `kyberdash menubar --update`. Tray-only details live in the
@@ -246,8 +251,8 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`squad install`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path <PATH>`, `-t\|--target <TARGETS>`, `-x\|--exclude <TARGETS>`, `-g\|--global`, `--dry-run`, `--adopt`, `--yes`, `-v\|--version <VERSION>` | Deploy canonical agents and skills to harness directories. |
-| [`squad update`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global`, `-t\|--target`, `-x\|--exclude`, `--dry-run`, `--replace-managed`, `--yes`, `-v\|--version`, `--projects <PROJECTS>` | Update an existing deployment while preserving managed local edits. |
+| [`squad install`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path <PATH>`, `-t\|--target <TARGETS>`, `-x\|--exclude <TARGETS>`, `-g\|--global`, `--dry-run`, `--adopt`, `--yes`, `-v\|--version <VERSION>`, `--no-capture-plugin` | Deploy canonical agents and skills to harness directories. With `--global` and OpenCode resolved, also installs the KyberDash OpenCode capture plugin (preserve mode); `--no-capture-plugin` skips that step. |
+| [`squad update`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global`, `-t\|--target`, `-x\|--exclude`, `--dry-run`, `--replace-managed`, `--yes`, `-v\|--version`, `--projects <PROJECTS>`, `--no-capture-plugin` | Update an existing deployment while preserving managed local edits. Same OpenCode plugin step as `squad install`. |
 | [`squad uninstall`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global`, `--dry-run`, `--yes` | Remove files recorded in the ownership receipt. |
 | [`squad status`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Verify deployed files and report drift against the receipt. |
 | [`squad doctor`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Diagnose prerequisites, toolchain availability, and deployment health. |
@@ -300,7 +305,7 @@ Owned by [Updating](install.md#updating).
 
 | Verb | Flags | What it does |
 |---|---|---|
-| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-kyberdash`, `--no-menubar` | Replace the installed CLI and MCP binaries (and KyberDash and tray) from a GitHub Release. |
+| [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray and upgrade an installed OpenCode capture plugin. `--no-restart` skips the engine and tray restart. |
 
 ## `kyberdash` reference
 
@@ -324,6 +329,7 @@ Owned by the [KyberDash overview](dash/README.md) and the
 | [`web`](dash/onboarding.md#first-run) | `--port <number>` (default: the persisted `dashboard.port`, `4747`), `--no-open`, `--view <path>` | Open the local web dashboard. |
 | [`mcp`](dash/runbook.md#2j-conversational-analytics-over-mcp-kyberdash-mcp) | `--server-url <url>` (literal loopback, wins), `--state-dir <dir>` (existing receipt) | Serve the eight read-only analytics tools over MCP stdio; attaches to the running engine, never starts or stops it. |
 | [`menubar`](dash/onboarding.md#install-the-tray) | `--force`, `--update`, `--version <version>` | Install and launch the macOS/Windows tray; `--update` updates an existing install. |
+| [`engine ensure`](dash/runbook.md) | `--if-running` (required) | Replace a live engine of another version with this binary's version. Starts nothing when no engine runs. Prints one line: `engine: not-running`, `engine: attached <version>`, `engine: replaced <old> -> <new>`, or `engine: started <version>`. |
 | [`doctor`](dash/runbook.md) | `--provider <provider>` (default `all`), `--json`, `--no-color` | Per-provider detection status: paths probed, sessions found, parse health. |
 
 ### Canonical telemetry commands (`kyber`)
@@ -336,7 +342,8 @@ Owned by the [KyberDash runbook](dash/runbook.md) and
 | [`kyber otel`](dash/runbook.md#1-starting-the-otlp-ingest-receiver) | `--port <number>` (default `4318`), `--host <host>` (default `127.0.0.1`), `--db <path>`, hidden `--serve` | Start the OTLP trace receiver. |
 | [`kyber capture status`](dash/runbook.md) | `--harness <id>` (repeatable), `--endpoint <url>` (default `http://127.0.0.1:4318`) | Report per-harness capture state and receiver liveness. |
 | [`kyber capture enable`](dash/runbook.md) | capture flags + `--dry-run` | Write harness OTLP exporter keys and record the receipt. |
-| [`kyber capture disable`](dash/runbook.md) | capture flags + `--dry-run` | Restore pre-enable values per key; refuse on drift. |
+| [`kyber capture disable`](dash/runbook.md) | capture flags + `--dry-run` | Restore pre-enable values per key; refuse on drift. For OpenCode also sets consent `content: false` and removes the plugin file. |
+| [`kyber capture plugin install`](dash/runbook.md) | `--harness opencode` (only value), `--preserve`, `--if-installed`, `--config-dir <dir>`, `--dry-run` | Install or upgrade the OpenCode capture plugin file. `--preserve` keeps an edited or foreign file (exit 0) and creates the consent file with `content: false` only when absent. `--if-installed` acts only when the file is present. `--config-dir` overrides `$OPENCODE_CONFIG_DIR` and `~/.config/opencode`. Never writes `opencode.jsonc`. |
 | [`kyber backfill`](dash/runbook.md#3-raw-content-backfill-and-re-normalization) | `--db <path>` | Re-derive canonical content for stored records from their raw payloads. |
 | [`kyber renormalize`](dash/runbook.md#3-raw-content-backfill-and-re-normalization) | `--db`, `--source <source>` (repeatable) | Re-derive harness attribution and token conversion. |
 | [`kyber build`](dash/runbook.md#2-derived-projection-rebuilding-kyber-build) | `--db <path>` | Build or rebuild derived sessions from canonical records. |
@@ -388,6 +395,8 @@ risk. The three rules below mirror the contract in
 | `mcp` | `0` on clean EOF/SIGTERM shutdown (the engine keeps running); tool-domain errors are in-band (`isError: true`) with stable codes, not exit codes |
 | `kyber otel` | `2` when a custom `--port` or `--host` is supplied while the engine attaches |
 | `capture` leaves | `2` for a usage error; otherwise the capture action's own code |
+| `engine ensure` | `0` for `not-running`, `attached`, `replaced`, or `started`; `1` for `engine: unresponsive` (the endpoint holder never answers, nothing started) or `engine: failed`; `2` without `--if-running` |
+| `kyber capture plugin install` | `0` on success, including every `--preserve` keep and every `--if-installed` skip; `1` on a strict refusal (foreign, edited, or unreadable file) or a failed write; `2` for a missing or unsupported `--harness` |
 
 ## `install.sh` flags
 
