@@ -147,6 +147,7 @@ export const ENTRIES = [
   'src/tools/store-memory.ts', // operator tool: attributes a store handle's resident memory
   'src/tools/report-fixtures.ts', // `npm run report:fixtures`, regenerates the renderer fixtures
   'src/capture/harnesses/opencode-plugin/entry.ts', // opencode loads the installed plugin file by path (runbook), never by dash import
+  'src/capture/harnesses/opencode-plugin/generated/plugin-source.ts', // generated text of the plugin; the T4 installer imports it, bundle.test.ts guards it
   'web/src/main.tsx', //        the web dashboard's Vite entry
 ]
 export const SCAN_ROOTS = ['src', 'web/src']

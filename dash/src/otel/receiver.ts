@@ -28,12 +28,15 @@
 // posting to this port (hex ids, plain numbers, `INTERNAL`-style enums).
 
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
 import { stripIdentityAttributes } from './identity.js'
+import { deriveLogId } from './log-id.js'
+
+// Kept exported from here: callers outside the plugin bundle import it from the receiver.
+export { deriveLogId }
 
 const execFileAsync = promisify(execFile)
 
@@ -144,38 +147,6 @@ export type OtlpLog = {
   attributes: Record<string, unknown>
   resource: Record<string, unknown>
   scope: OtlpScope
-}
-
-/**
- * Globally unique log identity for enrichment idempotency.
- *
- * Event class names (`claude_code.api_request_body`) repeat every turn; using
- * one as `logId` made later records of the same class look like duplicates.
- * Correlation identity + timestamp + a payload digest distinguishes them.
- */
-export function deriveLogId(input: {
-  traceId: string | null
-  spanId: string | null
-  sessionId: string | null
-  timeUnixNano: bigint | string
-  body: unknown
-  attributes: Record<string, unknown>
-  eventName?: string
-}): string {
-  const keys = Object.keys(input.attributes).sort()
-  const attributes: Record<string, unknown> = {}
-  for (const key of keys) attributes[key] = input.attributes[key]
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify({
-        event: input.eventName ?? '',
-        body: input.body ?? null,
-        attributes,
-      }),
-    )
-    .digest('hex')
-    .slice(0, 16)
-  return `${input.traceId ?? input.sessionId ?? 'log'}:${input.spanId ?? 'none'}:${String(input.timeUnixNano)}:${digest}`
 }
 
 /**

@@ -1281,3 +1281,84 @@ describe('extractListedSkills, opencode context listing', () => {
     expect(result).not.toHaveProperty('skills')
   })
 })
+
+// ---------------------------------------------------------------------------
+// extractListedSkills: opencode `<available_skills>` block (plan R1, D6, T7)
+// ---------------------------------------------------------------------------
+
+describe('extractListedSkills, opencode available_skills block', () => {
+  const OPENCODE_LISTING_KEY = 'opencode.context.skills'
+  const block = (ids: string[]): string =>
+    `Intro.\n<available_skills>\n${ids
+      .map((id) => `<skill><id>${id}</id><name>${id}</name><description>does ${id}</description></skill>`)
+      .join('\n')}\n</available_skills>`
+
+  const opencodeTurn = (spanId: string, system: string, raw?: Record<string, unknown>): CanonicalRecord =>
+    modelTurn('opencode', spanId, {
+      source: 'opencode',
+      ...withParts([{ part: 'system_prompt', text: system, order: 0 }]),
+      ...(raw === undefined ? {} : { raw }),
+    })
+
+  it('reads skill ids from the block when the listing key is absent', () => {
+    const result = extractListedSkills(opencodeTurn('oc-block', block(['review', 'build'])))
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['review', 'build'])
+  })
+
+  it('reads the block when the listing key holds an empty array', () => {
+    const result = extractListedSkills(
+      opencodeTurn('oc-empty-key', block(['review']), { [OPENCODE_LISTING_KEY]: '[]' }),
+    )
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['review'])
+  })
+
+  it('a non-empty listing key still wins over the block', () => {
+    const result = extractListedSkills(
+      opencodeTurn('oc-key-wins', block(['other']), { [OPENCODE_LISTING_KEY]: JSON.stringify(['review']) }),
+    )
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['review'])
+  })
+
+  it('a malformed block is not measurable with a named reason, never an empty list', () => {
+    const result = extractListedSkills(
+      opencodeTurn('oc-malformed', '<available_skills>\n<skill><name>x</name></skill>\n</available_skills>'),
+    )
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toContain('available_skills')
+    expect(result).not.toHaveProperty('skills')
+  })
+
+  it('no block falls back to the generic system-prompt listing', () => {
+    const result = extractListedSkills(
+      opencodeTurn('oc-fallback', '<skills><skill><name>legacy</name><description>d</description></skill></skills>'),
+    )
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['legacy'])
+  })
+
+  it('reads the skill id, not the display name, from the block', () => {
+    const result = extractListedSkills(
+      opencodeTurn(
+        'oc-id',
+        '<available_skills><skill><id>pkg:review</id><name>Review</name><description>d</description></skill></available_skills>',
+      ),
+    )
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['pkg:review'])
+  })
+
+  it('no block and no fallback source is not measurable', () => {
+    const result = extractListedSkills(opencodeTurn('oc-none', 'You are a build agent.'))
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('does not change another harness: a copilot-style block keeps its own reading', () => {
+    const record = modelTurn('copilot-vscode', 'cp-block', {
+      source: 'copilot-vscode',
+      ...withParts([{ part: 'system_prompt', text: block(['review']), order: 0 }]),
+    })
+    const result = extractListedSkills(record)
+    expect(result).toMatchObject({ measurable: true })
+  })
+})
