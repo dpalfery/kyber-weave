@@ -486,6 +486,70 @@ public sealed class ArchiveCloseoutValidatorTests
     }
 
     /// <summary>
+    /// A bold-prefixed waiver is still a leading waiver: markdown emphasis around the
+    /// marker does not demote it to prose, so the decision maps.
+    /// </summary>
+    [Fact]
+    public void BoldPrefixedWaiverStillMapsTheDecision()
+    {
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
+                CloseoutCorpus.DecisionsSection("D1")
+                + CloseoutCorpus.CloseoutMappingSection(("D1, H1",
+                    "**Documentation waiver — transient spike:** no surviving invariants."))
+                + CloseoutCorpus.DesignHarvestSection("H1")));
+
+        Assert.Empty(Validate(
+            fixture,
+            KyberWeaveConfig.ProductDefaults,
+            new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+    }
+
+    /// <summary>
+    /// A waiver marker buried after an unresolvable link is not a waiver: the row maps
+    /// nothing, so the decision stays unmapped (C7).
+    /// </summary>
+    [Fact]
+    public void BuriedWaiverMarkerAfterUnresolvableLinkMapsNothing()
+    {
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
+                CloseoutCorpus.DecisionsSection("D1")
+                + CloseoutCorpus.CloseoutMappingSection(("D1, H1",
+                    "[Ghost widget](../../reference/ghost.md) documentation waiver noted"))
+                + CloseoutCorpus.DesignHarvestSection("H1")));
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Equal(PlanPath, finding.FilePath);
+        Assert.Contains("C7", FindingText(finding), StringComparison.Ordinal);
+        Assert.Contains("D1", FindingText(finding), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A pipe table inside a fenced code block is an example, not evidence: with no
+    /// real Decisions table the entry fails C3.
+    /// </summary>
+    [Fact]
+    public void FencedExampleTableIsNotADecisionsTable()
+    {
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
+                "## Decisions\n\nAn example of the table shape:\n\n```\n| ID | Question |\n| --- | --- |\n| D1 | Example? |\n```\n"
+                + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+                + CloseoutCorpus.DesignHarvestSection("H1")));
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Equal(PlanPath, finding.FilePath);
+        Assert.Contains("C3", FindingText(finding), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A comma-separated first cell maps each id it names. The control entry still fails,
     /// so the single finding for the control proves the comma list passed.
     /// </summary>

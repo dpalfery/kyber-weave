@@ -444,9 +444,12 @@ public sealed partial class ArchiveCloseoutValidator
 
     /// <summary>
     /// C7: the ids one mapping row covers. A row maps its comma-separated ids when its
-    /// destination records a Documentation waiver or links a live governed document. A
-    /// hyphenated range is one token, not an expansion; RESIDUAL maps nothing by itself;
-    /// an ADR waiver excuses the lasting record, not the mapping.
+    /// destination starts with a Documentation waiver marker or links a live governed
+    /// document. A waiver buried after other text is prose, not a waiver: only a leading
+    /// marker excuses the link check, so an unresolvable link with trailing waiver
+    /// words still maps nothing. A hyphenated range is one token, not an expansion;
+    /// RESIDUAL maps nothing by itself; an ADR waiver excuses the lasting record,
+    /// not the mapping.
     /// </summary>
     private static HashSet<string> MappedIds(
         string entryPath,
@@ -456,7 +459,7 @@ public sealed partial class ArchiveCloseoutValidator
         HashSet<string> mapped = new(StringComparer.Ordinal);
         foreach ((string ids, string destination) in mapping)
         {
-            bool waived = destination.Contains("documentation waiver", StringComparison.OrdinalIgnoreCase);
+            bool waived = IsDocumentationWaiver(destination);
             bool linked = !waived && ResolvesToLiveDocument(entryPath, destination, byPath) is not null;
             if (!waived && !linked)
                 continue;
@@ -474,6 +477,15 @@ public sealed partial class ArchiveCloseoutValidator
 
         return mapped;
     }
+
+    /// <summary>
+    /// True when a mapping destination leads with a Documentation waiver marker. Leading
+    /// markdown emphasis is skipped, so a bold <c>**Documentation waiver — …**</c> cell
+    /// still reads as a waiver; a marker buried after other text stays prose.
+    /// </summary>
+    private static bool IsDocumentationWaiver(string destination) =>
+        destination.TrimStart().TrimStart('*', '_')
+            .StartsWith("documentation waiver", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The first live governed document a destination links, if any.</summary>
     private static DocumentModel? ResolvesToLiveDocument(
@@ -623,8 +635,24 @@ public sealed partial class ArchiveCloseoutValidator
         List<string> lines = section.Body
             .Split('\n')
             .Select(line => line.Trim())
-            .Where(line => line.Length > 0 && line[0] == '|')
             .ToList();
+        List<string> tableLines = new();
+        bool inFence = false;
+        foreach (string line in lines)
+        {
+            // Fenced code blocks hold examples, not evidence: the same fence rule as
+            // SplitSections, so a documented table shape never counts as a table.
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
+
+            if (!inFence && line.Length > 0 && line[0] == '|')
+                tableLines.Add(line);
+        }
+
+        lines = tableLines;
         if (lines.Count < 2)
             return null;
 
