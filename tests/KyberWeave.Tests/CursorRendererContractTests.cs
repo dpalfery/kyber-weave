@@ -318,6 +318,7 @@ public sealed class CursorRendererContractTests
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];

@@ -687,7 +687,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_Antigravity_Native_DocumentationProfileHasNoExecuteTools()
+    public async Task RenderAsync_Antigravity_Native_DocumentationProfileGrantsRunCommand()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -700,8 +700,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // D4/D10: Documentation profile (filesystem.write allow, process.execute deny)
-        // must not include run_command in the narrowed tools list
+        // D4/D10: Documentation profile (filesystem.write allow, process.execute allow)
+        // must include run_command in the tools list, and must not degrade as not isolable
         var docProfileAgents = source.Agents
             .Where(a => a.CapabilityProfile == "documentation")
             .ToList();
@@ -721,7 +721,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             YamlNode? toolsNode = OptionalScalar(frontmatter, "tools");
 
-            // Tools list must not contain run_command
+            // Tools list must contain run_command alongside write_to_file
             if (toolsNode is YamlSequenceNode toolsSeq)
             {
                 string[] tools = toolsSeq.Children
@@ -729,9 +729,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     .Select(n => n.Value ?? string.Empty)
                     .ToArray();
 
-                Assert.False(
+                Assert.True(
                     tools.Contains("run_command", StringComparer.Ordinal),
-                    $"Documentation agent '{agent.Name}' must not have run_command tool");
+                    $"Documentation agent '{agent.Name}' must have run_command tool");
+                Assert.DoesNotContain(
+                    result.Degradations,
+                    d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
                 Assert.True(
                     tools.Contains("write_to_file", StringComparer.Ordinal),
                     $"Documentation agent '{agent.Name}' must have write_to_file tool");

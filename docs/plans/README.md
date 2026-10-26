@@ -31,6 +31,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-26-docs-dev-process-execute.md](2026-10-26-docs-dev-process-execute.md) | Draft — decision-complete, awaiting approve-and-execute | 2026-10-26 | Give `docs-dev` `process.execute: allow` through the single-consumer `documentation` profile (plus Copilot `execute/*` tools, with a guard test) so it can archive plans/specs with `git mv` and run `docs validate --merge-ready` / `docs drift`; amend ADR 0028 and architecture §8 in place; flip the renderer test pins without weakening them. Local redeploy is a post-merge owner step. |
 
 ## Archived Plans
 

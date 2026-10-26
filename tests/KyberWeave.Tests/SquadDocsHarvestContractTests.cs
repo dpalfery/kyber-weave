@@ -523,6 +523,51 @@ public sealed class SquadDocsHarvestContractTests
         }
     }
 
+    /// <summary>
+    /// docs-dev holds a shell only for the four command classes its packet names: archival
+    /// <c>git mv</c>, the two documentation checks, and targeted doc-pinning tests. The body
+    /// also states the never-commit-or-push rule and that docs-dev is the only archiver, so
+    /// a later edit cannot widen the instruction-scoped boundary silently.
+    /// </summary>
+    [Fact]
+    public void DocsDevBodyNamesItsOnlyShellCommands()
+    {
+        string text = ReadProduct("agents", "docs-dev.md");
+
+        AssertAll(
+            text,
+            "## Commands you run",
+            "git mv",
+            "docs validate . --merge-ready",
+            "docs drift .",
+            "targeted tests that pin documentation",
+            "Never commit or push unless the packet says so",
+            "docs-dev is the only role that archives a plan or spec");
+    }
+
+    /// <summary>
+    /// The <c>documentation</c> capability profile has exactly one consumer, docs-dev, and
+    /// grants <c>process.execute</c>. Its grant is instruction-scoped (the lattice has no
+    /// command scoping), so a second consumer must be a visible, reviewed change that
+    /// updates this guard rather than a silent inheritance of the shell grant.
+    /// </summary>
+    [Fact]
+    public void DocumentationProfileIsConsumedOnlyByDocsDevAndGrantsExecute()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] expectedConsumers = ["docs-dev"];
+        string[] consumers = source.Agents
+            .Where(agent => agent.CapabilityProfile == "documentation")
+            .Select(agent => agent.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expectedConsumers, consumers);
+
+        SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles["documentation"];
+        Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions["process.execute"]);
+    }
+
     private static async Task<string> RenderFrontmatterAsync(string agentName)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
