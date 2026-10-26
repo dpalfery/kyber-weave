@@ -115,6 +115,14 @@ export type CaptureRunOptions = {
    * once after a successful, non-dry-run `enable` that includes OpenCode.
    */
   engine?: CaptureEngineSeams
+  /**
+   * OpenCode config root override for the whole-file plugin (`capture enable`,
+   * `disable` and `status`): `--config-dir`, else `$OPENCODE_CONFIG_DIR`, else
+   * `~/.config/opencode` — the same precedence `capture plugin install` and
+   * Squad use. The key writers never need it; only the OpenCode file plugin
+   * reads it.
+   */
+  opencodeConfigDir?: string
 }
 
 export type CaptureEngineSeams = {
@@ -395,7 +403,7 @@ export async function runCapture(
     probeReceiver(endpoint, options.fetchHealth, options.probeTimeoutMs))
 
   if (action === 'status') {
-    out.push(...statusLines(selected, home, pathEnv, endpoint))
+    out.push(...statusLines(selected, home, pathEnv, endpoint, options.opencodeConfigDir))
     out.push(`receiver: ${probe.state}`, `  ${probe.detail}`)
     if (probe.state === 'none') out.push(RECEIVER_DOWN_REMEDY)
     if (options.engine !== undefined) {
@@ -420,6 +428,7 @@ export async function runCapture(
         probe.detail,
         options.dryRun ?? false,
         options.fileFilter,
+        options.opencodeConfigDir,
       )
       return await ensureEngineAfterEnable(enabled, selected, options)
     }
@@ -432,6 +441,7 @@ export async function runCapture(
       options.fileFilter,
       endpoint,
       options.removeUnreceiptedKeys ?? false,
+      options.opencodeConfigDir,
     )
   } catch (error) {
     if (typeof error === 'object' && error !== null) {
@@ -461,6 +471,7 @@ function statusLines(
   home: string,
   env: PathEnv,
   endpoint: string,
+  configDir: string | undefined,
 ): string[] {
   const lines: string[] = []
   const receipt = loadReceiptLenient(home)
@@ -496,7 +507,7 @@ function statusLines(
     lines.push(...statusWarningLines(writer, home, env))
     lines.push(...statusEnvSnippetLines(writer))
     if (writer.filePlugin !== undefined) {
-      for (const line of writer.filePlugin.describeStatus(home, env)) lines.push(`  ${line}`)
+      for (const line of writer.filePlugin.describeStatus(home, env, ...(configDir !== undefined ? [{ configDir }] : []))) lines.push(`  ${line}`)
     }
   }
   return lines
@@ -843,8 +854,9 @@ function enableFilePlugin(
   home: string,
   env: PathEnv,
   dryRun: boolean,
+  configDir: string | undefined,
 ): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
-  const installed = plugin.install(home, env, { dryRun })
+  const installed = plugin.install(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
   const out = [...installed.out]
   // A noop adds nothing beside the config file's own event, so it stays in the text only.
   const events: CaptureEvent[] =
@@ -855,7 +867,7 @@ function enableFilePlugin(
             kind: installed.outcome,
             harness,
             fileId: 'plugin',
-            path: plugin.path(home, env),
+            path: plugin.path(home, env, ...(configDir !== undefined ? [{ configDir }] : [])),
             ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
           },
         ]
@@ -870,9 +882,10 @@ function disableFilePlugin(
   home: string,
   env: PathEnv,
   dryRun: boolean,
+  configDir: string | undefined,
 ): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
   const out = [...plugin.consent.set(home, env, false, { dryRun }).out]
-  const removed = plugin.uninstall(home, env, { dryRun })
+  const removed = plugin.uninstall(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
   out.push(...removed.out)
   const events: CaptureEvent[] =
     removed.outcome === 'wrote' || removed.outcome === 'would-write' || removed.outcome === 'noop'
@@ -882,7 +895,7 @@ function disableFilePlugin(
             kind: removed.outcome,
             harness,
             fileId: 'plugin',
-            path: plugin.path(home, env),
+            path: plugin.path(home, env, ...(configDir !== undefined ? [{ configDir }] : [])),
             ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
           },
         ]
@@ -899,6 +912,7 @@ async function runEnable(
   probeDetail: string,
   dryRun: boolean,
   fileFilter: CaptureFileFilter | undefined,
+  configDir: string | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -974,7 +988,7 @@ async function runEnable(
         wroteAny = true
       }
       if (writer.filePlugin !== undefined && !writerFailed) {
-        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun)
+        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
         out.push(...plugin.out)
         err.push(...plugin.err)
         events.push(...plugin.events)
@@ -1336,6 +1350,7 @@ async function runDisable(
   fileFilter: CaptureFileFilter | undefined,
   endpoint: string,
   removeUnreceiptedKeys: boolean,
+  configDir: string | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -1377,7 +1392,7 @@ async function runDisable(
       continue
     }
     if (writer.filePlugin !== undefined) {
-      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun)
+      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
       out.push(...plugin.out)
       err.push(...plugin.err)
       events.push(...plugin.events)

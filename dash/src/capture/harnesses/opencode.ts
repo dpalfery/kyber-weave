@@ -39,11 +39,14 @@ function narrow(result: OpencodePluginResult) {
 }
 
 const opencodeFilePlugin: ManagedFilePlugin = {
-  install: (home, env, options) => narrow(installOpencodePlugin(home, env, { mode: 'strict', dryRun: options.dryRun })),
-  uninstall: (home, env, options) => narrow(uninstallOpencodePlugin(home, env, { dryRun: options.dryRun })),
-  path: (home, env) => opencodePluginPaths(home, env).pluginFile,
-  state: (home, env) => opencodePluginState(home, env),
-  describeStatus: (home, env) => describeOpencodePluginStatus(home, env),
+  install: (home, env, options) =>
+    narrow(installOpencodePlugin(home, env, { mode: 'strict', dryRun: options.dryRun, ...(options.configDir !== undefined ? { configDir: options.configDir } : {}) })),
+  uninstall: (home, env, options) =>
+    narrow(uninstallOpencodePlugin(home, env, { dryRun: options.dryRun, ...(options.configDir !== undefined ? { configDir: options.configDir } : {}) })),
+  path: (home, env, options) => opencodePluginPaths(home, env, { ...(options?.configDir !== undefined ? { configDir: options.configDir } : {}) }).pluginFile,
+  state: (home, env, options) => opencodePluginState(home, env, { ...(options?.configDir !== undefined ? { configDir: options.configDir } : {}) }),
+  describeStatus: (home, env, options) =>
+    describeOpencodePluginStatus(home, env, { ...(options?.configDir !== undefined ? { configDir: options.configDir } : {}) }),
   consent: {
     set: (home, env, content, options) => setOpencodeContentConsent(home, content, { dryRun: options.dryRun, env }),
   },

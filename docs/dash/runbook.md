@@ -1322,12 +1322,14 @@ works — run the import above and ignore the row.
 **OpenCode capture plugin (`kyberdash-opencode`).** KyberDash installs one plugin file,
 `kyberdash-opencode.js`, into OpenCode's global plugin directory, `<root>/plugins/`. The root is
 `--config-dir` when given, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`. You do not copy
-the file by hand; the `kyberdash` binary carries it. `kyberdash kyber capture enable` takes no
-`--config-dir`: it uses `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`. A plugin Squad installed
+the file by hand; the `kyberdash` binary carries it. `kyberdash kyber capture enable`,
+`disable` and `status` take `--config-dir` with the same precedence (flag, else
+`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`), so a re-enable into a custom root needs no
+env export. Even without the flag, a plugin Squad installed
 into a custom root is still found by `capture status` and `capture disable`, which follow the path in
 the receipt, but only when that path is `<dir>/plugins/kyberdash-opencode.js`, a regular file (not a
-symlink) that carries the KyberDash marker. To re-enable into that custom root, set
-`$OPENCODE_CONFIG_DIR` or rerun the Squad install. OpenCode 2.1.4 loads its default export
+symlink) that carries the KyberDash marker. To re-enable into that custom root, pass
+`--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. OpenCode 2.1.4 loads its default export
 `{ id: 'kyberdash-opencode', setup }`, and `setup` registers one `context` hook that sends each
 request's identity, system prompt, tool definitions and skills listing to the loopback receiver
 through the bounded outbox. The hook only reads OpenCode's request. OpenCode 1.x is not supported yet.

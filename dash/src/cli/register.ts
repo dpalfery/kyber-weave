@@ -404,12 +404,13 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
 
   const runCaptureAction =
     (action: CaptureAction) =>
-    async (opts: { harness?: string[]; endpoint?: string; dryRun?: boolean }): Promise<void> => {
+    async (opts: { harness?: string[]; endpoint?: string; dryRun?: boolean; configDir?: string }): Promise<void> => {
       const { runCapture } = await import('../capture/index.js')
       const result = await runCapture(action, {
         harnessIds: opts.harness !== undefined && opts.harness.length > 0 ? opts.harness : undefined,
         endpoint: opts.endpoint,
         dryRun: opts.dryRun,
+        ...(opts.configDir !== undefined ? { opencodeConfigDir: opts.configDir } : {}),
         ...(action === 'disable' ? {} : { engine: await captureEngineSeams() }),
       })
       if (result.stdout !== '') process.stdout.write(result.stdout)
@@ -420,7 +421,8 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
   declareCaptureOptions(
     capture
       .command('status')
-      .description('Report per-harness capture state and receiver liveness'),
+      .description('Report per-harness capture state and receiver liveness')
+      .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)'),
   )
     .exitOverride(captureUsageExit)
     .action(runCaptureAction('status'))
@@ -429,7 +431,8 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     capture
       .command('enable')
       .description('Write harness OTLP exporter keys and record the receipt')
-      .option('--dry-run', 'Print the exact per-file change and write nothing'),
+      .option('--dry-run', 'Print the exact per-file change and write nothing')
+      .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)'),
   )
     .exitOverride(captureUsageExit)
     .action(runCaptureAction('enable'))
@@ -438,7 +441,8 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     capture
       .command('disable')
       .description('Restore pre-enable values per key; refuse on drift')
-      .option('--dry-run', 'Print the exact per-file change and write nothing'),
+      .option('--dry-run', 'Print the exact per-file change and write nothing')
+      .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)'),
   )
     .exitOverride(captureUsageExit)
     .action(runCaptureAction('disable'))

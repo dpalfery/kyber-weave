@@ -52,6 +52,69 @@ describe('capture enable/disable --harness opencode', () => {
     )
   })
 
+  it('enable with opencodeConfigDir installs the plugin under the custom root (Squad parity)', async () => {
+    const home = makeHome()
+    // A Squad install into a custom root and `capture enable` must agree on the
+    // plugin path: without the override enable writes to ~/.config while Squad
+    // installed elsewhere (kilo review on opencode.ts:42).
+    const root = join(home, 'custom-opencode')
+    const customPlugin = join(root, 'plugins', 'kyberdash-opencode.js')
+    const result = await runCapture('enable', {
+      homeDir: home,
+      harnessIds: ['opencode'],
+      fetchHealth: NO_LISTENER,
+      opencodeConfigDir: root,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(readFileSync(customPlugin, 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
+    expect(existsSync(pluginFile(home))).toBe(false)
+    expect(result.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ harness: 'opencode', fileId: 'plugin', kind: 'wrote', path: customPlugin }),
+      ]),
+    )
+  })
+
+  it('disable with opencodeConfigDir removes the custom-root plugin', async () => {
+    const home = makeHome()
+    const root = join(home, 'custom-opencode')
+    const customPlugin = join(root, 'plugins', 'kyberdash-opencode.js')
+    await runCapture('enable', {
+      homeDir: home,
+      harnessIds: ['opencode'],
+      fetchHealth: NO_LISTENER,
+      opencodeConfigDir: root,
+    })
+    const result = await runCapture('disable', {
+      homeDir: home,
+      harnessIds: ['opencode'],
+      fetchHealth: NO_LISTENER,
+      opencodeConfigDir: root,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(customPlugin)).toBe(false)
+    expect(consent(home)).toEqual({ version: 1, content: false })
+  })
+
+  it('status with opencodeConfigDir reports the custom-root plugin', async () => {
+    const home = makeHome()
+    const root = join(home, 'custom-opencode')
+    await runCapture('enable', {
+      homeDir: home,
+      harnessIds: ['opencode'],
+      fetchHealth: NO_LISTENER,
+      opencodeConfigDir: root,
+    })
+    const result = await runCapture('status', {
+      homeDir: home,
+      harnessIds: ['opencode'],
+      fetchHealth: NO_LISTENER,
+      opencodeConfigDir: root,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('plugin: installed')
+  })
+
   it('enable flips an existing content:false file to true', async () => {
     const home = makeHome()
     mkdirSync(join(home, '.kyberdash'), { recursive: true })

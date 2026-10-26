@@ -188,12 +188,12 @@ export type ManagedHarnessWriter = {
 
 /** The whole-file plugin a managed harness owns. Results reuse the Kilo plugin shape. */
 export type ManagedFilePlugin = {
-  install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
-  uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
-  path: (home: string, env: PathEnv | undefined) => string
-  state: (home: string, env: PathEnv | undefined) => KiloPluginState
+  install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
+  uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
+  path: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => string
+  state: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => KiloPluginState
   /** Fixed-format status lines for the plugin and its consent. Never echoes owner text. */
-  describeStatus: (home: string, env: PathEnv | undefined) => readonly string[]
+  describeStatus: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => readonly string[]
   /** The Settings switch is the consent: on for `enable`, off for `disable`. */
   consent: {
     set: (home: string, env: PathEnv | undefined, content: boolean, options: { dryRun: boolean }) => { out: string[] }
