@@ -250,8 +250,8 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     // object, not a number, and must not be coerced into the denominator.
     const summary = payload.summary
     if (summary) {
-      if (typeof summary.total_cache_read === 'number') digest.totalCacheRead += summary.total_cache_read
-      if (typeof summary.total_input === 'number') digest.totalInput += summary.total_input
+      if (typeof summary.total_cache_read === 'number' && Number.isFinite(summary.total_cache_read)) digest.totalCacheRead += summary.total_cache_read
+      if (typeof summary.total_input === 'number' && Number.isFinite(summary.total_input)) digest.totalInput += summary.total_input
       // Evidence is an observed, positive counter: a zero or an unmeasurable
       // block is not proof the harness exports the counter.
       if (observedBucket(summary.total_input) || observedBucket(summary.total_output)) digest.tokenUsage = true

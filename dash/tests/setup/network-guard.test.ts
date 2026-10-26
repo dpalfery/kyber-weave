@@ -33,6 +33,29 @@ describe('network guard rules', () => {
     expect(isLiveReceiverUrl('not a url')).toBe(false)
   })
 
+  it('covers all of 127.0.0.0/8, IPv6 loopback, v4-mapped loopback and mixed-case hosts', () => {
+    for (const host of ['127.0.0.2', '127.255.255.254', '[::1]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', 'LocalHost', '127.0.0.1.', 'localhost.']) {
+      expect(isLiveReceiverUrl(`http://${host}:4318/v1/traces`), host).toBe(true)
+    }
+    expect(isLiveReceiverUrl('http://[::1]:4319/v1/traces')).toBe(false)
+    expect(isLiveReceiverUrl('http://128.0.0.1:4318/v1/traces')).toBe(false)
+    expect(isLiveReceiverUrl('http://[2001:db8::1]:4318/v1/traces')).toBe(false)
+  })
+
+  it('refuses 127.0.0.2 and [::1] on port 4318 without calling the base fetch', async () => {
+    const base = vi.fn(okResponse)
+    const guard = createNetworkGuard(base)
+    for (const url of ['http://127.0.0.2:4318/v1/traces', 'http://[::1]:4318/v1/traces']) {
+      const outcome = await guard.fetch(url).then(
+        () => 'resolved',
+        (error: unknown) => error,
+      )
+      expect(outcome).toBeInstanceOf(NetworkGuardError)
+    }
+    expect(base).not.toHaveBeenCalled()
+    expect(guard.hits).toHaveLength(2)
+  })
+
   it('fails a live-receiver fetch closed with the named guard error and never calls the base fetch', async () => {
     const base = vi.fn(okResponse)
     const guard = createNetworkGuard(base)

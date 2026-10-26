@@ -12,7 +12,6 @@
 
 export const NETWORK_GUARD_ERROR_NAME = 'KyberDashNetworkGuardError'
 
-const LIVE_RECEIVER_HOSTS: readonly string[] = ['127.0.0.1', 'localhost']
 const LIVE_RECEIVER_PORT = '4318'
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
@@ -43,7 +42,20 @@ function urlOf(input: string | URL | Request): string {
   return input.url
 }
 
-/** True when the URL targets the live receiver: 127.0.0.1 or localhost on port 4318. */
+/** True for any loopback host: localhost, 127.0.0.0/8, [::1], or a v4-mapped 127.x address. */
+function isLoopbackHost(rawHost: string): boolean {
+  // URL already lower-cases and normalizes IPv6 (::ffff:127.0.0.1 -> ::ffff:7f00:1); strip the
+  // brackets and any trailing root dot.
+  const host = rawHost.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (host === 'localhost') return true
+  if (/^127(\.\d{1,3}){3}$/.test(host)) return true
+  if (host === '::1') return true
+  const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(host)
+  if (mapped) return (Number.parseInt(mapped[1] as string, 16) >> 8) === 127
+  return /^::ffff:127\./.test(host)
+}
+
+/** True when the URL targets the live receiver: any loopback host on port 4318. */
 export function isLiveReceiverUrl(input: string | URL | Request): boolean {
   let parsed: URL
   try {
@@ -51,7 +63,7 @@ export function isLiveReceiverUrl(input: string | URL | Request): boolean {
   } catch {
     return false
   }
-  return LIVE_RECEIVER_HOSTS.includes(parsed.hostname) && parsed.port === LIVE_RECEIVER_PORT
+  return isLoopbackHost(parsed.hostname) && parsed.port === LIVE_RECEIVER_PORT
 }
 
 const GUARD_HANDLE = Symbol.for('kyberdash.test.network-guard')
