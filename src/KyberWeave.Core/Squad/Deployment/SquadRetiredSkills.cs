@@ -34,7 +34,7 @@ public static class SquadRetiredSkills
         {
             foreach (string retired in RetiredSkillNames)
             {
-                if (file.RelativePath.Contains(retired, StringComparison.Ordinal))
+                if (IsRetiredSkillPath(file.RelativePath, retired))
                 {
                     retained.Add(file.RelativePath);
                     break;
@@ -49,14 +49,16 @@ public static class SquadRetiredSkills
     public static bool IsRetiredSkillPath(string relativePath)
     {
         ArgumentNullException.ThrowIfNull(relativePath);
-        foreach (string retired in RetiredSkillNames)
-        {
-            if (relativePath.Contains(retired, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return RetiredSkillNames.Any(retired => IsRetiredSkillPath(relativePath, retired));
     }
+
+    /// <summary>
+    /// True when one full path segment equals the retired skill name. Substring
+    /// matching would flag lookalikes such as <c>my-second-brainstorm</c> as retained
+    /// <c>second-brain</c> state.
+    /// </summary>
+    private static bool IsRetiredSkillPath(string relativePath, string retired) =>
+        relativePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment.Equals(retired, StringComparison.Ordinal));
 }
