@@ -824,7 +824,10 @@ public sealed class UpdateCommandTests : IDisposable
         List<ReconcileStep> steps,
         string? trayVersion = "0.9.23",
         ProcessResult? engineResult = null,
-        ProcessResult? pluginResult = null)
+        ProcessResult? pluginResult = null,
+        Exception? trayException = null,
+        Exception? engineException = null,
+        Exception? pluginException = null)
     {
         ProcessResult engine = engineResult ?? new ProcessResult(0, "engine: not-running\n", string.Empty);
         ProcessResult plugin = pluginResult ?? new ProcessResult(0, string.Empty, string.Empty);
@@ -836,12 +839,18 @@ public sealed class UpdateCommandTests : IDisposable
             (file, args) =>
             {
                 steps.Add(new ReconcileStep("tray", file, args));
+                if (trayException is not null)
+                    throw trayException;
                 return 0;
             },
             captureProcess: (file, args) =>
             {
                 bool engineCall = args.Count > 0 && args[0] == "engine";
                 steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
+                if (engineCall && engineException is not null)
+                    throw engineException;
+                if (!engineCall && pluginException is not null)
+                    throw pluginException;
                 return engineCall ? engine : plugin;
             });
         return updater.Run(options);
@@ -1122,6 +1131,75 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(log, line => line.Contains("capture plugin step failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>An engine step whose kyberdash cannot be started (not executable) is a named failure; the committed binaries stay.</summary>
+    [Fact]
+    public void RunWhenTheEngineStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            engineException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash engine step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>A tray step whose kyberdash cannot be started is a named failure; the committed binaries stay.</summary>
+    [Fact]
+    public void RunWhenTheTrayStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            trayException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash tray step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>A plugin step whose kyberdash cannot be started is a warning: the update still exits 0.</summary>
+    [Fact]
+    public void RunWhenThePluginStepCannotBeExecutedIsAWarningAndTheUpdateStillSucceeds()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("could not run KyberDash", StringComparison.Ordinal));
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
     private SelfUpdateOutcome Run(

@@ -27,6 +27,13 @@ public sealed class FakeProcessExecutor : IProcessExecutor
         return this;
     }
 
+    /// <summary>Makes the command throw the given exception, as a process start can when the file is not executable.</summary>
+    public FakeProcessExecutor WithException(string command, Exception exception)
+    {
+        _cannedExceptions[command] = exception;
+        return this;
+    }
+
     public ProcessResult Run(ProcessStartInfo startInfo, string standardInput = "")
     {
         ArgumentNullException.ThrowIfNull(startInfo);

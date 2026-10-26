@@ -379,7 +379,8 @@ internal sealed class SelfUpdater : IDisposable
         {
             result = _captureProcess(kyberdash, ["engine", "ensure", "--if-running"]);
         }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException)
         {
             throw new SelfUpdateException(
                 $"the KyberDash engine step could not start `{kyberdash} engine ensure --if-running`: {ex.Message}. " +
@@ -424,7 +425,8 @@ internal sealed class SelfUpdater : IDisposable
                 kyberdash,
                 ["kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"]);
         }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException)
         {
             _log($"warning: the OpenCode capture plugin step could not run KyberDash: {ex.Message}");
             return;
@@ -530,7 +532,19 @@ internal sealed class SelfUpdater : IDisposable
             BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
 
         _log("updating the KyberDash tray…");
-        int exitCode = _runProcess(kyberdash, ["menubar", "--update", "--version", version]);
+        int exitCode;
+        try
+        {
+            exitCode = _runProcess(kyberdash, ["menubar", "--update", "--version", version]);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException)
+        {
+            // Same named failure as a non-zero exit: the binaries are committed and nothing is rolled back.
+            throw new SelfUpdateException(
+                $"the KyberDash tray step could not start `{kyberdash} menubar --update --version {version}`: {ex.Message}.");
+        }
+
         if (exitCode != 0)
         {
             // Named, so the user can tell a tray failure from a CLI one. The

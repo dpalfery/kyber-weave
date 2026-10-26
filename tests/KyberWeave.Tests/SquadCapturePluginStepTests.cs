@@ -152,6 +152,22 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         Assert.Contains("warning", output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RunWhenTheProcessIsNotExecutableIsAWarningNotAnException()
+    {
+        // chmod -x on kyberdash: the start is refused with an access error, not a missing file.
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithException(
+            "kyberdash",
+            new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied."));
+        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+
+        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+
+        Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
+        Assert.Contains("warning", output, StringComparison.Ordinal);
+        Assert.Contains("could not run KyberDash", output, StringComparison.Ordinal);
+    }
+
     // ---- wiring through the Squad commands ----
 
     [Fact]
@@ -257,6 +273,22 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     {
         using Harness h = new(Path.Combine(_temp.Path, "install-plugin-fails"));
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Successfully installed", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("warning", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PluginStepThatCannotBeExecutedLeavesTheSquadExitCodeUnchanged()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-plugin-not-executable"));
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithException(
+            "kyberdash",
+            new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied."));
 
         CommandExecution execution =
             Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);

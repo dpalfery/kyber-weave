@@ -83,7 +83,8 @@ internal sealed class KyberDashCapturePluginStep
         {
             result = _executor.Run(start, string.Empty);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or Win32Exception
+                                       or UnauthorizedAccessException)
         {
             AnsiConsole.MarkupLine(
                 $"[yellow]warning:[/] OpenCode capture plugin step could not run KyberDash: {Markup.Escape(ex.Message)}. " +
