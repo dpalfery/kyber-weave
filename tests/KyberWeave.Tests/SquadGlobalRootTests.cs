@@ -242,6 +242,181 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------
+    // Criterion 7.3 & 7.8 / Task 15: SquadGlobalRoots rejects any override variable
+    // pointing into or under <home>/.kyber-weave/squad/instances/ so that a --global command
+    // run inside a launched session cannot deploy into an instance folder.
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming CLAUDE_CONFIG_DIR
+    /// and the invalid path when the override points into or under the squad instances directory.
+    /// </summary>
+    [Theory]
+    [InlineData(".kyber-weave/squad/instances")]
+    [InlineData(".kyber-weave/squad/instances/")]
+    [InlineData(".kyber-weave/squad/instances/claude/default")]
+    [InlineData(".kyber-weave/squad/instances/claude/default/subpath")]
+    public void ResolveGlobalRoot_ClaudeConfigDirPointingIntoOrUnderInstances_ThrowsArgumentException(
+        string relativeInstancePath)
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-claude-instances");
+        Directory.CreateDirectory(tempHome);
+        string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
+        string invalidPath = Path.Combine(tempHome, normalizedRelative);
+        if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
+        {
+            invalidPath += Path.DirectorySeparatorChar;
+        }
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
+                ? invalidPath
+                : null,
+            tempHome);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.Claude));
+
+        Assert.Equal("CLAUDE_CONFIG_DIR", exception.ParamName);
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming OPENCODE_CONFIG_DIR
+    /// and the invalid path when the override points into or under the squad instances directory.
+    /// </summary>
+    [Theory]
+    [InlineData(".kyber-weave/squad/instances")]
+    [InlineData(".kyber-weave/squad/instances/")]
+    [InlineData(".kyber-weave/squad/instances/opencode/default")]
+    [InlineData(".kyber-weave/squad/instances/opencode/default/subpath")]
+    public void ResolveGlobalRoot_OpenCodeConfigDirPointingIntoOrUnderInstances_ThrowsArgumentException(
+        string relativeInstancePath)
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-opencode-instances");
+        Directory.CreateDirectory(tempHome);
+        string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
+        string invalidPath = Path.Combine(tempHome, normalizedRelative);
+        if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
+        {
+            invalidPath += Path.DirectorySeparatorChar;
+        }
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "OPENCODE_CONFIG_DIR", StringComparison.Ordinal)
+                ? invalidPath
+                : null,
+            tempHome);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.OpenCode));
+
+        Assert.Equal("OPENCODE_CONFIG_DIR", exception.ParamName);
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming ZCODE_STORAGE_DIR
+    /// and the invalid path when the override points into or under the squad instances directory.
+    /// </summary>
+    [Theory]
+    [InlineData(".kyber-weave/squad/instances")]
+    [InlineData(".kyber-weave/squad/instances/")]
+    [InlineData(".kyber-weave/squad/instances/zcode/default")]
+    [InlineData(".kyber-weave/squad/instances/zcode/default/subpath")]
+    public void ResolveGlobalRoot_ZCodeStorageDirPointingIntoOrUnderInstances_ThrowsArgumentException(
+        string relativeInstancePath)
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-zcode-instances");
+        Directory.CreateDirectory(tempHome);
+        string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
+        string invalidPath = Path.Combine(tempHome, normalizedRelative);
+        if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
+        {
+            invalidPath += Path.DirectorySeparatorChar;
+        }
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "ZCODE_STORAGE_DIR", StringComparison.Ordinal)
+                ? invalidPath
+                : null,
+            tempHome);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+
+        Assert.Equal("ZCODE_STORAGE_DIR", exception.ParamName);
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming XDG_CONFIG_HOME
+    /// and the invalid path when the override points into or under the squad instances directory.
+    /// </summary>
+    [Theory]
+    [InlineData(".kyber-weave/squad/instances")]
+    [InlineData(".kyber-weave/squad/instances/")]
+    [InlineData(".kyber-weave/squad/instances/kilo/default")]
+    [InlineData(".kyber-weave/squad/instances/kilo/default/subpath")]
+    public void ResolveGlobalRoot_XdgConfigHomePointingIntoOrUnderInstances_ThrowsArgumentException(
+        string relativeInstancePath)
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-xdg-instances");
+        Directory.CreateDirectory(tempHome);
+        string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
+        string invalidPath = Path.Combine(tempHome, normalizedRelative);
+        if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
+        {
+            invalidPath += Path.DirectorySeparatorChar;
+        }
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "XDG_CONFIG_HOME", StringComparison.Ordinal)
+                ? invalidPath
+                : null,
+            tempHome);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.Kilo));
+
+        Assert.Equal("XDG_CONFIG_HOME", exception.ParamName);
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirement 7.3, 7.8: Every harness target with an override environment variable
+    /// throws ArgumentException naming the variable and the invalid path when pointing into instances.
+    /// </summary>
+    [Theory]
+    [InlineData(SquadTarget.Claude, "CLAUDE_CONFIG_DIR")]
+    [InlineData(SquadTarget.Codex, "CODEX_HOME")]
+    [InlineData(SquadTarget.Cursor, "CURSOR_CONFIG_DIR")]
+    [InlineData(SquadTarget.Copilot, "COPILOT_HOME")]
+    [InlineData(SquadTarget.Pi, "PI_CODING_AGENT_DIR")]
+    [InlineData(SquadTarget.OpenCode, "OPENCODE_CONFIG_DIR")]
+    [InlineData(SquadTarget.ZCode, "ZCODE_STORAGE_DIR")]
+    public void ResolveGlobalRoot_EveryHarnessOverridePointingIntoOrUnderInstances_ThrowsArgumentException(
+        SquadTarget target,
+        string overrideEnvironmentVariable)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"home-instances-{overrideEnvironmentVariable}");
+        Directory.CreateDirectory(tempHome);
+        string invalidPath = Path.Combine(tempHome, ".kyber-weave", "squad", "instances", "preset-instance");
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, overrideEnvironmentVariable, StringComparison.Ordinal)
+                ? invalidPath
+                : null,
+            tempHome);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(target));
+
+        Assert.Equal(overrideEnvironmentVariable, exception.ParamName);
+        Assert.Contains(invalidPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Devin is the only target whose default root differs by operating system: Devin CLI
     // v3000.x documents its user configuration at ~/.config/devin on macOS and Linux and at
     // %APPDATA%\devin on Windows, and custom subagents and skills load from agents/ and

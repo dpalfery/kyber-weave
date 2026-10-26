@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -88,7 +87,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
-        ("network.read", ["webfetch", "websearch"]),
+        ("network.read", ["webfetch", "websearch"])
     ];
 
     /// <summary>
@@ -171,7 +170,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.OpenCode);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -306,12 +305,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (profile.HarnessModels.TryGetValue("opencode", out string? opencodeModel))
         {
             // Omit model key when override is inherit or empty.
-            return string.Equals(opencodeModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(opencodeModel)
+            return string.Equals(opencodeModel, "inherit", StringComparison.Ordinal) ||
+                   string.IsNullOrWhiteSpace(opencodeModel)
                 ? null
                 : opencodeModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(profile.Default)
             ? null
             : profile.Default;
     }
@@ -415,15 +416,15 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. OpenCode's permissions cannot prompt " +
-                    "for per-capability confirmation, so these narrow to 'deny' and the " +
-                    "corresponding permissions are withheld.");
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. OpenCode's permissions cannot prompt " +
+                "for per-capability confirmation, so these narrow to 'deny' and the " +
+                "corresponding permissions are withheld.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -449,30 +450,32 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressibleDetails));
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["bash"],
-            withheldWriteTools: ["edit"]);
+            SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["bash"],
+            ["edit"]);
 
         if (notIsolable is not null)
         {

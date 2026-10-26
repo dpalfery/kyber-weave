@@ -17,9 +17,13 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description("The deployment root directory, overriding the positional path when supplied.")]
     public string? PathOption { get; set; }
 
-    /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.</summary>
+    /// <summary>
+    ///     Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi,
+    ///     zcode, devin, commandcode, all.
+    /// </summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
+    [Description(
+        "Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
@@ -48,14 +52,22 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description("Adopt pre-existing unmanaged files whose SHA-256 matches generated content exactly.")]
     public bool Adopt { get; set; }
 
-    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    /// <summary>
+    ///     Skip the interactive confirmation prompt before the mutation. Has no effect when the console is
+    ///     non-interactive, which never prompts.
+    /// </summary>
     [CommandOption("--yes")]
-    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    [Description(
+        "Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
     public bool Yes { get; set; }
 
-    /// <summary>Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.</summary>
+    /// <summary>
+    ///     Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata
+    ///     are accepted and stripped). Defaults to the running CLI's own version.
+    /// </summary>
     [CommandOption("-v|--version <VERSION>")]
-    [Description("Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
+    [Description(
+        "Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
     public string? Version { get; set; }
 }
 
@@ -79,7 +91,8 @@ public sealed class SquadUpdateSettings : CommandSettings
 
     /// <summary>The complete desired harness target set for update.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("The complete desired update target set: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
+    [Description(
+        "The complete desired update target set: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
@@ -103,20 +116,28 @@ public sealed class SquadUpdateSettings : CommandSettings
     [Description("Overwrite locally edited receipt-owned files with canonical updates.")]
     public bool ReplaceManaged { get; set; }
 
-    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    /// <summary>
+    ///     Skip the interactive confirmation prompt before the mutation. Has no effect when the console is
+    ///     non-interactive, which never prompts.
+    /// </summary>
     [CommandOption("--yes")]
-    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    [Description(
+        "Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
     public bool Yes { get; set; }
 
-    /// <summary>Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.</summary>
+    /// <summary>
+    ///     Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build'
+    ///     metadata are accepted and stripped). Defaults to the running CLI's own version.
+    /// </summary>
     [CommandOption("-v|--version <VERSION>")]
-    [Description("Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
+    [Description(
+        "Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
     public string? Version { get; set; }
 
     /// <summary>
-    /// Which registered projects a <c>--global</c> update reaches: <c>all</c>, <c>none</c>, or one
-    /// or more project paths. Repeatable. Requires <c>--global</c>. When omitted on an interactive
-    /// console the update prompts for the projects; when omitted otherwise, no project is updated.
+    ///     Which registered projects a <c>--global</c> update reaches: <c>all</c>, <c>none</c>, or one
+    ///     or more project paths. Repeatable. Requires <c>--global</c>. When omitted on an interactive
+    ///     console the update prompts for the projects; when omitted otherwise, no project is updated.
     /// </summary>
     [CommandOption("--projects <PROJECTS>")]
     [Description(
@@ -151,9 +172,13 @@ public sealed class SquadUninstallSettings : CommandSettings
     [Description("Preview the files to be removed without making filesystem changes.")]
     public bool DryRun { get; set; }
 
-    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    /// <summary>
+    ///     Skip the interactive confirmation prompt before the mutation. Has no effect when the console is
+    ///     non-interactive, which never prompts.
+    /// </summary>
     [CommandOption("--yes")]
-    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    [Description(
+        "Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
     public bool Yes { get; set; }
 }
 
@@ -211,6 +236,152 @@ public sealed class SquadPackSettings : CommandSettings
 
     /// <summary>Explicit version for the package archives.</summary>
     [CommandOption("-v|--version <VERSION>")]
-    [Description("Explicit version string for package manifests and archives. Defaults to the binary assembly version.")]
+    [Description(
+        "Explicit version string for package manifests and archives. Defaults to the binary assembly version.")]
     public string? Version { get; set; }
+}
+
+/// <summary>Settings for the <c>squad preset use</c> command.</summary>
+public sealed class SquadPresetUseSettings : CommandSettings
+{
+    /// <summary>The preset profile name to apply.</summary>
+    [CommandArgument(0, "<NAME>")]
+    [Description("The preset profile name to apply.")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The deployment root directory. Defaults to the current directory.</summary>
+    [CommandArgument(1, "[path]")]
+    [Description("The deployment root directory. Defaults to the current directory.")]
+    public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
+
+    /// <summary>
+    ///     Harness target(s) to apply the preset to: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp,
+    ///     factory, pi, zcode, devin, commandcode, all.
+    /// </summary>
+    [CommandOption("-t|--target <TARGETS>")]
+    [Description(
+        "Harness target(s) to apply the preset to: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Targets { get; set; } = [];
+
+    /// <summary>Target the per-user global deployment directory rather than the local project.</summary>
+    [CommandOption("-g|--global")]
+    [Description("Target the per-user global deployment directory rather than the local project.")]
+    public bool Global { get; set; }
+
+    /// <summary>Preview the planned model mutations without making filesystem changes.</summary>
+    [CommandOption("--dry-run")]
+    [Description("Preview the planned model mutations without making filesystem changes.")]
+    public bool DryRun { get; set; }
+}
+
+/// <summary>Settings for the <c>squad preset clear</c> command.</summary>
+public sealed class SquadPresetClearSettings : CommandSettings
+{
+    /// <summary>The deployment root directory. Defaults to the current directory.</summary>
+    [CommandArgument(0, "[path]")]
+    [Description("The deployment root directory. Defaults to the current directory.")]
+    public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
+
+    /// <summary>
+    ///     Harness target(s) to clear preset overrides for: codex, cursor, claude, copilot, opencode, kilo, antigravity,
+    ///     warp, factory, pi, zcode, devin, commandcode, all.
+    /// </summary>
+    [CommandOption("-t|--target <TARGETS>")]
+    [Description(
+        "Harness target(s) to clear preset overrides for: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode, all.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Targets { get; set; } = [];
+
+    /// <summary>Target the per-user global deployment directory rather than the local project.</summary>
+    [CommandOption("-g|--global")]
+    [Description("Target the per-user global deployment directory rather than the local project.")]
+    public bool Global { get; set; }
+
+    /// <summary>Preview the planned mutations without making filesystem changes.</summary>
+    [CommandOption("--dry-run")]
+    [Description("Preview the planned mutations without making filesystem changes.")]
+    public bool DryRun { get; set; }
+}
+
+/// <summary>Settings for the <c>squad preset list</c> command.</summary>
+public sealed class SquadPresetListSettings : CommandSettings
+{
+    /// <summary>The deployment root directory. Defaults to the current directory.</summary>
+    [CommandArgument(0, "[path]")]
+    [Description("The deployment root directory. Defaults to the current directory.")]
+    public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
+}
+
+/// <summary>Settings for the <c>squad preset show</c> command.</summary>
+public sealed class SquadPresetShowSettings : CommandSettings
+{
+    /// <summary>The preset profile name to inspect.</summary>
+    [CommandArgument(0, "<NAME>")]
+    [Description("The preset profile name to inspect.")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    ///     Harness target to show resolved models for: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp,
+    ///     factory, pi, zcode, devin, commandcode.
+    /// </summary>
+    [CommandOption("-t|--target <TARGET>")]
+    [Description(
+        "Harness target to show resolved models for: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, commandcode.")]
+    public string Target { get; set; } = string.Empty;
+}
+
+/// <summary>Settings for the <c>squad run</c> command.</summary>
+public sealed class SquadRunSettings : CommandSettings
+{
+    /// <summary>The target harness to run: claude, codex, copilot, pi, etc.</summary>
+    [CommandArgument(0, "<HARNESS>")]
+    [Description("The target harness to run: claude, codex, copilot, pi, etc.")]
+    public string Harness { get; set; } = string.Empty;
+
+    /// <summary>Arguments passed through to the target harness.</summary>
+    [CommandArgument(1, "[ARGS]")]
+    [Description("Arguments passed through to the target harness.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds remaining arguments to arrays.")]
+    public string[] Args { get; set; } = [];
+}
+
+/// <summary>Settings for the <c>squad instance remove</c> command.</summary>
+public sealed class SquadInstanceRemoveSettings : CommandSettings
+{
+    /// <summary>The target harness: claude, codex, copilot, pi, etc.</summary>
+    [CommandOption("-t|--target <TARGET>")]
+    [Description("The target harness: claude, codex, copilot, pi, etc.")]
+    public string? Target { get; set; }
+
+    /// <summary>The model preset name.</summary>
+    [CommandOption("-p|--preset <PRESET>")]
+    [Description("The model preset name.")]
+    public string? Preset { get; set; }
+
+    /// <summary>Skip confirmation prompt.</summary>
+    [CommandOption("--yes")]
+    [Description("Skip confirmation prompt.")]
+    public bool Yes { get; set; }
 }

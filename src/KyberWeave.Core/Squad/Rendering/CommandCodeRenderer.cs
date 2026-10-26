@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -69,7 +68,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         ("filesystem.search", ["read_directory", "grep", "glob"]),
         ("filesystem.write", ["write_file", "edit_file"]),
         ("process.execute", ["shell_command", "shell_output"]),
-        ("network.read", ["web_search", "web_fetch"]),
+        ("network.read", ["web_search", "web_fetch"])
     ];
 
     /// <summary>
@@ -141,7 +140,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.CommandCode);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -189,7 +188,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
                                 $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
-                                reusedCanonicalSkill: true));
+                                true));
                         }
                         else
                         {
@@ -404,12 +403,14 @@ public sealed class CommandCodeRenderer : ISquadRenderer
 
         if (profile.HarnessModels.TryGetValue("commandcode", out string? commandCodeModel))
         {
-            return string.Equals(commandCodeModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(commandCodeModel)
+            return string.Equals(commandCodeModel, "inherit", StringComparison.Ordinal) ||
+                   string.IsNullOrWhiteSpace(commandCodeModel)
                 ? null
                 : commandCodeModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(profile.Default)
             ? null
             : profile.Default;
     }
@@ -462,31 +463,30 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     {
         string entryPointDetails = reusedCanonicalSkill
             ? $"The same-name canonical skill at {entryPointSkillPath} is the entry point and " +
-                "carries the role; no duplicate entry-point skill is emitted, because the " +
-                "canonical skill already occupies that identity."
+              "carries the role; no duplicate entry-point skill is emitted, because the " +
+              "canonical skill already occupies that identity."
             : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
-                $"skill at {entryPointSkillPath}.";
+              $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
+              $"skill at {entryPointSkillPath}.";
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Command Code dispatches custom agents only as subagents through its task " +
-                "tool and offers no way to start a session as one. " + entryPointDetails +
-                " The entry point runs in the main session under the session's permissions — " +
-                "the agent's explicit tools allow-list does not apply to it. The agent file is " +
-                "kept for task dispatch.");
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "Command Code dispatches custom agents only as subagents through its task " +
+            "tool and offers no way to start a session as one. " + entryPointDetails +
+            " The entry point runs in the main session under the session's permissions — " +
+            "the agent's explicit tools allow-list does not apply to it. The agent file is " +
+            "kept for task dispatch.");
 
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
-            agent,
-            capabilityProfiles,
-            entryPointSkillNote:
-                $"The same-name entry point at {entryPointSkillPath} runs under the " +
-                "session's permissions; the agent's explicit tools allow-list does not " +
-                "apply to it."))
+                     agent,
+                     capabilityProfiles,
+                     $"The same-name entry point at {entryPointSkillPath} runs under the " +
+                     "session's permissions; the agent's explicit tools allow-list does not " +
+                     "apply to it."))
         {
             yield return record;
         }
@@ -511,15 +511,15 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Command Code has no per-tool approval key in agent " +
-                    "frontmatter, so these narrow to deny and the corresponding tools are withheld " +
-                    "from the agent's tools list.");
+                SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Command Code has no per-tool approval key in agent " +
+                "frontmatter, so these narrow to deny and the corresponding tools are withheld " +
+                "from the agent's tools list.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -547,29 +547,31 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         }
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: string.Join(" ", notExpressibleDetails));
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            string.Join(" ", notExpressibleDetails));
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["shell_command"],
-            withheldWriteTools: ["edit_file", "write_file"]);
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["shell_command"],
+            ["edit_file", "write_file"]);
 
         if (notIsolable is not null)
         {
@@ -589,7 +591,10 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     /// </summary>
     private sealed class CommandCodeYamlFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CommandCodeYamlFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CommandCodeYamlFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -603,7 +608,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string item in items)
             {
                 emitter.Emit(new Scalar(
@@ -611,8 +616,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                     TagName.Empty,
                     item,
                     ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
+                    true,
+                    true));
             }
 
             emitter.Emit(new SequenceEnd());

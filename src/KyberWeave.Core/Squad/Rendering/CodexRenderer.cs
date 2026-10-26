@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -64,7 +63,7 @@ public sealed class CodexRenderer : ISquadRenderer
 
         if (request.Targets.Count == 0) return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Codex);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -192,7 +191,9 @@ public sealed class CodexRenderer : ISquadRenderer
     }
 
     private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
-        => RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, scope);
+    {
+        return RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, scope);
+    }
 
     private static SquadDeploymentFile RenderSkillDocument(
         string name,
@@ -231,7 +232,9 @@ public sealed class CodexRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
         SquadAgent agent,
         SquadDeploymentScope scope)
-        => RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, scope);
+    {
+        return RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, scope);
+    }
 
     private static string? ResolveCodexModel(
         SquadAgent agent,

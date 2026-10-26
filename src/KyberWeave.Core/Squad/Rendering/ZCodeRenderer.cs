@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -205,7 +204,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         ("filesystem.write", ["Edit", "Write"]),
         ("process.execute", ["Bash"]),
         ("network.read", ["WebFetch", "WebSearch"]),
-        ("delegate", ["Agent"]),
+        ("delegate", ["Agent"])
     ];
 
     /// <summary>
@@ -249,7 +248,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.ZCode);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -373,7 +372,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
         AppendRewrittenResources(files, agent, scope, rewritten);
         degradations.AddRange(BuildCapabilityDegradations(
             agent, source.CapabilityProfiles.Profiles, mcpServerNames));
-
     }
 
     private static void RenderPrimaryAgent(
@@ -392,14 +390,14 @@ public sealed class ZCodeRenderer : ISquadRenderer
         if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
         {
             degradations.Add(new SquadDegradationRecord(
-                Target: TargetToken,
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "omitted",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Fallback profile '{agent.Fallback}' declares no-primary-agent: omit; " +
-                    "ZCode has no primary-agent primitive for this agent to render onto, so no " +
-                    "file is emitted."));
+                TargetToken,
+                agent.Name,
+                agent.Name,
+                "omitted",
+                agent.BodyDigest,
+                $"Fallback profile '{agent.Fallback}' declares no-primary-agent: omit; " +
+                "ZCode has no primary-agent primitive for this agent to render onto, so no " +
+                "file is emitted."));
             return;
         }
 
@@ -420,7 +418,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 source.CapabilityProfiles.Profiles,
                 capabilityVocabulary,
                 mcpServerNames,
-                reusedCanonicalSkill: true));
+                true));
             return;
         }
 
@@ -587,19 +585,19 @@ public sealed class ZCodeRenderer : ISquadRenderer
 
         rewritten = true;
         degradations.Add(new SquadDegradationRecord(
-            Target: TargetToken,
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "resource-links-rewritten",
-            InstructionDigest: agent.BodyDigest,
-            Details: $"ZCode scans '.zcode/agents/' and '.zcode/commands/' recursively, so this " +
-                $"agent's {agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} " +
-                "resource file(s) cannot be projected beside their principal without " +
-                "registering as phantom agents or commands. They are projected under " +
-                "'.zcode/skills/' instead, and " +
-                (changed
-                    ? "the agent's authored links were rewritten to '../skills/' so they still resolve."
-                    : "no authored link required rewriting.")));
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            "resource-links-rewritten",
+            agent.BodyDigest,
+            $"ZCode scans '.zcode/agents/' and '.zcode/commands/' recursively, so this " +
+            $"agent's {agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} " +
+            "resource file(s) cannot be projected beside their principal without " +
+            "registering as phantom agents or commands. They are projected under " +
+            "'.zcode/skills/' instead, and " +
+            (changed
+                ? "the agent's authored links were rewritten to '../skills/' so they still resolve."
+                : "no authored link required rewriting.")));
 
         return body;
     }
@@ -650,8 +648,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
     /// <c>isSafePlainYamlScalar</c> predicate would accept it, otherwise a double-quoted
     /// scalar escaped by its own <c>escapeYamlString</c> rules.
     /// </summary>
-    private static string FormatScalar(string value) =>
-        IsSafePlainScalar(value) ? value : $"\"{EscapeScalar(value)}\"";
+    private static string FormatScalar(string value)
+    {
+        return IsSafePlainScalar(value) ? value : $"\"{EscapeScalar(value)}\"";
+    }
 
     private static bool IsSafePlainScalar(string value)
     {
@@ -668,8 +668,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         return !value.Contains('#', StringComparison.Ordinal) &&
-            !SafePlainMappingLike.IsMatch(value) &&
-            SafePlainShape.IsMatch(value);
+               !SafePlainMappingLike.IsMatch(value) &&
+               SafePlainShape.IsMatch(value);
     }
 
     private static readonly Regex SafePlainReserved = new(
@@ -702,13 +702,19 @@ public sealed class ZCodeRenderer : ISquadRenderer
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
-    private static string EscapeScalar(string value) => value
-        .Replace("\\", "\\\\", StringComparison.Ordinal)
-        .Replace("\"", "\\\"", StringComparison.Ordinal)
-        .Replace("\n", "\\n", StringComparison.Ordinal)
-        .Replace("\r", "\\r", StringComparison.Ordinal);
+    private static string EscapeScalar(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal);
+    }
 
-    private static bool IsValidCommandName(string name) => CommandName.IsMatch(name);
+    private static bool IsValidCommandName(string name)
+    {
+        return CommandName.IsMatch(name);
+    }
 
     private static string FirstSegment(string relativePath)
     {
@@ -828,15 +834,15 @@ public sealed class ZCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: TargetToken,
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. ZCode has no per-capability permission " +
-                    "prompt, and the 'tools' key is a binary allow-list, so these narrow to " +
-                    "withheld: the corresponding tools are absent from the agent's 'tools' list.");
+                TargetToken,
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. ZCode has no per-capability permission " +
+                "prompt, and the 'tools' key is a binary allow-list, so these narrow to " +
+                "withheld: the corresponding tools are absent from the agent's 'tools' list.");
         }
 
         List<string> notExpressible = [];
@@ -870,30 +876,32 @@ public sealed class ZCodeRenderer : ISquadRenderer
         if (notExpressible.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: TargetToken,
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressible));
+                TargetToken,
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressible));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: TargetToken,
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["Bash"],
-            withheldWriteTools: ["Edit", "Write"]);
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["Bash"],
+            ["Edit", "Write"]);
 
         if (notIsolable is not null)
         {
@@ -911,56 +919,59 @@ public sealed class ZCodeRenderer : ISquadRenderer
     {
         string projectionText = reusedCanonicalSkill
             ? "this agent reuses the same-name canonical skill as its entry point, because the " +
-                "canonical skill already occupies that identity, so no slash command is emitted " +
-                $"and the entry point is the '{agent.Name}' skill"
+              "canonical skill already occupies that identity, so no slash command is emitted " +
+              $"and the entry point is the '{agent.Name}' skill"
             : "ZCode has a project-scoped slash-command primitive, so this agent renders as a " +
-                $"command at '.zcode/commands/{agent.Name}.md' and is invoked as '/{agent.Name}' " +
-                "rather than as a skill";
+              $"command at '.zcode/commands/{agent.Name}.md' and is invoked as '/{agent.Name}' " +
+              "rather than as a skill";
 
         yield return new SquadDegradationRecord(
-            Target: TargetToken,
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "ZCode has no primary-agent selection primitive: its agent modes are a " +
-                "closed set of permission modes (build, edit, plan, yolo), not selectable " +
-                $"agents. Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, and " + projectionText + ".");
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "ZCode has no primary-agent selection primitive: its agent modes are a " +
+            "closed set of permission modes (build, edit, plan, yolo), not selectable " +
+            $"agents. Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
+            $"{fallbackProfile.NoPrimaryAgent}, and " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
         yield return new SquadDegradationRecord(
-            Target: TargetToken,
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Capability decisions " +
-                $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
-                "are not enforced as the canonical lattice: a command's 'allowed-tools' is a " +
-                "flat allow-list evaluated against the session the command runs in, not a " +
-                $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
-                "instruction-only." +
-                (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles)
-                    ? " " + DescribeWithheldMcp(agent, mcpServerNames)
-                    : string.Empty));
+            TargetToken,
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            "Capability decisions " +
+            $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
+            "are not enforced as the canonical lattice: a command's 'allowed-tools' is a " +
+            "flat allow-list evaluated against the session the command runs in, not a " +
+            $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
+            "instruction-only." +
+            (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles)
+                ? " " + DescribeWithheldMcp(agent, mcpServerNames)
+                : string.Empty));
     }
 
     /// <summary>
     /// The fully qualified MCP tool names declared by <c>toolchain.yml</c>, in a stable order,
     /// ready to append to a tool allow-list ZCode matches by exact name.
     /// </summary>
-    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source) =>
-    [
-        .. source.Toolchain.RequiredMcpTools
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .SelectMany(entry => entry.Value
-                .OrderBy(tool => tool, StringComparer.Ordinal)
-                .Select(tool => $"mcp__{entry.Key}__{tool}"))
-    ];
+    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source)
+    {
+        return
+        [
+            .. source.Toolchain.RequiredMcpTools
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .SelectMany(entry => entry.Value
+                    .OrderBy(tool => tool, StringComparer.Ordinal)
+                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
+        ];
+    }
 
     /// <summary>
     /// Why a principal did not receive the declared MCP tools. Only a profile outside the
@@ -968,16 +979,20 @@ public sealed class ZCodeRenderer : ISquadRenderer
     /// </summary>
     private static string DescribeWithheldMcp(
         SquadAgent agent,
-        IReadOnlyList<string> mcpServerNames) =>
-        $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
-        $"profile '{agent.CapabilityProfile}' does not allow 'filesystem.read', or is the pure " +
-        "orchestrator profile that routes work rather than researching it. A role that only " +
-        "routes has no use for documentation or code-graph lookups, and granting them would " +
-        "hand it a research surface its own profile denies.";
+        IReadOnlyList<string> mcpServerNames)
+    {
+        return $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
+               $"profile '{agent.CapabilityProfile}' does not allow 'filesystem.read', or is the pure " +
+               "orchestrator profile that routes work rather than researching it. A role that only " +
+               "routes has no use for documentation or code-graph lookups, and granting them would " +
+               "hand it a research surface its own profile denies.";
+    }
 
     /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source) =>
-        [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    {
+        return [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+    }
 
     /// <summary>
     /// Whether a principal is entitled to the declared MCP tools, mirroring
@@ -986,15 +1001,19 @@ public sealed class ZCodeRenderer : ISquadRenderer
     /// </summary>
     private static bool GrantsMcp(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
-        !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
-        profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-        decision == SquadPermissionDecision.Allow;
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        return !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
+               capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+               decision == SquadPermissionDecision.Allow;
+    }
 
-    private static string CollapseToSingleLine(string value) =>
-        string.Join(
+    private static string CollapseToSingleLine(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 }

@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 
@@ -106,7 +105,7 @@ public sealed class WarpRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Warp);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -150,13 +149,13 @@ public sealed class WarpRenderer : ISquadRenderer
                 // identity whose body is identical to the skill's, and a primary shared
                 // identity whose body is the thin wrapper pointing at it.
                 degradations.Add(new SquadDegradationRecord(
-                    Target: "warp",
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: agent.Name,
-                    Code: "role-skill-fallback",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: "Reused the same-name canonical skill as the entry point; no separate " +
-                        "agent projection is emitted on a target with no agent primitive."));
+                    "warp",
+                    agent.Name,
+                    agent.Name,
+                    "role-skill-fallback",
+                    agent.BodyDigest,
+                    "Reused the same-name canonical skill as the entry point; no separate " +
+                    "agent projection is emitted on a target with no agent primitive."));
                 loweredAgents.Add((agent, agent.Name));
             }
             else if (occupiedIdentities.Contains(agent.Name) &&
@@ -165,24 +164,24 @@ public sealed class WarpRenderer : ISquadRenderer
                 string outputIdentity = $"role-{agent.Name}";
                 files.Add(RenderSkill(outputIdentity, agent.Description, agent.InstructionBody, skillsDir));
                 degradations.Add(new SquadDegradationRecord(
-                    Target: "warp",
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: outputIdentity,
-                    Code: "role-skill-fallback",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: "Agent lowered to role-prefixed skill to preserve distinct canonical skill."));
+                    "warp",
+                    agent.Name,
+                    outputIdentity,
+                    "role-skill-fallback",
+                    agent.BodyDigest,
+                    "Agent lowered to role-prefixed skill to preserve distinct canonical skill."));
                 loweredAgents.Add((agent, outputIdentity));
             }
             else
             {
                 files.Add(RenderSkill(agent.Name, agent.Description, agent.InstructionBody, skillsDir));
                 degradations.Add(new SquadDegradationRecord(
-                    Target: "warp",
-                    CanonicalIdentity: agent.Name,
-                    OutputIdentity: agent.Name,
-                    Code: "role-skill-fallback",
-                    InstructionDigest: agent.BodyDigest,
-                    Details: "Agent lowered to role skill."));
+                    "warp",
+                    agent.Name,
+                    agent.Name,
+                    "role-skill-fallback",
+                    agent.BodyDigest,
+                    "Agent lowered to role skill."));
                 loweredAgents.Add((agent, agent.Name));
             }
 
@@ -316,24 +315,26 @@ public sealed class WarpRenderer : ISquadRenderer
         }
 
         return new SquadDegradationRecord(
-            Target: "warp",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: $"Capability profile '{agent.CapabilityProfile}' constrains " +
-                $"{string.Join(", ", constrained)} but Warp skills cannot express " +
-                "capability permissions; the deployed skill's behaviour is governed by the " +
-                "harness default, not the canonical profile.");
+            "warp",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            $"Capability profile '{agent.CapabilityProfile}' constrains " +
+            $"{string.Join(", ", constrained)} but Warp skills cannot express " +
+            "capability permissions; the deployed skill's behaviour is governed by the " +
+            "harness default, not the canonical profile.");
     }
 
     /// <summary>
     /// YAML frontmatter scalars must stay single-line; a folded canonical description
     /// would otherwise emit a block scalar and break consumers that expect a plain string.
     /// </summary>
-    private static string ToSingleLineScalar(string value) =>
-        string.Join(
+    private static string ToSingleLineScalar(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 }
