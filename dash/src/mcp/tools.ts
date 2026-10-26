@@ -18,7 +18,7 @@ export type AnalyticsToolDefinition = {
   readonly operation: string
   readonly method: 'GET' | 'POST'
   readonly description: string
-  readonly inputSchema: z.ZodObject<z.ZodRawShape>
+  readonly inputSchema: z.ZodTypeAny
 }
 
 const scope = z.object({
@@ -35,7 +35,12 @@ const inspectTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('turn'), sessionId: z.string(), turnIndex: z.number().int().min(0) }).strict(),
 ])
 
-const inspect = z.object({
+// The registered MCP shape must stay a plain ZodObject: the MCP SDK builds
+// the JSON Schema from it, and a refined (ZodEffects) schema converts to an
+// empty property set. Cross-field rules live on `inspect` below and are
+// enforced in the tool handler (server.ts), so the wire contract keeps both
+// the strict shape and the refinement.
+const inspectBase = z.object({
   ...base,
   mode: z.enum(['manifest', 'content']).optional(),
   target: inspectTarget.optional(),
@@ -47,7 +52,9 @@ const inspect = z.object({
   sessionId: z.string().optional(),
   turnIndex: z.number().int().min(0).optional(),
   blockId: z.string().optional(),
-}).strict().superRefine((value, ctx) => {
+}).strict()
+
+const inspect = inspectBase.superRefine((value, ctx) => {
   const hasMode = value.mode !== undefined
   const hasTarget = value.target !== undefined
   if (hasMode !== hasTarget) {

@@ -305,7 +305,15 @@ describe('startOtlpCollectorService canonical projection', () => {
 
       expect(service.canon.get(SPAN_ID)).toBeDefined()
       expect(service.canon.getSessionPayload(TRACE_ID)).toBeUndefined()
-      expect(reported.some((line) => line.includes('projection failure injected'))).toBe(true)
+      // Per-session derivation degrade (not an outer-belt projection failure):
+      // the pass succeeds with the session skipped, so onError never fires.
+      // The failure is recorded as a derivation_failed problem row instead.
+      expect(reported.some((line) => line.includes('projection failure injected'))).toBe(false)
+      expect(
+        service.canon
+          .getProblems(TRACE_ID)
+          .some((problem) => problem.code === 'derivation_failed'),
+      ).toBe(true)
 
       service.canon.tokenCache().exec('DROP TRIGGER projection_failure_fixture')
       await service.writer.enqueue([
