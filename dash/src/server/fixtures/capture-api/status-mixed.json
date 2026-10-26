@@ -227,7 +227,10 @@
           }
         }
       ],
-      "statusLines": [],
+      "statusLines": [
+        "plugin: not installed",
+        "content consent: not set (no system prompt, tool definitions or skills are captured until OpenCode capture is turned on in KyberDash Settings)"
+      ],
       "health": "off",
       "issues": []
     },

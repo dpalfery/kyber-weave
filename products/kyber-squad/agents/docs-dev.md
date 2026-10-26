@@ -5,7 +5,7 @@ description: "Provides docs-dev closeout for finished plans and specs by harvest
 invocation: subagent
 model-profile: fast
 capability-profile: documentation
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, edit/createFile, edit/editFiles, edit/rename]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -36,6 +36,16 @@ You do **not** own:
 
 Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, do not open files under the directories named by **<plan-index>** and **<specification-index>**; if the packet is insufficient, return a blocker instead of reading the plan or spec.
 
+## Commands you run
+
+The only processes you run are these four command classes:
+- `git mv` of the plan or spec you close out: a plan file moves to `<docs-root>/archive/plans/`, and a specification directory moves to `<docs-root>/archive/specs/`. Archive only the artifact named by the packet, and only after its closeout steps are complete.
+- `kyber-weave docs validate . --merge-ready` (or `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` where the host's AGENTS.md declares that form). Run it after every corpus edit and every archival move.
+- `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
+- Run the targeted tests that pin documentation, named by the packet.
+
+Run nothing else. Never commit or push unless the packet says so. docs-dev is the only role that archives a plan or spec.
+
 ## Workflow
 
 1. Read only the source code and existing documentation named by the packet. A closeout task also reads the plan or spec artifact being closed.
@@ -56,11 +66,12 @@ When assigned a plan closeout:
    - **ADR waiver**: State `no ADR — ADR waiver: <reason>` when a decision refines existing architecture, applies established patterns, or represents implementation detail that does not warrant a new ADR.
    - **Documentation waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
 5. Update canonical documentation to describe the verified behavior, then update the plan index with the implementation reference, canonical doc destinations, and archive date.
-6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` only when the verification, closeout mapping table, and documentation updates are complete.
+6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` with `git mv`, only when the verification, closeout mapping table, and documentation updates are complete.
 7. If any criterion, durable decision harvest, or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
 
 8. Harvest the plan's Design harvest declared at authoring time: every Design harvest requirement-group at its declared scale migrates into canonical documentation alongside the decisions. Record the documentation-impact of each migrated item.
 9. Record a Closeout mapping for every harvested item with its documentation-impact, impact-components, last-reviewed date, and status archived row. Set the plan artifact header to `Status: Archived` only after the mapping is complete.
+10. After the `git mv` archival and the plan index update, run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Report any finding as a blocker; do not report `CLOSEOUT_COMPLETE` while either check reports one.
 
 ## Specification closeout
 
@@ -87,10 +98,10 @@ When assigned a specification closeout:
    archive date, the outcome, and the canonical documents that now carry its content.
    Naming the replacing documentation is the point of the entry. Mark the specification
    artifact `Status: Archived` only after steps 2 to 4 are complete.
-5. Move the whole `<docs-root>/specs/{feature-name}/` directory to `<docs-root>/archive/specs/` and
-   set the status to `Archived`, only after steps 2 to 4 are complete.
-6. Run the documentation validation and drift checks. Migrating content moves code
-   references between documents, and an unresolved reference is a broken join.
+5. Move the whole `<docs-root>/specs/{feature-name}/` directory to `<docs-root>/archive/specs/` with
+   `git mv` and set the status to `Archived`, only after steps 2 to 4 are complete.
+6. Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .`. Migrating content
+   moves code references between documents, and an unresolved reference is a broken join.
 7. If any precondition or documentation update is unresolved, do not archive. Leave the
    specification `Review required` or return it to the appropriate active status, and
    report the precise gap to the orchestrator.
@@ -123,6 +134,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - **Never write implementation code.** Your role is documentation only.
 - **Never create or modify tests.** Hand off to `test-dev` if test documentation is needed.
 - **Never modify CI/CD pipelines or build scripts.** Hand off to `github-devops` if pipeline documentation is needed.
+- **Run only the commands in `## Commands you run`.** Archive only with `git mv`, and never commit or push unless the packet says so.
 - **Always verify library/API behavior** with Context7 or Microsoft Learn before documenting it.
 - **Follow existing documentation style and conventions.** Match tone, heading structure, and formatting patterns already in use. When documenting an application, you MUST follow the structure defined in the `app-docs-standard` skill (Overview, Onboarding, Architecture, Requirements).
 - **Prefer Mermaid diagrams** for visualizing architecture, flows, and relationships.

@@ -28,6 +28,8 @@ export default defineConfig({
     // provider-specific *_HOME) don't bleed real local data into fixtures.
     setupFiles: [
       resolve(__dirname, './tests/setup/env-isolation.ts'),
+      // Fails closed on any fetch to the live KyberDash receiver (D10).
+      resolve(__dirname, './tests/setup/network-guard-setup.ts'),
       resolve(__dirname, './web/vitest.setup.ts'),
     ],
     // Real-I/O tests (session parses, sqlite fixtures, worker pools) exceed the

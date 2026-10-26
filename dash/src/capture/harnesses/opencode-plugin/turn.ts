@@ -26,7 +26,8 @@
 // the `com.opencode` `tool_result` the todo names. No receiver, transport,
 // outbox, web, tray, resolver, or API change lives here.
 
-import { deriveLogId, type OtlpLog } from '../../../otel/receiver.js'
+import { deriveLogId } from '../../../otel/log-id.js'
+import type { OtlpLog } from '../../../otel/receiver.js'
 import type { OpencodePluginSpanPayload } from './mapper.js'
 
 /** The instrumentation scope a turn outcome log is emitted under. */

@@ -284,6 +284,13 @@ export type ContextAnalysis =
       contextLimitSource?: ContextLimitSource
       /** Composition and pressure per turn, session order (R7.1, R7.4). */
       turns: TurnPressure[]
+      /**
+       * The part types some turn actually supplied (resident, with text or a
+       * count). A bucket total of 0 for a type absent from this list is "never
+       * observed", not "observed empty": the report reads this to tell the two
+       * apart (D8, ADR 0033).
+       */
+      observedParts: CanonicalContentKey[]
       /** Summed residual over the session, as explicit as per turn (R7.3). */
       residualTotal: number
       /** True when any bucket count was derived; present totals as bounds. */
@@ -484,6 +491,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   const flaggedTurns: number[] = []
   let residualTotal = 0
   let derivedCounts = false
+  const observed = new Set<CanonicalContentKey>()
 
   for (const [position, turn] of turns.entries()) {
     const buckets = emptyBuckets()
@@ -502,6 +510,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         nonResidentToolDefinitions += 1
         continue
       }
+      if (part.text !== '' || part.tokens !== undefined) observed.add(part.part)
       // Instruction fences ride inside history and tool results; stripping
       // them anywhere else would miscount a system prompt that happens to
       // quote a fence, so the strip applies to the carrier buckets only.
@@ -623,6 +632,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
     contextLimit,
     ...(options.contextLimitSource !== undefined ? { contextLimitSource: options.contextLimitSource } : {}),
     turns: perTurn,
+    observedParts: CANONICAL_CONTENT_KEYS.filter((key) => observed.has(key)),
     residualTotal,
     derivedCounts,
     freshJumpFactor,

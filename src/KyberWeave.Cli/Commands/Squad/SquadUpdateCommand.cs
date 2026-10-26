@@ -1,4 +1,3 @@
-using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
@@ -32,10 +31,12 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly ISquadRenderer? _renderer;
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadUserPaths? _userPaths;
+    private readonly KyberDashCapturePluginStep? _capturePluginStep;
 
     /// <summary>Creates a new update command using default dependencies.</summary>
     public SquadUpdateCommand()
     {
+        _capturePluginStep = KyberDashCapturePluginStep.CreateDefault();
     }
 
     /// <summary>Creates a new update command using injectable dependencies.</summary>
@@ -54,7 +55,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         Func<string, bool>? readAnswer = null,
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadProjectPicker? picker = null,
-        SquadInstanceService? instanceService = null)
+        SquadInstanceService? instanceService = null,
+        KyberDashCapturePluginStep? capturePluginStep = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -65,6 +67,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _globalRoots = globalRoots;
         _picker = picker;
         _instanceService = instanceService;
+        _capturePluginStep = capturePluginStep;
     }
 
     /// <summary>
@@ -222,8 +225,17 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             SquadReceipt? globalReceipt = stateStore.ReadReceipt(targetRoot, scope);
             if (globalReceipt is not null)
             {
-                int exitCode = RunUpdate(run, stateStore, lifecycleService, interactive, cancellationToken);
+                List<SquadTarget> deployed = [];
+                int exitCode = RunUpdate(run, stateStore, lifecycleService, interactive, cancellationToken, deployed);
                 if (exitCode != 0) return exitCode;
+
+                // Runs after the global deployment has updated and cannot change this command's exit code.
+                KyberDashCapturePluginStep.RunForGlobal(
+                    _capturePluginStep,
+                    deployed,
+                    settings.NoCapturePlugin,
+                    settings.DryRun,
+                    _globalRoots);
             }
 
             ISquadUserPaths paths = _userPaths ?? stateStore.UserPaths;
@@ -359,13 +371,15 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     ///     Updates one deployment: a global one, a project's own, or a project a global run selected. This is the
     ///     single project update path, so every form gets the same planning, confirmation and transaction.
     /// </summary>
+    /// <param name="deployed">Receives the resolved targets when the update succeeds, so a global caller can act on them.</param>
     /// <returns>0 on success, 2 when the operator declined or the resolution refused, and 1 on failure.</returns>
     private int RunUpdate(
         UpdateRun run,
         SquadStateStore stateStore,
         SquadLifecycleService lifecycleService,
         bool interactive,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        List<SquadTarget>? deployed = null)
     {
         SquadReceipt? receipt = stateStore.ReadReceipt(run.TargetRoot, run.Scope);
         if (receipt is null)
@@ -458,6 +472,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 .GetResult();
             if (result.Success)
             {
+                deployed?.AddRange(decision.Targets);
                 if (run.DryRun)
                 {
                     int fileCount = result.Receipt?.Files.Count ?? 0;

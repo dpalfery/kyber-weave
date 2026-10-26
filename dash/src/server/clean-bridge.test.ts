@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // The bridge holds the store refresh lock around `cleanDatabase` (issue #312
 // F4). Stub only the acquire — every other lock export stays real — so these

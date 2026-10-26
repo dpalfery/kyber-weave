@@ -27,7 +27,8 @@ internal sealed record SelfUpdateHost(
     private static string ReadCurrentVersion()
     {
         Assembly assembly = typeof(SelfUpdateHost).Assembly;
-        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        string? infoVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
             return infoVersion;
 
@@ -36,11 +37,16 @@ internal sealed record SelfUpdateHost(
     }
 }
 
+/// <param name="NoRestart">
+/// Skips restarting the KyberDash engine and the tray after the binaries commit. The OpenCode capture plugin
+/// step still runs, because it changes a file and does not restart anything.
+/// </param>
 internal readonly record struct SelfUpdateOptions(
     string? Version,
     bool ReleaseCandidate,
     bool NoMcp,
     bool NoKyberDash = false,
-    bool NoMenubar = false);
+    bool NoMenubar = false,
+    bool NoRestart = false);
 
 internal sealed record SelfUpdateOutcome(int ExitCode, string Message);

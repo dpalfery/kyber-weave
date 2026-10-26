@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 status: current
 ---
 
@@ -60,6 +60,15 @@ kyberdash report            # terminal report, formatted from the canonical stor
 `kyberdash web` serves the dashboard from a packed asset inside the binary, so it needs no
 `npm` and no checkout. `KYBERDASH_DASH_DIR` overrides it with a directory of your own build.
 
+### OpenCode capture plugin
+
+`install.sh` does not install the OpenCode capture plugin. Squad installs it. Run
+`kyber-weave squad install --global` or `kyber-weave squad update --global` with the OpenCode target,
+and it is written to OpenCode's global plugin directory. Pass `--no-capture-plugin` to skip it. Then
+restart OpenCode. Content capture (system prompt, tool definitions, skills) stays off until you turn
+OpenCode on in the Settings drawer. The [runbook](runbook.md#harness-opentelemetry-capture) describes
+the consent file and the restart steps.
+
 ### Install the tray
 
 The tray ships as its own release asset from `0.1.7-rc.13`. On macOS and Windows:
@@ -77,17 +86,24 @@ exits `1`: the tray ships for macOS and Windows only.
 
 ## Update
 
-`kyber-weave update` updates an installed `kyberdash` along with the CLI and MCP server. When
-a tray is installed, `kyber-weave update` hands off to `kyberdash menubar --update`, which
-quits the running tray, replaces it, and relaunches it — restoring the previous app if any
-step fails. You can also update the tray directly:
+One command updates KyberDash. Run `kyber-weave update`, and no other command is needed:
 
-```bash
-kyberdash menubar --update
-```
+- It replaces the `kyberdash` binary beside the CLI, along with the CLI and MCP server.
+- It restarts the KyberDash engine. A running engine of an older version is replaced by the new one,
+  and this also runs when the release is unchanged. Nothing starts if no engine is running.
+- It relaunches the tray when a tray is installed. The tray is quit, replaced, and relaunched, and
+  the previous app is restored if a step fails.
+- It upgrades the OpenCode capture plugin, but only if that plugin is already installed.
 
-The CLI-only update flags (`--no-kyberdash`, `--no-mcp`, `--no-menubar`) let you narrow what
-`kyber-weave update` touches; `kyber-weave update --help` lists them.
+When the plugin file changed, the output says to restart OpenCode. KyberDash cannot restart your
+OpenCode process. The engine then re-projects the store on its own start, so you do not run
+`kyber build` after an update.
+
+To update the tray alone, use `kyberdash menubar --update`.
+
+Flags: `--no-restart` replaces the binaries and leaves the engine and tray running as they are.
+`--no-kyberdash`, `--no-mcp`, and `--no-menubar` narrow what the command touches. `kyber-weave update --help`
+lists them all.
 
 ---
 

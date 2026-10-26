@@ -321,7 +321,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
-        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
+        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);

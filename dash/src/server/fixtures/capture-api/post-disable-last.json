@@ -7,6 +7,12 @@
     {
       "kind": "restored",
       "harness": "opencode",
+      "fileId": "plugin",
+      "path": "/Users/example/.config/opencode/plugins/kyberdash-opencode.js"
+    },
+    {
+      "kind": "restored",
+      "harness": "opencode",
       "fileId": "opencode-config",
       "path": "/Users/example/.config/opencode/opencode.jsonc",
       "changes": [
@@ -55,7 +61,10 @@
         }
       }
     ],
-    "statusLines": [],
+    "statusLines": [
+      "plugin: not installed",
+      "content consent: off (turn OpenCode capture on in KyberDash Settings to capture the system prompt, tool definitions and skills)"
+    ],
     "health": "off",
     "issues": []
   },

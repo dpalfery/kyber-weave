@@ -708,6 +708,15 @@ export const SURVEYED_HARNESSES = [
 
 export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
 
+/**
+ * Why an OpenCode dimension is unmeasurable when no session evidence lifts it (D7).
+ * OpenCode exports no telemetry of its own; its sessions are recorded only by the
+ * KyberDash capture plugin, so the refusal names that condition rather than a
+ * setting of the harness.
+ */
+const OPENCODE_NO_CAPTURE_REASON =
+  'OpenCode exports no session telemetry unless the KyberDash capture plugin has recorded sessions; none carrying this counter were observed.'
+
 const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
   [
     'copilot',
@@ -827,7 +836,7 @@ const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability,
       cacheRead: false,
       cacheCreation: false,
       reason:
-        'OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.',
+        OPENCODE_NO_CAPTURE_REASON,
     },
   ],
 ])
@@ -951,7 +960,7 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
       prefixBytes: false,
       fallback: 'none',
       reason:
-        'OpenCode OpenTelemetry is disabled; no prefix bytes or transcript telemetry are available.',
+        `${OPENCODE_NO_CAPTURE_REASON} No prefix bytes are exported at all.`,
     },
   ],
 ])
@@ -1043,9 +1052,16 @@ export type DimensionEvidence = {
   bucketParts?: Iterable<string>
   /** Provenance of each window the sessions' pressures were measured against. */
   windowSources?: Iterable<ContextLimitSource>
+  /** Sessions carried observed, positive token counters (input or output). */
+  tokenUsage?: boolean
+  /** Sessions carried an observed, positive cache-read counter. */
+  cacheRead?: boolean
+  /** Sessions carried a priced cost figure. */
+  cost?: boolean
 }
 
 const TOOL_DIMENSIONS = new Set(['tool_yield', 'tool_definitions', 'schema_cost'])
+const CACHE_DIMENSIONS = new Set(['cache_hit_rate', 'cache_efficiency', 'cache'])
 const PRESSURE_DIMENSIONS = new Set([
   'context_pressure',
   'context_pressure_median',
@@ -1080,6 +1096,10 @@ function evidencedAvailability(dim: string, evidence: DimensionEvidence | undefi
     }
     return declared ? 'derived' : undefined
   }
+  // Counters are measured; a cost is priced from them, so it is derived (D7).
+  if (dim === 'token_usage') return evidence.tokenUsage === true ? 'measured' : undefined
+  if (CACHE_DIMENSIONS.has(dim)) return evidence.cacheRead === true ? 'measured' : undefined
+  if (dim === 'cost') return evidence.cost === true || evidence.tokenUsage === true ? 'derived' : undefined
   return undefined
 }
 
@@ -1133,7 +1153,7 @@ export function harnessDimensionAvailability(
     dim === 'pressure'
   ) {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal metrics via LiteLLM but records no structured context window or per-turn token usage.')
@@ -1153,7 +1173,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf Cascade telemetry exports non-model metadata without tool definition schemas.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'claude-code') {
       return unavailable('Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.')
@@ -1179,7 +1199,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf does not export execution hierarchy or subagent delegation linkage.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'codex') {
       return unavailable('Codex session files record standalone sessions without execution hierarchy.')
@@ -1195,7 +1215,7 @@ export function harnessDimensionAvailability(
   // 7. Cost: billing basis (derived from token usage or reported)
   if (dim === 'cost') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     return 'derived'
   }
@@ -1203,7 +1223,7 @@ export function harnessDimensionAvailability(
   // 8. Token usage: basic token counters
   if (dim === 'token_usage') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal output via LiteLLM without structured token counters.')

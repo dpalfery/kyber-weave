@@ -147,6 +147,7 @@ export const ENTRIES = [
   'src/tools/store-memory.ts', // operator tool: attributes a store handle's resident memory
   'src/tools/report-fixtures.ts', // `npm run report:fixtures`, regenerates the renderer fixtures
   'src/capture/harnesses/opencode-plugin/entry.ts', // opencode loads the installed plugin file by path (runbook), never by dash import
+  'src/capture/harnesses/opencode-plugin/generated/plugin-source.ts', // generated text of the plugin; the T4 installer imports it, bundle.test.ts guards it
   'web/src/main.tsx', //        the web dashboard's Vite entry
 ]
 export const SCAN_ROOTS = ['src', 'web/src']
@@ -159,6 +160,7 @@ export const ALIASES = { '@': 'web/src' }
  */
 export const TEST_ENTRIES = [
   'tests/setup/env-isolation.ts', //                  vitest.config.ts setupFiles
+  'tests/setup/network-guard-setup.ts', //            vitest.config.ts setupFiles (D10 live-receiver guard)
   'tests/fixtures/cache-refresh-worker.ts', //        spawned by path from lock-process.test.ts
   'tests/fixtures/cache-refresh-corrupt-owner.ts', // spawned via spawnFixture() in lock-corrupt-body.test.ts
   'tests/fixtures/cache-refresh-slow-owner.ts', //    spawned via spawnFixture() in lock-corrupt-body.test.ts

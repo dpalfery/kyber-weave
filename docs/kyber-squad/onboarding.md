@@ -38,10 +38,10 @@ All squad operations are grouped under the `squad` branch:
 
 ```bash
 # Install squad into project (or global) scope
-kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>]
+kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>] [--no-capture-plugin]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--projects <all|none|PATH>] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>]
+kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--projects <all|none|PATH>] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>] [--no-capture-plugin]
 
 # Uninstall squad deployment
 kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
@@ -452,6 +452,18 @@ prints no such warning. Every later run anchors on the same root.
 | `warp` | `~/.warp` (no override) | `skills/<name>/SKILL.md` |
 | `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
 | `devin` | Windows: `%APPDATA%\devin`; macOS and Linux: `$XDG_CONFIG_HOME/devin` → `~/.config/devin` | `agents/<name>/AGENT.md`, `skills/<name>/SKILL.md` |
+
+**OpenCode capture plugin (global scope).** When `squad install --global` or `squad update --global`
+resolves the `opencode` target and succeeds, Squad also installs or upgrades the KyberDash OpenCode
+capture plugin, `kyberdash-opencode.js`, under the OpenCode root in the table above. Squad runs
+`kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <that root>`. Preserve
+mode keeps an edited or foreign plugin file with a warning, and it never touches `opencode.jsonc`.
+The consent file `~/.kyberdash/opencode-plugin.json` is created with content off only when absent.
+Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If `kyberdash`
+is not installed, Squad prints a skip line that names `kyber-weave update`, and Squad's own result is
+unchanged. A failed plugin step prints a warning and does not change Squad's exit code.
+Restart OpenCode after the step reports an installed or upgraded plugin. Squad cannot restart it. See
+[Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.
