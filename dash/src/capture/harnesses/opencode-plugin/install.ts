@@ -6,8 +6,8 @@
 //
 //   strict    `capture enable`: refuses a foreign file (conflict), an owner-edited file
 //             (drift) and an unreadable path with exit 1, as the Kilo installer does.
-//   preserve  Squad and `kyber-weave update`: never overwrites an edited or foreign plugin
-//             and never touches an existing consent file; it keeps them, warns, and exits 0.
+//   preserve  Squad and `kyber-weave update`: never overwrites an edited or foreign plugin,
+//             nor an older one no receipt proves unmodified, and never touches an existing consent file; it keeps them, warns, and exits 0.
 //             A missing consent file is created with content off (Q2).
 //
 // Neither mode touches opencode.jsonc. The OpenCode root is `--config-dir`, else
@@ -163,19 +163,22 @@ type Classified =
   | { kind: 'same' }
   | { kind: 'edited' }
   | { kind: 'newer' }
-  | { kind: 'older' }
+  | { kind: 'older'; proven: boolean }
 
 function classify(slot: Slot, receipt: Receipt | undefined, pluginFile: string): Classified {
   if (slot.kind !== 'file') return { kind: slot.kind }
   const text = slot.text
   if (!text.startsWith(MARKER_PREFIX)) return { kind: 'foreign' }
   if (text === OPENCODE_PLUGIN_SOURCE) return { kind: 'same' }
-  // With no receipt for this path the marker is all that says the file is ours.
-  if (receipt !== undefined && receipt.path === pluginFile && sha256Hex(text) !== receipt.sha256) {
-    return { kind: 'edited' }
-  }
+  // With no receipt for this path the marker is all that says the file is ours, and nothing
+  // proves the owner has not edited it. Only a matching receipt whose digest still holds proves
+  // an older file is the unmodified plugin we wrote.
+  const hasReceipt = receipt !== undefined && receipt.path === pluginFile
+  if (hasReceipt && sha256Hex(text) !== receipt.sha256) return { kind: 'edited' }
   const version = versionOf(text)
-  return version !== undefined && version > OUR_VERSION ? { kind: 'newer' } : { kind: 'older' }
+  return version !== undefined && version > OUR_VERSION
+    ? { kind: 'newer' }
+    : { kind: 'older', proven: hasReceipt }
 }
 
 function result(
@@ -258,6 +261,17 @@ export function installOpencodePlugin(
         err: [`kyberdash capture: warning: ${pluginFile} was edited since install; leaving it in place`],
       })
     }
+    case 'older':
+      if (preserve && !found.proven) {
+        return result('kept-edited', 'kept', {
+          consent: ensureConsent(paths, dryRun),
+          out: [`opencode plugin: kept-edited ${pluginFile}`],
+          err: [
+            `kyberdash capture: warning: ${pluginFile} is an older KyberDash plugin but no receipt proves it is unmodified; leaving it in place. Run \`kyberdash kyber capture plugin install --harness opencode\` or delete it to upgrade.`,
+          ],
+        })
+      }
+      return installOrUpgrade(true)
     case 'newer':
       return result('kept-newer', 'noop', {
         consent: preserve ? ensureConsent(paths, dryRun) : 'none',
@@ -269,24 +283,25 @@ export function installOpencodePlugin(
         out: [`opencode plugin: unchanged ${pluginFile}`],
       })
     case 'absent':
-    case 'older': {
-      const upgrade = found.kind === 'older'
-      const disposition = upgrade ? 'upgraded' : 'installed'
-      if (dryRun) {
-        return result(disposition, 'would-write', {
-          consent: preserve ? ensureConsent(paths, true) : 'none',
-          out: [`opencode plugin: ${upgrade ? 'would-upgrade' : 'would-install'} ${pluginFile}`],
-        })
-      }
-      writePlugin(paths)
-      return result(disposition, 'wrote', {
-        consent: preserve ? ensureConsent(paths, false) : 'none',
-        out: [
-          `opencode plugin: ${disposition} ${pluginFile}`,
-          `harness opencode: restart OpenCode so it loads the ${upgrade ? 'upgraded ' : ''}capture plugin`,
-        ],
+      return installOrUpgrade(false)
+  }
+
+  function installOrUpgrade(upgrade: boolean): OpencodePluginResult {
+    const disposition = upgrade ? 'upgraded' : 'installed'
+    if (dryRun) {
+      return result(disposition, 'would-write', {
+        consent: preserve ? ensureConsent(paths, true) : 'none',
+        out: [`opencode plugin: ${upgrade ? 'would-upgrade' : 'would-install'} ${pluginFile}`],
       })
     }
+    writePlugin(paths)
+    return result(disposition, 'wrote', {
+      consent: preserve ? ensureConsent(paths, false) : 'none',
+      out: [
+        `opencode plugin: ${disposition} ${pluginFile}`,
+        `harness opencode: restart OpenCode so it loads the ${upgrade ? 'upgraded ' : ''}capture plugin`,
+      ],
+    })
   }
 }
 

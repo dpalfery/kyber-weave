@@ -315,7 +315,9 @@ which the installer reads as the version marker.
 - **Strict** (`capture enable`, `capture plugin install` without flags): refuses a foreign or
   edited plugin file with exit 1.
 - **Preserve** (`--preserve`, used by Squad and `kyber-weave update`): keeps a foreign or edited
-  file with a warning and exits 0. An older plugin of ours is upgraded. An absent file is written
+  file with a warning and exits 0. An older plugin of ours is upgraded only when the receipt for
+  that path proves it unmodified; with no receipt, or one for another path, it is kept as
+  `kept-edited` because its origin cannot be proven. An absent file is written
   when the caller is not `--if-installed`. `--if-installed` acts only when a plugin file is already
   present, and otherwise prints `skipped-not-installed` and writes nothing.
 

@@ -1336,8 +1336,9 @@ through the bounded outbox. The hook only reads OpenCode's request. OpenCode 1.x
   the plugin only if it is already installed. See [Updating](../install.md#updating). Pass
   `--no-restart` to skip the restart.
 - Both paths run `kyberdash kyber capture plugin install --harness opencode --preserve`. Preserve
-  mode keeps a plugin file you edited or a file KyberDash did not write, prints a warning, and
-  exits 0. It never touches `opencode.jsonc`.
+  mode keeps a plugin file you edited, an older KyberDash plugin with no matching receipt (its
+  origin cannot be proven; reported as `kept-edited`), or a file KyberDash did not write, prints a
+  warning, and exits 0. It upgrades an older plugin only when the receipt proves it is unmodified. It never touches `opencode.jsonc`.
 - Strict mode (no `--preserve`) refuses to overwrite such a file and exits 1. Add `--dry-run` to
   preview either mode without writing.
 

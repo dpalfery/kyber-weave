@@ -120,6 +120,47 @@ describe('installOpencodePlugin: preserve mode', () => {
     expect(result.err.join('\n')).toMatch(/edited/i)
   })
 
+  it('keeps an older marker file when there is no receipt (origin unknown), warns, exits 0', () => {
+    const home = temp('oc-norcpt-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const unknown = `// kyberdash-opencode-plugin v0\nexport default {}\n// owner tweak\n`
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    writeFileSync(paths.pluginFile, unknown)
+    const result = preserve(home)
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('kept-edited')
+    expect(result.outcome).toBe('kept')
+    expect(readFileSync(paths.pluginFile, 'utf8')).toBe(unknown)
+    expect(existsSync(paths.receiptFile)).toBe(false)
+    expect(result.err.join('\n')).toMatch(/no receipt/i)
+  })
+
+  it('keeps an older marker file when the receipt is for another path', () => {
+    const home = temp('oc-otherrcpt-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const older = `// kyberdash-opencode-plugin v0\nexport default {}\n`
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    writeFileSync(paths.pluginFile, older)
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    const receipt = JSON.stringify({ version: 1, path: join(home, 'elsewhere', 'kyberdash-opencode.js'), sha256: sha256Hex(older) })
+    writeFileSync(paths.receiptFile, receipt)
+    const result = preserve(home)
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('kept-edited')
+    expect(readFileSync(paths.pluginFile, 'utf8')).toBe(older)
+    expect(readFileSync(paths.receiptFile, 'utf8')).toBe(receipt)
+  })
+
+  it('strict mode still upgrades an older marker file with no receipt', () => {
+    const home = temp('oc-strict-norcpt-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    writeFileSync(paths.pluginFile, '// kyberdash-opencode-plugin v0\n')
+    const result = installOpencodePlugin(home, undefined, { mode: 'strict', processEnv: NO_ENV })
+    expect(result.disposition).toBe('upgraded')
+    expect(readFileSync(paths.pluginFile, 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
+  })
+
   it('keeps a plugin that is not ours, warns, and exits 0 without touching consent', () => {
     const home = temp('oc-foreign-')
     const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
@@ -176,7 +217,10 @@ describe('installOpencodePlugin: preserve mode', () => {
     const home = temp('oc-ifinst2-')
     const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
     mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
-    writeFileSync(paths.pluginFile, '// kyberdash-opencode-plugin v0\n')
+    const older = '// kyberdash-opencode-plugin v0\n'
+    writeFileSync(paths.pluginFile, older)
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    writeFileSync(paths.receiptFile, JSON.stringify({ version: 1, path: paths.pluginFile, sha256: sha256Hex(older) }))
     expect(preserve(home, { ifInstalled: true }).disposition).toBe('upgraded')
     expect(readFileSync(paths.pluginFile, 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
   })

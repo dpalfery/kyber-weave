@@ -8,7 +8,8 @@
 // only `.default` and requires `{ id, setup }`, so a stdin entry re-exports `default` alone:
 // `entry.ts` also exports `createSetup`, which must not reach the loader.
 //
-// esbuild is the bundler tsup already depends on; no package is added.
+// esbuild is the bundler tsup already uses; it is a direct devDependency so this script does not
+// rely on tsup hoisting it.
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
