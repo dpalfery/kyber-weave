@@ -91,11 +91,11 @@ describe('harnessDimensionAvailability & coverageFor (ADR 0009, ADR 0011, Task E
     }
     expect(coverageFor('aider')).toBe(0.0)
 
-    // OpenCode has experimental OpenTelemetry disabled
+    // OpenCode exports nothing until the capture plugin has recorded sessions
     const opencodeCache = harnessDimensionAvailability('opencode', 'cache_hit_rate')
     expect(isNotMeasurable(opencodeCache)).toBe(true)
     if (isNotMeasurable(opencodeCache)) {
-      expect(opencodeCache.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodeCache.reason).toContain('KyberDash capture plugin')
     }
     expect(coverageFor('opencode')).toBe(0.0)
 
@@ -115,13 +115,13 @@ describe('harnessDimensionAvailability & coverageFor (ADR 0009, ADR 0011, Task E
     const opencodePressureMedian = harnessDimensionAvailability('opencode', 'context_pressure_median')
     expect(isNotMeasurable(opencodePressureMedian)).toBe(true)
     if (isNotMeasurable(opencodePressureMedian)) {
-      expect(opencodePressureMedian.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodePressureMedian.reason).toContain('KyberDash capture plugin')
     }
 
     const opencodePressureP95 = harnessDimensionAvailability('opencode', 'context_pressure_p95')
     expect(isNotMeasurable(opencodePressureP95)).toBe(true)
     if (isNotMeasurable(opencodePressureP95)) {
-      expect(opencodePressureP95.reason).toContain('experimental OpenTelemetry disabled')
+      expect(opencodePressureP95.reason).toContain('KyberDash capture plugin')
     }
   })
 

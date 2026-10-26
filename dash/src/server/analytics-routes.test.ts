@@ -13,6 +13,9 @@ import { runWebDashboard } from '../cli/web.js'
 import type { JobHost } from '../jobs/host.js'
 import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
 import { removeTempStateDir, stopServer } from './testing.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const POST_ROUTES = [
   '/api/kyber/analytics/query',

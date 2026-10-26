@@ -14,6 +14,9 @@ import { projectCanonicalStore } from '../canon/projection.js'
 import { loadPricing } from '../pricing/models.js'
 import type { CanonicalRecord, CostBlock } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const asadShape = JSON.parse(
   readFileSync(new URL('../canon/fixtures/asad-session-shape.json', import.meta.url), 'utf8')

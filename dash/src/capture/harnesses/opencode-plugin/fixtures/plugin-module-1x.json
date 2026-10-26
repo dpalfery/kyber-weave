@@ -1,0 +1,150 @@
+{
+  "t0": "OpenCode 1.x plugin contract pin for T2/T3/T7 (plan docs/archive/plans/2026-10-25-opencode-capture-deploy-kyberdash.md §5 T0, §2.2 G1/G2/G4). Facts only, no emission logic. Every quote below is verbatim from the named file on the owner machine at the version shown.",
+  "pinned_on": "2026-10-26",
+  "installed_versions": {
+    "opencode_cli": {
+      "version": "2.1.4",
+      "binary": "/opt/homebrew/Cellar/opencode/2.1.4/bin/opencode",
+      "probe": "opencode --version => opencode v2.1.4",
+      "note": "This is the OpenCode runtime on PATH. Its plugin loader is quoted under loader_2_1_4 below."
+    },
+    "opencode_plugin_1x": {
+      "name": "@opencode-ai/plugin",
+      "version": "1.17.3",
+      "path": "~/.config/opencode/node_modules/@opencode-ai/plugin",
+      "authority": "dist/index.d.ts (1.x types, read on owner machine)"
+    },
+    "opencode_sdk_1x": {
+      "name": "@opencode-ai/sdk",
+      "version": "1.17.3",
+      "path": "~/.config/opencode/node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts",
+      "authority": "types.gen.d.ts, export type Model (line 1278), export type Provider (line 1335)"
+    }
+  },
+  "loader_default_vs_named_exports": {
+    "g1_question": "Does the loader read only the default export, or does it also invoke named exports?",
+    "answer_2_1_4": "Reads only `.default`. Named exports are never read or invoked. A default export must match a union of { id, effect } or { id, setup }. Shape { id, server } is NOT in the union.",
+    "answer_1_x": "NOT PINNED from source. The 1.x runtime loader is not present on this machine (no 1.x CLI binary, no 1.x package containing a loader; the 1.17.3 package contains only type declarations). The only 1.x rule quotable is the type below, which names one default-shaped `server` module and no named-export rule.",
+    "mitigation_status": "D2 (export only `default`) is consistent with the 2.1.4 loader, which reads only `.default`. Named exports are therefore inert on 2.1.4; the 1.x named-export rule remains unpinned.",
+    "sources": [
+      {
+        "file": "~/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts",
+        "verbatim": "export type PluginModule = {\n    id?: string;\n    server: Plugin;\n    tui?: never;\n};\nexport type Plugin = (input: PluginInput, options?: PluginOptions) => Promise<Hooks>;"
+      },
+      {
+        "file": "/opt/homebrew/Cellar/opencode/2.1.4/bin/opencode (Bun-compiled binary; loader symbols found by byte search)",
+        "verbatim_schema": "_qm=j({default:tt([j({id:w,effect:Zs((e)=>typeof e===\"function\")}),j({id:w,setup:Zs((e)=>typeof e===\"function\")})])})",
+        "verbatim_load": "let l=yield*Dn(()=>r?t.read(c):tPt(c).then((p)=>({module:p,version:a?.revision}))),u=(yield*xn(_qm)(l.module).pipe(Je((p)=>new D0n({message:\"Plugin must export a default definition with an id and an effect or setup function.\",cause:p})))).default,d=\"effect\"in u?u:zJn(u);",
+        "verbatim_error": "Plugin must export a default definition with an id and an effect or setup function.",
+        "reading": "Only `.default` is passed to the schema and used. Named exports are not read. A `{ id, server }` default fails the schema with the error above."
+      }
+    ],
+    "conflict_for_T2": "Plan D1 specifies default export `{ id: 'kyberdash-opencode', server }`. The installed 2.1.4 loader rejects that shape. The 1.x loader that accepts `server` is not on this machine. Escalate to the conductor before T2 is written against `server`."
+  },
+  "skills_listing_g2": {
+    "answer_2_1_4": "The skill list is prompt TEXT, not a tool description. It is rendered as an `<available_skills>` block, one `<skill>` element per skill with `<id>`, `<name>`, `<description>` children. The `skill` tool description is static and lists no skills. When skills change mid-session, a message reading \"The available skills have changed. This list supersedes the previous available skills list.\" is emitted with the same block.",
+    "sources": [
+      {
+        "file": "/opt/homebrew/Cellar/opencode/2.1.4/bin/opencode (byte search)",
+        "verbatim_block": "\"<available_skills>\",...QOr(e),\"</available_skills>\"",
+        "verbatim_entry": "[\"  <skill>\",`    <id>${t.id}</id>`,`    <name>${t.name}</name>`,`    <description>${t.description}</description>`,\"  </skill>\"]",
+        "verbatim_static_tool_description": "Load a specialized skill's instructions and resources into the current conversation when the task at hand matches its description."
+      }
+    ],
+    "t7_implication": "Read the listing from the assembled system prompt text (experimental.chat.system.transform output.system) by locating the `<available_skills>` block and parsing `<id>` values. Fallback per §2.2 G2: `readSystemPromptListing`. A malformed or absent block yields a named not-measurable reason, not zero.",
+    "answer_1_x": "Not pinned from source (1.x runtime absent). The 2.1.4 answer above is the only quoted location."
+  },
+  "chat_params_shape_1x": {
+    "source_file": "~/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts",
+    "verbatim": "\"chat.params\"?: (input: {\n        sessionID: string;\n        agent: string;\n        model: Model;\n        provider: ProviderContext;\n        message: UserMessage;\n    }, output: {\n        temperature: number;\n        topP: number;\n        topK: number;\n        maxOutputTokens: number | undefined;\n        options: Record<string, any>;\n    }) => Promise<void>;",
+    "provider_context_verbatim": "export type ProviderContext = {\n    source: \"env\" | \"config\" | \"custom\" | \"api\";\n    info: Provider;\n    options: Record<string, any>;\n};",
+    "model_limit_context": {
+      "path": "input.model.limit.context",
+      "type": "number",
+      "source_file": "~/.config/opencode/node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts",
+      "verbatim": "export type Model = { ... limit: {\n        context: number;\n        output: number;\n    }; ... }",
+      "note": "Model.limit is declared on the Model type (line 1278 opens the type, limit at line 1323). Output limit is input.model.limit.output."
+    },
+    "provider_id": {
+      "path": "input.provider.info.id",
+      "type": "string",
+      "source_file": "~/.config/opencode/node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts",
+      "verbatim": "export type Provider = { id: string; name: string; source: \"env\" | \"config\" | \"custom\" | \"api\"; ... models: { [key: string]: Model; }; };",
+      "note": "Kilo precedent (dash/src/capture/kilo-plugin/source.ts) reads input.provider.info.id then falls back to input.provider.id. Keep the same fallback."
+    },
+    "model_id": {
+      "path": "input.model.id",
+      "type": "string",
+      "note": "Kilo precedent reads input.model.id."
+    }
+  },
+  "g4_quarantine_check": {
+    "method": "Read-only. Copied ~/.kyberdash/canon.db and canon.db-wal into the task scratchpad, then queried the copy with sqlite3 (no writes to the live store; the live receiver was not touched).",
+    "table": "quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload, harness)",
+    "selector": "reason LIKE '%contract version%'",
+    "result": {
+      "rows_total": 41,
+      "rows_before_2026-10-25": 35,
+      "rows_on_or_after_2026-10-25": 6,
+      "distinct_session_ids": ["opencode-session-7f3a"],
+      "span_name": "opencode.session.context",
+      "harness": "opencode",
+      "attribute_value_seen": "opencode.contract_version = \"2\""
+    },
+    "fixture_match": {
+      "session_id": "opencode-session-7f3a",
+      "files": [
+        "dash/src/capture/harnesses/opencode-plugin/entry.test.ts (line 25: const SESSION_ID = 'opencode-session-7f3a')",
+        "dash/src/capture/harnesses/opencode-plugin/plugin.pipeline.test.ts",
+        "dash/src/capture/harnesses/opencode-plugin/plugin.test.ts",
+        "dash/src/capture/harnesses/opencode-plugin/transport/outbox.test.ts"
+      ]
+    },
+    "verdict": "Test pollution confirmed. All 41 contract-version rows carry the test fixture session id opencode-session-7f3a, which is hardcoded in four test files. None are owner sessions. The count is 41 now (35 before 2026-10-25, plus 6 later), so the plan's figure of 35 is stale. Rows continue to arrive, which means the polluting test runs still reach the live receiver; T1 (network guard) is the fix. Leave the rows in quarantine per D9."
+  },
+  "context_hook_input_2_1_4": {
+    "t2": "Plan T2 (R1): the 2.1.4 session.hook(\"context\") input and the G6 answer. Registration is ctx.session.hook(\"context\", cb); cb(input) receives a SessionContext.",
+    "pinned_on": "2026-10-26",
+    "sources": [
+      "@opencode/plugin@2.1.4 tarball dist/promise/session.d.ts (SessionRequest, SessionContext), already quoted in fixtures/context-payload.json",
+      "@opencode/schema@2.1.4 tarball dist/model.d.ts (Model.Ref, Model.Info limit)",
+      "@opencode/client@2.1.4 tarball dist/effect/api/api.d.ts (ModelApi)",
+      "/opt/homebrew/Cellar/opencode/2.1.4/bin/opencode (byte search of the Bun-compiled binary)"
+    ],
+    "input_shape": {
+      "sessionID": "string (readonly)",
+      "model": "Model.Ref: { id: string, providerID: string, variant?: string } (readonly)",
+      "agent": "string (Agent.ID, readonly)",
+      "system": "Array<SystemPart>, read as system[n].text (mutable)",
+      "tools": "Record<string, { description: string, input: JsonSchema }> keyed by tool id (mutable)",
+      "messages": "Array<Message> (mutable; KyberDash never reads it)"
+    },
+    "example_input": {
+      "sessionID": "opencode-session-7f3a",
+      "model": { "id": "claude-sonnet-4-5", "providerID": "anthropic" },
+      "agent": "build",
+      "system": [
+        { "text": "You are opencode." },
+        { "text": "Skills:\n<available_skills>\n  <skill>\n    <id>review</id>\n    <name>review</name>\n    <description>Review code</description>\n  </skill>\n  <skill>\n    <id>deploy</id>\n    <name>deploy</name>\n    <description>Ship it</description>\n  </skill>\n</available_skills>" }
+      ],
+      "tools": {
+        "read": { "description": "Read a file", "input": { "type": "object" } },
+        "skill": { "description": "Load a specialized skill's instructions", "input": { "type": "object" } }
+      },
+      "messages": []
+    },
+    "model_ref_verbatim_binary": "n.model.providerID, n.model.id, r.model.variant (built-in plugin reads of the context input model ref)",
+    "g6_catalog_lookup": {
+      "answer": "YES. The setup context exposes ctx.model (ModelDomain extends ModelApi: list, default). OpenCode's own built-in plugins call (yield*e.model.list()).data.find((o)=>o.providerID===n.model.providerID&&o.id===n.model.id) inside the context callback. Each catalog entry is Model.Info with limit.context (Int), limit.output, and optional limit.input.",
+      "list_result_shape": "{ data: Model.Info[] } (binary reads .data); the reader also tolerates a bare array",
+      "context_limit_path": "<catalog entry>.limit.context",
+      "binary_verbatim": "let r=(yield*e.model.list()).data.find((o)=>o.providerID===n.model.providerID&&o.id===n.model.id)??OQ.default(n.model.providerID,n.model.id)",
+      "schema_verbatim": "readonly limit: Schema.Struct<{ readonly context: Schema.Int; readonly input: ...; readonly output: Schema.Int; }>",
+      "consequence": "D6: the plugin sends opencode.model.context_limit (reported) when ctx.model.list finds the model with a positive finite limit.context; otherwise it omits it (never 0)."
+    }
+  },
+  "still_unpinned": [
+    "1.x named-export loader rule (no 1.x runtime on this machine).",
+    "1.x skill listing location (no 1.x runtime on this machine)."
+  ]
+}

@@ -108,6 +108,13 @@ describe('runCaptureAction: enable', () => {
         path: opencodePath(home),
         changes: [{ key: 'experimental.openTelemetry', after: true }],
       },
+      // T4: OpenCode now also owns its capture plugin file (strict install).
+      {
+        kind: 'wrote',
+        harness: 'opencode',
+        fileId: 'plugin',
+        path: join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js'),
+      },
     ])
     const written = readFileSync(opencodePath(home), 'utf8')
 
@@ -179,6 +186,13 @@ describe('runCaptureAction: disable', () => {
     const preview = await runCaptureAction(request(home, 'opencode', 'disable', { dryRun: true }))
     expect(preview.outcome).toBe('previewed')
     expect(preview.events).toEqual([
+      // T4: the installed plugin file is part of the disable preview.
+      {
+        kind: 'would-restore',
+        harness: 'opencode',
+        fileId: 'plugin',
+        path: join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js'),
+      },
       {
         kind: 'would-restore',
         harness: 'opencode',
@@ -191,7 +205,9 @@ describe('runCaptureAction: disable', () => {
 
     const restored = await runCaptureAction(request(home, 'opencode', 'disable'))
     expect(restored.outcome).toBe('wrote')
-    expect(restored.events[0]).toMatchObject({ kind: 'restored', fileId: 'opencode-config' })
+    expect(restored.events).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'restored', fileId: 'opencode-config' })]),
+    )
     expect(readFileSync(opencodePath(home), 'utf8')).toBe(seed)
   })
 
@@ -539,7 +555,8 @@ describe('runCapture: structured events beside the unchanged text', () => {
       fetchHealth: NO_LISTENER,
     })
     expect(result.stdout).toContain(`harness opencode: enabled: ${opencodePath(home)} (updated)`)
-    expect(result.events.map((event) => event.kind)).toEqual(['wrote'])
+    // The config file, then the OpenCode plugin file (T4).
+    expect(result.events.map((event) => `${event.fileId}:${event.kind}`)).toEqual(['opencode-config:wrote', 'plugin:wrote'])
   })
 
   it('bounds the receiver probe by probeTimeoutMs', async () => {

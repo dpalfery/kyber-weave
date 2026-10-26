@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -1319,25 +1319,90 @@ It is detected from any **one** of three traces, and nothing else counts as dete
 VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
 installed only there has none of the three traces, so the row says not detected while Kilo itself
 works — run the import above and ignore the row.
-**OpenCode plugin (`kyberdash-opencode`).** The dash-CLI-managed plugin observes
-session/turn/span hooks plus the `session.context` hook (system prompt, tool definitions,
-skills listing, session/model identity) from opencode's own plugin directories (`~/.config/opencode/plugins/`,
-`.opencode/plugins/`; loadable entry `entry.ts` covers both the v2 CLI `Plugin.define` shape
-and the v1 Desktop hooks map) and posts span-anchored OTLP/HTTP spans to the loopback receiver
-through the bounded outbox, which spools offline and retries with backoff. Capture owns
-the plugin keys declare-only: the writer declares the plugin id and its `plugins` config
-keys, but `enable` writes only `experimental.openTelemetry` — the registration installs by
-file and the endpoint stays process-env-only, so neither ever enters a receipt. Context
-content rides only under the sender-owned consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
-default; unset or any other value drops content pre-emit while identity/markers still flow).
-After enabling, install/upgrade the plugin file, set the consent where opencode launches,
-and restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
-Desktop: disable plugins, clear cache, restart) with `OTEL_EXPORTER_OTLP_ENDPOINT` set
-where it launches, then emit a turn; a green enable is not capture. Restart-to-upgrade note:
-spans stamped contract `'1'` by a pre-upgrade plugin quarantine under `unknown opencode
-contract version` after the `'2'` bump — reinstall the plugin file and re-emit so the turn
-is stamped `'2'`. Live check: emit one opencode turn and confirm the session's Context view
-shows the system prompt and tool definitions and the Skills view shows the listing.
+**OpenCode capture plugin (`kyberdash-opencode`).** KyberDash installs one plugin file,
+`kyberdash-opencode.js`, into OpenCode's global plugin directory, `<root>/plugins/`. The root is
+`--config-dir` when given, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`. You do not copy
+the file by hand; the `kyberdash` binary carries it. `kyberdash kyber capture enable`,
+`disable` and `status` take `--config-dir` with the same precedence (flag, else
+`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`), so a re-enable into a custom root needs no
+env export. Even without the flag, a plugin Squad installed
+into a custom root is still found by `capture status` and `capture disable`, which follow the path in
+the receipt, but only when that path is `<dir>/plugins/kyberdash-opencode.js`, a regular file (not a
+symlink) that carries the KyberDash marker. To re-enable into that custom root, pass
+`--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. OpenCode 2.1.4 loads its default export
+`{ id: 'kyberdash-opencode', setup }`, and `setup` registers one `context` hook that sends each
+request's identity, system prompt, tool definitions and skills listing to the loopback receiver
+through the bounded outbox. The hook only reads OpenCode's request. OpenCode 1.x is not supported yet.
+
+**Install and update: one command.**
+
+- `kyber-weave squad install --global` or `kyber-weave squad update --global` with the OpenCode
+  target installs or upgrades the plugin after the Squad step. Pass `--no-capture-plugin` to skip
+  it. Project-scope runs do not install it.
+- `kyber-weave update` installs the new `kyberdash`, restarts the engine and tray, and upgrades
+  the plugin only if it is already installed. See [Updating](../install.md#updating). Pass
+  `--no-restart` to skip the restart.
+- Both paths run `kyberdash kyber capture plugin install --harness opencode --preserve`. Preserve
+  mode keeps a plugin file you edited, an older KyberDash plugin with no matching receipt (its
+  origin cannot be proven; reported as `kept-edited`), or a file KyberDash did not write, prints a
+  warning, and exits 0. It upgrades an older plugin only when the receipt proves it is unmodified. It never touches `opencode.jsonc`.
+- Strict mode (no `--preserve`) refuses to overwrite such a file and exits 1. Add `--dry-run` to
+  preview either mode without writing.
+
+**Restart OpenCode after every install or upgrade.** KyberDash cannot restart your OpenCode
+process. The install prints `restart OpenCode to load the upgraded capture plugin` when the file
+changed. Until you restart, OpenCode runs the old plugin or none.
+
+**Content consent.** Consent controls whether the system prompt, tool definitions and skills
+listing are sent. It lives in `~/.kyberdash/opencode-plugin.json` (`{ "version": 1, "content": <bool> }`).
+
+- Install creates that file with `content: false` only if it does not exist. An existing file is
+  never rewritten by install or update.
+- **On:** turn OpenCode on in the KyberDash Settings drawer, or run
+  `kyberdash kyber capture enable --harness opencode`. This sets `content: true`, writes
+  `experimental.openTelemetry`, and ensures the engine is running.
+- **Off:** turn OpenCode off in the Settings drawer, or run
+  `kyberdash kyber capture disable --harness opencode`. This sets `content: false` and removes the
+  plugin file and its JSONC key.
+- The plugin reads the consent file on each request, so a change applies without reinstalling. A
+  restart is still needed for an upgraded plugin file, not for consent.
+- `KYBERDASH_OPENCODE_CONTEXT=1` forces content on and `0` forces it off. Unset defers to the file.
+  This is a debugging override only: a Desktop app started from the Dock does not inherit shell variables.
+- While consent is off, identity and token counts still flow. The system prompt, tool definitions
+  and skills read "not measurable".
+
+**Confirm it works.** Restart OpenCode, run one turn, and open the session in the dashboard. The
+Context view should show the system prompt and tool definitions, and the Skills view the listing.
+The tray should show token counts and a context window. The window comes from the plugin when
+OpenCode reports its model limit; otherwise KyberDash's model-window catalog supplies it and the
+view labels it as catalog-derived. A green `capture enable` is still not capture: confirm with a turn.
+
+**Engine check.** `kyberdash engine ensure --if-running` replaces a live engine of another version and
+starts nothing when none runs. It prints one line: `engine: not-running`, `engine: attached <version>`,
+or `engine: replaced <old> -> <new>`. It exits 1 with `engine: unresponsive` or `engine: failed` when it
+cannot act. `kyber-weave update` runs it after the binaries commit.
+
+**Engine version in status.** `kyberdash kyber capture status` prints the running engine's version
+against the CLI's own, as `engine: running <engine>, cli <cli>`. When they differ it adds `(differs)`
+and the remedy `kyber-weave update`. It prints `engine: not-running (cli <cli>)` when no engine holds
+the endpoint, and `engine: unresponsive` when the holder never answers.
+
+**Re-projection after an upgrade.** The engine re-projects the store on its own start. The job host
+runs one maintenance tick at once, and when the store's detector stamp is older than this build's
+(`DETECTOR_VERSION`), that tick projects the store to the new rules. You do not need `kyber build`.
+Rows from an older build, including OpenCode buckets that showed a measured zero, refresh on that tick.
+A current stamp means the tick does nothing.
+
+**Quarantined spans from before this change.** Test runs sent 41 spans (test session
+`opencode-session-7f3a`) into `canon.db` at contract `'1'`. They stay in quarantine under
+`unknown opencode contract version` as evidence, and nothing relinks them. To clear the OpenCode
+rows, wipe the harness scope:
+`kyberdash dash clean --harness opencode --no-reingest --yes`. The scope wipe also removes
+quarantine rows for `opencode`.
+
+**Tests.** A test cannot reach the live OTLP receiver. `dash/tests/setup/network-guard.ts` refuses
+any fetch to `127.0.0.1:4318` or `localhost:4318` with a named error. Inject `fetchFn` into plugin
+code under test instead.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows

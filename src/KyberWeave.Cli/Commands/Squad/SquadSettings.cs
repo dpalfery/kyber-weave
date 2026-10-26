@@ -69,6 +69,11 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description(
         "Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
     public string? Version { get; set; }
+
+    /// <summary>Skip the OpenCode capture-plugin step that a global install runs after it succeeds.</summary>
+    [CommandOption("--no-capture-plugin")]
+    [Description("Skip installing the KyberDash OpenCode capture plugin after a global install.")]
+    public bool NoCapturePlugin { get; set; }
 }
 
 /// <summary>Settings for the <c>squad update</c> command.</summary>
@@ -133,6 +138,11 @@ public sealed class SquadUpdateSettings : CommandSettings
     [Description(
         "Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
     public string? Version { get; set; }
+
+    /// <summary>Skip the OpenCode capture-plugin step that a global update runs after it succeeds.</summary>
+    [CommandOption("--no-capture-plugin")]
+    [Description("Skip upgrading the KyberDash OpenCode capture plugin after a global update.")]
+    public bool NoCapturePlugin { get; set; }
 
     /// <summary>
     ///     Which registered projects a <c>--global</c> update reaches: <c>all</c>, <c>none</c>, or one

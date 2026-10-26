@@ -303,3 +303,35 @@ describe('opencode plugin span mapper carries T0 context fields onto envelope v2
     expect('opencode.context.skills' in attributes).toBe(false)
   })
 })
+
+// T2 (R1, D6): the 2.1.4 catalog window rides as the optional additive
+// attribute `opencode.model.context_limit` inside contract '2'. Only a
+// positive finite window is stamped; absent stays absent, never 0.
+describe('opencode plugin span mapper carries the reported context window (T2, D6)', () => {
+  it('stamps opencode.model.context_limit as a number without a contract bump', () => {
+    const attributes = mapOpencodePayloadToAttributes({
+      ...MODEL_PAYLOAD,
+      spanId: 'span-context-limit',
+      contextLimit: 200000,
+    })
+    expect(attributes['opencode.model.context_limit']).toBe(200000)
+    expect(attributes['opencode.contract_version']).toBe('2')
+  })
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'leaves the window absent for the unusable value %s',
+    (contextLimit) => {
+      const attributes = mapOpencodePayloadToAttributes({
+        ...MODEL_PAYLOAD,
+        spanId: 'span-context-limit-bad',
+        contextLimit,
+      })
+      expect('opencode.model.context_limit' in attributes).toBe(false)
+    },
+  )
+
+  it('leaves the window absent when the payload names none', () => {
+    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
+    expect('opencode.model.context_limit' in attributes).toBe(false)
+  })
+})

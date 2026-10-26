@@ -10,6 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 describe('web dashboard server: serving and the loopback guard', () => {
   let server: Server

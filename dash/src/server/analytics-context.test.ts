@@ -6,6 +6,9 @@ import { runWebDashboard } from '../cli/web.js'
 import type { JobHost } from '../jobs/host.js'
 import type { AnalyticsService } from './analytics-routes.js'
 import { stopServer } from './testing.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const inspectRequest = {
   mode: 'content',

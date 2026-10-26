@@ -204,7 +204,9 @@ describe('opencode capture ownership (T6)', () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.events).toHaveLength(1)
+      // The config file, then the plugin file the strict install would write (T4).
+      expect(result.events).toHaveLength(2)
+      expect(result.events[1]).toMatchObject({ kind: 'would-write', harness: 'opencode', fileId: 'plugin' })
       expect(result.events[0]).toMatchObject({
         kind: 'would-write',
         harness: 'opencode',

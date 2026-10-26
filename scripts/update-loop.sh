@@ -506,7 +506,7 @@ else
     expect_exit_zero
     expect_reports kyber-weave "kyber-weave ${TO_VERSION}" "--no-kyberdash still updates the CLI"
     expect_reports kyberdash "$STUB_KYBERDASH_VERSION" "--no-kyberdash leaves kyberdash alone"
-    expect_logged "--no-kyberdash given; leaving the KyberDash tray unchanged" "--no-kyberdash leaves the tray alone"
+    expect_logged "--no-kyberdash given; leaving the KyberDash engine, tray and capture plugin" "--no-kyberdash leaves the tray alone"
 
     begin_case tray-opt-out "$FROM_BIN"
     install_stub_kyberdash

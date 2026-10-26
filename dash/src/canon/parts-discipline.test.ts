@@ -292,8 +292,8 @@ describe("the projection's parts discipline", () => {
   it('derives the same tables, buckets, tool definitions, skills listing and timeline', async () => {
     // The anti-regression pin: the projection's whole output for a corpus
     // whose parts carry text is byte-identical to the output the same corpus
-    // derived before, except for the two Antigravity skill-invocation reason
-    // leaves noted in the file header (re-pinned 2026-10-21). The digest is
+    // derived before, except for the intended changes listed at the pin below.
+    // The digest is
     // over the derived sessions, runs, executions, rollups and findings — the
     // tables the projection writes.
     const store = seedStore(corpus(6))
@@ -301,12 +301,21 @@ describe("the projection's parts discipline", () => {
     await projectCanonicalStore(store)
 
     const digest = createHash('sha256').update(derivedSnapshot(store)).digest('hex')
-    // The digest of the derived tables for this corpus as of 2026-10-21. It
-    // differs from the earlier pin only in `$.sessions.0.payload.skills.rows.{0,1}.invocations.reason`,
-    // the Antigravity transcript reason copy in dash/src/canon/skills.ts
-    // `extractInvokedSkills`; every other leaf matches the earlier output.
+    // The digest of the derived tables for this corpus, re-pinned after two
+    // intended changes on this branch; every other leaf matches the earlier
+    // output:
+    //   1. T8 (bdec1c4): the session payload gains
+    //      `$.sessions.0.payload.context.observedParts` = the four parts the
+    //      context window measured (system_prompt, tool_definitions,
+    //      conversation_history, tool_result_content).
+    //   2. T6 (36ccf03): the OpenCode measurability reasons under
+    //      `$.rollups.41.measurability.*.reason` (cache_hit_rate,
+    //      context_pressure, context_pressure_median, context_pressure_p95,
+    //      delegation_overhead, tool_yield) now read "OpenCode exports no
+    //      session telemetry unless the KyberDash capture plugin has recorded
+    //      sessions; none carrying this counter were observed."
     expect(digest).toBe(
-      '2bcd880430f11af2dd23abfbb9fe7c28c1765509edcaccbb0129d3ad4742bc22',
+      'bad2d184270cad22329e1c43216dbb5c87a6c447b45696f57a6c194dd3cfb753',
     )
   })
 
