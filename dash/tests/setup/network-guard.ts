@@ -42,13 +42,40 @@ function urlOf(input: string | URL | Request): string {
   return input.url
 }
 
-/** True for any loopback host: localhost, 127.0.0.0/8, [::1], or a v4-mapped 127.x address. */
-function isLoopbackHost(rawHost: string): boolean {
+/** One inet_aton part: decimal, 0-octal or 0x-hex. NaN when it is none of those. */
+function inetPart(part: string): number {
+  if (/^0x[0-9a-f]*$/i.test(part)) return part.length === 2 ? Number.NaN : Number.parseInt(part.slice(2), 16)
+  if (/^0[0-7]+$/.test(part)) return Number.parseInt(part, 8)
+  if (/^(0|[1-9][0-9]*)$/.test(part)) return Number.parseInt(part, 10)
+  return Number.NaN
+}
+
+/**
+ * The address a 1-4 part inet_aton host spells (`2130706433`, `0x7f.1`, `0177.0.0.1`), or
+ * undefined when it is not such a host. The last part fills all remaining bytes.
+ */
+function inetAton(host: string): number | undefined {
+  const parts = host.split('.')
+  if (parts.length > 4) return undefined
+  const nums = parts.map(inetPart)
+  if (nums.some((n) => Number.isNaN(n))) return undefined
+  const last = nums[nums.length - 1] as number
+  const leading = nums.slice(0, -1)
+  if (leading.some((n) => n > 255) || last >= 256 ** (4 - leading.length)) return undefined
+  return leading.reduce((acc, n, i) => acc + n * 256 ** (3 - i), 0) + last
+}
+
+/**
+ * True for any loopback host: localhost, 127.0.0.0/8 in any numeric spelling, [::1], or a
+ * v4-mapped 127.x address. URL normalizes numeric hosts already; raw strings are handled too.
+ */
+export function isLoopbackHost(rawHost: string): boolean {
   // URL already lower-cases and normalizes IPv6 (::ffff:127.0.0.1 -> ::ffff:7f00:1); strip the
   // brackets and any trailing root dot.
   const host = rawHost.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
   if (host === 'localhost') return true
-  if (/^127(\.\d{1,3}){3}$/.test(host)) return true
+  const v4 = inetAton(host)
+  if (v4 !== undefined) return Math.floor(v4 / 2 ** 24) === 127
   if (host === '::1') return true
   const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(host)
   if (mapped) return (Number.parseInt(mapped[1] as string, 16) >> 8) === 127

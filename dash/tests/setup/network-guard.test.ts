@@ -17,6 +17,7 @@ import {
   createNetworkGuard,
   installNetworkGuard,
   isLiveReceiverUrl,
+  isLoopbackHost,
   isNetworkGuarded,
 } from './network-guard.js'
 
@@ -40,6 +41,20 @@ describe('network guard rules', () => {
     expect(isLiveReceiverUrl('http://[::1]:4319/v1/traces')).toBe(false)
     expect(isLiveReceiverUrl('http://128.0.0.1:4318/v1/traces')).toBe(false)
     expect(isLiveReceiverUrl('http://[2001:db8::1]:4318/v1/traces')).toBe(false)
+  })
+
+  it('treats every numeric IPv4 spelling of loopback as the live receiver, through URL and as raw hosts', () => {
+    const forms = ['2130706433', '0x7f000001', '0X7F000001', '0x7f.0.0.1', '0177.0.0.1', '0177.0.0.01', '127.1', '127.0.1', '0x7f.1', '017700000001', '127.0.0.0x1', '2130706434']
+    for (const host of forms) {
+      expect(isLiveReceiverUrl(`http://${host}:4318/v1/traces`), host).toBe(true)
+      expect(isLoopbackHost(host), `raw ${host}`).toBe(true)
+    }
+  })
+
+  it('does not treat other numeric IPv4 spellings as loopback', () => {
+    for (const host of ['2147483648', '0x80000001', '128.1', '0200.0.0.1', '10.0.0.1', '167772161', 'example.com', '127.0.0.1.example.com']) {
+      expect(isLoopbackHost(host), host).toBe(false)
+    }
   })
 
   it('refuses 127.0.0.2 and [::1] on port 4318 without calling the base fetch', async () => {
