@@ -13,12 +13,12 @@
 // Neither mode touches opencode.jsonc. The OpenCode root is `--config-dir`, else
 // `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` (the precedence Squad uses).
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, isAbsolute } from 'node:path'
+import { lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { dirname, isAbsolute } from 'node:path'
 
 import { envJoin, type PathEnv } from '../../paths.js'
 import { sha256Hex } from '../../receipt.js'
-import { createConsentIfAbsent, readConsentState, writeContentConsent } from './consent-write.js'
+import { createConsentIfAbsent, readConsentState, writeContentConsent, writeFileAtomic } from './consent-write.js'
 import { OPENCODE_PLUGIN_MARKER, OPENCODE_PLUGIN_SOURCE } from './generated/plugin-source.js'
 
 export type OpencodePluginMode = 'strict' | 'preserve'
@@ -106,10 +106,16 @@ export function opencodePluginPaths(
 
 type Slot = { kind: 'absent' } | { kind: 'file'; text: string } | { kind: 'unreadable' }
 
-/** Never throws: a directory or a permission error is `unreadable`. */
+/**
+ * Never throws: a directory, a symlink (live or dangling), any other non-regular entry or a
+ * permission error is `unreadable`, so an install never writes or removes through a link.
+ */
 function readSlot(path: string): Slot {
   try {
-    return existsSync(path) ? { kind: 'file', text: readFileSync(path, 'utf8') } : { kind: 'absent' }
+    const stat = lstatSync(path, { throwIfNoEntry: false })
+    if (stat === undefined) return { kind: 'absent' }
+    if (!stat.isFile()) return { kind: 'unreadable' }
+    return { kind: 'file', text: readFileSync(path, 'utf8') }
   } catch {
     return { kind: 'unreadable' }
   }
@@ -139,14 +145,22 @@ function withReceiptFallback(
   options: Pick<OpencodePluginOptions, 'configDir'>,
 ): OpencodePluginPaths {
   if (options.configDir !== undefined && options.configDir !== '') return paths
-  if (existsSync(paths.pluginFile)) return paths
+  if (lstatSync(paths.pluginFile, { throwIfNoEntry: false }) !== undefined) return paths
   const recorded = readReceipt(paths.receiptFile)?.path
   if (recorded === undefined || recorded === paths.pluginFile) return paths
-  const usable =
-    basename(recorded.replace(/\\/g, '/')) === OPENCODE_PLUGIN_FILE_NAME &&
-    (isAbsolute(recorded) || /^[A-Za-z]:[\\/]/.test(recorded))
-  if (!usable || !existsSync(recorded)) return paths
-  return { ...paths, pluginFile: recorded }
+  return isOurRecordedPlugin(recorded) ? { ...paths, pluginFile: recorded } : paths
+}
+
+/**
+ * A recorded path is followed only when it has our shape (absolute, `.../plugins/kyberdash-opencode.js`)
+ * and our content (a regular file, not a link, carrying the plugin marker).
+ */
+function isOurRecordedPlugin(recorded: string): boolean {
+  if (!(isAbsolute(recorded) || /^[A-Za-z]:[\\/]/.test(recorded))) return false
+  const parts = recorded.replace(/\\/g, '/').split('/')
+  if (parts[parts.length - 1] !== OPENCODE_PLUGIN_FILE_NAME || parts[parts.length - 2] !== 'plugins') return false
+  const slot = readSlot(recorded)
+  return slot.kind === 'file' && slot.text.startsWith(MARKER_PREFIX)
 }
 
 function versionOf(text: string): number | undefined {
@@ -191,10 +205,9 @@ function result(
 
 function writePlugin(paths: OpencodePluginPaths): void {
   mkdirSync(dirname(paths.pluginFile), { recursive: true })
-  writeFileSync(paths.pluginFile, OPENCODE_PLUGIN_SOURCE)
-  mkdirSync(dirname(paths.receiptFile), { recursive: true })
+  writeFileAtomic(paths.pluginFile, OPENCODE_PLUGIN_SOURCE)
   const receipt: Receipt = { version: 1, path: paths.pluginFile, sha256: sha256Hex(OPENCODE_PLUGIN_SOURCE) }
-  writeFileSync(paths.receiptFile, `${JSON.stringify(receipt, null, 2)}\n`)
+  writeFileAtomic(paths.receiptFile, `${JSON.stringify(receipt, null, 2)}\n`)
 }
 
 /** Preserve mode creates the consent file with content off, only when nothing is there. */
@@ -329,7 +342,11 @@ export function uninstallOpencodePlugin(
       out: [`harness opencode: ${pluginFile} was not written by KyberDash; leaving it in place`],
     })
   }
-  const recorded = readReceipt(receiptFile)?.sha256 ?? sha256Hex(OPENCODE_PLUGIN_SOURCE)
+  // A receipt vouches only for the path it recorded. For any other file the baseline is the
+  // current source, so a pristine current plugin in a new root uninstalls cleanly.
+  const receipt = readReceipt(receiptFile)
+  const ownsReceipt = receipt === undefined || receipt.path === pluginFile
+  const recorded = receipt !== undefined && receipt.path === pluginFile ? receipt.sha256 : sha256Hex(OPENCODE_PLUGIN_SOURCE)
   if (sha256Hex(slot.text) !== recorded) {
     return result('refused', 'refused', {
       exitCode: 1,
@@ -341,7 +358,7 @@ export function uninstallOpencodePlugin(
     return result('skipped', 'would-restore', { out: [`harness opencode: would remove capture plugin ${pluginFile}`] })
   }
   rmSync(pluginFile)
-  rmSync(receiptFile, { force: true })
+  if (ownsReceipt) rmSync(receiptFile, { force: true })
   return result('skipped', 'restored', { out: [`harness opencode: removed capture plugin ${pluginFile}`] })
 }
 

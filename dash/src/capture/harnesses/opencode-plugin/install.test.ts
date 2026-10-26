@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -468,5 +468,129 @@ describe('receipt fallback for status and uninstall (a custom-root install is no
     expect(opencodePluginState(home, undefined, { processEnv: NO_ENV }).state).toBe('off')
     expect(uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV }).outcome).toBe('noop')
     expect(existsSync(victim)).toBe(true)
+  })
+})
+
+describe('receipt fallback is constrained by shape and content (C2)', () => {
+  const POSIX_ONLY = process.platform === 'win32'
+
+  function withReceiptPointingAt(recorded: string): string {
+    const home = temp('oc-c2-')
+    const { receiptFile } = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    mkdirSync(join(receiptFile, '..'), { recursive: true })
+    writeFileSync(receiptFile, JSON.stringify({ version: 1, path: recorded, sha256: sha256Hex(OPENCODE_PLUGIN_SOURCE) }))
+    return home
+  }
+  const expectIgnored = (home: string, target: string, content: string): void => {
+    expect(opencodePluginState(home, undefined, { processEnv: NO_ENV }).state).toBe('off')
+    expect(uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV }).outcome).toBe('noop')
+    expect(readFileSync(target, 'utf8')).toBe(content)
+  }
+
+  it('ignores <dir>/kyberdash-opencode.js whose parent directory is not named plugins, even with our marker', () => {
+    const evil = join(temp('oc-c2-evil-'), 'evil')
+    mkdirSync(evil, { recursive: true })
+    const target = join(evil, 'kyberdash-opencode.js')
+    writeFileSync(target, OPENCODE_PLUGIN_SOURCE)
+    expectIgnored(withReceiptPointingAt(target), target, OPENCODE_PLUGIN_SOURCE)
+  })
+
+  it('ignores plugins/kyberdash-opencode.js that does not carry our marker', () => {
+    const dir = join(temp('oc-c2-nomark-'), 'plugins')
+    mkdirSync(dir, { recursive: true })
+    const target = join(dir, 'kyberdash-opencode.js')
+    writeFileSync(target, 'export default {}\n')
+    expectIgnored(withReceiptPointingAt(target), target, 'export default {}\n')
+  })
+
+  it.skipIf(POSIX_ONLY)('ignores a symlink named like our plugin, even one pointing at a marked file', () => {
+    const base = temp('oc-c2-link-')
+    const real = join(base, 'real.js')
+    writeFileSync(real, OPENCODE_PLUGIN_SOURCE)
+    const dir = join(base, 'plugins')
+    mkdirSync(dir)
+    const link = join(dir, 'kyberdash-opencode.js')
+    symlinkSync(real, link)
+    expectIgnored(withReceiptPointingAt(link), real, OPENCODE_PLUGIN_SOURCE)
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+  })
+
+  it('ignores a relative recorded path', () => {
+    const home = withReceiptPointingAt('plugins/kyberdash-opencode.js')
+    expect(opencodePluginState(home, undefined, { processEnv: NO_ENV }).state).toBe('off')
+  })
+})
+
+describe('install refuses a symlinked plugin path and writes atomically (C3)', () => {
+  const POSIX_ONLY = process.platform === 'win32'
+
+  it.skipIf(POSIX_ONLY)('strict install refuses a symlink and leaves its target untouched', () => {
+    const home = temp('oc-c3-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const target = join(temp('oc-c3-target-'), 'precious.txt')
+    writeFileSync(target, 'PRECIOUS')
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    symlinkSync(target, paths.pluginFile)
+    const result = installOpencodePlugin(home, undefined, { mode: 'strict', processEnv: NO_ENV })
+    expect(result.exitCode).toBe(1)
+    expect(result.reason).toBe('unreadable')
+    expect(readFileSync(target, 'utf8')).toBe('PRECIOUS')
+    expect(lstatSync(paths.pluginFile).isSymbolicLink()).toBe(true)
+  })
+
+  it.skipIf(POSIX_ONLY)('preserve install keeps a dangling symlink and writes nothing through it', () => {
+    const home = temp('oc-c3-dangle-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const target = join(temp('oc-c3-dangle-t-'), 'not-yet.txt')
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    symlinkSync(target, paths.pluginFile)
+    const result = installOpencodePlugin(home, undefined, { mode: 'preserve', processEnv: NO_ENV })
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('kept-unreadable')
+    expect(existsSync(target)).toBe(false)
+  })
+
+  it.skipIf(POSIX_ONLY)('uninstall refuses a symlinked plugin path', () => {
+    const home = temp('oc-c3-rm-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const real = join(temp('oc-c3-rm-t-'), 'real.js')
+    writeFileSync(real, OPENCODE_PLUGIN_SOURCE)
+    mkdirSync(join(paths.pluginFile, '..'), { recursive: true })
+    symlinkSync(real, paths.pluginFile)
+    expect(uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV }).exitCode).toBe(1)
+    expect(existsSync(real)).toBe(true)
+  })
+
+  it('leaves only the plugin in its directory and only the receipt in ~/.kyberdash besides consent', () => {
+    const home = temp('oc-c3-clean-')
+    const paths = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    installOpencodePlugin(home, undefined, { mode: 'preserve', processEnv: NO_ENV })
+    expect(readdirSync(join(paths.pluginFile, '..'))).toEqual(['kyberdash-opencode.js'])
+    expect(readdirSync(join(paths.receiptFile, '..')).sort()).toEqual(['opencode-plugin-receipt.json', 'opencode-plugin.json'])
+  })
+})
+
+describe('uninstall drift check follows the receipt only for its own path (C7)', () => {
+  it('removes a pristine current plugin in a new root when the receipt records another path', () => {
+    const home = temp('oc-c7-')
+    const rootA = temp('oc-c7-a-')
+    const rootB = temp('oc-c7-b-')
+    installOpencodePlugin(home, undefined, { mode: 'preserve', configDir: rootA, processEnv: NO_ENV })
+    const pluginB = join(rootB, 'plugins', 'kyberdash-opencode.js')
+    mkdirSync(join(rootB, 'plugins'), { recursive: true })
+    writeFileSync(pluginB, OPENCODE_PLUGIN_SOURCE)
+    // Make the receipt's digest differ from the current source, as after an upgrade of root A.
+    const { receiptFile } = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    const receipt = JSON.parse(readFileSync(receiptFile, 'utf8')) as Record<string, unknown>
+    receipt['sha256'] = sha256Hex('an older plugin')
+    writeFileSync(receiptFile, JSON.stringify(receipt))
+
+    const result = uninstallOpencodePlugin(home, undefined, { configDir: rootB, processEnv: NO_ENV })
+    expect(result.exitCode).toBe(0)
+    expect(result.outcome).toBe('restored')
+    expect(existsSync(pluginB)).toBe(false)
+    // The receipt belongs to root A's install and stays.
+    expect(existsSync(receiptFile)).toBe(true)
+    expect(existsSync(join(rootA, 'plugins', 'kyberdash-opencode.js'))).toBe(true)
   })
 })

@@ -4,7 +4,8 @@
 // must stay read-only and tiny; the installer and the capture engine own the writes here.
 // The file is `{ "version": 1, "content": <boolean> }`.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 const MAX_CONSENT_BYTES = 4096
@@ -37,17 +38,32 @@ function consentBody(content: boolean): string {
   return `${JSON.stringify({ version: 1, content }, null, 2)}\n`
 }
 
-/** Create or replace the file with `content`. Atomic: a reader never sees half a file. */
-export function writeContentConsent(path: string, content: boolean): void {
+/**
+ * Write `data` to `path` atomically: an unpredictable sibling temp file opened with `wx` (never
+ * follows a pre-planted name), flushed to disk, then renamed over the target. A reader never
+ * sees half a file, and a symlink at `path` is replaced rather than written through.
+ */
+export function writeFileAtomic(path: string, data: string): void {
   mkdirSync(dirname(path), { recursive: true })
-  const temp = `${path}.${process.pid}.tmp`
+  const temp = `${path}.${randomBytes(8).toString('hex')}.tmp`
   try {
-    writeFileSync(temp, consentBody(content))
+    const fd = openSync(temp, 'wx', 0o644)
+    try {
+      writeFileSync(fd, data)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(temp, path)
   } catch (error) {
     rmSync(temp, { force: true })
     throw error
   }
+}
+
+/** Create or replace the file with `content`. Atomic: a reader never sees half a file. */
+export function writeContentConsent(path: string, content: boolean): void {
+  writeFileAtomic(path, consentBody(content))
 }
 
 /**
@@ -60,7 +76,8 @@ export function createConsentIfAbsent(path: string): 'created' | 'present' {
     writeFileSync(path, consentBody(false), { flag: 'wx' })
     return 'created'
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return 'present'
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EEXIST' || code === 'EISDIR') return 'present'
     throw error
   }
 }
