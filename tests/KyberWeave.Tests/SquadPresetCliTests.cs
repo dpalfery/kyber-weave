@@ -711,6 +711,54 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
+    public void ShowNamesTheSnapshotVersionItResolved()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
+        SquadPresetShowCommand command = new(
+            _userPaths,
+            (_, _) => snapshotStore.TryReadLatest());
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        // Show can preview a different release than use would apply (newest snapshot vs
+        // lock-keyed snapshot), so it must name the version its rows came from.
+        Assert.Equal(0, captured.Result);
+        Assert.Contains("1.2.3", captured.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowNamesCheckoutWhenProfilesComeFromACheckout()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SquadCanonicalProfiles checkoutProfiles = CreateCanonicalSnapshot("1.2.3") with
+        {
+            SquadVersion = string.Empty
+        };
+        SquadPresetShowCommand command = new(
+            _userPaths,
+            (_, _) => checkoutProfiles);
+
+        SquadPresetShowSettings settings = new()
+        {
+            Name = "percat",
+            Target = "claude"
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        Assert.Equal(0, captured.Result);
+        Assert.Contains("checkout", captured.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ShowWithNoCanonicalSourceExits1WithRemedy()
     {
         WritePreset("percat", PerCategoryPresetYaml);

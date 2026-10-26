@@ -103,6 +103,14 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             return 1;
         }
 
+        // Show resolves checkout-first or newest-snapshot while use applies the lock-keyed
+        // snapshot, so the rows can preview a different release than an apply would use:
+        // name which source they came from. A checkout carries no release version.
+        if (string.IsNullOrEmpty(canonical.SquadVersion))
+            SquadCommandComposition.WriteLine("Canonical model profiles from the current checkout.");
+        else
+            SquadCommandComposition.WriteLine($"Canonical model profiles from Squad release {canonical.SquadVersion}.");
+
         try
         {
             SquadModelPresetValidator.Validate(preset, canonical.Profiles);
