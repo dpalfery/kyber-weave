@@ -138,6 +138,24 @@ public sealed class SquadCanonicalProfileStoreTests
     }
 
     [Fact]
+    public void SnapshotAgentRosterResolvesNamesCaseInsensitively()
+    {
+        using TempDirectory temp = new();
+        FakeSquadUserPaths userPaths = new(temp.Path);
+        SquadCanonicalProfileStore store = new(userPaths);
+        store.Write(CreateSnapshot("1.2.3"));
+
+        SquadCanonicalProfiles? reread = store.TryRead("1.2.3");
+
+        // The checkout roster is OrdinalIgnoreCase; the snapshot roster must match it,
+        // or a differently-cased deployed identity rewrites on checkout and silently
+        // skips once installed.
+        Assert.NotNull(reread);
+        Assert.True(reread.AgentProfiles.TryGetValue("ARCHITECT", out string? category));
+        Assert.Equal("deep-planning", category);
+    }
+
+    [Fact]
     public void TryReadReturnsNullWhenProfilesDirectoryIsMissing()
     {
         using TempDirectory temp = new();

@@ -430,9 +430,10 @@ internal static class SquadCommandComposition
     ///     closed with the squad update remedy. The checkout-built result is labelled with the
     ///     preferred version because a checkout carries no release version, and the label is
     ///     never persisted — snapshots are written only by install and update from release
-    ///     results. The roster comparer follows its origin (case-insensitive from a checkout, as
-    ///     the preset verbs always built it; store order from a snapshot), which is safe because
-    ///     deployed identities are rendered verbatim from the same canonical names.
+    ///     results. Both roster origins are case-insensitive (checkout builds it that way, as
+    ///     the preset verbs always did; the snapshot store parses it that way), so a
+    ///     differently-cased deployed identity resolves the same entry on a checkout and
+    ///     on an installed CLI instead of rewriting on one and silently skipping on the other.
     /// </remarks>
     public static SquadCanonicalProfiles? ResolveCanonicalProfiles(string? preferredVersion, ISquadUserPaths userPaths)
     {

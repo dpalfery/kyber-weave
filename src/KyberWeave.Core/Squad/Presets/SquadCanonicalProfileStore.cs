@@ -305,8 +305,8 @@ public sealed class SquadCanonicalProfileStore
         IReadOnlyDictionary<string, SquadModelProfile> profiles,
         string path)
     {
-        Dictionary<string, string> agents = new(StringComparer.Ordinal);
-        HashSet<string> seen = new(StringComparer.Ordinal);
+        Dictionary<string, string> agents = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<YamlNode, YamlNode> pair in agentsNode.Children)
         {
             string name = RequireKey(pair.Key, "agents", path);

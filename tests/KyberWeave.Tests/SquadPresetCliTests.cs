@@ -651,6 +651,36 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
+    public void UseWithSnapshotPresentResolvesUppercaseAgentNameThroughRoster()
+    {
+        WritePreset("percat", PerCategoryPresetYaml);
+        SeedProjectDeployment(
+            _projectDir,
+            "claude",
+            (".claude/agents/architect.md",
+                "---\nname: ARCHITECT\nmodel: bundled-arch-claude\n---\nYou are architect.\n"));
+        SquadPresetUseCommand command = CreateUseCommand(SnapshotResolver("1.2.3"));
+
+        SquadPresetUseSettings settings = new()
+        {
+            Name = "percat",
+            Path = _projectDir,
+            Targets = ["claude"],
+            DryRun = true
+        };
+        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(() =>
+            command.Execute(CreateCommandContext(), settings, CancellationToken.None));
+
+        // The snapshot roster must match the checkout roster's case-insensitivity:
+        // ARCHITECT resolves to the architect entry instead of passing through.
+        Assert.Equal(0, captured.Result);
+        Assert.Contains(
+            "ARCHITECT: bundled-arch-claude -> percat-arch-claude",
+            captured.Output,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ShowWithSnapshotPresentResolvesNewestSnapshot()
     {
         WritePreset("percat", PerCategoryPresetYaml);
