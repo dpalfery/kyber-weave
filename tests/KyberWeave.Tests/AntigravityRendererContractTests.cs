@@ -721,24 +721,28 @@ public sealed class AntigravityRendererContractTests : IDisposable
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             YamlNode? toolsNode = OptionalScalar(frontmatter, "tools");
 
-            // Tools list must contain run_command alongside write_to_file
-            if (toolsNode is YamlSequenceNode toolsSeq)
-            {
-                string[] tools = toolsSeq.Children
-                    .OfType<YamlScalarNode>()
-                    .Select(n => n.Value ?? string.Empty)
-                    .ToArray();
+            // The tools sequence must exist before its contents are asserted; a missing section
+            // must fail here rather than let the grant checks below pass vacuously.
+            Assert.True(
+                toolsNode is YamlSequenceNode,
+                $"Documentation agent '{agent.Name}' must render a tools sequence in agent.md frontmatter.");
+            YamlSequenceNode toolsSeq = (YamlSequenceNode)toolsNode!;
 
-                Assert.True(
-                    tools.Contains("run_command", StringComparer.Ordinal),
-                    $"Documentation agent '{agent.Name}' must have run_command tool");
-                Assert.DoesNotContain(
-                    result.Degradations,
-                    d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
-                Assert.True(
-                    tools.Contains("write_to_file", StringComparer.Ordinal),
-                    $"Documentation agent '{agent.Name}' must have write_to_file tool");
-            }
+            // Tools list must contain run_command alongside write_to_file
+            string[] tools = toolsSeq.Children
+                .OfType<YamlScalarNode>()
+                .Select(n => n.Value ?? string.Empty)
+                .ToArray();
+
+            Assert.True(
+                tools.Contains("run_command", StringComparer.Ordinal),
+                $"Documentation agent '{agent.Name}' must have run_command tool");
+            Assert.True(
+                tools.Contains("write_to_file", StringComparer.Ordinal),
+                $"Documentation agent '{agent.Name}' must have write_to_file tool");
+            Assert.DoesNotContain(
+                result.Degradations,
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
         }
     }
 

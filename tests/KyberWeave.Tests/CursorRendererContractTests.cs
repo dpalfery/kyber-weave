@@ -316,9 +316,11 @@ public sealed class CursorRendererContractTests
         Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "architect", expectedReadOnly: false);
 
-        SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
-        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
+        // Cursor has no tools allow-list, so the documentation grant reaches the rendered output
+        // only through the readonly boolean. Its profile sets filesystem.write and process.execute
+        // to allow, and either one omits readonly, so docs-dev's rendered agent file must carry
+        // no readonly key. That is asserted on the artifact itself, not on the profile.
+        Assert.Single(result.Files, f => f.RelativePath == ".cursor/agents/docs-dev.md");
         AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];

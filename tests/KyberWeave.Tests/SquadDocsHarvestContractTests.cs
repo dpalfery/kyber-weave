@@ -543,6 +543,51 @@ public sealed class SquadDocsHarvestContractTests
             "targeted tests that pin documentation",
             "Never commit or push unless the packet says so",
             "docs-dev is the only role that archives a plan or spec");
+
+        // Negative check: the section must name exactly the allowed command classes and no others.
+        string section = ExtractSection(text, "## Commands you run");
+
+        string[] bullets = section
+            .Split('\n')
+            .Where(line => line.StartsWith("- ", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(4, bullets.Length);
+
+        // Every backticked span with a space is a command. "dotnet run" is the invocation-form
+        // selector the validate and drift bullets name ("or the same `dotnet run` form"), not a
+        // separate command, so it is part of the allowed set.
+        // Pair every backtick first, then keep the spans that contain a space. A path span such as
+        // `<docs-root>/archive/plans/` has no space, so it cannot shift the pairing of the spans after it.
+        string[] namedCommands = Regex.Matches(section, "`([^`]*)`")
+            .Select(match => match.Groups[1].Value)
+            .Where(span => span.Contains(' ', StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        string[] allowedCommands =
+        [
+            "dotnet run",
+            "dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready",
+            "git mv",
+            "kyber-weave docs drift .",
+            "kyber-weave docs validate . --merge-ready",
+        ];
+
+        Assert.Equal(
+            allowedCommands.Order(StringComparer.Ordinal).ToArray(),
+            namedCommands);
+    }
+
+    private static string ExtractSection(string markdown, string heading)
+    {
+        string normalized = markdown.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int start = normalized.IndexOf(heading, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing section '{heading}'.");
+
+        int bodyStart = start + heading.Length;
+        int next = normalized.IndexOf("\n## ", bodyStart, StringComparison.Ordinal);
+        return next < 0 ? normalized[bodyStart..] : normalized[bodyStart..next];
     }
 
     /// <summary>
@@ -564,8 +609,14 @@ public sealed class SquadDocsHarvestContractTests
 
         Assert.Equal(expectedConsumers, consumers);
 
-        SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles["documentation"];
-        Assert.Equal(SquadPermissionDecision.Allow, profile.Permissions["process.execute"]);
+        Assert.True(
+            source.CapabilityProfiles.Profiles.TryGetValue("documentation", out SquadCapabilityProfile? profile),
+            "Capability profile 'documentation' is missing from products/kyber-squad/profiles/capabilities.yml.");
+        Assert.NotNull(profile);
+        Assert.True(
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision),
+            "Capability profile 'documentation' must declare process.execute.");
+        Assert.Equal(SquadPermissionDecision.Allow, execDecision);
     }
 
     private static async Task<string> RenderFrontmatterAsync(string agentName)
