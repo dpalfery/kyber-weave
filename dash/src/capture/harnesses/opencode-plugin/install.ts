@@ -13,7 +13,7 @@
 // Neither mode touches opencode.jsonc. The OpenCode root is `--config-dir`, else
 // `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` (the precedence Squad uses).
 
-import { lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, isAbsolute } from 'node:path'
 
 import { envJoin, type PathEnv } from '../../paths.js'
@@ -104,20 +104,34 @@ export function opencodePluginPaths(
   }
 }
 
-type Slot = { kind: 'absent' } | { kind: 'file'; text: string } | { kind: 'unreadable' }
+type Slot = { kind: 'absent' } | { kind: 'file'; text: string } | { kind: 'unreadable'; entryExists: boolean }
+
+/** Errors that mean "no such entry here": the path (or a parent) does not exist or is not a directory. */
+function isNoEntry(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
 
 /**
  * Never throws: a directory, a symlink (live or dangling), any other non-regular entry or a
  * permission error is `unreadable`, so an install never writes or removes through a link.
+ * The file is opened once (never following a final symlink where the platform supports it) and
+ * validated through the descriptor, so there is no gap between the type check and the read.
+ * `entryExists` is false when the probe could not see an entry at all (missing parent, ENOTDIR,
+ * EACCES on a parent), so the receipt fallback can look elsewhere.
  */
 function readSlot(path: string): Slot {
+  let fd: number | undefined
   try {
-    const stat = lstatSync(path, { throwIfNoEntry: false })
-    if (stat === undefined) return { kind: 'absent' }
-    if (!stat.isFile()) return { kind: 'unreadable' }
-    return { kind: 'file', text: readFileSync(path, 'utf8') }
-  } catch {
-    return { kind: 'unreadable' }
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+    if (!fstatSync(fd).isFile()) return { kind: 'unreadable', entryExists: true }
+    return { kind: 'file', text: readFileSync(fd, 'utf8') }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return { kind: 'absent' }
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    return { kind: 'unreadable', entryExists: !isNoEntry(error) && code !== 'EACCES' && code !== 'EPERM' }
+  } finally {
+    if (fd !== undefined) closeSync(fd)
   }
 }
 
@@ -145,7 +159,8 @@ function withReceiptFallback(
   options: Pick<OpencodePluginOptions, 'configDir'>,
 ): OpencodePluginPaths {
   if (options.configDir !== undefined && options.configDir !== '') return paths
-  if (lstatSync(paths.pluginFile, { throwIfNoEntry: false }) !== undefined) return paths
+  const here = readSlot(paths.pluginFile)
+  if (here.kind === 'file' || (here.kind === 'unreadable' && here.entryExists)) return paths
   const recorded = readReceipt(paths.receiptFile)?.path
   if (recorded === undefined || recorded === paths.pluginFile) return paths
   return isOurRecordedPlugin(recorded) ? { ...paths, pluginFile: recorded } : paths

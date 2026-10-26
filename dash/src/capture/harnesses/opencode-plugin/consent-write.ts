@@ -5,7 +5,7 @@
 // The file is `{ "version": 1, "content": <boolean> }`.
 
 import { randomBytes } from 'node:crypto'
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 const MAX_CONSENT_BYTES = 4096
@@ -15,12 +15,12 @@ export type ConsentState = 'absent' | 'on' | 'off' | 'invalid' | 'unreadable'
 
 /** Never throws, and never returns the file's text. */
 export function readConsentState(path: string): ConsentState {
-  if (!existsSync(path)) return 'absent'
   let text: string
   try {
     text = readFileSync(path, 'utf8')
-  } catch {
-    return 'unreadable'
+  } catch (error) {
+    // One read attempt, no existence pre-check: a missing entry is the only 'absent'.
+    return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' ? 'absent' : 'unreadable'
   }
   if (text.length > MAX_CONSENT_BYTES) return 'invalid'
   try {

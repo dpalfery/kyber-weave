@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -519,6 +519,39 @@ describe('receipt fallback is constrained by shape and content (C2)', () => {
     const home = withReceiptPointingAt('plugins/kyberdash-opencode.js')
     expect(opencodePluginState(home, undefined, { processEnv: NO_ENV }).state).toBe('off')
   })
+})
+
+describe('receipt fallback survives an unprobeable plugin path (never throws)', () => {
+  it('a plugin path whose parent is a file (ENOTDIR) falls through to the receipt instead of throwing', () => {
+    const home = temp('oc-enotdir-')
+    const root = temp('oc-enotdir-root-')
+    installOpencodePlugin(home, undefined, { mode: 'preserve', configDir: root, processEnv: NO_ENV })
+    const blocker = join(temp('oc-enotdir-block-'), 'plugins-is-a-file')
+    writeFileSync(blocker, 'x')
+    const env = { OPENCODE_CONFIG_DIR: join(blocker, 'nested') }
+    expect(() => opencodePluginState(home, undefined, { processEnv: env })).not.toThrow()
+    expect(opencodePluginState(home, undefined, { processEnv: env })).toMatchObject({ state: 'on', exists: true })
+    expect(() => describeOpencodePluginStatus(home, undefined, { processEnv: env })).not.toThrow()
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an unreadable parent directory (EACCES) falls through to the receipt instead of throwing',
+    () => {
+      const home = temp('oc-eacces-')
+      const root = temp('oc-eacces-root-')
+      installOpencodePlugin(home, undefined, { mode: 'preserve', configDir: root, processEnv: NO_ENV })
+      const locked = temp('oc-eacces-locked-')
+      mkdirSync(join(locked, 'plugins'), { recursive: true })
+      chmodSync(locked, 0o000)
+      try {
+        const env = { OPENCODE_CONFIG_DIR: locked }
+        expect(() => opencodePluginState(home, undefined, { processEnv: env })).not.toThrow()
+        expect(opencodePluginState(home, undefined, { processEnv: env })).toMatchObject({ state: 'on', exists: true })
+      } finally {
+        chmodSync(locked, 0o700)
+      }
+    },
+  )
 })
 
 describe('install refuses a symlinked plugin path and writes atomically (C3)', () => {
