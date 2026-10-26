@@ -1,5 +1,6 @@
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Squad;
@@ -17,13 +18,26 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
     }
 
     /// <summary>Creates a new preset show command using injectable dependencies.</summary>
-    internal SquadPresetShowCommand(ISquadUserPaths? userPaths = null)
+    internal SquadPresetShowCommand(
+        ISquadUserPaths? userPaths = null,
+        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?>? canonicalProfileResolver = null)
     {
         _userPaths = userPaths;
+        if (canonicalProfileResolver is not null)
+            CanonicalProfileResolver = canonicalProfileResolver;
     }
 
+    /// <summary>Resolves canonical model profiles for this command.</summary>
+    /// <remarks>
+    ///     Injectable seam so tests can force the no-checkout path; the production default is the
+    ///     composition static, which prefers a checkout and falls back to the newest home snapshot.
+    /// </remarks>
+    internal Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> CanonicalProfileResolver { get; } =
+        SquadCommandComposition.ResolveCanonicalProfiles;
+
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadPresetShowSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadPresetShowSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -49,7 +63,8 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
 
         if (string.IsNullOrWhiteSpace(settings.Target))
         {
-            SquadCommandComposition.WriteClientInputError("No target specified. Specify a target using --target <target>.");
+            SquadCommandComposition.WriteClientInputError(
+                "No target specified. Specify a target using --target <target>.");
             return 2;
         }
 
@@ -59,7 +74,8 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([settings.Target]);
             if (targets.Count != 1)
             {
-                SquadCommandComposition.WriteClientInputError($"Specify exactly one target using --target. Received: '{settings.Target}'.");
+                SquadCommandComposition.WriteClientInputError(
+                    $"Specify exactly one target using --target. Received: '{settings.Target}'.");
                 return 2;
             }
 
@@ -77,14 +93,28 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             return 0;
         }
 
-        SquadSource? source = SquadCommandComposition.TryResolveSquadSource();
-        if (source is null)
+        SquadCanonicalProfiles? canonical = CanonicalProfileResolver(null, userPaths);
+        if (canonical is null)
         {
-            SquadCommandComposition.WriteClientInputError("Could not resolve Squad model profiles from canonical source.");
+            // Show has no deployment context to key a version on, so the chain already fell
+            // back to the newest snapshot: a null here means no source at all, and the remedy
+            // matches the one use and clear print.
+            SquadCommandComposition.WriteCanonicalProfilesUnresolvedError();
             return 1;
         }
 
-        SquadModelProfiles bundledProfiles = source.ModelProfiles;
+        try
+        {
+            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+        }
+        catch (SquadSourceValidationException ex)
+        {
+            SquadCommandComposition.WriteClientInputError(
+                SquadCommandComposition.FormatPresetValidationError(ex));
+            return 1;
+        }
+
+        SquadModelProfiles bundledProfiles = canonical.Profiles;
         SquadModelProfiles resolvedProfiles = preset.ApplyTo(bundledProfiles);
         string targetToken = SquadTargetCatalog.GetToken(target);
 
@@ -96,8 +126,10 @@ public sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
         {
             string? resolvedToken = SquadModelResolution.ResolveToken(resolvedProfiles, category, target);
             bool isOverridden = preset.Profiles.TryGetValue(category, out SquadModelProfile? p) &&
-                (p.HarnessModels.ContainsKey(targetToken) ||
-                 (p.Default is not null && (!bundledProfiles.Profiles.TryGetValue(category, out SquadModelProfile? bp) || !bp.HarnessModels.ContainsKey(targetToken))));
+                                (p.HarnessModels.ContainsKey(targetToken) ||
+                                 (p.Default is not null &&
+                                  (!bundledProfiles.Profiles.TryGetValue(category, out SquadModelProfile? bp) ||
+                                   !bp.HarnessModels.ContainsKey(targetToken))));
 
             if (isOverridden)
             {

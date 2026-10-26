@@ -125,20 +125,18 @@ public sealed class SquadLifecycleService
                 cancellationToken).ConfigureAwait(false);
 
             List<SquadModelDiffItem>? modelChanges = null;
-            if (loadedPresets.Count > 0 || request.DryRun)
+            SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
+            if (source is not null)
             {
-                SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
-                if (source is not null)
-                {
-                    foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                        SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
+                foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
+                    SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
 
-                    if (request.DryRun) modelChanges = ComputeModelChanges(source, request.Targets, loadedPresets);
-                }
-                else if (loadedPresets.Count > 0)
-                {
-                    throw new InvalidOperationException("Cannot validate model presets because Squad source could not be resolved.");
-                }
+                if (request.DryRun) modelChanges = ComputeModelChanges(source, request.Targets, loadedPresets);
+            }
+            else if (loadedPresets.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Cannot validate model presets because Squad source could not be resolved.");
             }
 
             string? userScopeDir = request.Scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
@@ -228,6 +226,9 @@ public sealed class SquadLifecycleService
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);
 
+            List<string> warnings = new(transaction.Warnings);
+            WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
+
             return new SquadLifecycleResult(
                 true,
                 plan,
@@ -235,7 +236,7 @@ public sealed class SquadLifecycleService
                 plan.Lock,
                 plan.Receipt.Degradations,
                 DryRun: false,
-                Warnings: transaction.Warnings);
+                Warnings: warnings);
         }
         finally
         {
@@ -307,20 +308,18 @@ public sealed class SquadLifecycleService
                 cancellationToken).ConfigureAwait(false);
 
             List<SquadModelDiffItem>? modelChanges = null;
-            if (loadedPresets.Count > 0 || request.DryRun)
+            SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
+            if (source is not null)
             {
-                SquadSource? source = TryResolveSquadSource(releaseResult.ExtractionRoot);
-                if (source is not null)
-                {
-                    foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
-                        SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
+                foreach (KeyValuePair<SquadTarget, SquadModelPreset> kvp in loadedPresets)
+                    SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
 
-                    if (request.DryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
-                }
-                else if (loadedPresets.Count > 0)
-                {
-                    throw new InvalidOperationException("Cannot validate model presets because Squad source could not be resolved.");
-                }
+                if (request.DryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
+            }
+            else if (loadedPresets.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Cannot validate model presets because Squad source could not be resolved.");
             }
 
             string? userScopeDir = request.Scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
@@ -397,6 +396,9 @@ public sealed class SquadLifecycleService
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);
 
+            List<string> warnings = new(transaction.Warnings);
+            WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
+
             return new SquadLifecycleResult(
                 true,
                 plan,
@@ -404,7 +406,7 @@ public sealed class SquadLifecycleService
                 plan.Lock,
                 plan.Receipt.Degradations,
                 DryRun: false,
-                Warnings: transaction.Warnings);
+                Warnings: warnings);
         }
         finally
         {
@@ -577,6 +579,44 @@ public sealed class SquadLifecycleService
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Persists the canonical profile snapshot for a committed deployment, keyed by release version.
+    /// </summary>
+    /// <remarks>
+    ///     A snapshot failure never fails the deployment: the transaction is already durable, and the
+    ///     next update rebuilds the snapshot, so the warning names that repair. This mirrors the
+    ///     project-registry write-failure pattern in <c>SquadTransaction.RecordProjectRegistration</c>.
+    ///     A null source means there is nothing to snapshot (possible only when no checkout backs the
+    ///     extraction root and no presets forced resolution); the preset verbs then fail closed with
+    ///     the update remedy, the same migration path pre-snapshot deployments take. Dry-run callers
+    ///     never reach here: they return before the transaction executes.
+    /// </remarks>
+    private void WriteCanonicalSnapshot(string version, SquadSource? source, List<string> warnings)
+    {
+        if (source is null)
+            return;
+
+        try
+        {
+            Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
+            foreach (SquadAgent agent in source.Agents)
+                agentProfiles[agent.Name] = agent.ModelProfile;
+
+            new SquadCanonicalProfileStore(_stateStore.UserPaths).Write(
+                new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));
+        }
+        catch (Exception exception) when (exception is IOException or
+                                              UnauthorizedAccessException or
+                                              InvalidDataException or
+                                              ArgumentException)
+        {
+            warnings.Add(
+                $"The Squad canonical profile snapshot for version '{version}' was not written " +
+                $"({exception.Message}). The deployment itself is committed. " +
+                "Rerun `squad update` to rebuild the snapshot.");
+        }
     }
 
     /// <summary>

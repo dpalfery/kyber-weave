@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -111,7 +112,7 @@ internal static class SquadCommandComposition
     public static IReadOnlyList<SquadModelPresetSelectionStore> ResolveSelectionStores(ISquadUserPaths userPaths)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
-        return [new(userPaths)];
+        return [new SquadModelPresetSelectionStore(userPaths)];
     }
 
     public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null)
@@ -409,6 +410,119 @@ internal static class SquadCommandComposition
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Resolves canonical Squad model profiles for the preset verbs: checkout first, then the
+    ///     snapshot for the preferred Squad version, then the newest snapshot.
+    /// </summary>
+    /// <param name="preferredVersion">
+    ///     The active lock's <c>SquadVersion</c> for use and clear, or null for show which has no
+    ///     deployment context.
+    /// </param>
+    /// <param name="userPaths">The user paths locating the home snapshot store.</param>
+    /// <returns>The canonical profiles and agent roster, or null when none resolves.</returns>
+    /// <remarks>
+    ///     Checkout-first keeps repo-built behaviour and the existing checkout-backed tests
+    ///     unchanged. The version-keyed snapshot carries what that deployment was actually
+    ///     rendered from, so an installed CLI resolves the active release's models without ever
+    ///     downloading; the newest snapshot serves show. A null result means the caller fails
+    ///     closed with the squad update remedy. The checkout-built result is labelled with the
+    ///     preferred version because a checkout carries no release version, and the label is
+    ///     never persisted — snapshots are written only by install and update from release
+    ///     results. The roster comparer follows its origin (case-insensitive from a checkout, as
+    ///     the preset verbs always built it; store order from a snapshot), which is safe because
+    ///     deployed identities are rendered verbatim from the same canonical names.
+    /// </remarks>
+    public static SquadCanonicalProfiles? ResolveCanonicalProfiles(string? preferredVersion, ISquadUserPaths userPaths)
+    {
+        ArgumentNullException.ThrowIfNull(userPaths);
+
+        SquadSource? source = TryResolveSquadSource();
+        if (source is not null)
+        {
+            Dictionary<string, string> checkoutRoster = source.Agents.ToDictionary(
+                agent => agent.Name,
+                agent => agent.ModelProfile,
+                StringComparer.OrdinalIgnoreCase);
+            return new SquadCanonicalProfiles(preferredVersion ?? string.Empty, source.ModelProfiles, checkoutRoster);
+        }
+
+        SquadCanonicalProfileStore store = new(userPaths);
+        if (!string.IsNullOrWhiteSpace(preferredVersion))
+        {
+            SquadCanonicalProfiles? versioned = TryReadVersionedSnapshot(store, preferredVersion);
+            if (versioned is not null)
+                return versioned;
+        }
+
+        return store.TryReadLatest();
+    }
+
+    /// <summary>
+    ///     Reads one versioned snapshot, treating an invalid snapshot name as absent.
+    /// </summary>
+    /// <remarks>
+    ///     The store reports missing, unreadable, and corrupt snapshots as null but rejects a
+    ///     malformed version with <see cref="ArgumentException" />. A lock version can only reach
+    ///     that shape through home-state damage, so it falls through to the newest snapshot the
+    ///     same way a missing one does rather than throwing over state the verbs never wrote.
+    /// </remarks>
+    private static SquadCanonicalProfiles? TryReadVersionedSnapshot(SquadCanonicalProfileStore store, string version)
+    {
+        try
+        {
+            return store.TryRead(version);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Writes the shared exit-1 operational error the preset verbs report when canonical model
+    ///     profiles resolve from neither a checkout nor the home snapshot store.
+    /// </summary>
+    /// <remarks>
+    ///     One message shape across use, clear, and show, so the remedy the operator learns from
+    ///     one verb holds for the others: a <c>squad update</c> re-renders from the active
+    ///     release and persists the snapshot the verbs read back.
+    /// </remarks>
+    public static void WriteCanonicalProfilesUnresolvedError()
+    {
+        WriteClientInputError(
+            "Could not resolve Squad model profiles from canonical source. " +
+            "Run `kyber-weave squad update` to refresh the profile snapshot; " +
+            "running from a kyber-weave checkout also works.");
+    }
+
+    /// <summary>
+    ///     Formats a preset validation failure the way the documented strict-validation contract
+    ///     requires: the validator's finding with the preset file path and line number.
+    /// </summary>
+    /// <param name="exception">The validation failure the preset validator raised.</param>
+    /// <returns>The finding message with its file-path and line-number location.</returns>
+    /// <remarks>
+    ///     The exception message alone names only the finding; the path and line live on the
+    ///     first diagnostic, so the contract's "exact file path and line number" needs both.
+    ///     A failure without a located diagnostic falls back to the exception message rather
+    ///     than losing the finding.
+    /// </remarks>
+    public static string FormatPresetValidationError(SquadSourceValidationException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        IReadOnlyList<Diagnostic> items = exception.Diagnostics.Items;
+        if (items.Count == 0)
+            return exception.Message;
+        Diagnostic first = items[0];
+        if (string.IsNullOrWhiteSpace(first.FilePath))
+            return exception.Message;
+        string filePath = first.FilePath;
+        string location = first.StartLine.HasValue
+            ? $"{filePath}:{first.StartLine.Value}"
+            : filePath;
+        return $"{first.Message} ({location})";
     }
 
     /// <summary>
@@ -818,7 +932,7 @@ internal static class SquadCommandComposition
         ISquadUserPaths resolvedPaths = userPaths ?? ResolveUserPaths();
         SquadStateStore stateStore = ResolveStateStore(resolvedPaths);
         ISquadReleaseSource releaseSource = ResolveDefaultReleaseSource();
-        SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore: stateStore, releaseSource: releaseSource);
+        SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
         SquadModelPresetStore presetStore = new(resolvedPaths);
         ISquadLinkFileSystem linkFileSystem = ResolveLinkFileSystem();
         ISquadGlobalRootResolver globalRoots = ResolveGlobalRoots();

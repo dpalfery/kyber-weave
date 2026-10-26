@@ -579,6 +579,177 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         await Assert.ThrowsAsync<SquadSourceValidationException>(() => service.InstallAsync(request));
     }
 
+    [Fact]
+    public async Task CommittedInstallWritesCanonicalSnapshotKeyedByReleaseVersion()
+    {
+        // Arrange — no presets: source resolution must run whenever the extraction root is
+        // available, not only when presets are loaded.
+        string targetRoot = Path.Combine(_temp.Path, "install-snapshot-root");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadInstallRequest request = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0");
+
+        // Act
+        SquadLifecycleResult result = await service.InstallAsync(request);
+
+        // Assert
+        Assert.True(result.Success);
+        SquadCanonicalProfileStore snapshots = new(userPaths);
+        SquadCanonicalProfiles? snapshot = snapshots.TryRead("1.0.0");
+        Assert.NotNull(snapshot);
+        Assert.Equal("1.0.0", snapshot.SquadVersion);
+        Assert.NotEmpty(snapshot.Profiles.Profiles);
+        Assert.NotEmpty(snapshot.AgentProfiles);
+        Assert.All(snapshot.AgentProfiles,
+            kvp => Assert.True(snapshot.Profiles.Profiles.ContainsKey(kvp.Value),
+                $"Agent '{kvp.Key}' maps to unknown profile category '{kvp.Value}'."));
+        Assert.Equal("1.0.0", snapshots.TryReadLatest()?.SquadVersion);
+    }
+
+    [Fact]
+    public async Task CommittedUpdateWritesCanonicalSnapshotKeyedByReleaseVersion()
+    {
+        // Arrange
+        string targetRoot = Path.Combine(_temp.Path, "update-snapshot-root");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadInstallRequest installRequest = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0");
+
+        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
+        Assert.True(installResult.Success);
+
+        // Act
+        SquadUpdateRequest updateRequest = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            Version: "1.1.0");
+
+        SquadLifecycleResult updateResult = await service.UpdateAsync(updateRequest);
+
+        // Assert — the update snapshot is keyed by the new release version; the older
+        // snapshot is retained (no pruning) and the newest read resolves to the update.
+        Assert.True(updateResult.Success);
+        SquadCanonicalProfileStore snapshots = new(userPaths);
+        SquadCanonicalProfiles? updated = snapshots.TryRead("1.1.0");
+        Assert.NotNull(updated);
+        Assert.Equal("1.1.0", updated.SquadVersion);
+        Assert.NotEmpty(updated.Profiles.Profiles);
+        Assert.NotEmpty(updated.AgentProfiles);
+        Assert.NotNull(snapshots.TryRead("1.0.0"));
+        Assert.Equal("1.1.0", snapshots.TryReadLatest()?.SquadVersion);
+    }
+
+    [Fact]
+    public async Task DryRunInstallAndUpdateWriteNoCanonicalSnapshot()
+    {
+        // Arrange
+        string targetRoot = Path.Combine(_temp.Path, "dry-run-snapshot-root");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        // Act — dry-run install modifies no state, so it must not write a snapshot.
+        SquadInstallRequest dryInstall = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0",
+            DryRun: true);
+
+        SquadLifecycleResult dryInstallResult = await service.InstallAsync(dryInstall);
+
+        // Assert
+        Assert.True(dryInstallResult.Success);
+        SquadCanonicalProfileStore snapshots = new(userPaths);
+        Assert.Null(snapshots.TryRead("1.0.0"));
+        Assert.Null(snapshots.TryReadLatest());
+
+        // Act — a committed install followed by a dry-run update: only the committed
+        // version gains a snapshot.
+        SquadInstallRequest installRequest = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0");
+
+        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
+        Assert.True(installResult.Success);
+
+        SquadUpdateRequest dryUpdate = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            Version: "1.1.0",
+            DryRun: true);
+
+        SquadLifecycleResult dryUpdateResult = await service.UpdateAsync(dryUpdate);
+
+        // Assert
+        Assert.True(dryUpdateResult.Success);
+        Assert.NotNull(snapshots.TryRead("1.0.0"));
+        Assert.Null(snapshots.TryRead("1.1.0"));
+        Assert.Equal("1.0.0", snapshots.TryReadLatest()?.SquadVersion);
+    }
+
+    [Fact]
+    public async Task CommittedInstallWithUnwritableSnapshotWarnsAndKeepsDeployment()
+    {
+        // Arrange — a directory at the snapshot file path makes the atomic rename fail
+        // after the deployment has already committed.
+        string targetRoot = Path.Combine(_temp.Path, "snapshot-failure-root");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string blocker = Path.Combine(
+            userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles", "1.0.0.yml");
+        Directory.CreateDirectory(blocker);
+
+        SquadStateStore stateStore = new(userPaths);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadInstallRequest request = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0");
+
+        // Act
+        SquadLifecycleResult result = await service.InstallAsync(request);
+
+        // Assert — the deployment succeeds and the warning names the remedy.
+        Assert.True(result.Success);
+        Assert.NotNull(result.Warnings);
+        Assert.Contains(result.Warnings,
+            warning => warning.Contains("squad update", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
+        Assert.NotNull(stateStore.ReadLock(targetRoot, SquadDeploymentScope.Project));
+        Assert.Null(new SquadCanonicalProfileStore(userPaths).TryRead("1.0.0"));
+    }
+
     private static async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)
     {
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");

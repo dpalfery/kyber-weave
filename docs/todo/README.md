@@ -71,6 +71,7 @@ last-reviewed: YYYY-MM-DD
 | [transcript-segment-single-sweep.md](transcript-segment-single-sweep.md) | KyberDash | draft | `segmentTranscript` filters every step once per call, O(calls x steps); replace it with one sorted sweep if conversations grow large enough to measure. |
 | [antigravity-file-session-skill-listing.md](antigravity-file-session-skill-listing.md) | KyberDash | draft | File-only Antigravity sessions have no skill listing, since it exists only on OTLP spans; surface it from OTLP when the labels join, or document the panel as listing-free. |
 | [antigravity-offered-label-per-definition.md](antigravity-offered-label-per-definition.md) | KyberDash | draft | A mixed tool-definitions block carries one `offered (MCP catalogue)` label for every member; label per definition and add a block-member test. |
+| [dash-mcp-zod-gates.md](dash-mcp-zod-gates.md) | KyberDash | draft | Pre-existing `dash/` gate failures parked during the issue #436 review: `ts-typecheck` TS2740 in `src/mcp/tools.ts` and two Zod-assertion failures in `src/mcp/context-inspect.test.ts` / `src/mcp/server.test.ts` (suspected Zod/SDK drift); `dash/` untouched by that fix. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

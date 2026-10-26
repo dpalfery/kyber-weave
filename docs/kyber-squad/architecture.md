@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -58,6 +58,8 @@ code-refs:
   - SquadModelPresetValidator
   - SquadModelResolution
   - SquadModelDiff
+  - SquadCanonicalProfileStore
+  - SquadCanonicalProfiles
   - SquadInstanceCatalog
   - SquadInstanceLinkPlanner
   - SquadInstanceLinkSync
@@ -279,6 +281,7 @@ flowchart LR
         Ledger["migration-ledger.json\n(kyber-squad.migration-ledger/v1)"]
         Presets["presets/*.yml\n(kyber-squad.model-preset/v1)"]
         Selections["selections/*.yml\n(kyber-squad.project-selection/v1)"]
+        Profiles["profiles/<version>.yml\n(kyber-squad.canonical-profiles/v1)"]
         Global["global/\nsquad.lock.yml\nsquad.receipt.json"]
         Projects["projects/root-key/\nsquad.lock.yml\nsquad.receipt.json"]
         Instances["instance-state/target/preset/\nsquad.lock.yml\nsquad.receipt.json\nlinks.json"]
@@ -306,6 +309,17 @@ flowchart LR
   repository's in-repo `.kyber-weave/squad.lock.yml` and `squad.receipt.json`. Migration reads them and
   never deletes them. The application-data directory is no longer a state location; rendering's own
   user-scope directory is unchanged.
+- **Canonical profile snapshots**: `profiles/<version>.yml` (schema
+  `kyber-squad.canonical-profiles/v1`) carries one Squad release version's canonical model profiles
+  — the `models.yml` shape plus the agent-name-to-category map — written atomically (temporary
+  file, then rename) by `SquadLifecycleService` after a committed install or update, never on
+  dry-run. `preset use` and `preset clear` read the snapshot keyed by the deployment lock's
+  `SquadVersion`, falling back to the newest snapshot; `preset show` has no deployment context
+  and reads checkout first, then the newest snapshot. A checkout `products/kyber-squad` source
+  is preferred over any snapshot wherever one is present. A snapshot write that fails after the
+  transaction has committed produces a warning naming the remedy (rerun `squad update`); the
+  deployment is not failed. One file is kept per distinct version and snapshots are never
+  pruned.
 
 ### Cross-Process Mutex Lease
 

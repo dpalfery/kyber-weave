@@ -1,7 +1,7 @@
-using System.Text;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Validation;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Squad;
@@ -26,22 +26,35 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     internal SquadPresetUseCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string?, ISquadUserPaths, SquadCanonicalProfiles?>? canonicalProfileResolver = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _globalRoots = globalRoots;
+        if (canonicalProfileResolver is not null)
+            CanonicalProfileResolver = canonicalProfileResolver;
     }
 
+    /// <summary>Resolves canonical model profiles for this command.</summary>
+    /// <remarks>
+    ///     Injectable seam so tests can force the no-checkout path; the production default is the
+    ///     composition static, which prefers a checkout and falls back to the home snapshot store.
+    /// </remarks>
+    internal Func<string?, ISquadUserPaths, SquadCanonicalProfiles?> CanonicalProfileResolver { get; } =
+        SquadCommandComposition.ResolveCanonicalProfiles;
+
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadPresetUseSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadPresetUseSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
         ISquadUserPaths userPaths = _userPaths ?? stateStore.UserPaths;
         SquadModelPresetStore presetStore = new(userPaths);
-        IReadOnlyList<SquadModelPresetSelectionStore> selectionStores = SquadCommandComposition.ResolveSelectionStores(userPaths);
+        IReadOnlyList<SquadModelPresetSelectionStore> selectionStores =
+            SquadCommandComposition.ResolveSelectionStores(userPaths);
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
@@ -78,7 +91,7 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             else
             {
                 string checkRoot = scope == SquadDeploymentScope.Global
-                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
+                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
                     : projectRoot;
                 SquadReceipt? receipt = stateStore.ReadReceipt(checkRoot, scope);
                 if (receipt is not null && receipt.Files.Count > 0)
@@ -101,7 +114,8 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
         if (scope == SquadDeploymentScope.Global)
         {
-            string globalAnchor = SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun);
+            string globalAnchor =
+                SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun);
             SquadReceipt? globalReceipt = stateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global);
             SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
 
@@ -141,16 +155,16 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             }
 
             return ApplyPresetToDeployment(
-                targets: targets,
-                preset: preset,
-                scope: SquadDeploymentScope.Global,
-                anchorRoot: globalAnchor,
-                projectRoot: projectRoot,
-                activeReceipt: globalReceipt,
-                activeLock: globalLock,
-                effectiveStateStore: stateStore,
-                selectionStores: selectionStores,
-                settings: settings);
+                targets,
+                preset,
+                SquadDeploymentScope.Global,
+                globalAnchor,
+                projectRoot,
+                globalReceipt,
+                globalLock,
+                stateStore,
+                selectionStores,
+                settings);
         }
 
         SquadReceipt? projectReceipt = stateStore.ReadReceipt(projectRoot, SquadDeploymentScope.Project);
@@ -206,16 +220,16 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         }
 
         return ApplyPresetToDeployment(
-            targets: targets,
-            preset: preset,
-            scope: SquadDeploymentScope.Project,
-            anchorRoot: projectRoot,
-            projectRoot: projectRoot,
-            activeReceipt: projectReceipt,
-            activeLock: projectLock,
-            effectiveStateStore: stateStore,
-            selectionStores: selectionStores,
-            settings: settings);
+            targets,
+            preset,
+            SquadDeploymentScope.Project,
+            projectRoot,
+            projectRoot,
+            projectReceipt,
+            projectLock,
+            stateStore,
+            selectionStores,
+            settings);
     }
 
     private int ApplyPresetToDeployment(
@@ -231,76 +245,60 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         SquadPresetUseSettings settings)
     {
         ISquadGlobalRootResolver effectiveGlobalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
-        HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> targetTokens =
+            targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        SquadSource? source = SquadCommandComposition.TryResolveSquadSource();
-        Dictionary<string, string> agentProfiles = source?.Agents.ToDictionary(a => a.Name, a => a.ModelProfile, StringComparer.OrdinalIgnoreCase)
-            ?? new(StringComparer.OrdinalIgnoreCase);
-        SquadModelProfiles? mergedProfiles = source is not null
-            ? preset.ApplyTo(source.ModelProfiles)
-            : new SquadModelProfiles("kyber-squad.model-profiles/v1", preset.Profiles, string.Empty);
-
-        List<SquadModelDiffItem> diffs = [];
-        List<SquadDeploymentFile> renderedFiles = [];
-
-        foreach (SquadOwnedFile file in activeReceipt.Files)
+        SquadCanonicalProfiles? canonical =
+            CanonicalProfileResolver(activeLock?.SquadVersion, effectiveStateStore.UserPaths);
+        if (canonical is null)
         {
-            string physicalPath = scope == SquadDeploymentScope.Global
-                ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
-                : Path.Combine(anchorRoot, file.RelativePath);
-
-            if (!File.Exists(physicalPath))
-            {
-                continue;
-            }
-
-            byte[] rawBytes = File.ReadAllBytes(physicalPath);
-            if (!targetTokens.Contains(file.Target) || !file.RelativePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
-            {
-                renderedFiles.Add(new SquadDeploymentFile(file.RelativePath, rawBytes, file.Target));
-                continue;
-            }
-
-            string fileText = Encoding.UTF8.GetString(rawBytes);
-            if (!SquadFrontmatterHelper.TryParseFrontmatter(fileText, out string frontmatter, out string body, out string newline))
-            {
-                renderedFiles.Add(new SquadDeploymentFile(file.RelativePath, rawBytes, file.Target));
-                continue;
-            }
-
-            string agentName = SquadFrontmatterHelper.ExtractField(frontmatter, "name") ?? SquadFrontmatterHelper.ResolveIdentity(file.RelativePath);
-            string? currentModel = SquadFrontmatterHelper.ExtractField(frontmatter, "model");
-            string profileCategory = SquadFrontmatterHelper.ExtractField(frontmatter, "model-profile")
-                ?? (agentProfiles.TryGetValue(agentName, out string? p) ? p : "general");
-
-            string? newModel = SquadFrontmatterHelper.ResolveModel(mergedProfiles, profileCategory, file.Target);
-
-            if (!string.Equals(currentModel, newModel, StringComparison.Ordinal))
-            {
-                diffs.Add(new SquadModelDiffItem(agentName, currentModel, newModel));
-            }
-
-            string updatedFrontmatter = SquadFrontmatterHelper.UpdateFrontmatterModel(frontmatter, newModel, newline);
-            string updatedContent = $"---{newline}{updatedFrontmatter}{newline}---{body}";
-            byte[] updatedBytes = Encoding.UTF8.GetBytes(updatedContent);
-
-            renderedFiles.Add(new SquadDeploymentFile(file.RelativePath, updatedBytes, file.Target));
+            // The deployment cannot be re-rendered without the release it was rendered from:
+            // fail before the rewrite loop in both dry-run and apply, never printing a plan
+            // built on a silent general fallback.
+            SquadCommandComposition.WriteCanonicalProfilesUnresolvedError();
+            return 1;
         }
+
+        try
+        {
+            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+        }
+        catch (SquadSourceValidationException ex)
+        {
+            SquadCommandComposition.WriteClientInputError(
+                SquadCommandComposition.FormatPresetValidationError(ex));
+            return 1;
+        }
+
+        SquadModelProfiles mergedProfiles = preset.ApplyTo(canonical.Profiles);
+
+        SquadPresetRewriteResult rewrite = SquadPresetFileRewriter.Rewrite(
+            activeReceipt.Files,
+            targetTokens,
+            mergedProfiles,
+            canonical.AgentProfiles,
+            file =>
+            {
+                string physicalPath = scope == SquadDeploymentScope.Global
+                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file)
+                    : Path.Combine(anchorRoot, file.RelativePath);
+                return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
+            });
 
         if (settings.DryRun)
         {
-            diffs.Sort((a, b) => StringComparer.Ordinal.Compare(a.Agent, b.Agent));
-            foreach (SquadModelDiffItem diff in diffs)
+            foreach (SquadModelDiffItem diff in rewrite.Diffs)
             {
-                SquadCommandComposition.WriteLine($"{diff.Agent}: {diff.OldModel ?? "none"} -> {diff.NewModel ?? "none"}");
+                SquadCommandComposition.WriteLine(
+                    $"{diff.Agent}: {diff.OldModel ?? "none"} -> {diff.NewModel ?? "none"}");
             }
 
             return 0;
         }
 
         Dictionary<SquadTarget, SquadAppliedPreset> applied = activeLock?.ModelPresets != null
-            ? new(activeLock.ModelPresets)
-            : new();
+            ? new Dictionary<SquadTarget, SquadAppliedPreset>(activeLock.ModelPresets)
+            : new Dictionary<SquadTarget, SquadAppliedPreset>();
 
         foreach (SquadTarget target in targets)
         {
@@ -308,32 +306,32 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         }
 
         SquadLock nextLock = (activeLock ?? new SquadLock(
-            LockSchemaV2,
-            "1.0.0",
-            "1.0.0",
-            "1.0.0",
-            "full",
-            targets.Select(SquadTargetCatalog.GetToken).ToArray(),
-            [],
-            "best-effort",
-            "0".PadRight(64, '0'),
-            "0".PadRight(64, '0'),
-            SquadApmIdentity.None)) with
+                LockSchemaV2,
+                "1.0.0",
+                "1.0.0",
+                "1.0.0",
+                "full",
+                targets.Select(SquadTargetCatalog.GetToken).ToArray(),
+                [],
+                "best-effort",
+                "0".PadRight(64, '0'),
+                "0".PadRight(64, '0'),
+                SquadApmIdentity.None)) with
         {
             Schema = LockSchemaV2,
             ModelPresets = applied
         };
 
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
-            targetRoot: anchorRoot,
-            scope: scope,
-            squadLock: nextLock,
-            renderedFiles: renderedFiles,
-            previousReceipt: activeReceipt,
-            degradations: [],
-            replaceManaged: true,
-            timeProvider: TimeProvider.System,
-            globalRoots: effectiveGlobalRoots);
+            anchorRoot,
+            scope,
+            nextLock,
+            rewrite.Files,
+            activeReceipt,
+            [],
+            true,
+            TimeProvider.System,
+            effectiveGlobalRoots);
 
         SquadTransaction transaction = new(effectiveStateStore);
         transaction.Execute(plan);
