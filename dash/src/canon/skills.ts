@@ -569,6 +569,9 @@ function readRequestBodyListing(
   for (const part of parts) {
     const eligible = part.part === 'system_prompt' || (part.part === 'conversation_history' && part.role === 'system')
     if (!eligible) continue
+    // Malformed bytes can leave a non-string where text belongs; skip it
+    // rather than crashing on `.indexOf` inside `parseBodyListing`.
+    if (typeof part.text !== 'string') continue
     const skills = parseBodyListing(record, part.text)
     if (skills.length > 0) return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
   }
@@ -584,6 +587,9 @@ function readRequestBodyListing(
  * unindented non-entry line ends the listing.
  */
 function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] {
+  // Malformed bytes can carry a number where prompt text belongs; that is
+  // unmeasured, never a crash on `.indexOf`.
+  if (typeof text !== 'string') return []
   const at = text.indexOf(BODY_LISTING_MARKER)
   if (at < 0) return []
   const entries: Array<{ name: string; description: string }> = []
@@ -611,6 +617,9 @@ function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] 
 /** Skill names and optional descriptions from the system prompt's `<skill>` XML blocks. */
 function xmlDescriptions(text: string): Map<string, string | undefined> {
   const found = new Map<string, string | undefined>()
+  // Malformed bytes can carry a non-string prompt; that is unmeasured,
+  // never a crash on `.matchAll`.
+  if (typeof text !== 'string') return found
   for (const match of text.matchAll(/<skill\b[^>]*>([\s\S]*?)<\/skill>/gi)) {
     const block = match[1] ?? ''
     const nameMatch = block.match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)
@@ -628,7 +637,7 @@ function xmlDescriptions(text: string): Map<string, string | undefined> {
 /** The system prompt text: the `system_prompt` parts when present, else the flat bucket. */
 function partsSystemPrompt(parts: readonly ContentPart[]): string {
   return parts
-    .filter((part) => part.part === 'system_prompt')
+    .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string')
     .map((part) => part.text)
     .join('\n')
 }

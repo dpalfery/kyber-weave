@@ -89,20 +89,31 @@ const TOKEN_DIMS = [
   'reportedOutput',
 ] as const satisfies readonly (keyof TokenUsage)[]
 
+/**
+ * Malformed-byte guard: only finite numbers are measured usage. Anything else
+ * (null, strings, NaN, Infinity from a corrupt row) reads as 0 so the caller
+ * treats the turn as unreported rather than crashing on it.
+ */
+function tokenNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 function counterKey(record: CanonicalRecord, shareKey?: string): CounterKey {
   const { tokens } = record
   // A share routinely mixes rows with session_id set and rows where only
   // the trace carried the key (review): an omitted attribute must resolve
   // to the share's key, never to a bucket of its own — otherwise one
   // collector's half of a twin lands in '' and the turn counts twice.
+  // Token reads go through `tokenNumber`: a corrupt row carries non-numbers
+  // where counters belong, and those read as unmeasured rather than crashing.
   return [
     record.sessionId ?? shareKey ?? '',
-    tokens.freshInput,
-    tokens.cacheRead,
-    tokens.cacheCreation,
-    tokens.output,
-    tokens.reportedInput,
-    tokens.reportedOutput,
+    tokenNumber(tokens?.freshInput),
+    tokenNumber(tokens?.cacheRead),
+    tokenNumber(tokens?.cacheCreation),
+    tokenNumber(tokens?.output),
+    tokenNumber(tokens?.reportedInput),
+    tokenNumber(tokens?.reportedOutput),
   ].join(':')
 }
 
@@ -178,18 +189,17 @@ function hasParts(record: CanonicalRecord): boolean {
 
 /** True when a turn reported no usage at all: identical for every such turn, so nothing to match on. */
 function isUnreportedCounters(tokens: CanonicalRecord['tokens']): boolean {
-  return (
-    tokens.freshInput === 0 &&
-    tokens.cacheRead === 0 &&
-    tokens.cacheCreation === 0 &&
-    tokens.output === 0 &&
-    tokens.reportedInput === 0 &&
-    tokens.reportedOutput === 0
-  )
+  // A corrupt row can carry null (or a non-object) where counters belong;
+  // that is unmeasured, never a crash on property access.
+  if (tokens === null || tokens === undefined || typeof tokens !== 'object') return true
+  return TOKEN_DIMS.every((dim) => tokenNumber(tokens[dim]) === 0)
 }
 
 function tokenDims(tokens: TokenUsage): readonly number[] {
-  return TOKEN_DIMS.map((dim) => tokens[dim] ?? 0)
+  // Same malformed-row guard as `isUnreportedCounters`: non-objects read as
+  // all-zero (unmeasured) rather than crashing on element access.
+  if (tokens === null || tokens === undefined || typeof tokens !== 'object') return TOKEN_DIMS.map(() => 0)
+  return TOKEN_DIMS.map((dim) => tokenNumber(tokens[dim]))
 }
 
 /** Componentwise ≤ — every field of `a` is covered by `b`. */
@@ -509,8 +519,11 @@ function hasEvidencedCursorTwinShare(records: readonly CanonicalRecord[]): boole
 
 /** Both input and output counters present — a full turn observation, not a half. */
 function hasCompleteCounters(record: CanonicalRecord): boolean {
-  const hasInput = record.tokens.freshInput > 0 || record.tokens.reportedInput > 0
-  const hasOutput = record.tokens.output > 0 || record.tokens.reportedOutput > 0
+  // A corrupt row carries no measurable counters, so it is never complete.
+  const tokens = record.tokens
+  if (tokens === null || tokens === undefined || typeof tokens !== 'object') return false
+  const hasInput = tokenNumber(tokens.freshInput) > 0 || tokenNumber(tokens.reportedInput) > 0
+  const hasOutput = tokenNumber(tokens.output) > 0 || tokenNumber(tokens.reportedOutput) > 0
   return hasInput && hasOutput
 }
 

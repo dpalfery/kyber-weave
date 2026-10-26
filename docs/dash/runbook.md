@@ -276,6 +276,27 @@ ingested, grouped by their persisted reason: `window_filtered` (all native recor
 refresh window; widen `--history-weeks` to ingest them) or `no_recordable_events` (the file
 holds no usage or model events, so there is nothing to ingest).
 
+### 2a.1 Degraded-but-successful refresh (`derivation_failed`)
+
+When one session's derivation throws, `buildSessions` skips that session and the refresh
+still succeeds. The failing session is recorded as a `derivation_failed` problem row
+(severity `error`, session id and harness where known, error message plus stack), the
+`skipped` and `derivationDegraded` counters increment, and every other session still
+derives. The refresh exits **0** and its summary names the degraded count
+(e.g. `"; N session(s) skipped: derivation failed"`). A projection-level failure still
+closes the run as `failure` (exit **1**) through the outer `projectCanonicalStore` catch.
+
+Operating it:
+
+- Open **Problems** and look for `derivation_failed`: the row names the skipped session
+  and carries the stack. That plus the degraded count in the refresh summary is the whole
+  signal — nothing was silently dropped.
+- A green tray with a degraded count means skip-and-record. The red `Last refresh failed`
+  state is reserved for a failed run (failed harness job or projection-level derivation
+  failure), never for a degraded-but-successful one.
+- After the producer defect is fixed, the next refresh re-ingests and the session derives
+  normally; no manual rebuild is required beyond the normal refresh.
+
 ### 2b. Database clean (`dash clean`)
 
 Wipe bad or stale telemetry — double-counting, mis-attribution, test noise — by harness
@@ -847,7 +868,10 @@ The macOS menu bar and Windows notification area show one diagonal lightsaber, w
 its handle at the bottom left and blade pointing to the top right. The blade is green
 only when the shared coverage API reports a healthy, enabled, listening, unpaused
 collector with no recent failures and a current health check. Otherwise it is red,
-including startup before coverage is available. Both colours use the same silver
+including startup before coverage is available. A degraded-but-successful refresh keeps
+the healthy/green state: the skipped sessions ride in the refresh summary as a degraded
+count with their `derivation_failed` rows in Problems, while the red `Last refresh
+failed` state is reserved for a failed run. Both colours use the same silver
 handle and silhouette; macOS template tinting is disabled to preserve the colour.
 Windows shows the saber instead of a pressure number or status dot; pressure remains
 available in the tooltip and popover. Flat fills keep the icon legible at small sizes.
@@ -1081,7 +1105,7 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   (`canPromote: false`) until history is explicitly measured. See
   [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
-- **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+- **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors. A skipped session appears here as `derivation_failed` (severity `error`): it names the session (and harness where known) and carries the error message and stack. It means skip-and-record, not silent loss — see the [degraded refresh](#2a1-degraded-but-successful-refresh-derivation_failed).
 
 #### Status and Maintenance panels
 

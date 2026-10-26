@@ -29,9 +29,11 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-26-kyberdash-numeric-part-text-refresh-crash.md](2026-10-26-kyberdash-numeric-part-text-refresh-crash.md) | Draft — decision-complete (autonomous), awaiting approve-and-execute; `docs validate`/`docs drift` outstanding in the authoring harness (conductor runs both) | 2026-10-26 | KyberDash refresh stops crashing on numeric `ContentPart.text`: fail-closed token counter, `typeof` guards at every derivation boundary (`partsOf`, `reduceRecordParts`, `taskSummaryOf`, `reduceContextParts`, `analyzeContext`), per-session derivation degrade with recorded `derivation_failed` problems and a succeeding refresh run, and a producer hunt over `PROVIDER_READERS` plus an installed-binary version diff. Development mode: test-first. Autonomy: autonomous. |
 
-No plans are active.
+Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 

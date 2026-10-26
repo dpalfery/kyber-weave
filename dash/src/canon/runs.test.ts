@@ -678,3 +678,34 @@ describe('Issue #182 — twin front-ends build one run', () => {
     store.close()
   })
 })
+
+describe('buildRuns malformed counters (non-number dims)', () => {
+  it('builds the run when a turn carries non-number counter dims', async () => {
+    // A corrupt row carries strings, NaN, Infinity, and objects where finite
+    // counters belong. The twin collapse reads those as unmeasured rather
+    // than crashing, and the run still builds from the turn's content.
+    const store = new CanonStore(':memory:')
+    store.upsert(
+      makeRecord('corrupt-dims-1', {
+        sessionId: 'sess-corrupt',
+        timestamp: '2026-09-03T10:00:00.000Z',
+        tokens: {
+          freshInput: 'lots',
+          cacheRead: Number.NaN,
+          cacheCreation: Number.POSITIVE_INFINITY,
+          output: Number.NaN,
+          reportedInput: {},
+          reportedOutput: [],
+        } as unknown as TokenUsage,
+        raw: { cwd: '/repo/app' },
+      }),
+    )
+
+    const report = await buildRuns(store)
+
+    expect(report.runsBuilt).toBe(1)
+    expect(report.executionsBuilt).toBe(1)
+    expect(store.listRuns()).toHaveLength(1)
+    store.close()
+  })
+})

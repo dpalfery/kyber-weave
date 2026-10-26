@@ -1362,3 +1362,57 @@ describe('extractListedSkills, opencode available_skills block', () => {
     expect(result).toMatchObject({ measurable: true })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Malformed-byte guards: a numeric value where prompt text belongs
+// ---------------------------------------------------------------------------
+//
+// Corrupt captures can carry a number where a part's text belongs. Those rows
+// read as unmeasured (or skip the corrupt part), never as a crash on
+// `.indexOf` / `.matchAll` inside the body-listing and XML-description reads.
+
+describe('extractListedSkills, numeric part text (malformed bytes)', () => {
+  it('a numeric system_prompt part is not measurable, never a crash in the body listing', () => {
+    const numeric = { part: 'system_prompt', text: 42 } as unknown as ContentPart
+    const record = modelTurn('claude-code', 'claude-numeric-body', {
+      source: 'claude-code',
+      sessionId: CLAUDE_SESSION,
+      timestamp: CLAUDE_LISTING_TS,
+      ...withParts([numeric]),
+    })
+
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect(result).not.toHaveProperty('skills')
+  })
+
+  it('skips a numeric conversation_history part and still reads the body listing', () => {
+    const body = 'The following skills are available for use with the Skill tool:\n- alpha: first skill\n'
+    const numericHistory = { part: 'conversation_history', role: 'system', text: 7 } as unknown as ContentPart
+    const record = modelTurn('claude-code', 'claude-numeric-history', {
+      source: 'claude-code',
+      sessionId: CLAUDE_SESSION,
+      timestamp: CLAUDE_LISTING_TS,
+      ...withParts([numericHistory, { part: 'system_prompt', text: body }]),
+    })
+
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['alpha'])
+  })
+
+  it('a copilot listing with a numeric system prompt still lists names without descriptions', () => {
+    const record = modelTurn('copilot', 'cp-numeric-prompt', {
+      source: 'github-copilot',
+      raw: { [COPILOT_LISTING_KEY]: JSON.stringify(['alpha']) },
+      content: { system_prompt: 42 as unknown as string },
+    })
+
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ measurable: true })
+    expect(namesOf((result as { skills: ListedSkill[] }).skills)).toEqual(['alpha'])
+  })
+})

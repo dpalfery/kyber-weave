@@ -368,6 +368,17 @@ export type ContextReductionOptions = {
 }
 
 /**
+ * Read a part's text for counting: the normalization boundary can hand this
+ * module a non-string `text` at runtime despite the type (untrusted JSON and
+ * SQLite rows), and a refresh must survive that rather than throw. Non-string
+ * reads as `''` — so marker checks and `countTokens` never see the raw value —
+ * while a measured `tokens` count is still honored by the callers below.
+ */
+function partText(part: ContextPart): string {
+  return typeof part.text === 'string' ? part.text : ''
+}
+
+/**
  * The parts' contribution to the composition, with their text released.
  *
  * WHY: a session's turns carry tens of kilobytes of text each, and the
@@ -392,18 +403,19 @@ export function reduceContextParts(
   const markers = options.instructionMarkers ?? SYSTEM_REMINDER_MARKERS
   const countTokens = options.countTokens ?? approximateO200kBase
   return parts.map((part) => {
+    const text = partText(part)
     // Instruction fences ride inside history and tool results; stripping them
     // anywhere else would miscount a system prompt that happens to quote a
     // fence, so the strip applies to the carrier buckets only.
     const strippable = part.part === 'conversation_history' || part.part === 'tool_result_content'
     const containsMarkers =
-      strippable && part.text.includes(markers.open) && part.text.includes(markers.close)
+      strippable && text.includes(markers.open) && text.includes(markers.close)
     if (containsMarkers) {
       // A measured whole-part count cannot be split without deriving the
       // pieces, so the split is always derived — and that derivation is
       // precisely what a tokenizer-drift attribution of the turn's residual
       // would be claiming (R7.3).
-      const { blocks, remainder } = stripInstructionBlocks(part.text, markers)
+      const { blocks, remainder } = stripInstructionBlocks(text, markers)
       const remainderTokens = countTokens(remainder)
       let instructionTokens = 0
       for (const block of blocks) instructionTokens += countTokens(block)
@@ -421,11 +433,11 @@ export function reduceContextParts(
     // A part with no text and no measured count contributes nothing and
     // carries no structure: its count stays absent, so the composition reads
     // it exactly as it read the part.
-    const structure = part.text !== '' || part.tokens !== undefined
+    const structure = text !== '' || part.tokens !== undefined
     return {
       part: part.part,
       text: '',
-      ...(structure ? { tokens: part.tokens ?? countTokens(part.text) } : {}),
+      ...(structure ? { tokens: part.tokens ?? countTokens(text) } : {}),
       ...(part.tokens === undefined ? { derived: true } : {}),
       ...(part.server !== undefined ? { server: part.server } : {}),
       // Reduction keeps residency: dropping the flag here would make a
@@ -511,12 +523,13 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         continue
       }
       if (part.text !== '' || part.tokens !== undefined) observed.add(part.part)
+      const text = partText(part)
       // Instruction fences ride inside history and tool results; stripping
       // them anywhere else would miscount a system prompt that happens to
       // quote a fence, so the strip applies to the carrier buckets only.
       const strippable = part.part === 'conversation_history' || part.part === 'tool_result_content'
       const containsMarkers =
-        strippable && part.text.includes(markers.open) && part.text.includes(markers.close)
+        strippable && text.includes(markers.open) && text.includes(markers.close)
       let tokens: number
 
       if (containsMarkers) {
@@ -524,7 +537,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         // pieces, so the split is always derived — and that derivation is
         // precisely what a tokenizer-drift attribution of the turn's
         // residual would be claiming (R7.3).
-        const { blocks, remainder } = stripInstructionBlocks(part.text, markers)
+        const { blocks, remainder } = stripInstructionBlocks(text, markers)
         const remainderTokens = countTokens(remainder)
         buckets[part.part] += remainderTokens
         derivedThisTurn = true
@@ -538,7 +551,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         }
         tokens = partTokens
       } else {
-        tokens = part.tokens ?? countTokens(part.text)
+        tokens = part.tokens ?? countTokens(text)
         if (part.tokens === undefined || part.derived === true) derivedThisTurn = true
         buckets[part.part] += tokens
         // A REDUCED part carries the instruction blocks that were stripped out

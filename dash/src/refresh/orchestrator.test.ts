@@ -44,10 +44,10 @@ vi.mock('../canon/projection.js', async (importOriginal) => {
     : undefined
   return {
     ...actual,
-    projectCanonicalStore: async (store: { count(): number }): Promise<unknown> => {
+    projectCanonicalStore: vi.fn(async (store: { count(): number }): Promise<unknown> => {
       projectionProbe.calls.push({ store, recordsAtCall: store.count() })
       return delegate !== undefined ? await delegate(store) : undefined
-    },
+    }),
   }
 })
 
@@ -1217,6 +1217,66 @@ describe('refreshHarnessSources — shared projection entry point', () => {
       expect(Array.isArray(loaderShapes[1])).toBe(true)
       const retryLoad = loaderShapes[1] as ParsedProviderCall[]
       expect(retryLoad[0]?.provider).toBe('claude-desktop')
+    } finally {
+      store.close()
+    }
+  })
+})
+
+// T4 — a degraded projection (healthy sessions built, bad ones skipped) still
+// exits 0 with the skip count in the summary; only a projection-level throw
+// fails the refresh. RED without the fix: the degraded count never reached
+// the summary (no suffix, and a throw-shaped assertion on exitCode failed
+// the wrong way), so a refresh that skipped sessions looked identical to a
+// clean one — and a real projection failure was indistinguishable from a
+// partial one.
+describe('refreshHarnessSources — degraded derivation', () => {
+  it('exits 0 with a skipped-derivation suffix when the projection degrades instead of failing', async () => {
+    const store = temporaryStore()
+    try {
+      const { projectCanonicalStore } = await import('../canon/projection.js')
+      vi.mocked(projectCanonicalStore).mockResolvedValueOnce({
+        built: 1,
+        skipped: 1,
+        derivationDegraded: 1,
+        pruned: 0,
+        rollups: 0,
+        findings: 0,
+      })
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: [],
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      expect(report.exitCode).toBe(0)
+      expect(report.derivationFailed).toBe(false)
+      expect(store.listRefreshRuns()[0]).toMatchObject({
+        status: 'success',
+        summary: expect.stringContaining('; 1 session(s) skipped: derivation failed'),
+      })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('exits 1 when the projection itself throws', async () => {
+    const store = temporaryStore()
+    try {
+      const { projectCanonicalStore } = await import('../canon/projection.js')
+      vi.mocked(projectCanonicalStore).mockRejectedValueOnce(new Error('projection boom'))
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: [],
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      expect(report.exitCode).toBe(1)
+      expect(report.derivationFailed).toBe(true)
     } finally {
       store.close()
     }

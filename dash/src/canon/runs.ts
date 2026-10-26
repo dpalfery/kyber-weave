@@ -384,13 +384,18 @@ export function linkExecutions(
 function hasTurnEvidence(records: readonly CanonicalRecord[]): boolean {
   const turns = records.filter((r) => r.op === 'llm.invoke')
   if (turns.length === 0) return false
-  return turns.some(
-    (r) =>
-      r.tokens.reportedInput > 0 ||
-      r.tokens.output > 0 ||
-      (r.parts?.length ?? 0) > 0 ||
-      Object.keys(r.content).length > 0,
-  )
+  return turns.some((r) => {
+    // Same malformed-row guard as twin-dedupe `isUnreportedCounters`: a corrupt
+    // row can carry null (or a non-object) where counters belong; that reads as
+    // no token evidence, never a throw on property access.
+    const tokens: unknown = r.tokens
+    const hasTokenEvidence =
+      typeof tokens === 'object' &&
+      tokens !== null &&
+      ((tokens as CanonicalRecord['tokens']).reportedInput > 0 ||
+        (tokens as CanonicalRecord['tokens']).output > 0)
+    return hasTokenEvidence || (r.parts?.length ?? 0) > 0 || Object.keys(r.content).length > 0
+  })
 }
 
 export type BuildRunsOptions = {
