@@ -149,6 +149,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // looks for are what an installed workspace holds, not what the source would render.
         ReportDevinImportOverlap(workingDirectory);
 
+        // 5b. Retired skills. A stale second-brain directory or a receipt that still
+        // claims it is a warning, not a failure: the stale copy works.
+        ReportRetiredSkills(workingDirectory, homeStateStore);
+
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             homeStateStore,
@@ -318,6 +322,90 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                   "in .devin/config.json to stop the import (it also drops everything else that " +
                   "import brings), or deploy only one of the two targets.");
         }
+    }
+
+    /// <summary>
+    /// Warns about the retired <c>second-brain</c> skill, whether it survives as an
+    /// unmanaged directory in a deployed target tree or as a retained entry in the
+    /// project deployment receipt.
+    /// </summary>
+    /// <remarks>
+    /// A warning rather than a failure: the stale copy works. Each warning names the
+    /// remedy: delete the stale directory, then run <c>squad update</c> to reconcile
+    /// the receipt. The workflow moved to the Kyber-Docs skills deployed by
+    /// <c>docs init</c>, so the warning points there.
+    /// </remarks>
+    private void ReportRetiredSkills(string workingDirectory, SquadStateStore stateStore)
+    {
+        List<string> staleDirs = [];
+        string[] skillsRoots = [Path.Combine(".claude", "skills"), Path.Combine(".agents", "skills")];
+        foreach (string skillsRoot in skillsRoots)
+        {
+            foreach (string retired in SquadRetiredSkills.RetiredSkillNames)
+            {
+                string staleDir = Path.Combine(workingDirectory, skillsRoot, retired);
+                if (Directory.Exists(staleDir))
+                {
+                    staleDirs.Add(staleDir);
+                }
+            }
+        }
+
+        List<string> retained = [];
+        string? receiptError = null;
+        try
+        {
+            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Project);
+            if (receipt is not null)
+            {
+                retained.AddRange(SquadRetiredSkills.FindRetainedReceiptPaths(receipt));
+            }
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // An unreadable receipt is state this check could not read. Warn with the
+            // reason rather than reporting healthy over unknown state; the registry
+            // check below still applies, so this stays a warning, not a failure.
+            receiptError = ex.Message;
+        }
+
+        if (receiptError is not null)
+        {
+            string message = receiptError;
+            SquadCommandComposition.WriteUnfolded(() =>
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] Deployment receipt is unreadable: {Markup.Escape(message)}");
+                AnsiConsole.MarkupLine(
+                    "         Delete the receipt and lock, then run [grey]squad update[/] to reconcile them.");
+            });
+        }
+
+        if (staleDirs.Count == 0 && retained.Count == 0)
+        {
+            return;
+        }
+
+        SquadCommandComposition.WriteUnfolded(() =>
+        {
+            foreach (string staleDir in staleDirs)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] Retired skill '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' still present at [bold]{Markup.Escape(staleDir)}[/].");
+            }
+
+            if (retained.Count > 0)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] Deployment receipt still claims retired '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' files: [bold]{Markup.Escape(string.Join(", ", retained))}[/].");
+            }
+
+            AnsiConsole.MarkupLine(
+                "         Delete the stale directory, then run [grey]squad update[/] to reconcile the receipt.");
+            AnsiConsole.MarkupLine(
+                $"         The workflow moved to the Kyber-Docs skills ([grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkillPrefix)}*[/], " +
+                $"see [grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkill)}[/]); run [grey]docs init[/] to deploy them.");
+        });
     }
 
     /// <summary>

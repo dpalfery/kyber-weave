@@ -6,7 +6,7 @@ These are **product templates**, not live host CI.
 
 | Template | Gates | Feature |
 | --- | --- | --- |
-| [`kyber-weave-docs-gate.yml`](kyber-weave-docs-gate.yml) | `docs validate` · `docs drift` | [DocGraph](../../docs/docgraph/governance.md) |
+| [`kyber-weave-docs-gate.yml`](kyber-weave-docs-gate.yml) | `docs validate --merge-ready` · `docs drift` | [DocGraph](../../docs/docgraph/governance.md) |
 | [`kyber-weave-skill-gate.yml`](kyber-weave-skill-gate.yml) | `skill validate` · `skill lint` · `skill scan` (SARIF) | [ContextHygiene](../../docs/context-hygiene/skills.md) |
 | [`kyber-weave-agent-gate.yml`](kyber-weave-agent-gate.yml) | `agent validate` · `agent scan` (per harness) · `agent sync-check` | [ContextHygiene](../../docs/context-hygiene/agents.md) |
 

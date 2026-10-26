@@ -326,7 +326,9 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   v1 Desktop default-export hooks map (including `session.context`), both bridging to
   `createInstalledOpencodePlugin` + `registerOpencodePlugin`. `session.context` is
   registered on both the v2 namespaced and v1 dotted host surfaces; lifecycle kinds are
-  unchanged.
+  unchanged. Context capture extends this in-repo envelope plugin; a standalone plugin
+  POSTing raw JSON is rejected — the wrong port and body bypass the version guard, the
+  bounded outbox, and the never-fail-host contract.
 - **Consent.** System prompt, tool definitions, and the skills listing are content and
   flow only under the sender-owned env consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
   default; true only for exactly `1`). With consent absent the context event still emits
@@ -343,6 +345,9 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   still maps `llm.invoke` (a context event is pre-LLM-call request assembly), never
   fabricating counters. Context content buckets after every existing part: system text
   as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
+  The skills listing reads from raw `opencode.context.skills` (the `skills.ts` listing
+  source, measurable only under consent; a malformed value yields a named
+  `notMeasurable` reason).
   Prompt text (`opencode.prompt.text`) buckets as
   conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
   as non-model — the correct taxonomy for a boundary, not a rejection — with zero
@@ -360,8 +365,7 @@ under sender opt-in, and assembled text honors the 14-day content purge. Operato
 [runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
 T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
 verification on Desktop and CLI v2 (owner enablement, plugin install, live turn) is still
-open, tracked by [kyberdash-opencode-plugin-live-verification](../todo/kyberdash-opencode-plugin-live-verification.md) —
-nothing here is live-verified on this checkout.
+open — [NOT LIVE-VERIFIED]: nothing here is live-verified on this checkout.
 
 ## Local harness-source refresh
 
@@ -1288,7 +1292,7 @@ detector declares its numerator, denominator, measurement class, and explicit un
 - `oversizedResultShare`: Proportion of turn input consumed by large tool output blocks.
 - `compactionPressure`: Rate of context window growth relative to model context limits.
 - `delegationOverhead`: Percentage of run tokens spent on parent-child coordination.
-- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16). Its listed and invoked sets come from `dash/src/canon/skills.ts`, not from tool names or text matching. A `Skill` tool call credits the skill it loads, never a skill named `Skill`. When invocations are not measurable (Copilot, Antigravity) or no listing is measurable (Pi, OpenCode, unknown harnesses), the signal is reported as not measurable and no finding is raised. See the [skills view contract](#skills-view-contract).
+- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16). Its listed and invoked sets come from `dash/src/canon/skills.ts`, not from tool names or text matching. A `Skill` tool call credits the skill it loads, never a skill named `Skill`. When invocations are not measurable (Copilot, Antigravity) or no listing is measurable (Pi, unknown harnesses — and OpenCode absent the `KYBERDASH_OPENCODE_CONTEXT` consent, whose listing then reads from raw `opencode.context.skills`), the signal is reported as not measurable and no finding is raised. See the [skills view contract](#skills-view-contract).
 - `inactive-skill-reference` (finding detector): A listed skill with no observed invocation. It is a low-confidence, heuristic finding ranked last, worded as "listed with N recorded turns and 0 invocations". It states what was observed and does not use deletion or waste wording (ADR 0013 D15/D16). The same measurability rule applies: no finding when either side is not measured.
 
 ### Context-Item Classification (Decision D15)

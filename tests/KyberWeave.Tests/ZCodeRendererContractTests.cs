@@ -782,8 +782,28 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_SkillDescriptionsUseALosslessFoldedBlockScalar()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        // The canonical corpus carries no embedded quote today, so seed a controlled
+        // exemplar: copy it and give one skill a description containing one, then render
+        // the copy through the same path. The canonical description stays untouched.
+        using TempDirectory temp = new();
+        string fixtureRoot = Path.Combine(temp.Path, "kyber-squad");
+        ZCodeFixtureFiles.CopyCanonicalCorpus(fixtureRoot);
+
+        string skillFile = Path.Combine(fixtureRoot, "skills", "app-docs-standard", "SKILL.md");
+        string skillText = await File.ReadAllTextAsync(skillFile);
+        string[] skillLines = skillText.Split('\n');
+        int descriptionIndex = Array.FindIndex(
+            skillLines,
+            line => line.StartsWith("description:", StringComparison.Ordinal));
+        Assert.True(descriptionIndex >= 0, "app-docs-standard SKILL.md has no description line to seed.");
+        skillLines[descriptionIndex] = skillLines[descriptionIndex].TrimEnd() + " Say \"hello\".";
+        await File.WriteAllTextAsync(
+            skillFile,
+            string.Join('\n', skillLines),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        SquadSource source = SquadSourceLoader.Load(fixtureRoot);
+        SquadRenderResult result = await RenderZCodeAsync(fixtureRoot);
 
         List<SquadSkill> quoted = source.Skills
             .Where(skill => skill.Description.Contains('"', StringComparison.Ordinal))

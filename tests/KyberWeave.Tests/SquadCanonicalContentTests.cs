@@ -128,7 +128,6 @@ public sealed class SquadCanonicalContentTests
         "python-dev",
         "resharper-clt",
         "rust-dev",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
         "task-gate",
@@ -216,6 +215,35 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
         Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
+    }
+
+    /// <summary>
+    /// The retired <c>second-brain</c> skill moves to Kyber-Docs. The Squad bundle file and
+    /// the loaded bundle roster must not name it, or pack and install keep shipping it.
+    /// </summary>
+    [Fact]
+    public void LoadFullProductTreeContainsNoSecondBrainInBundleOrRoster()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string bundleText = File.ReadAllText(Path.Combine(ProductRoot, "bundles", "full.yml"));
+
+        Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
+        Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
+        Assert.DoesNotContain("second-brain", bundleText, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "second-brain")));
+    }
+
+    /// <summary>
+    /// The product README is the human-readable skill roster. It must not list the retired
+    /// skill in its tree or its canonical-skill counts once the source no longer ships it.
+    /// </summary>
+    [Fact]
+    public void ProductReadmeRosterLacksSecondBrain()
+    {
+        string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
+
+        Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
+        Assert.DoesNotContain("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **24 canonical agents** and **28 canonical skills**,
+It maintains a target-neutral, declarative catalog of **24 canonical agents** and **27 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -59,7 +59,7 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # 28 canonical skill directories; 110 recursive files
+├── skills/                             # 27 canonical skill directories; 108 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -82,7 +82,6 @@ products/kyber-squad/
 │   ├── python-dev/
 │   ├── resharper-clt/
 │   ├── rust-dev/
-│   ├── second-brain/
 │   ├── security-review/
 │   ├── setup-dev-environment/
 │   ├── task-gate/
@@ -122,15 +121,15 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (28 Canonical Skills)
+### 2. Skills (27 Canonical Skills)
 
-The 28 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The 27 canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
-in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
-(`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+in Kyber-Squad. Every imported raw `SKILL.md` except the five explicitly evolved skills
+(`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 82 supplemental resources, for 110 skill-tree files in total; recursive APM and
+tree also retains 81 supplemental resources, for 108 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -154,8 +153,9 @@ resources today. Every retained resource now has a reviewed disposition in the
 non-policy content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-`kyber-weave-docs` is intentionally managed separately under
-`.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
+The Kyber-Docs skills (`kyber-docs-authoring`, `kyber-docs-integrity-review`, and
+`kyber-docs-onboarding-and-assessment`) are intentionally managed separately under
+`.apm/skills/` for Kyber-Docs distribution and are not part of Kyber-Squad.
 
 ### 3. Profiles
 

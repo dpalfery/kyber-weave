@@ -37,7 +37,7 @@ Do not invent missing design. If design blocks task decomposition, return `STATU
 
 ## Final task
 
-End with a task assigned through the conductor to `docs-dev`: verify requirements against implementation and review evidence, migrate durable content into canonical documentation, update the specification index, and archive the specification. This closeout depends on all implementation, verification, and final-council work.
+End with a task assigned through the conductor to `docs-dev`: verify requirements against implementation and review evidence, harvest the Design harvest declared at authoring time at its declared scale, migrate durable content into canonical documentation, update the specification index, and archive the specification. This closeout depends on all implementation, verification, and final-council work.
 
 ## Digest
 

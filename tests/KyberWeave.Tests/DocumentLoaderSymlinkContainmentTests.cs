@@ -289,6 +289,45 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         Assert.Contains("OutsideOwner", result.Owners);
     }
 
+    /// <summary>
+    /// The narrow archived-entry read refuses a symlink: a file-level link at the
+    /// requested path fails closed instead of following the link target.
+    /// </summary>
+    [Fact]
+    public void LoadArchivedDocumentThroughSymlinkIsRefused()
+    {
+        WriteDocument("docs/archive/evil.md", """
+            ---
+            id: evil
+            title: Evil
+            doc-type: plan
+            status: superseded
+            ---
+            # Evil
+            """);
+        WriteDocument("target.md", OutsideCatalog, root: "outside");
+        string linkPath = Path.Combine(_repoRoot.Path, "docs", "archive", "linked.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        File.CreateSymbolicLink(linkPath, Path.Combine(_outside.Path, "target.md"));
+
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        DocumentLoader loader = new(_repoRoot.Path, config);
+
+        Assert.Throws<InvalidOperationException>(() => loader.LoadArchivedDocument("docs/archive/linked.md"));
+    }
+
+    /// <summary>
+    /// The narrow archived-entry read refuses a path that escapes the repository root.
+    /// </summary>
+    [Fact]
+    public void LoadArchivedDocumentOutsideRepoRootIsRefused()
+    {
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        DocumentLoader loader = new(_repoRoot.Path, config);
+
+        Assert.Throws<InvalidOperationException>(() => loader.LoadArchivedDocument("../outside.md"));
+    }
+
     private const string OutsideCatalog = """
         ---
         id: catalog

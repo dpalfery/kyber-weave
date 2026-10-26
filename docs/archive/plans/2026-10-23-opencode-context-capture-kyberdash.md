@@ -2,16 +2,20 @@
 id: plans/2026-10-23-opencode-context-capture-kyberdash
 title: "opencode context capture: system prompt, tool schemas, skills (envelope v2)"
 doc-type: plan
-status: draft
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-23
+last-reviewed: 2026-10-25
+documentation-impact: extends-component
+impact-components: [KyberDash]
 development-mode: test-first
 ---
 
 # opencode context capture: system prompt, tool schemas, skills (envelope v2)
 
-**Status: Ready — decision-complete and executable. All decisions D1–D7 decided under
+**Status: Archived — T12 backfill closeout 2026-10-25: scale declared (`extends-component`, [KyberDash]), design harvested into the KyberDash canonical docs (see `## Design harvest` and `## Closeout mapping` below). The Decisions table and every original section are preserved intact; the original status paragraph follows, labelled as history.**
+
+**Pre-closeout status (preserved as history):** Ready — decision-complete and executable. All decisions D1–D7 decided under
 `autonomy: autonomous` (provenance recorded per row); the approve-and-execute gate (AP1)
 is recorded as accepted per the bug-crusher escalation packet's autonomous-mode instruction,
 and the conductor still presents it before execution routing. Frontmatter `status: draft`
@@ -232,7 +236,7 @@ emits identity/markers; the content fields are dropped before emit.
   unset/zero with honest measurability), and lifecycle spans without markers keep the
   non-model quarantine taxonomy.
 
-## 4. Decisions
+## Decisions
 
 Permanent table; preserved intact across all lifecycle transitions.
 
@@ -346,3 +350,54 @@ execute** gate first; this plan's AP1 is recorded in §4). Closeout:
   in live use.
 - Archive per `KW-DOC-LIFECYCLE-003` by the finishing PR; the plan-index row moves to the
   archived table with the closeout mapping.
+
+## Design harvest
+
+Targets are component + doc type. The closeout mapping below maps every H id and every
+decision ID to the resolved docs.
+
+| ID | Design item (section of this plan) | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Envelope v2: contract bump `'1'`→`'2'`, `opencode.context.*` keys (D3, T1) | KyberDash | architecture |
+| H2 | `session.context` hook + loadable entry + v1 fallback ladder (D2, T2–T3) | KyberDash | architecture |
+| H3 | Adapter bucketing + self-contained `llm.invoke` record, zero fabricated counters (D4, T5) | KyberDash | architecture |
+| H4 | Consent gate `KYBERDASH_OPENCODE_CONTEXT=1`, off by default (D5, T3) | KyberDash | architecture; runbook; reference |
+| H5 | Skills listing source from raw `opencode.context.skills` (D6, T5) | KyberDash | architecture; reference |
+| H6 | In-repo extension; standalone raw-JSON route rejected (D1) | KyberDash | architecture |
+| H7 | Telemetry-inventory OpenCode row: context capture, consent-gated measurability (T6) | KyberDash | reference |
+| H8 | Runbook plugin paragraph: consent, restart-to-upgrade, live check (T6) | KyberDash | runbook |
+
+## Completion summary (T12 2026-10-25)
+
+Delivered T0–T6 test-first with whole-change review (per the archived index row:
+review with re-gate 18/18, dash suite 7063/7063) and archived 2026-10-24 per
+`KW-DOC-LIFECYCLE-003`. This T12 backfill adds the scale frontmatter, the archived
+status line, this Design harvest, and the Closeout mapping below — the Decisions table
+and every original section are untouched. The T12 pass also wrote the two missing
+design items into the architecture doc: the standalone-route rejection (H6/D1, Entry
+bullet) and the skills-listing source (H5/D6, Mapping bullet + skills-view contract).
+
+Open owner items (not residuals): G2 live-capture gate (consent set, restart, Context
+and Skills views) — recorded `[NOT LIVE-VERIFIED]` in the inventory row, the runbook
+paragraph, and the architecture envelope section.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| H1 | [dash/architecture.md](../../dash/architecture.md), "OpenCode plugin span/turn envelope" — Version key (`'2'`) + Context keys bullets |
+| H2 | [dash/architecture.md](../../dash/architecture.md), same section — Context keys payload pin + Entry bullet (v2 + v1 surfaces, `session.context` registration) |
+| H3 | [dash/architecture.md](../../dash/architecture.md), same section — Claim rule + Mapping bullets (bucketing, self-contained `llm.invoke`, zero fabricated counters) |
+| H4 | [dash/architecture.md](../../dash/architecture.md), same section — Consent bullet; [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph; [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md), OpenCode plugin row |
+| H5 | [dash/architecture.md](../../dash/architecture.md), same section — Mapping bullet (skills-listing source sentence, added T12) + skills-view contract (OpenCode measurable under consent, corrected T12); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md), OpenCode plugin row |
+| H6 | [dash/architecture.md](../../dash/architecture.md), same section — Entry bullet (standalone-route rejection sentence, added T12) |
+| H7 | [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md), OpenCode plugin row |
+| H8 | [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph |
+| D1 | [dash/architecture.md](../../dash/architecture.md) — Entry bullet (in-repo extension; standalone raw-JSON route rejected) |
+| D2 | [dash/architecture.md](../../dash/architecture.md) — Context keys + Entry bullets |
+| D3 | [dash/architecture.md](../../dash/architecture.md) — Version key + Context keys bullets |
+| D4 | [dash/architecture.md](../../dash/architecture.md) — Claim rule + Mapping bullets |
+| D5 | [dash/architecture.md](../../dash/architecture.md) — Consent bullet; [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph |
+| D6 | [dash/architecture.md](../../dash/architecture.md) — Mapping bullet (skills-listing source); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md), OpenCode plugin row |
+| D7 | [dash/architecture.md](../../dash/architecture.md) — Entry bullet; the installer-automation candidate takes **Documentation waiver — deferred candidate:** no owner acceptance (todos exist only when accepted), no surviving invariant. |
+| AP1 | **Documentation waiver — transient approval record:** the approve-and-execute provenance is preserved in plan §4. |

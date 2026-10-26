@@ -1,6 +1,6 @@
 ---
 name: kyber-weave-cli
-description: "Use when installing, updating, or configuring the Kyber-Weave CLI or the KyberDash engine: canonical install, update, and configure commands for both products, with flags and exit codes. Do NOT use for authoring governed documents — that is `kyber-weave-docs`."
+description: "Use when installing, updating, or configuring the Kyber-Weave CLI or the KyberDash engine: canonical install, update, and configure commands for both products, with flags and exit codes. Do NOT use for authoring governed documents — that is `kyber-docs-authoring`."
 license: MIT
 metadata:
   author: dpalfery
@@ -20,7 +20,7 @@ before running a verb this skill does not list. It is the authority for the comp
 and exit-code contract; this skill is the entry point, not a second copy of that page.
 
 If you are here to author or validate governed documents rather than run the products,
-stop — that is the `kyber-weave-docs` skill. This skill does not write documentation.
+stop — that is the `kyber-docs-authoring` skill. This skill does not write documentation.
 
 ## Install
 
@@ -134,4 +134,4 @@ kyber-weave update --no-kyberdash
   `install.sh` is the only supported user path.
 - **NEVER** edit KyberDash's settings store by hand; use `kyberdash dash settings set`.
 - **NEVER** author, rewrite, or validate governed documentation from this skill — that is
-  the `kyber-weave-docs` skill.
+  the `kyber-docs-authoring` skill.

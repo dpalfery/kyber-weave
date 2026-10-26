@@ -56,7 +56,7 @@ Never infer plan versus spec from the size or wording of the work; an explicit s
 - Retain the original worker session for that task's rework and verification when the harness supports continuation. Record the worker session handle and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
 - Every developer completion digest carries the task-gate digest line from the worker's own deterministic exit gate. Reject a digest whose line is missing or `FAIL` back to the original worker session, as specified in the **Developer exit gate** of the execution-and-review contract. No agent audits a single task; `code-reviewer` is the single end-of-run council, never a per-task reviewer.
 - Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, and applies equally to resumed and replacement sessions. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
-- Every completed plan or specification receives a distinct `docs-dev` closeout task before the objective is reported complete.
+- every completed change receives a docs-dev review for documentation impact; plan/spec-backed work additionally completes closeout before the objective is reported complete.
 
 For task sequencing, evidence rules, findings, final review, and closeout, read [the execution-and-review contract](conductor/references/execution-and-review.md).
 
@@ -68,4 +68,4 @@ Report queue changes as dispatching, running, blocked, and accumulated change. R
 
 ## Completion
 
-Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE`, and `docs-dev` completed the applicable plan or specification closeout. Report outcomes and evidence; do not independently re-interpret technical correctness.
+Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE`, and `docs-dev` completed the applicable plan or specification closeout. This holds because every completed change received its docs-dev review and, where plan/spec-backed, closeout. Report outcomes and evidence; do not independently re-interpret technical correctness.

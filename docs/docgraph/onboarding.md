@@ -58,7 +58,7 @@ operator-owned file.
 
 ### APM is an expected dependency
 
-`docs init` also deploys the **`kyber-weave-docs` skill** through
+`docs init` also deploys the **`kyber-docs-authoring` skill** through
 [APM](https://microsoft.github.io/apm). APM is a **prerequisite you install yourself** —
 Kyber-Weave never installs it for you, and never installs anything else on your machine.
 
@@ -106,7 +106,7 @@ kyber-weave docs validate .
 ```
 
 Every ungoverned file reports `KW-DOC-SPEC-001`. This is the judgment half, and the point
-of the skill: ask your agent to apply **`kyber-weave-docs`** to the failing documents.
+of the skill: ask your agent to apply **`kyber-docs-authoring`** to the failing documents.
 
 The skill's procedure, in short:
 

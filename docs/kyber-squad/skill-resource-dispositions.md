@@ -10,9 +10,9 @@ last-reviewed: 2026-10-22
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 82 supplemental files that sit
-beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 82 resources, a reader can answer three questions: what kind of
+This reference is the content-preservation audit for the 81 supplemental files that sit
+beside the 27 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+that, for every one of those 81 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -20,7 +20,7 @@ created it,
 
 **D2 — a skill's own directory is a durable home.** Review lenses, MSBuild/CI technique, MAUI
 platform technique, Pylance/Python procedure, product-owner phase references, PR provider
-files and scripts, second-brain's templates, the setup inventory, and
+files and scripts, the setup inventory, and
 `setup-dev-environment/agents/openai.yaml` all stay exactly where they are, with a recorded
 reason. A resource does not have to be policy to be worth keeping; framework-correctness
 facts, security floors, and procedure belong in the skill regardless of what a host decides.
@@ -42,8 +42,6 @@ starting at a skill's own `SKILL.md`, actually reaches — a file named only in 
 packaged into both archives but never rendered beside its principal. Every resource below is
 `rendered` except `skills/setup-dev-environment/agents/openai.yaml`, which is `packaged-only`
 Codex skill-UI metadata that no instruction links to, and which stays that way by design (D6).
-`skills/second-brain/references/templates.md` is `rendered` because `second-brain/SKILL.md`
-links `references/templates.md` across its four template references (D6).
 
 **Records, not guidance.** The Policy-line ledger below quotes verbatim excerpts from the
 resource files so that later edits can be checked against them (A5). A `migrated`,
@@ -124,7 +122,6 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/rust-dev/references/cross-compilation.md` | technique | retain-in-place | rendered | — | Cross-build, rustls, and git-pinning technique; target and dependency policy lives in `<rust-coding-standard>` (D2). |
 | `skills/rust-dev/references/errors-and-boundaries.md` | technique | retain-in-place | rendered | — | Error-type and crate-boundary technique; the error policy lives in `<rust-coding-standard>` (D2). |
 | `skills/rust-dev/references/gates-and-platforms.md` | procedure | retain-in-place | rendered | — | Per-platform procedure for running the Rust gates; the commands themselves are named by `<rust-coding-standard>` (D2). |
-| `skills/second-brain/references/templates.md` | template | retain-in-place | rendered | — | Template content is skill-owned (D2). Delivery is `rendered` because `second-brain/SKILL.md` links `references/templates.md` across its four template references (D6). |
 | `skills/setup-dev-environment/agents/openai.yaml` | metadata | retain-in-place | packaged-only | — | Codex skill-UI metadata (display name, default prompt, implicit-invocation policy); no instruction references it, so no closure reaches it (D2, D6). |
 | `skills/setup-dev-environment/references/inventory.md` | inventory | retain-in-place | rendered | — | Host bootstrap inventory reference; not a host-reversible policy (D2). |
 | `skills/test-dev/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
@@ -138,10 +135,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/types-and-absent-values.md` | technique | retain-in-place | rendered | — | Narrowing and absent-value technique; typing and absent-value policy lives in `<typescript-coding-standard>` (D2). |
 
-Eighty-two rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 64
+Eighty-one rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 63
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 81 `rendered`, 1 `packaged-only`.
+`policy-migrated-to-template`). Delivery: 80 `rendered`, 1 `packaged-only`.
 
 ## Policy-line ledger
 

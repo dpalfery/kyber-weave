@@ -77,7 +77,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "python-dev",
         "resharper-clt",
         "rust-dev",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
         "task-gate",
@@ -158,8 +157,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 28 canonical skills
-        Assert.Equal(28, CanonicalSkills.Length);
+        // Presence of all 27 canonical skills
+        Assert.Equal(27, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -194,6 +193,22 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         Assert.Contains("skills/task-gate/SKILL.md", entryNames);
         Assert.DoesNotContain(entryNames, name => name.Contains("task-reviewer", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The retired <c>second-brain</c> documentation-architecture skill moves to Kyber-Docs
+    /// (<c>.apm/skills/kyber-docs-onboarding-and-assessment</c>). The APM package ships the
+    /// Squad bundle, so no entry may carry it in any path.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "no-second-brain");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+
+        Assert.DoesNotContain(entryNames, name => name.Contains("second-brain", StringComparison.Ordinal));
     }
 
     /// <summary>

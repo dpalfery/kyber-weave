@@ -2,17 +2,21 @@
 id: plans/2026-10-23-pi-renderer-network-read-mcp
 title: "Pi: restore read-only MCP access via a canonical per-target agent-file overlay (pi-extensions / pi-tools)"
 doc-type: plan
-status: draft
+status: archived
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-25
+documentation-impact: extends-component
+impact-components: [KyberSquad]
 development-mode: test-first
 autonomy: autonomous
 ---
 
 # Pi: restore read-only MCP access via a canonical per-target agent-file overlay (`pi-extensions` / `pi-tools`)
 
-**Status: Ready — decision-complete. Revision 2 (2026-10-24): D1/Option A is REVERSED on
+**Status: Archived — T12 backfill closeout 2026-10-25: scale declared (`extends-component`, [KyberSquad]), design harvested into the KyberSquad canonical docs + ADR 0019 (see `## Design harvest` and `## Closeout mapping` below). The Decisions table and every original section are preserved intact; the original status paragraph follows, labelled as history.**
+
+**Pre-closeout status (preserved as history):** Ready — decision-complete. Revision 2 (2026-10-24): D1/Option A is REVERSED on
 verified live evidence (not a guess — see the D1 row); the fix moved one layer up from the
 renderer vocabulary to the canonical Squad agent file, per D7–D11, decided under
 `autonomy: autonomous` with provenance recorded per row. `docs validate` / `docs drift`
@@ -77,7 +81,7 @@ not-expressible record **stays** (it is TRUE for the renderer alone — no built
 it), `extensions: false` remains the default emission for every agent without an overlay,
 and the `tools` key is still always emitted.
 
-## 2. Decisions
+## Decisions
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
@@ -337,3 +341,59 @@ Whole-change review per repo policy (deterministic gate suite plus council). Clo
 0019 amendment (rewritten by T3); the corrected vocabulary facts → the
 `requirements.md`/`onboarding.md` rows; D5 + the deployment-gap finding → §9 above and the
 closeout summary's open item. This plan's `## Decisions` table survives archival intact.
+
+## Design harvest
+
+Targets are component + doc type. The closeout mapping below maps every H id and every
+decision ID to the resolved docs.
+
+| ID | Design item (section of this plan) | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Canonical overlay keys `pi-extensions` / `pi-tools` (D7) | KyberSquad | architecture; onboarding; requirements |
+| H2 | `ext:`-form-only validation, no built-in smuggling (D8) | KyberSquad | architecture |
+| H3 | Renderer emission: YAML sequence, CSV append, byte-stability (D9) | KyberSquad | architecture |
+| H4 | `research-agent`-only scope with verified entries (D10) | KyberSquad | requirements; onboarding |
+| H5 | Reversal record: bare `mcp` invalid, Option A reversed, Q1-A intact (D1, D2) | KyberSquad | adr |
+
+## Completion summary (T12 2026-10-25)
+
+Revision 2 reverted the renderer to the pre-plan seven-tool vocabulary and implemented
+the canonical overlay end to end (T1 RED contract re-pointing → T2 GREEN revert +
+overlay → T3 docs + ADR 0019 amendment rework; T4 live gate pre-satisfied GREEN via the
+2026-10-24 context7 adapter-path probes, run twice). Merged as `0351a45c`
+(`feat(squad): pi per-agent MCP overlay via pi-extensions/pi-tools`). This T12 backfill
+adds the scale frontmatter, the archived status line, this Design harvest, and the
+Closeout mapping below — the Decisions table and every original section are untouched.
+The T12 pass also wrote the missing overlay design into
+`docs/kyber-squad/architecture.md` (Pi per-target overlay bullet: keys, validation,
+emission, scope).
+
+Evidence note for reviewer (T10): historical RED was observed 1× `003` on the still-open
+current plan and 0× `004` on #425/#426 with `--base 8beb97ae~1`. Recorded as an evidence
+mismatch; it does not block this backfill (T12 still meets C1–C9 in scope).
+
+Open owner items (not residuals): the deployment gap (`squad install/update --global`
+fails — no published Squad release — fixed by a future plan, out of scope here); the T4
+re-run trigger is conditional on implementation deviating from the verified mechanism,
+not an open gate.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| H1 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — Pi per-target overlay bullet (added T12); [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md), tool-vocabulary paragraph |
+| H2 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — same bullet (validation rules); [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment |
+| H3 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — same bullet (emission form); [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment |
+| H4 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md), tool-vocabulary paragraph |
+| H5 | [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment 2026-10-24 (reversal + intact Q1-A) |
+| D1 | [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment (reversal on verified live evidence; renderer edit reverted in T2) |
+| D2 | [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment (Q1-A intact) + [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row |
+| D3 | [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment itself (amend-in-place, no new ADR) |
+| D4 | **Documentation waiver — voided design:** the `mcp` placement debate is moot after the D1 reversal (VOID); no surviving invariant; the record stays in this plan. |
+| D5 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row + [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md), tool-vocabulary paragraph (overlay scope + byte-stability); the deployment gap is an open owner item, see Completion summary |
+| D6 | [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment (live-probe basis cited) |
+| D7 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — Pi per-target overlay bullet; [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row |
+| D8 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — same bullet (validation rules); [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment |
+| D9 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) — same bullet (emission form); [adr/0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) amendment |
+| D10 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md), Pi row; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md), tool-vocabulary paragraph |
+| D11 | **Documentation waiver — transient test placement:** the assertion-location decision pins no doc invariant; the pins live in `PiRendererContractTests`/`SquadSourceTests` per the plan record. |

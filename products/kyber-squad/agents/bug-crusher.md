@@ -9,7 +9,7 @@ copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/
 # The skill dispatches bug-crusher-investigator as its first act on every defect, so the
 # roster has to permit it. `root-fixer` grants `delegate` for exactly this; the roster is
 # what keeps the grant scoped to the one agent the skill names.
-delegates-to: [bug-crusher-investigator]
+delegates-to: [bug-crusher-investigator, docs-dev]
 fallback: role-skill
 aliases: []
 ---

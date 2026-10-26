@@ -1,5 +1,5 @@
 ---
-name: kyber-weave-docs
+name: kyber-docs-authoring
 description: "Generate conformant Kyber-Weave frontmatter for repository documentation so that docs validate and docs drift pass. Use when a document fails a KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation tree after kyber-weave docs init, or when authoring a new governed document — including a todo or a coding standard — and you must choose doc-type, status, component, technology, source-root, and code-refs. Not for editing prose or style, authoring SKILL.md skills, or writing harness agent definitions."
 license: MIT
 metadata:
@@ -133,7 +133,7 @@ confident `current` on metadata nobody checked.
 
 ## Example
 
-A file at `docs/payments/architecture.md` opening with `# Payments service` and no
+A file at `<docs-root>/payments/architecture.md` opening with `# Payments service` and no
 frontmatter. The catalog already has a `Payments` component owned by `payments-team`,
 whose source root is `src/Payments`.
 
@@ -232,8 +232,8 @@ heading — never hardcode it, never assume it.
 Agents and skills should look up the following properties dynamically to find the relevant documentation and references for this repository:
 
 - **<docs-root>**: `docs`
-- **<documentation-index>**: `docs/catalog.md`
-- **<documentation-ontology>**: `docs/documentation-ontology.md`
+- **<documentation-index>**: `<docs-root>/catalog.md`
+- **<documentation-ontology>**: `<docs-root>/documentation-ontology.md`
 ```
 
 1. Read the document. Decide what it actually *is* → `doc-type`, from

@@ -2,16 +2,20 @@
 id: plans/2026-10-22-opencode-span-turn-hooks-kyberdash
 title: "opencode span-turn hooks to KyberDash (Desktop + CLI v2, one codebase)"
 doc-type: plan
-status: draft
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-22
+last-reviewed: 2026-10-25
+documentation-impact: extends-component
+impact-components: [KyberDash]
 development-mode: test-first
 ---
 
 # opencode span-turn hooks to KyberDash (Desktop + CLI v2, one codebase)
 
-**Status: Ready — decision-complete, executable (revision R2 approved human 2026-10-22 `Approve R2 (Recommended)`, gate id R2 approve-and-execute; T8 e2e restated to version-pass + attribution + quarantined==6 non-model with zero fabricated counters + session anchoring, not accepted; R1 prior authority retained as history, AP1 superseded history; frontmatter `status: draft` unchanged per closed ontology — body Ready is authoritative; docs validate/drift outstanding G3, no exec tool in harness — conductor runs both checks before execution).**
+**Status: Archived — T12 backfill closeout 2026-10-25: scale declared (`extends-component`, [KyberDash]), design harvested into the KyberDash canonical docs (see `## Design harvest` and `## Closeout mapping` below). The Decisions table and every original section are preserved intact; the original status paragraph follows, labelled as history.**
+
+**Pre-closeout status (preserved as history):** Ready — decision-complete, executable (revision R2 approved human 2026-10-22 `Approve R2 (Recommended)`, gate id R2 approve-and-execute; T8 e2e restated to version-pass + attribution + quarantined==6 non-model with zero fabricated counters + session anchoring, not accepted; R1 prior authority retained as history, AP1 superseded history; frontmatter `status: draft` unchanged per closed ontology — body Ready is authoritative; docs validate/drift outstanding G3, no exec tool in harness — conductor runs both checks before execution).**
 **Development mode:** `test-first` (the default; no opt-out supplied).
 **Autonomy:** `autonomous` (resolved from repository root `AGENTS.md` Config Reg `<autonomy>`).
 
@@ -348,7 +352,7 @@ no exec tool in harness); no pass claimed — conductor runs both checks before
 execution. No `AUTONOMOUS_APPROVAL` inferred or needed. Implementation (T0–T8, then
 T7) may proceed under the conductor.
 
-## 10. Decisions
+## Decisions
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
@@ -505,3 +509,62 @@ Revision R2 2026-10-22 (provenance human; APPROVED explicit human `Approve R2 (R
   G3 cleared (validate/drift run in this harness); T0–T8 TASK_GATE lines absent from
   tree (packet authority only). Evidence under
   `.agent_scratchpad/T7-opencode-span-turn-hooks-closeout/` (r4 logs).
+
+## Design harvest
+
+Targets are component + doc type. The closeout mapping below maps every H id and every
+decision ID to the resolved docs.
+
+| ID | Design item (section of this plan) | Target component | Target doc type |
+|---|---|---|---|
+| H1 | Span/turn envelope contract + version key + version guard (§§3.2, T1; R2 restatement) | KyberDash | architecture |
+| H2 | Adapter claim rule + span mapping, incl. non-model quarantine taxonomy with zero fabricated counters (§§3.2, T1, T3–T4; R2) | KyberDash | architecture |
+| H3 | Live OTLP/HTTP transport + bounded outbox, offline spool, backpressure (§§3.2, T5) | KyberDash | architecture |
+| H4 | Privacy/redaction defaults: counters always, content sender-opt-in (D5, §3.3) | KyberDash | architecture |
+| H5 | Capture key ownership: declare-only managed writer, receipt parity (T6) | KyberDash | architecture; runbook |
+| H6 | Pipeline assembly in the installed entry, never-fail-host (T8) | KyberDash | architecture |
+| H7 | Per-harness outcome row: spans/turns observed, content availability, residual gates (T6) | KyberDash | reference |
+| H8 | Operator steps: enable/verify/wipe for the plugin (T6) | KyberDash | runbook |
+| H9 | Display-layer placement: plugin is a sender, no surface change (D7, §3.1) | KyberDash | architecture |
+
+## Completion summary (T12 2026-10-25)
+
+Shipped T0–T8 test-first under the R2 authority: T7 closeout PASS (re-run under R2 +
+restated T8), F1 resolved by real assembly in the installed entry, council APPROVE.
+Per the plan's own record (§12, T7 status): dash typecheck, lint, `check:reachable`
+clean, full suite 6921/6921 over 459 files (display-layer guard 28, new-plugin tests 68
+incl. pipeline e2e 6), `docs validate` + `docs drift` zero findings. Archived 2026-10-22
+per `KW-DOC-LIFECYCLE-003`. This T12 backfill adds the scale frontmatter, the archived
+status line, this Design harvest, and the Closeout mapping below — the Decisions table
+and every original section are untouched.
+
+Open owner items (not residuals): G1/G2 fixtures and the owner live round trips on
+Desktop + CLI v2 (owner enablement, plugin install, live turn). The canonical docs mark
+them `[NOT LIVE-VERIFIED]`.
+
+## Closeout mapping
+
+| ID | Destination |
+|---|---|
+| H1 | [dash/architecture.md](../../dash/architecture.md), "OpenCode plugin span/turn envelope" — Version key + Version guard bullets |
+| H2 | [dash/architecture.md](../../dash/architecture.md), same section — Claim rule + Mapping bullets (non-model quarantine taxonomy, zero fabricated counters, session anchoring) |
+| H3 | [dash/architecture.md](../../dash/architecture.md), same section — sender/outbox paragraph + Assembly bullet |
+| H4 | [dash/architecture.md](../../dash/architecture.md), same section — Consent/content rule; [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph (consent, restart matrix) |
+| H5 | [dash/architecture.md](../../dash/architecture.md), same section — declare-only capture sentence; [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph (declare-only keys) |
+| H6 | [dash/architecture.md](../../dash/architecture.md), same section — Assembly bullet (hook→mapper→turn→outbox→sender, one codebase) |
+| H7 | [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md), OpenCode plugin row |
+| H8 | [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph |
+| H9 | [dash/architecture.md](../../dash/architecture.md) — sender placement + display-layer rule (KD-011) |
+| D1 | **Documentation waiver — transient mode/governance:** `test-first` is the execution mode; no surviving doc invariant. |
+| D2 | **Documentation waiver — transient mode/governance:** autonomy basis from Config Reg. |
+| D3 | **Documentation waiver — transient mode/governance:** intake route is an execution-state fact. |
+| D4 | [dash/architecture.md](../../dash/architecture.md) — Assembly bullet (one codebase serves both Desktop and CLI v2 targets) |
+| D5 | [dash/architecture.md](../../dash/architecture.md) — Consent/content rule; [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph |
+| D6 | [dash/architecture.md](../../dash/architecture.md) — sender/outbox paragraph, direct to `127.0.0.1:4318`, no new route |
+| D7 | [dash/architecture.md](../../dash/architecture.md) — sender placement + display-layer rule (KD-011) |
+| Q1 | [dash/architecture.md](../../dash/architecture.md) (dash-CLI-managed plugin) + [dash/runbook.md](../../dash/runbook.md), OpenCode plugin paragraph |
+| Q2 | [dash/architecture.md](../../dash/architecture.md) (live OTLP/HTTP to the loopback receiver) |
+| Q3 | [dash/architecture.md](../../dash/architecture.md) (span-anchored ids + contract version key) |
+| AP1 | **Documentation waiver — transient approval record:** the approve-and-execute provenance is preserved in plan §9. |
+| R1 | **Documentation waiver — transient revision record:** superseded revision history preserved in plan §§9–12. |
+| R2 | [dash/architecture.md](../../dash/architecture.md) — Mapping bullet (restated e2e taxonomy); the revision record stays in the plan |

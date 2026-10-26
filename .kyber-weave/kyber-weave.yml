@@ -65,20 +65,22 @@ review:
     # and invisible in the report, which records one line per gate regardless. The build
     # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-docs]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-authoring]
       blocking: true
     - id: skill-lint
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-authoring, --min-desc-score, "70"]
       blocking: true
     # `--fail-on critical` is the documented local check. Binding it here means a
     # later change to the CLI default cannot silently loosen what the gate enforces.
     - id: skill-scan
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-authoring, --fail-on, critical]
       blocking: true
-    # The entry-point skill is a second skill directory, and `skill validate` / `lint` /
-    # `scan` each take one path. The declared suite covers it the same way it covers the
-    # authoring skill — three more gates, one per verb, or the new skill is discoverable
-    # to an agent but never gated.
+    # The entry-point skill was the second gated skill directory, and the two
+    # Kyber-Docs skills that moved out of Squad are the third and fourth.
+    # `skill validate` / `lint` / `scan` each take one path. The declared suite
+    # covers each the same way it covers the authoring skill — three more gates
+    # per skill, one per verb, or a new skill is discoverable to an agent but
+    # never gated.
     - id: skill-validate-cli
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
       blocking: true
@@ -87,6 +89,28 @@ review:
       blocking: true
     - id: skill-scan-cli
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-cli, --fail-on, critical]
+      blocking: true
+    # The integrity-review skill moved out of .apm's retired
+    # `doc-corpus-integrity-review` directory to its Kyber-Docs name.
+    - id: skill-validate-integrity-review
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-integrity-review]
+      blocking: true
+    - id: skill-lint-integrity-review
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-integrity-review, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-integrity-review
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-integrity-review, --fail-on, critical]
+      blocking: true
+    # The onboarding-and-assessment skill moved out of Squad's `second-brain`
+    # directory to its Kyber-Docs home under .apm/skills.
+    - id: skill-validate-onboarding-and-assessment
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-onboarding-and-assessment]
+      blocking: true
+    - id: skill-lint-onboarding-and-assessment
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-onboarding-and-assessment, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-onboarding-and-assessment
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-onboarding-and-assessment, --fail-on, critical]
       blocking: true
     - id: docs-validate
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]

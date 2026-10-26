@@ -631,7 +631,7 @@ public sealed class CopilotRendererTests
         "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'rust-dev', 'sql-database-architect', " +
         "'tauri-dev', 'test-dev', 'typescript-dev']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
-    [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
+    [InlineData("bug-crusher", "agents: ['bug-crusher-investigator', 'docs-dev']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
         string agentName,
         string expectedAgentsLine)

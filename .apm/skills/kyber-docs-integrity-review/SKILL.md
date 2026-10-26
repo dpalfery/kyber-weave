@@ -1,5 +1,5 @@
 ---
-name: doc-corpus-integrity-review
+name: kyber-docs-integrity-review
 description: "Use when a human requests a statement-by-statement review of governed Markdown documents."
 license: MIT
 metadata:

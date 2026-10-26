@@ -227,7 +227,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 | Verb | Flags (beyond `[path]` and `--docs-root`) | What it does |
 |---|---|---|
 | [`docs init`](docgraph/onboarding.md#1-initialize) | `--owner <OWNER>` (default `unassigned`), `-t\|--target <TARGETS>` (default `agent-skills`), `--no-skill`, `--force`, `--kyber-standards` | Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM. |
-| [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready` | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`). |
+| [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs drift`](docgraph/governance.md#entity-drift--docs-drift) | validate flags + `--docs-root` | Resolve documented symbols against the CodeGraph index (`KW-DOC-DRIFT-*`). |
 | [`docs export-graph`](docgraph/architecture.md) | validate flags + `--docs-root`, `-o\|--out <DIR>` (default `./build/doc-graph`) | Export the documentation graph as `nodes.jsonl` and `edges.jsonl`. |
 | [`docs catalog`](docgraph/governance.md#coverage--docs-catalog) | validate flags + `--docs-root` | Display doc-type coverage by component. |

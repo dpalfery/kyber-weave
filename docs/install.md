@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-25
 ---
 
 # Installing Kyber-Weave
@@ -473,6 +473,47 @@ a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc
 Global `kyber-weave --version` still prints the running binary; pinning is a positional
 argument so the two do not collide.
 
+## Upgrading
+
+### Retired skills
+
+Two renames ship in this release: `kyber-weave-docs` is now `kyber-docs-authoring`,
+`doc-corpus-integrity-review` is now `kyber-docs-integrity-review`, and the Squad
+`second-brain` skill moved to Kyber-Docs as `kyber-docs-onboarding-and-assessment`
+(deployed by `docs init`). The old copies keep working, so the upgrade is cleanup,
+not repair — but remove them so the stale copy is not the one an agent finds.
+
+APM prunes a retired skill only when a lockfile records the install. That
+lockfile-gated pruning was observed on both 0.28.0 and 0.35.0: with a lockfile
+present, a plain `apm install` pruned the stale directory; without a lockfile,
+both versions left it standing. No version gate is encoded — neither a minimum
+APM version nor a "this version never prunes" rule — because none was observed.
+If the stale directory is still there after the deploy step, delete it by hand.
+
+Kyber-Docs skills (default `agent-skills` target, `.agents/skills/` root):
+
+```bash
+rm -rf ".agents/skills/kyber-weave-docs" ".agents/skills/doc-corpus-integrity-review"
+kyber-weave docs init .   # deploys kyber-docs-authoring, kyber-docs-integrity-review, kyber-docs-onboarding-and-assessment
+```
+
+For a `claude` target the roots are `.claude/skills/kyber-weave-docs` and
+`.claude/skills/doc-corpus-integrity-review`; the `rm -rf` shape is the same.
+`docs init` warns when a retired directory is still present after the deploy
+step and prints the exact removal command.
+
+Squad `second-brain` (retired from `products/kyber-squad/`):
+
+```bash
+rm -rf ".claude/skills/second-brain" ".agents/skills/second-brain"
+kyber-weave squad update   # reconcile the receipt once the stale directory is gone
+```
+
+`kyber-weave squad doctor` warns about a stale `second-brain` directory in a
+deployed target tree, and about a deployment receipt that still claims its
+files, in both cases printing the delete-then-`squad update` steps and pointing
+at the Kyber-Docs skills (`kyber-docs-*`, see `kyber-docs-onboarding-and-assessment`).
+
 ## Then initialize your repository
 
 ```bash
@@ -481,7 +522,7 @@ kyber-weave docs init .
 
 This scaffolds host config, the catalog, and the ontology reference; safely merges the
 narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deploys the
-`kyber-weave-docs` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
+`kyber-docs-authoring` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
 of 11 Kyber Squad coding standards templates. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
 
@@ -498,7 +539,7 @@ installed on your machine behind your back.
 
 ### APM
 
-The Agent Package Manager distributes the `kyber-weave-docs` authoring skill, resolves
+The Agent Package Manager distributes the `kyber-docs-authoring` authoring skill, resolves
 the harness layout for each runtime, and powers target compilation for `kyber-weave squad`.
 Install it once:
 
