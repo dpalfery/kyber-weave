@@ -31,7 +31,10 @@ async function loadScript(): Promise<BundleScript> {
 function probeInNode(source: string, probe: string): unknown {
   const url = `data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`
   const program = `const ns = await import(${JSON.stringify(url)})\n${probe}`
-  const out = execFileSync(process.execPath, ['--input-type=module', '-e', program], {
+  // The program goes on stdin, not in `-e`: the data URL alone can exceed the Windows
+  // command-line limit (32,767 characters), which makes spawn fail with ENAMETOOLONG.
+  const out = execFileSync(process.execPath, ['--input-type=module'], {
+    input: program,
     encoding: 'utf8',
     timeout: 20_000,
     env: { PATH: process.env['PATH'] ?? '' },
