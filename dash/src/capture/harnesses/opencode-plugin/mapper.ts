@@ -29,6 +29,9 @@ import {
 } from '../../../canon/adapters/opencode-envelope.js'
 import type { OtlpSpan } from '../../../otel/receiver.js'
 
+/** Optional reported context window (D6); additive inside contract '2'. */
+export const OPENCODE_MODEL_CONTEXT_LIMIT_KEY = 'opencode.model.context_limit'
+
 /** Token counters as the hook payload carries them (T0 `tokens` bucket). */
 export type OpencodePluginSpanTokens = {
   input_tokens: number
@@ -76,6 +79,8 @@ export type OpencodePluginSpanPayload = {
   skills?: string[] | string
   /** Plain model identity from a context event (T4); carried only when non-empty. */
   modelId?: string
+  /** Model context window the plugin read from the host catalog (D6); stamped only when a positive finite number. */
+  contextLimit?: number
   tokens?: OpencodePluginSpanTokens
   errors?: OpencodePluginSpanError
   startTimeUnixNano: string | number | bigint
@@ -162,6 +167,10 @@ export function mapOpencodePayloadToAttributes(
     attributes[OPENCODE_CONTEXT_SKILLS_KEY] = JSON.stringify(payload.skills)
   }
   if (nonEmpty(payload.modelId)) attributes['opencode.model.id'] = payload.modelId
+  // D6: additive attribute inside contract '2' (no bump). Absent stays absent; 0 or non-finite is never stamped.
+  if (finiteNumber(payload.contextLimit) && payload.contextLimit > 0) {
+    attributes[OPENCODE_MODEL_CONTEXT_LIMIT_KEY] = payload.contextLimit
+  }
   if (nonEmpty(payload.tool)) attributes['opencode.tool.name'] = payload.tool
   if (nonEmpty(payload.messageID)) attributes['opencode.message.id'] = payload.messageID
   if (nonEmpty(payload.callID)) {

@@ -102,6 +102,47 @@
     },
     "verdict": "Test pollution confirmed. All 41 contract-version rows carry the test fixture session id opencode-session-7f3a, which is hardcoded in four test files. None are owner sessions. The count is 41 now (35 before 2026-10-25, plus 6 later), so the plan's figure of 35 is stale. Rows continue to arrive, which means the polluting test runs still reach the live receiver; T1 (network guard) is the fix. Leave the rows in quarantine per D9."
   },
+  "context_hook_input_2_1_4": {
+    "t2": "Plan T2 (R1): the 2.1.4 session.hook(\"context\") input and the G6 answer. Registration is ctx.session.hook(\"context\", cb); cb(input) receives a SessionContext.",
+    "pinned_on": "2026-10-26",
+    "sources": [
+      "@opencode/plugin@2.1.4 tarball dist/promise/session.d.ts (SessionRequest, SessionContext), already quoted in fixtures/context-payload.json",
+      "@opencode/schema@2.1.4 tarball dist/model.d.ts (Model.Ref, Model.Info limit)",
+      "@opencode/client@2.1.4 tarball dist/effect/api/api.d.ts (ModelApi)",
+      "/opt/homebrew/Cellar/opencode/2.1.4/bin/opencode (byte search of the Bun-compiled binary)"
+    ],
+    "input_shape": {
+      "sessionID": "string (readonly)",
+      "model": "Model.Ref: { id: string, providerID: string, variant?: string } (readonly)",
+      "agent": "string (Agent.ID, readonly)",
+      "system": "Array<SystemPart>, read as system[n].text (mutable)",
+      "tools": "Record<string, { description: string, input: JsonSchema }> keyed by tool id (mutable)",
+      "messages": "Array<Message> (mutable; KyberDash never reads it)"
+    },
+    "example_input": {
+      "sessionID": "opencode-session-7f3a",
+      "model": { "id": "claude-sonnet-4-5", "providerID": "anthropic" },
+      "agent": "build",
+      "system": [
+        { "text": "You are opencode." },
+        { "text": "Skills:\n<available_skills>\n  <skill>\n    <id>review</id>\n    <name>review</name>\n    <description>Review code</description>\n  </skill>\n  <skill>\n    <id>deploy</id>\n    <name>deploy</name>\n    <description>Ship it</description>\n  </skill>\n</available_skills>" }
+      ],
+      "tools": {
+        "read": { "description": "Read a file", "input": { "type": "object" } },
+        "skill": { "description": "Load a specialized skill's instructions", "input": { "type": "object" } }
+      },
+      "messages": []
+    },
+    "model_ref_verbatim_binary": "n.model.providerID, n.model.id, r.model.variant (built-in plugin reads of the context input model ref)",
+    "g6_catalog_lookup": {
+      "answer": "YES. The setup context exposes ctx.model (ModelDomain extends ModelApi: list, default). OpenCode's own built-in plugins call (yield*e.model.list()).data.find((o)=>o.providerID===n.model.providerID&&o.id===n.model.id) inside the context callback. Each catalog entry is Model.Info with limit.context (Int), limit.output, and optional limit.input.",
+      "list_result_shape": "{ data: Model.Info[] } (binary reads .data); the reader also tolerates a bare array",
+      "context_limit_path": "<catalog entry>.limit.context",
+      "binary_verbatim": "let r=(yield*e.model.list()).data.find((o)=>o.providerID===n.model.providerID&&o.id===n.model.id)??OQ.default(n.model.providerID,n.model.id)",
+      "schema_verbatim": "readonly limit: Schema.Struct<{ readonly context: Schema.Int; readonly input: ...; readonly output: Schema.Int; }>",
+      "consequence": "D6: the plugin sends opencode.model.context_limit (reported) when ctx.model.list finds the model with a positive finite limit.context; otherwise it omits it (never 0)."
+    }
+  },
   "still_unpinned": [
     "1.x named-export loader rule (no 1.x runtime on this machine).",
     "1.x skill listing location (no 1.x runtime on this machine)."
