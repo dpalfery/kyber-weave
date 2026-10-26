@@ -30,6 +30,21 @@ import { parseAvailableSkills } from './skills-block.js'
 /** Bound on the one-time model catalog lookup; expiry means "no window", not a stalled request. */
 const DEFAULT_LOOKUP_TIMEOUT_MS = 500
 
+/**
+ * Cap on each content field (system prompt, tools JSON) sent per event, in characters (UTF-16
+ * units, at most 3 bytes each in UTF-8, so under 800 KB on the wire). A host prompt or tool
+ * catalogue can be megabytes; the hook runs on the request path and has a 250ms budget, so
+ * content past the cap is cut and ends with `CONTENT_TRUNCATION_MARKER`, never sent whole.
+ */
+export const MAX_CONTENT_CHARS = 262_144
+
+/** Appended to a field that hit the cap, so a reader can tell it was cut. */
+export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
+
+function capContent(value: string): string {
+  return value.length > MAX_CONTENT_CHARS ? `${value.slice(0, MAX_CONTENT_CHARS)}${CONTENT_TRUNCATION_MARKER}` : value
+}
+
 export type EntryOptions = Omit<InstalledOpencodePluginOptions, 'emit'> & {
   /** A prebuilt pipeline (tests observe its events); default: built inside `setup`. */
   installed?: InstalledOpencodePlugin
@@ -120,11 +135,33 @@ function systemText(system: unknown): string | undefined {
   return parts.length > 0 ? parts.join('\n\n') : undefined
 }
 
-/** JSON of the tools record; undefined when empty or not serializable. Reads only. */
+/**
+ * JSON of the tools record, capped at `MAX_CONTENT_CHARS`; undefined when empty or not
+ * serializable. Tools are serialized one at a time and the walk stops once the cap is passed,
+ * so a huge catalogue is not stringified whole. Equal to `JSON.stringify(tools)` under the cap.
+ * Reads only.
+ */
 function toolsJson(tools: unknown): string | undefined {
-  if (!isRecord(tools) || Object.keys(tools).length === 0) return undefined
+  if (!isRecord(tools)) return undefined
+  const keys = Object.keys(tools)
+  if (keys.length === 0) return undefined
   try {
-    return JSON.stringify(tools)
+    const members: string[] = []
+    let size = 2
+    let cut = false
+    for (const key of keys) {
+      const value = JSON.stringify(tools[key])
+      if (value === undefined) continue // JSON.stringify omits such members too
+      const member = `${JSON.stringify(key)}:${value}`
+      members.push(member)
+      size += member.length + 1
+      if (size > MAX_CONTENT_CHARS) {
+        cut = true
+        break
+      }
+    }
+    // Past the cap the object is left open on purpose: it is cut and marked, not valid JSON.
+    return capContent(`{${members.join(',')}${cut ? '' : '}'}`)
   } catch {
     return undefined
   }
@@ -162,7 +199,7 @@ async function toContextPayload(
   const skills = systemPrompt === undefined ? undefined : parseAvailableSkills(systemPrompt)
   return {
     ...payload,
-    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    ...(systemPrompt !== undefined ? { systemPrompt: capContent(systemPrompt) } : {}),
     ...(toolsText !== undefined ? { toolsText } : {}),
     // A missing or malformed block leaves skills absent; the adapter names the reason (T7).
     ...(skills?.ok === true && skills.ids.length > 0 ? { skills: skills.ids } : {}),
@@ -178,13 +215,17 @@ export function createSetup(
   options: EntryOptions = {},
 ): (ctx: OpencodePluginSetupContext) => Promise<void> {
   const { installed: injected, env, consentPath, lookupTimeoutMs, ...pipelineOptions } = options
+  const lookupBoundMs =
+    typeof lookupTimeoutMs === 'number' && Number.isFinite(lookupTimeoutMs) && lookupTimeoutMs > 0
+      ? lookupTimeoutMs
+      : DEFAULT_LOOKUP_TIMEOUT_MS
   return async (ctx) => {
     try {
       const session = ctx?.session
       if (typeof session?.hook !== 'function') return
       const installed = injected ?? createInstalledOpencodePlugin(pipelineOptions)
       const path = consentPath ?? resolveConsentPath()
-      const lookup = createContextLimitLookup(ctx.model, lookupTimeoutMs ?? DEFAULT_LOOKUP_TIMEOUT_MS)
+      const lookup = createContextLimitLookup(ctx.model, lookupBoundMs)
       const callback = async (input: unknown): Promise<void> => {
         try {
           const payload = await toContextPayload(

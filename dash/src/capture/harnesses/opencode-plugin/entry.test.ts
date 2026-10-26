@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveConsentPath } from './consent.js'
-import entryDefault, { createSetup, type EntryOptions } from './entry.js'
+import entryDefault, { CONTENT_TRUNCATION_MARKER, MAX_CONTENT_CHARS, createSetup, type EntryOptions } from './entry.js'
 import { OPENCODE_PLUGIN_ID, createInstalledOpencodePlugin, type OpencodeHookEvent } from './plugin.js'
 import type { OtlpFetch } from './transport/otlp-sender.js'
 
@@ -357,6 +357,62 @@ describe('context window (G6 answered: ctx.model.list exposes limit.context; D6)
     expect(events()).toHaveLength(1)
     expect(events()[0]).not.toHaveProperty('contextLimit')
   })
+})
+
+describe('content is capped before it is serialized and sent (C6)', () => {
+  const ON = { KYBERDASH_OPENCODE_CONTEXT: '1' }
+
+  it('truncates an oversized system prompt with a marker and keeps the skills parsed from the full text', async () => {
+    const { callback, events } = await boot({ env: ON })
+    const given = input()
+    const big = 'x'.repeat(MAX_CONTENT_CHARS * 2)
+    given.system = [...given.system, { text: big }]
+    await callback(given)
+    const prompt = (events()[0] as { systemPrompt?: string }).systemPrompt ?? ''
+    expect(prompt.length).toBe(MAX_CONTENT_CHARS + CONTENT_TRUNCATION_MARKER.length)
+    expect(prompt.endsWith(CONTENT_TRUNCATION_MARKER)).toBe(true)
+    expect(events()[0]).toMatchObject({ skills: ['review', 'deploy'] })
+  })
+
+  it('truncates oversized tools JSON with a marker, without serializing every tool past the cap', async () => {
+    const { callback, events } = await boot({ env: ON })
+    const given = input()
+    const tools: Record<string, unknown> = {}
+    for (let i = 0; i < 50; i += 1) tools[`tool${i}`] = { description: 'd'.repeat(MAX_CONTENT_CHARS / 4) }
+    given.tools = tools
+    await callback(given)
+    const text = (events()[0] as { toolsText?: string }).toolsText ?? ''
+    expect(text.length).toBe(MAX_CONTENT_CHARS + CONTENT_TRUNCATION_MARKER.length)
+    expect(text.endsWith(CONTENT_TRUNCATION_MARKER)).toBe(true)
+    expect(text.startsWith('{"tool0":')).toBe(true)
+  })
+
+  it('leaves content at or under the cap exactly as before', async () => {
+    const { callback, events } = await boot({ env: ON })
+    const given = input()
+    await callback(given)
+    expect((events()[0] as { toolsText?: string }).toolsText).toBe(JSON.stringify(given.tools))
+  })
+
+  it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY, '20' as unknown as number])(
+    'falls back to the default lookup bound for an invalid lookupTimeoutMs (%s)',
+    async (bad) => {
+      vi.useFakeTimers()
+      try {
+        // A catalog that answers after 50ms: the default bound (500ms) waits for it, while a
+        // timer built from the invalid value would expire at once and drop the window.
+        const slow = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(CATALOG), 50)))
+        const { callback, events } = await boot({ list: slow, lookupTimeoutMs: bad })
+        const done = callback(input())
+        await vi.advanceTimersByTimeAsync(100)
+        await done
+        expect(events()).toHaveLength(1)
+        expect(events()[0]).toMatchObject({ contextLimit: 200000 })
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
 })
 
 describe('never fails the host', () => {
