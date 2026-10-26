@@ -22,7 +22,9 @@ Amended 2026-10-26, in place: `docs-dev` now holds `process.execute: allow` on e
 the shared `documentation` profile, for plan and spec archival (`git mv`) and `docs validate` /
 `docs drift`. It was observed unable to archive, which is this ADR's own widening trigger ("widen to
 a role when that role is observed failing the same way"). The grant is shared across targets and has
-exactly one consumer, `docs-dev`, pinned by a test. `task-reviewer` is unchanged.
+exactly one consumer, `docs-dev`, pinned by a test. On Copilot the grant renders as the seven
+`execute/*` tools in `docs-dev`'s tool list, which the source validator requires to match the
+profile. `task-reviewer` is unchanged.
 
 ## Context
 

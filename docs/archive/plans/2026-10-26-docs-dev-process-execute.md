@@ -2,7 +2,7 @@
 id: plans/2026-10-26-docs-dev-process-execute
 title: "docs-dev gets a shell: process.execute allow on the documentation profile so docs-dev can archive plans and run docs validate/drift"
 doc-type: plan
-status: draft
+status: complete
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-26
@@ -13,7 +13,9 @@ impact-components: [KyberSquad]
 
 # docs-dev gets a shell (process.execute for the documentation profile)
 
-**Status: Draft — decision-complete, awaiting approve-and-execute.** Every row in `## Decisions` is ANSWERED. The plan becomes Ready only when the owner approves at the approve-and-execute gate (scale `extends-component`, component `KyberSquad`, development mode `test-first`).
+**Status: Complete 2026-10-26 — closeout certified by docs-dev; every Decisions row (B1–B5, D1–D3) and Design harvest row (H1–H2) is mapped in `## Closeout mapping` below. Archival to `docs/archive/plans/` is performed by the orchestrator, and the local Kyber-Squad redeploy is a post-merge owner step [NOT LIVE-VERIFIED].**
+
+Earlier authoring status (preserved as history): Draft, decision-complete, awaiting approve-and-execute. The plan became Ready when the owner approved at the approve-and-execute gate (scale `extends-component`, component `KyberSquad`, development mode `test-first`).
 
 **Development mode:** `test-first` (default; no opt-out supplied). **Autonomy:** `supervised`. Branch: `fix/docs-dev-process-execute`, cut from `origin/main` (`95412c0`). Escalated by `bug-crusher` (investigator verdict `NEEDS_ARCHITECT`).
 
@@ -80,12 +82,12 @@ impact-components: [KyberSquad]
 
 ---
 
-## 3. Design harvest
+## Design harvest
 
-| Item | Target component | Target doc type | Destination |
-|---|---|---|---|
-| H1 — docs-dev holds `process.execute: allow` via the shared `documentation` profile (single consumer, test-pinned); grant is instruction-scoped to archival `git mv`, `docs validate . --merge-ready`, `docs drift .`, doc-pinning tests; never commit/push unless packeted; only docs-dev archives | KyberSquad | ADR | `docs/adr/0028-devin-target-scoped-authoring-capability-profiles.md` (amended in place), `docs/adr/README.md` row 0028 |
-| H2 — per-target effect of the grant (Devin no longer narrows docs-dev; Antigravity `run_command`) | KyberSquad | Architecture | `docs/kyber-squad/architecture.md` §8 Devin bullet (replace the "deliberately names no Devin profile and keeps narrowing" sentence) |
+| ID | Design item | Target component | Target doc type | Destination |
+|---|---|---|---|---|
+| H1 | docs-dev holds `process.execute: allow` via the shared `documentation` profile (single consumer, test-pinned); grant is instruction-scoped to archival `git mv`, `docs validate . --merge-ready`, `docs drift .`, doc-pinning tests; never commit/push unless packeted; only docs-dev archives | KyberSquad | ADR | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) (amended in place), [ADR index row 0028](../../adr/README.md) |
+| H2 | per-target effect of the grant (Devin no longer narrows docs-dev; Antigravity `run_command`) | KyberSquad | Architecture | [Kyber-Squad architecture §8](../../kyber-squad/architecture.md) Devin and Antigravity bullet |
 
 ---
 
@@ -184,3 +186,30 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 Review: one whole-change `code-review` after T4. Closeout: `docs-dev` maps B1–B5, D1–D3 and H1–H2 to ADR 0028 (amended), ADR README row 0028 and architecture §8, and records the mapping. It does not archive this plan in this execution.
 
 Post-merge owner step (D3, outside execution scope): the owner redeploys Kyber-Squad on their machine from the merged build, then `docs-dev` archives this plan with `git mv`, moves its index row to the archive table, and re-runs `docs validate . --merge-ready` and `docs drift .`. See R1: CI requires the archive before merge, so the owner may need to pull this step ahead of merge.
+
+The redeploy goes through the normal path: merge, release, `kyber-weave update`, then `squad update --global`. `squad update` installs only released packs, so the deployed docs-dev has no shell until a release containing this change ships and the owner runs that path. **[NOT LIVE-VERIFIED]**: no redeploy or live docs-dev archive run has been performed or observed.
+
+## Closeout mapping
+
+Every decision ID and Design harvest ID maps to a live governed document (ADR 0028, the ADR index, or the Kyber-Squad architecture doc) or to a Documentation waiver.
+
+| ID | Destination |
+|---|---|
+| B1 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Decision 2 and the 2026-10-26 amendment: `docs-dev` holds `process.execute: allow` through the shared `documentation` profile; `ask` would withhold it on subagents |
+| B2 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — 2026-10-26 amendment: the grant renders as the seven `execute/*` tools on Copilot, which the source validator requires to match the profile |
+| B3 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — 2026-10-26 amendment and Decision 2: the grant is instruction-scoped in the `docs-dev` body to archival `git mv`, `docs validate` and `docs drift`, and doc-pinning tests |
+| B4 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Decision 2: the `documentation` profile has one consumer, `docs-dev`, pinned by a test |
+| B5 | **Documentation waiver** — `final-body-sha256` in the migration record is derived evidence of the body; it is enforced by `SquadCanonicalContentTests` and carries no architectural invariant beyond that test |
+| D1 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) amended in place, with no new ADR and no superseding chain; [ADR index row 0028](../../adr/README.md) reads "Accepted (amended 2026-10-26)" |
+| D2 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Decision 2: change to the shared `documentation` profile, plus the single-consumer guard test |
+| D3 | **Documentation waiver** — transient sequencing decision: the redeploy and archive timing belong to the owner's post-merge step, recorded in §9 of this plan; no durable architectural invariant survives it |
+| H1 | [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) (amended in place) and [ADR index row 0028](../../adr/README.md) |
+| H2 | [Kyber-Squad architecture §8](../../kyber-squad/architecture.md) — Devin bullet (`docs-dev` needs no Devin profile; receives `exec` and no `safety-narrowed`) and the Antigravity `run_command` effect |
+
+## Completion summary
+
+- Scope delivered: capabilities profile `documentation.process.execute: allow` with a single-consumer guard test; `docs-dev` Copilot `execute/*` tools and `## Commands you run` body section; renderer pins flipped (Claude, OpenCode, Antigravity, Copilot, Cursor) and `SquadDocsHarvestContractTests` facts; ADR 0028 and the ADR index amended in place; architecture §8 updated.
+- Closeout edits in this pass: ADR 0028 amendment now records the Copilot `execute/*` effect; architecture §8 now records the Antigravity `run_command` effect; `last-reviewed` bumped to 2026-10-26 on ADR 0028, the ADR index and architecture.
+- ADR waiver: no new ADR (owner decision D1); ADR 0028 is the record.
+- Not verified by this pass (no shell in the closeout session): the `final-body-sha256` value in `products/kyber-squad/migration/docs-dev.md` (not recomputed here), the RED evidence, `dotnet build`, the full test run, and `docs validate` / `docs drift`. Those are the conductor's gates and are listed in §7.
+- Archive: `git mv` to `docs/archive/plans/` and the `docs/plans/README.md` row move are the orchestrator's step.

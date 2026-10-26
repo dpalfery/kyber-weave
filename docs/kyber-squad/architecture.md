@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -686,7 +686,8 @@ and validates.
   `docs drift` to pass. `docs-dev` needs no Devin profile: its shared `documentation` profile
   grants `process.execute: allow` on every target, for archival `git mv` and the two docs checks
   (ADR 0028, amended 2026-10-26), so on Devin it receives `exec` and its companions and records no
-  `safety-narrowed`. With `filesystem.write: allow` beside the shell, these two roles
+  `safety-narrowed`. On Antigravity it receives `run_command` beside `write_to_file` and records no
+  `capability-not-isolable` (ADR 0022). With `filesystem.write: allow` beside the shell, these two roles
   also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
   and `spec-path` references pre-create an empty destination before dispatching, and again before
   redispatching a role that reported a write error on a nonexistent file — the harness-neutral

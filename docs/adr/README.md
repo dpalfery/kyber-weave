@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 ---
 
 # Architecture decision records
