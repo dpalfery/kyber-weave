@@ -2,7 +2,7 @@
 id: plans/2026-10-26-docs-dev-process-execute
 title: "docs-dev gets a shell: process.execute allow on the documentation profile so docs-dev can archive plans and run docs validate/drift"
 doc-type: plan
-status: complete
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-26
@@ -13,7 +13,7 @@ impact-components: [KyberSquad]
 
 # docs-dev gets a shell (process.execute for the documentation profile)
 
-**Status: Complete 2026-10-26 — closeout certified by docs-dev; every Decisions row (B1–B5, D1–D3) and Design harvest row (H1–H2) is mapped in `## Closeout mapping` below. Archival to `docs/archive/plans/` is performed by the orchestrator, and the local Kyber-Squad redeploy is a post-merge owner step [NOT LIVE-VERIFIED].**
+**Status:** Archived 2026-10-26 — closeout certified by docs-dev; every Decisions row (B1–B5, D1–D3) and Design harvest row (H1–H2) is mapped in `## Closeout mapping` below. Custody: docs-dev is the only role that archives plans and specs. The one exception is this plan: on 2026-10-26 the owner explicitly instructed the orchestrator to move it to `docs/archive/plans/` after docs-dev certified the harvest, a one-time owner-authorized exception, because the live docs-dev had no shell until this change is released and redeployed. The local Kyber-Squad redeploy is a post-merge owner step [NOT LIVE-VERIFIED].
 
 Earlier authoring status (preserved as history): Draft, decision-complete, awaiting approve-and-execute. The plan became Ready when the owner approved at the approve-and-execute gate (scale `extends-component`, component `KyberSquad`, development mode `test-first`).
 
@@ -185,7 +185,7 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 
 Review: one whole-change `code-review` after T4. Closeout: `docs-dev` maps B1–B5, D1–D3 and H1–H2 to ADR 0028 (amended), ADR README row 0028 and architecture §8, and records the mapping. It does not archive this plan in this execution.
 
-Post-merge owner step (D3, outside execution scope): the owner redeploys Kyber-Squad on their machine from the merged build, then `docs-dev` archives this plan with `git mv`, moves its index row to the archive table, and re-runs `docs validate . --merge-ready` and `docs drift .`. See R1: CI requires the archive before merge, so the owner may need to pull this step ahead of merge.
+Post-merge owner step (D3, outside execution scope): the owner redeploys Kyber-Squad on their machine from the merged build. This plan is already archived by the one-time owner-authorized exception recorded in the Status line; no further archival step is pending for it. Going forward, only `docs-dev` archives plans and specs. See R1 for the CI `KW-DOC-LIFECYCLE-003` interaction.
 
 The redeploy goes through the normal path: merge, release, `kyber-weave update`, then `squad update --global`. `squad update` installs only released packs, so the deployed docs-dev has no shell until a release containing this change ships and the owner runs that path. **[NOT LIVE-VERIFIED]**: no redeploy or live docs-dev archive run has been performed or observed.
 
@@ -212,4 +212,4 @@ Every decision ID and Design harvest ID maps to a live governed document (ADR 00
 - Closeout edits in this pass: ADR 0028 amendment now records the Copilot `execute/*` effect; architecture §8 now records the Antigravity `run_command` effect; `last-reviewed` bumped to 2026-10-26 on ADR 0028, the ADR index and architecture.
 - ADR waiver: no new ADR (owner decision D1); ADR 0028 is the record.
 - Not verified by this pass (no shell in the closeout session): the `final-body-sha256` value in `products/kyber-squad/migration/docs-dev.md` (not recomputed here), the RED evidence, `dotnet build`, the full test run, and `docs validate` / `docs drift`. Those are the conductor's gates and are listed in §7.
-- Archive: `git mv` to `docs/archive/plans/` and the `docs/plans/README.md` row move are the orchestrator's step.
+- Archive: moved to `docs/archive/plans/` by the orchestrator on the owner's one-time instruction of 2026-10-26 (see the Status line). docs-dev is the only role that archives plans and specs.

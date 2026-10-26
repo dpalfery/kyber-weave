@@ -122,13 +122,13 @@ ready, and both were unreachable on this target for the same reason.
 - `architect` and `product-owner` receive `exec` and its three companions on Devin, and no longer
   record `safety-narrowed` for `process.execute` there. `docs-dev` also receives them, through its
   shared `documentation` profile (amended 2026-10-26); `task-reviewer` still records `safety-narrowed`.
-- `capability-not-isolable` does not arise for these two roles on Devin: with
+- `capability-not-isolable` does not arise for these three roles (`architect`, `product-owner`, `docs-dev`) on Devin: with
   `filesystem.write: allow` alongside `process.execute: allow`, there is no withheld write-tool name
   to name. The record is still emitted for Devin roles that grant execution while withholding writes.
 - Devin authoring roles hold a shell. That is a real widening of what the deployed subagent can do,
   accepted because the alternative is a harness that cannot create the artifact the role exists to
-  write. Both roles use the shell to initialise a missing destination before editing and to run
-  their documentation checks; the conductor pre-creation protocol stays as the fallback if a write
+  write. `architect` and `product-owner` use the shell to initialise a missing destination before
+  editing and to run their documentation checks; `docs-dev` uses it to archive and run its checks. The conductor pre-creation protocol stays as the fallback if a write
   still fails on a nonexistent file. The shared profile's narrower intent — a grant scoped to two
   commands rather than a shell — is preserved everywhere else.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
