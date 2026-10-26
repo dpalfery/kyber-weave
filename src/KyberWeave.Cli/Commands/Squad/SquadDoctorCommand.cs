@@ -12,16 +12,16 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Squad;
 
 /// <summary>
-/// Diagnoses prerequisites, toolchain availability, and deployment health for Kyber-Squad.
+///     Diagnoses prerequisites, toolchain availability, and deployment health for Kyber-Squad.
 /// </summary>
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
-    private readonly ISquadUserPaths? _userPaths;
-    private readonly SquadStateStore? _stateStore;
-    private readonly string? _workingDirectory;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadRenderer? _renderer;
+    private readonly SquadStateStore? _stateStore;
+    private readonly ISquadUserPaths? _userPaths;
+    private readonly string? _workingDirectory;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
     public SquadDoctorCommand()
@@ -46,7 +46,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadDoctorSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadDoctorSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -76,10 +77,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
         SquadStateStore homeStateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        if (settings.Global)
-        {
-            _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, dryRun: true);
-        }
+        if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         AnsiConsole.WriteLine();
@@ -101,18 +99,19 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             .Except(supported, StringComparer.Ordinal)
             .OrderBy(token => token, StringComparer.Ordinal)
             .ToArray();
-        AnsiConsole.MarkupLine($"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
+        AnsiConsole.MarkupLine(
+            $"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
         if (pending.Length > 0)
-        {
-            AnsiConsole.MarkupLine($"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
-        }
+            AnsiConsole.MarkupLine(
+                $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
 
         // 3. MCP Probe
         McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_executor);
         ToolProbeResult mcpResult = mcpProbe.Probe();
         if (mcpResult is { IsAvailable: true, Version: not null })
         {
-            AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
+            AnsiConsole.MarkupLine(
+                $"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
         }
         else
         {
@@ -125,21 +124,19 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
         if (canonicalSourcePath is not null)
-        {
             try
             {
                 SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
-                AnsiConsole.MarkupLine($"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
+                AnsiConsole.MarkupLine(
+                    $"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
 
-                if (ReportZCodeMcpConfiguration(source, workingDirectory))
-                {
-                    hasIssues = true;
-                }
+                if (ReportZCodeMcpConfiguration(source, workingDirectory)) hasIssues = true;
             }
             catch (SquadSourceValidationException ex)
             {
-                AnsiConsole.MarkupLine($"  [red]fail[/] Canonical source validation failed: {Markup.Escape(ex.Message)}");
+                AnsiConsole.MarkupLine(
+                    $"  [red]fail[/] Canonical source validation failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
             catch (Exception ex)
@@ -147,7 +144,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 AnsiConsole.MarkupLine($"  [red]fail[/] Canonical source loading failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
-        }
 
         // 5. Devin duplicate imports. Runs without canonical source, because the duplicates it
         // looks for are what an installed workspace holds, not what the source would render.
@@ -161,9 +157,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             homeStateStore,
             Environment.CurrentDirectory,
-            projectRoot: settings.Global ? null : workingDirectory,
-            dryRun: false);
-        SquadCommandComposition.WriteMigrationNotes(migration, includeRetainedLegacyRoots: true);
+            settings.Global ? null : workingDirectory,
+            false);
+        SquadCommandComposition.WriteMigrationNotes(migration, true);
         try
         {
             ReportHomeState(homeStateStore);
@@ -177,9 +173,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         if (settings.Global &&
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
-        {
             hasIssues = true;
-        }
 
         AnsiConsole.WriteLine();
         if (hasIssues)
@@ -192,35 +186,35 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         return 0;
     }
 
-    public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, SquadDoctorSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 
     /// <summary>
-    /// Reports whether the ZCode installation declares the MCP servers the canonical toolchain
-    /// requires.
+    ///     Reports whether the ZCode installation declares the MCP servers the canonical toolchain
+    ///     requires.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// This is a hard failure rather than a warning because ZCode makes it one.
-    /// <c>ZCodeRenderer</c> grants MCP by fully qualified tool name — the only form ZCode's
-    /// exact-match allow-list registers — and <c>validateSubagentMcpRequirements</c> then
-    /// treats each name as a requirement, so an agent whose server is not connected raises a
-    /// configuration error mid-run. Failing here moves that breakage to diagnosis time.
-    /// </para>
-    /// <para>
-    /// It fails only where ZCode is actually in play, keyed on the same <c>.zcode/</c> marker
-    /// <see cref="SquadTargetResolver"/> detects targets with. A repository that has never
-    /// deployed to ZCode is reported as skipped rather than failed, because requiring three MCP
-    /// servers of someone who does not use the harness would make doctor useless to them.
-    /// </para>
+    ///     <para>
+    ///         This is a hard failure rather than a warning because ZCode makes it one.
+    ///         <c>ZCodeRenderer</c> grants MCP by fully qualified tool name — the only form ZCode's
+    ///         exact-match allow-list registers — and <c>validateSubagentMcpRequirements</c> then
+    ///         treats each name as a requirement, so an agent whose server is not connected raises a
+    ///         configuration error mid-run. Failing here moves that breakage to diagnosis time.
+    ///     </para>
+    ///     <para>
+    ///         It fails only where ZCode is actually in play, keyed on the same <c>.zcode/</c> marker
+    ///         <see cref="SquadTargetResolver" /> detects targets with. A repository that has never
+    ///         deployed to ZCode is reported as skipped rather than failed, because requiring three MCP
+    ///         servers of someone who does not use the harness would make doctor useless to them.
+    ///     </para>
     /// </remarks>
-    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    /// <returns><see langword="true" /> when doctor should exit non-zero.</returns>
     private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory)
     {
         IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys.ToArray();
-        if (required.Count == 0)
-        {
-            return false;
-        }
+        if (required.Count == 0) return false;
 
         string marker = Path.Combine(workingDirectory, ".zcode");
         if (!Directory.Exists(marker))
@@ -265,24 +259,22 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             $"         Declare them under 'mcp.servers' in {Markup.Escape(Path.Combine(zcodeRoot, "cli", "config.json"))}, " +
             "or in a project 'zcode.json' / '.zcode/config.json'.");
         if (report.InspectedPaths.Count == 0)
-        {
             AnsiConsole.MarkupLine("         No ZCode configuration file was found to read.");
-        }
 
         return true;
     }
 
     /// <summary>
-    /// Warns when Devin would load a Squad identity twice: once from <c>.devin/</c> and again
-    /// from a tree it reads natively or imports from another tool.
+    ///     Warns when Devin would load a Squad identity twice: once from <c>.devin/</c> and again
+    ///     from a tree it reads natively or imports from another tool.
     /// </summary>
     /// <remarks>
-    /// A warning rather than a failure: both copies are Squad's own and each works, so the
-    /// cost is an ambiguous choice between two same-named profiles, not a broken install.
-    /// Each warning names the remedy, and the remedy differs by tree — an imported tree has a
-    /// <c>read_config_from</c> switch, a native one does not — so the hint is per entry. Keyed
-    /// on the same <c>.devin/</c> marker target resolution uses, so a workspace without Devin
-    /// is reported as skipped.
+    ///     A warning rather than a failure: both copies are Squad's own and each works, so the
+    ///     cost is an ambiguous choice between two same-named profiles, not a broken install.
+    ///     Each warning names the remedy, and the remedy differs by tree — an imported tree has a
+    ///     <c>read_config_from</c> switch, a native one does not — so the hint is per entry. Keyed
+    ///     on the same <c>.devin/</c> marker target resolution uses, so a workspace without Devin
+    ///     is reported as skipped.
     /// </remarks>
     private void ReportDevinImportOverlap(string workingDirectory)
     {
@@ -325,10 +317,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 $"[bold]{Markup.Escape(string.Join(", ", overlap.Identities))}[/]");
             AnsiConsole.MarkupLine(overlap.ImportSetting is null
                 ? $"         Devin reads '{Markup.Escape(overlap.SourceRoot)}/' natively and cannot be told " +
-                    "not to; deploy only one of the targets that write there."
+                  "not to; deploy only one of the targets that write there."
                 : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
-                    "in .devin/config.json to stop the import (it also drops everything else that " +
-                    "import brings), or deploy only one of the two targets.");
+                  "in .devin/config.json to stop the import (it also drops everything else that " +
+                  "import brings), or deploy only one of the two targets.");
         }
     }
 
@@ -417,14 +409,14 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    /// Reports the home-level registry: each stale entry, and each project whose in-repo Squad state was
-    /// imported but is still present in its repository.
+    ///     Reports the home-level registry: each stale entry, and each project whose in-repo Squad state was
+    ///     imported but is still present in its repository.
     /// </summary>
     /// <remarks>
-    /// Warnings rather than failures. A stale entry is harmless to the rest of the home, and retained in-repo
-    /// state is kept on purpose by the migration; both need the operator's decision, not a failing exit code.
-    /// The retained-state warning is only raised for a project still registered as live, because a stale
-    /// project's home state is already gone and there is nothing to be authoritative over.
+    ///     Warnings rather than failures. A stale entry is harmless to the rest of the home, and retained in-repo
+    ///     state is kept on purpose by the migration; both need the operator's decision, not a failing exit code.
+    ///     The retained-state warning is only raised for a project still registered as live, because a stale
+    ///     project's home state is already gone and there is nothing to be authoritative over.
     /// </remarks>
     private static void ReportHomeState(SquadStateStore stateStore)
     {
@@ -449,17 +441,15 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             string inRepoState = Path.Combine(project.Path, ".kyber-weave");
             if (File.Exists(Path.Combine(inRepoState, "squad.receipt.json")) ||
                 File.Exists(Path.Combine(inRepoState, "squad.lock.yml")))
-            {
                 SquadCommandComposition.WriteLine(
                     $"  [yellow]warn[/] in-repo Squad state at '{Markup.Escape(inRepoState)}' is retained after its import. " +
                     "The home record is now authoritative, so remove that directory from version control.");
-            }
         }
     }
 
     /// <returns>
-    /// <see langword="true"/> when the scan itself failed and doctor should exit non-zero.
-    /// Warnings and skipped scans return <see langword="false"/>.
+    ///     <see langword="true" /> when the scan itself failed and doctor should exit non-zero.
+    ///     Warnings and skipped scans return <see langword="false" />.
     /// </returns>
     private bool ReportGlobalCollisions(
         string workingDirectory,
@@ -492,6 +482,38 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             // Global state is one home-anchored receipt, so there is no sibling receipt to collide with.
             IReadOnlyList<SquadReceipt> siblingReceipts = [];
 
+            SquadLock? squadLock = null;
+            try
+            {
+                squadLock = stateStore.ReadLock(workingDirectory, SquadDeploymentScope.Global);
+            }
+            catch (Exception)
+            {
+                // Lock read failure falls back to comparison render without presets.
+            }
+
+            Dictionary<SquadTarget, SquadModelPreset>? loadedPresets = null;
+            if (squadLock?.ModelPresets is { Count: > 0 })
+            {
+                SquadModelPresetStore presetStore = new(stateStore.UserPaths);
+                foreach (KeyValuePair<SquadTarget, SquadAppliedPreset> entry in squadLock.ModelPresets)
+                {
+                    try
+                    {
+                        SquadModelPreset? preset = presetStore.TryLoad(entry.Value.Name);
+                        if (preset is not null)
+                        {
+                            loadedPresets ??= new Dictionary<SquadTarget, SquadModelPreset>();
+                            loadedPresets[entry.Key] = preset;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // Omit invalid or unreadable preset from comparison render.
+                    }
+                }
+            }
+
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
@@ -499,9 +521,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 // doctor --global from crashing the whole scan. Relative override values
                 // throw ArgumentException from SquadGlobalRoots; catch that per target so
                 // the remaining harnesses still scan.
+                string targetGlobalRoot;
                 try
                 {
-                    _ = globalRoots.ResolveGlobalRoot(target);
+                    targetGlobalRoot = globalRoots.ResolveGlobalRoot(target);
                 }
                 catch (ArgumentOutOfRangeException)
                 {
@@ -522,7 +545,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                             canonicalSourcePath,
                             [target],
                             SquadDeploymentScope.Global,
-                            GlobalRoots: globalRoots))
+                            GlobalRoots: globalRoots,
+                            ModelPresets: loadedPresets))
                     .GetAwaiter()
                     .GetResult();
 
@@ -547,17 +571,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         if (collisions.Count == 0)
-        {
             AnsiConsole.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
-        }
         else
-        {
             foreach (SquadUnmanagedPathCollision collision in collisions)
-            {
                 AnsiConsole.MarkupLine(
                     $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
-            }
-        }
 
         return invalidGlobalRoot;
     }
@@ -565,11 +583,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private static string GetCliVersion()
     {
         Assembly assembly = typeof(SquadDoctorCommand).Assembly;
-        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(infoVersion))
-        {
-            return infoVersion;
-        }
+        string? infoVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(infoVersion)) return infoVersion;
 
         return assembly.GetName().Version?.ToString() ?? "0.0.0";
     }

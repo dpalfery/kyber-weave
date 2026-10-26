@@ -17,6 +17,7 @@ decided-by:
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
+  - adr/0044-squad-lock-v2-and-instance-deployment-scope
 keywords:
   - multi-harness
   - deployment
@@ -30,6 +31,9 @@ keywords:
   - registry
   - migration
   - migration-ledger
+  - model-presets
+  - instances
+  - link-sync
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -48,6 +52,16 @@ code-refs:
   - PiRenderer
   - FactoryRenderer
   - DevinRenderer
+  - SquadRenderSource
+  - SquadModelPreset
+  - SquadModelPresetStore
+  - SquadModelPresetValidator
+  - SquadModelResolution
+  - SquadModelDiff
+  - SquadInstanceCatalog
+  - SquadInstanceLinkPlanner
+  - SquadInstanceLinkSync
+  - ISquadLinkFileSystem
 ---
 
 # Kyber-Squad architecture
@@ -68,46 +82,56 @@ flowchart TD
         Agents["24 Canonical Agents\n(agents/*.md)"]
         Skills["28 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
-        Schemas["JSON Schemas\n(schemas/*.json)"]
     end
 
-    subgraph Loader["Source Loading & Normalization"]
-        SquadSourceLoader["SquadSourceLoader"]
-        AgentIR["Normalized AgentIR\n+ Body Digests"]
+    subgraph CoreEngine["Kyber-Squad Core Engine (KyberWeave.Core.Squad)"]
+        Parser["SquadSourceLoader\n(YAML & Markdown AST)"]
+        IR["AgentIR / SkillIR\nIntermediate Representation"]
+        Lattice["Capability & Permission\nLattice Evaluator"]
+        Overlay["Preset Overlay Seam\n(SquadRenderSource)"]
+        Registry["SquadRendererRegistry\nTarget Dispatcher"]
+        TxEngine["SquadTransaction\nJournal & Recovery Engine"]
     end
 
-    subgraph Compiler["Target Resolution & Lowering"]
-        SquadTargetResolver["SquadTargetResolver\n(12 Harness Targets)"]
-        Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
-        Lowering["Role-Skill Lowering\n(Unoccupied vs Collision role-*)"]
+    subgraph StateAndStorage["Home State Store (~/.kyber-weave/squad/)"]
+        Lock["squad.lock.yml\n(v1 or v2 with presets)"]
+        Receipt["squad.receipt.json\n(Asset Ownership & Hashes)"]
+        ProjectReg["registry.json\n(Project Directory Index)"]
+        Instances["instances/ & instance-state/\n(Isolated Harness Environments)"]
     end
 
-    subgraph DeploymentEngine["Transactional Deployment Engine"]
-        Mutex["OS Named Mutex Lease\n(kyber-weave-squad-root-key)"]
-        Journal["Write-Ahead Prepared Journal\n(SquadArtifactAuthority)"]
-        Transaction["SquadTransaction\n(No-Overwrite Claim/Publish)"]
-        StateStore["SquadStateStore\n(squad.lock.yml / squad.receipt.json in ~/.kyber-weave/squad/)"]
+    subgraph Targets["Target Harness Deployments"]
+        Claude[".claude/ & ~/.claude/"]
+        Copilot[".github/ & ~/.copilot/"]
+        Cursor[".cursor/ & ~/.cursor/"]
+        Codex[".codex/ & ~/.codex/"]
+        Antigravity[".agents/ & ~/.gemini/config/"]
+        Pi[".pi/ & ~/.pi/agent/"]
+        OpenCode[".opencode/ & ~/.config/opencode/"]
+        Kilo[".kilo/ & ~/.config/kilo/"]
+        Warp[".warp/ & ~/.warp/"]
+        Factory[".factory/ & ~/.factory/"]
+        ZCode[".zcode/ & ~/.zcode/"]
+        Devin[".devin/ & AppData/devin/"]
+        CommandCode[".commandcode/ & ~/.commandcode/"]
     end
 
-    subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode, Devin)"]
-        UnsupportedTargets["Coverage Preflight Failure\n(Future / Undeclared Targets)"]
-    end
-
-    CanonicalSource --> SquadSourceLoader
-    SquadSourceLoader --> AgentIR
-    AgentIR --> Compiler
-    Profiles --> Compiler
-    Compiler --> DeploymentEngine
-    DeploymentEngine --> RegisteredTargets
-    Compiler --> UnsupportedTargets
+    CanonicalSource --> Parser
+    Parser --> IR
+    IR --> Lattice
+    Lattice --> Overlay
+    Overlay --> Registry
+    Registry --> TxEngine
+    TxEngine --> StateAndStorage
+    TxEngine --> Targets
+    StateAndStorage -. links .-> Instances
 ```
 
 ---
 
-## 1. AgentIR Normalization and Canonical Sources
+## 1. Canonical Source Normalization and IR Construction
 
-Kyber-Squad treats agent and skill definitions as strictly typed, immutable source models:
+Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of truth:
 
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
@@ -115,38 +139,32 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Skills and Resources**: `SquadSourceLoader` loads the 27 top-level `SKILL.md`
   identities. The canonical tree separately retains 81 supplemental files, giving 108 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
+- **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
+  domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
+  `capability-profile`, `tools`, `delegates-to`); concrete `AgentIR` / `SkillIR` representations
+  are created with resolved tool references, evaluated capability mappings, and parsed
+  instruction bodies.
 
 ---
 
-## 2. Semantic Permission Lattice
+## 2. Capability and Permission Lattice Evaluation
 
-Permissions are governed by a formal three-state lattice:
+Agent permissions are evaluated through a strict multi-level lattice:
 
-```mermaid
-graph LR
-    Deny["deny (0)"] --> Ask["ask (1)"] --> Allow["allow (2)"]
+```
+Grant (allow) > Review (ask) > Deny (deny) > Default (withhold)
 ```
 
-### Lattice Evaluation Rules
-
-1. **Ordering**: `deny < ask < allow`.
-2. **Safety Narrowing**: If a target harness does not support interactive prompts (`ask`), the permission safely narrows to `deny`.
-3. **Non-Broadening Guarantee**: If a harness cannot enforce `ask` or `deny` constraints for a specific capability, the entire agent or skill representation is **omitted** rather than broadened to `allow`.
-4. **Structured Degradation**: Every narrowing or omission is recorded in the deployment receipt as an explicit degradation record.
+1. **Capability Taxonomy**: Maps high-level operations (`filesystem.read`, `filesystem.write`, `process.execute`, `network.fetch`, `network.publish`) to platform-specific tools.
+2. **Non-Broadening Guarantee**: Target-specific renderers may restrict or narrow permissions, but must **never** grant capabilities beyond what the canonical agent specification authorizes.
+3. **Structured Degradations**: Where target platforms lack granular permissions or cannot enforce delegation boundaries, Squad emits explicit degradation records in the deployment receipt rather than guessing or silently granting ambient privileges.
 
 ---
 
 ## 3. Role-Skill Lowering and Namespace Resolution
 
-Targets without native agent primitives use **agent-to-role-skill lowering**, governed by
-`profiles/fallbacks.yml`. Warp is the sole remaining fallback target with an implemented renderer for
-this projection; Antigravity was previously classified as fallback and has been reclassified to native
-([ADR 0022](../adr/0022-antigravity-native-agents.md)).
-
-The current canonical agent and skill namespaces intersect at eleven names. Two of those
-intersections — `product-owner` and `bug-crusher` — are **primary shared identities**: root agents
-whose body is a thin wrapper pointing at the same-name canonical skill, which carries the role
-([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining nine are
+Harnesses differ in their native agent support. Platforms that lack native subagent execution
+receive role-skill lowering, converting agents into executable skills with prefixed naming to avoid
 distinct-body collisions. The primary shared identities reuse the canonical skill as their entry
 point, so no `role-` projection is generated for them:
 
@@ -248,51 +266,22 @@ emitted. Separately, Claude resolves personal skills before project skills but p
 before user agents, so mixed-scope installs can expose `/<name>` and `@agent-<name>` from different
 versions.
 
-**Rejected alternatives:**
-- Legacy `.claude/commands/conductor.md` command: Claude Code registers files under
-  `.claude/commands/<subdir>/` as `<subdir>:<name>` commands, so resources would become phantom
-  commands, requiring ZCode-style relocation and link rewriting ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)).
-  A skill directory takes supporting files natively, and a skill wins over a same-named command.
-- Skill with `context: fork` and `agent: conductor`: runs an isolated subagent that does not see
-  conversation history, runs in the background by default, and recreates the nested-subagent
-  failure (no Agent tool at depth 1).
-- Setting `"agent": "conductor"` in `.claude/settings.json`: makes every session a conductor
-  session, but Squad does not own settings files.
-- Replacing the subagent with the skill: drops the only enforced form (`claude --agent conductor`)
-  and breaks existing `@agent-conductor` use.
-- Unconditional renderer rule for every primary agent: Claude would become the only target that
-  ignores the declared `no-primary-agent` value, with no off switch in source.
-- A new dedicated profile key: it is a schema change when the existing key already declares the
-  intent.
-- Emitting `model`, `allowed-tools` or `disallowed-tools` on the skill: all three last only for
-  the invoking turn and cannot hold the orchestration profile.
-- Hook-based enforcement from the skill: skill hooks stay registered for the rest of the session,
-  which outlives the conductor's use.
-
 ---
 
-## 4. State, Identity, and Locking Model
+## 4. Deployment Scopes and State Topology
 
-Squad deployments maintain rigorous state and concurrency boundaries:
-
-### Physical Root Identity and Path Semantics
-
-- **Canonical Physical Roots**: Paths are resolved through all symbolic links and reparse points to their physical disk location using `SquadPhysicalRootIdentity.Resolve`.
-- **Root Hash Key**: The lowercase SHA-256 hash of the canonical physical path forms `<root-key>`. Lexical or symlink aliases of the same physical root converge onto the same state root and lease.
-- **Filesystem Path Semantics**: `SquadFileSystemPathSemantics` enforces case-exact matching against disk segments, preventing accidental case-folding on case-insensitive filesystems while respecting case-distinct directories on case-sensitive filesystems.
-
-### State Location and Layout
-
-Lock and receipt state no longer lives in the repository. It lives under the user's home directory
-([ADR 0037](../adr/0037-squad-state-in-user-home.md)):
+Squad maintains deployment state under the user's home directory across three scopes:
 
 ```mermaid
 flowchart LR
     subgraph Home["~/.kyber-weave/squad/"]
         Registry["registry.json\n(kyber-squad.registry/v1)"]
         Ledger["migration-ledger.json\n(kyber-squad.migration-ledger/v1)"]
+        Presets["presets/*.yml\n(kyber-squad.model-preset/v1)"]
+        Selections["selections/*.yml\n(kyber-squad.project-selection/v1)"]
         Global["global/\nsquad.lock.yml\nsquad.receipt.json"]
         Projects["projects/root-key/\nsquad.lock.yml\nsquad.receipt.json"]
+        Instances["instance-state/target/preset/\nsquad.lock.yml\nsquad.receipt.json\nlinks.json"]
     end
     Legacy["Legacy sources (read by migration only)\nKyberWeave/squad/roots/root-key/\n.kyber-weave/squad.* in each repository"]
     Legacy -.->|"migrated, never deleted"| Global
@@ -309,6 +298,10 @@ flowchart LR
 - **Project state**: `projects/<root-key>/squad.lock.yml` and `projects/<root-key>/squad.receipt.json`.
   `<root-key>` is `SquadPhysicalRootIdentity.Key`, so lexical and symbolic-link spellings of one
   directory converge on one entry.
+- **Instance state**: `instance-state/<target>/<preset>/squad.lock.yml` (v2), `squad.receipt.json`,
+  and `links.json`. Deployed instance files live in `instances/<target>/<preset>/`. The transaction mutex
+  is keyed by the lowercase SHA-256 of the physical instance root path (`SquadPhysicalRootIdentity.Key`),
+  ensuring multiple concurrent executions of the same instance target are cleanly serialized.
 - **Legacy sources**: the application-data tree `KyberWeave/squad/roots/<root-key>/` and each
   repository's in-repo `.kyber-weave/squad.lock.yml` and `squad.receipt.json`. Migration reads them and
   never deletes them. The application-data directory is no longer a state location; rendering's own
@@ -317,9 +310,10 @@ flowchart LR
 ### Cross-Process Mutex Lease
 
 - **Named OS Mutex**: Every mutating operation acquires an exclusive OS-named mutex (`kyber-weave-squad-<root-key>`).
-  For global scope the key is the hash of the physical home directory.
+  For global scope the key is the hash of the physical home directory. For instance scope the key is
+  the hash of the physical instance root directory.
 - **Scope-Independent Contention**: Project-scoped and global-scoped operations targeting the same physical root contend for the exact same mutex, preventing concurrent corruption. A project installed at the home directory therefore shares the global mutex.
-- **Per-Root Work Directory**: The transaction work directory and journal stay with the physical root. Project scope uses `<root>/.kyber-weave/.squad-transaction`; global scope uses `<home>/.kyber-weave/.squad-transaction`. Only the receipt and lock move to the home state root.
+- **Per-Root Work Directory**: The transaction work directory and journal stay with the physical root. Project scope uses `<root>/.kyber-weave/.squad-transaction`; global scope uses `<home>/.kyber-weave/.squad-transaction`; instance scope uses `<instance-root>/.squad-transaction`. Only the receipt, lock, and link manifests move to the home state root.
 - **Precondition Reverification**: After acquiring the lease, all preconditions and path containment assertions are re-evaluated immediately before filesystem operations.
 
 ### Registry
@@ -353,7 +347,7 @@ holds the physical path, the last update time in UTC, and the targets deployed.
 Lock and receipt files are not committed to the repository. Squad writes them to the home state
 root. The in-repo copies of earlier releases are read by migration and retained for rollback.
 
-- **`squad.lock.yml`**: Contains bundle metadata, versions, target lists, exclusions, translation mode, and bundle digests. Also carries a vestigial upstream-toolchain identity field, kept for schema stability now that rendering no longer depends on an external toolchain; it reads `unverified` on every install.
+- **`squad.lock.yml`**: Contains bundle metadata, versions, target lists, exclusions, translation mode, bundle digests, and model preset mappings. Also carries a vestigial upstream-toolchain identity field, kept for schema stability now that rendering no longer depends on an external toolchain; it reads `unverified` on every install.
 - **`squad.receipt.json`**: Records scope, installation timestamp, structured degradation records, and an ordered manifest of owned files with relative paths and SHA-256 digests. Its `targetRoot` is the canonical absolute physical root for a project receipt (receipts written with `"."` remain readable). A global receipt records the home anchor, or the resolved binding root for a migrated legacy single-root receipt.
 
 #### Receipt version and layout contract
@@ -363,6 +357,20 @@ root. The in-repo copies of earlier releases are read by migration and retained 
 - **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
 - **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
 - **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
+
+#### Lock version and preset contract
+
+- **Lock v2 (`kyber-squad.lock/v2`)**: When any target has a model preset applied, the lock file serializes with `schema: kyber-squad.lock/v2` and adds a top-level `model-presets` mapping:
+  ```yaml
+  schema: kyber-squad.lock/v2
+  model-presets:
+    claude:
+      name: zai
+      digest: 7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069
+  ```
+- **Conditional upgrade**: Lock v2 is written only when `model-presets` is non-empty. When no presets are applied, the lock remains byte-identical `kyber-squad.lock/v1`. Clearing all presets restores the lock to v1.
+- **Fail-closed backward compatibility**: Deserialization reads both v1 and v2. Older CLI versions that lack preset support reject a v2 lock file immediately upon encountering the undeclared `model-presets` field (`RequireExactYamlFields`), preventing silent preset loss or unintended rollbacks.
+- **Integrity verification**: The recorded SHA-256 hex digest represents the exact content of the preset file at the time it was applied. Status checks detect drift between the file on disk and the recorded digest (`changed since applied`), while updates verify preset existence before downloading or rendering.
 
 #### Migration from earlier layouts
 
@@ -731,6 +739,29 @@ and validates.
   `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were
   removed.
 
+### Preset Overlay Render Seam
+
+Model preset customization operates as an in-memory overlay applied directly ahead of renderer
+execution without mutating canonical release profiles or writing intermediate files:
+
+- **Isolated Loader Seam (`SquadRenderSource`)**: All 13 renderers load their source through
+  `SquadRenderSource.Load(request, target)`. It calls `SquadSourceLoader.Load(request.SourceDirectory)`
+  and applies the target's preset override:
+  `source with { ModelProfiles = preset.ApplyTo(source.ModelProfiles) }`.
+- **Pure Overlay Merge (`SquadModelPreset`)**: `SquadModelPreset.ApplyTo` merges preset profiles
+  into bundled `SquadModelProfiles` key-by-key per profile category. Omitted categories remain
+  unmodified; omitted harnesses within a category fall back to bundled tokens.
+- **Preset Store (`SquadModelPresetStore`)**: Reads presets from `~/.kyber-weave/squad/presets/<name>.yml`.
+  Naming strictly enforces `^[a-z0-9][a-z0-9-]{0,63}$`.
+- **Fail-Closed Validation (`SquadModelPresetValidator`)**: Before any rendering or deployment write,
+  `SquadModelPresetValidator.Validate` ensures every profile category referenced by the preset exists
+  in the active release's `models.yml`. Unknown categories fail immediately with line numbers and
+  remediation hints.
+- **Diff Resolution (`SquadModelResolution`, `SquadModelDiff`)**:
+  `SquadModelResolution.ResolveToken` resolves concrete model tokens for each category and harness,
+  treating `inherit` as null. `SquadModelDiff.Compute` calculates changed model resolutions across all
+  canonical agents between base and preset profiles, powering `--dry-run` and status diffs.
+
 ---
 
 ## 9. Conductor execution circuit-breaker
@@ -945,6 +976,66 @@ elsewhere keeps working.
 
 ---
 
+## 10. Harness Instances and Filesystem Linking
+
+To support concurrent execution across projects with differing model presets without modifying
+project directories (`git status` stays clean) and without altering global configuration,
+Kyber-Squad establishes isolated harness instances under `SquadDeploymentScope.Instance`:
+
+### Instance Catalog (`SquadInstanceCatalog`)
+
+The static `SquadInstanceCatalog` encapsulates configuration parameters, environment variables,
+executable names, and isolation mechanisms across all approved targets:
+
+- **Row Structure (`SquadInstanceRow`)**:
+  - `Target`: The target enum identifier.
+  - `Executable`: Harness command-line binary.
+  - `Kind`: `HomeReplace` (replaces entire home), `ConfigLayer` (secondary config directory), or `None`.
+  - `Variable`: The redirection environment variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `PI_CODING_AGENT_DIR`, etc.).
+  - `ExtraLinks`: Specific auxiliary paths required by the harness (e.g. root configuration files).
+  - `NeverLinked`: Paths that must never be linked into an instance (such as volatile lock files or credentials prone to split-link desynchronization).
+  - `Status`: `Ready` (verified and supported), `SpikePending` (candidate variable identified, awaiting live platform spike verification), or `Unsupported` (no safe non-global redirection supported).
+  - `Reason`: Diagnostic explanation for unsupported or pending targets.
+
+### Pure Link Planning (`SquadInstanceLinkPlanner`)
+
+`SquadInstanceLinkPlanner.Plan` is a pure function with zero filesystem I/O. It computes link
+synchronization actions from five deterministic inputs:
+1. Main home entry listing (`IReadOnlyList<SquadLinkRecord>`).
+2. Set of paths rendered directly by Squad that must never be linked (`IReadOnlySet<string>`).
+3. Catalog row rules (`ExtraLinks` and `NeverLinked`).
+4. Previously recorded link manifests (`IReadOnlyList<SquadLinkRecord>`).
+5. Current instance directory listing (`IReadOnlyList<string>`).
+
+It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
+- **Rendered Exclusion**: Any path rendered by Squad (e.g. `agents/`, `skills/`) is never linked.
+- **Top-Level Linking**: All top-level directories and files not containing rendered outputs are linked.
+- **Granular Sub-entry Linking**: Directories holding rendered files (such as `agents/`) are created as
+  concrete directories in the instance; non-rendered entries within them (e.g. user-authored custom agents)
+  are linked individually.
+- **Stale Pruning**: Links recorded in prior executions whose targets in the main home no longer exist
+  are scheduled for `Remove`.
+- **Unmanaged File Preservation**: Files in the instance not tracked by `links.json` and not rendered by
+  Squad are retained with a warning, preventing accidental data loss.
+
+### Link Synchronization and Filesystem Abstraction (`SquadInstanceLinkSync`, `ISquadLinkFileSystem`)
+
+`SquadInstanceLinkSync` executes the planned actions against `ISquadLinkFileSystem`:
+- **Unix / macOS (`UnixSquadLinkFileSystem`)**: Creates POSIX symbolic links (`File.CreateSymbolicLink`).
+- **Windows (`WindowsSquadLinkFileSystem`)**: Creates hard links for files (`CreateHardLinkW`) and
+  directory junctions for folders (`CreateSymbolicLink` / junction reparse points). This operates
+  without administrative privileges and without requiring Windows Developer Mode.
+- **Manifest Persistence (`links.json`)**: Active links are serialized to `links.json` in the instance
+  state directory (`instance-state/<target>/<preset>/`).
+- **Safe Non-Destructive Removal**: When `squad instance remove` or instance refresh runs, recorded
+  links are deleted directly without following link targets into the user's primary home directory.
+- **Split-Link Detection**: On Windows, applications that update files by writing to a temporary file
+  and renaming split the underlying hard link (changing file ID). Sync inspects file IDs; if both
+  copies are byte-identical, the link is restored. If they diverge, both copies are preserved with a
+  warning naming the split.
+
+---
+
 ## Related
 
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
@@ -952,6 +1043,7 @@ elsewhere keeps working.
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — Lock and receipt state in the user home, the project registry, the global anchor, and migration
+- [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

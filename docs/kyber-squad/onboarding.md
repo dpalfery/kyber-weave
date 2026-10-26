@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-25
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -14,6 +14,7 @@ decided-by:
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
+  - adr/0044-squad-lock-v2-and-instance-deployment-scope
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -50,6 +51,18 @@ kyber-weave squad doctor [path] [--global] [--path <PATH>]
 
 # Build release packages (repository maintainer only)
 kyber-weave squad pack --format <apm|plugins|all> --out <directory>
+
+# Manage model presets
+kyber-weave squad preset use <name> --target <targets> [--global] [--dry-run]
+kyber-weave squad preset clear --target <targets> [--global]
+kyber-weave squad preset list
+kyber-weave squad preset show <name> --target <target>
+
+# Run harness against an isolated instance configured with the active preset
+kyber-weave squad run <target> [-- <args>...]
+
+# Remove a specific harness preset instance
+kyber-weave squad instance remove --target <target> --preset <name> [--yes]
 ```
 
 **Version pinning.** `squad install` and `squad update` accept `-v|--version <VERSION>` to pin the
@@ -178,75 +191,37 @@ With both a global and a project Squad install:
 - `/conductor` (skill) resolves to the **personal** copy at `~/.claude/skills/conductor/SKILL.md`
   (skills: personal over project).
 - `@agent-conductor` and `--agent conductor` resolve to the **project** copy at
-  `.claude/agents/conductor.md` (agents: project over user).
+  `.claude/agents/conductor.md` (subagents: project over personal).
 
-This scope-precedence rule is Claude Code's built-in behaviour; Squad documents it but neither
-designs nor corrects it.
+To ensure that personal skills load during project development, operators may configure personal
+skills within project settings, e.g.:
 
-**Cloud sessions (CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1).**
-On 2026-09-25, cloud sessions were observed with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`,
-which disables subagent nesting entirely:
-- A subagent conductor has no Agent tool and cannot delegate. Use `/conductor` instead.
-- Specialists that delegate further (`architect`, `product-owner`, `code-reviewer`) cannot
-  nest in cloud sessions.
-- `/conductor` runs in the main thread at depth 0, so it works and reaches you.
+```json
+{
+  "skills": ["~/.claude/skills"]
+}
+```
 
-This is not documented in public Claude Code docs; it is an observed environment constraint.
-By default a subagent can spawn subagents up to 3 layers below the main conversation; the
-override is the environment variable `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.
+This points Claude at your personal skills directory while working in a project.
 
-**Global paths and live reload.**
-- Global subagent: `~/.claude/agents/conductor.md` with references beside it.
-- Global skill: `~/.claude/skills/conductor/SKILL.md` with references beside it.
-- Claude Code watches `~/.claude/skills/` and picks up added skills without restart (provided
-  the directory exists before the session started; a top-level `~/.claude/` directory created
-  after session start needs a restart).
-- `/conductor` appears only after `squad update` with a release that carries it; until then,
-  older releases still have the subagent-only form.
+**Cloud sessions (SSH / Docker containers / devcontainers / github.dev).**
+Claude Code environments with spawn depth 1 (including observed behavior in Cloud sessions)
+disable nested delegation, making subagents unable to dispatch further agents. Operators should
+verify subagent delegation within their execution environment.
 
----
+**MCP servers.**
+Subagents inherit MCP tools declared by the session. Ensure any MCP servers referenced in
+`allowed-tools` are properly declared in Claude Code settings (`mcpServers`).
 
 ### Pi notes
 
-Pi is a third-party coding agent that renders Squad agents natively through the
-`@tintinweb/pi-subagents` extension
-([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)). The following operational
-details ensure correct deployment and coexistence with other targets:
+Pi supports native subagents through `@gotgenes/pi-subagents` (`@tintinweb/pi-subagents`),
+deploying agents to `.pi/agents/<name>.md` and skills to `.pi/skills/<name>/SKILL.md`
+([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
+Primary-invocation agents (`conductor`) are lowered to skills at `.pi/skills/<name>/SKILL.md`
+to prevent nested subagent depth exhaustion.
 
-**Prerequisite**: Pi agent output needs `@tintinweb/pi-subagents` 0.19.0 or later, which requires
-Pi 0.84.0 or later. Install the extension via Pi's `settings.json` `packages` entry beforehand;
-`squad doctor` does not detect it, so verify it is configured before installing the `pi` target.
-
-**Project trust**: Pi's agent loader has no trust check, so project `.pi/agents/` loads
-regardless of project trust. Project `.pi/skills/` loads only for projects trusted in
-`~/.pi/agent/trust.json`, so the conductor skill under `.pi/skills/conductor/` requires project
-trust. Global skills and agents are not gated by trust.
-
-**Override and collision behaviour**: Project `.pi/agents/<name>.md` files override
-identically-named global agents in `~/.pi/agent/agents/` silently — no diagnostic is printed, and
-this is the intended project authority mechanism. By contrast, project `.pi/skills/conductor/`
-taking precedence over a global `~/.pi/agent/skills/conductor` is a real name collision: Pi prints
-a diagnostic naming the skipped global file, and `/skill:conductor` then loads the Squad
-conductor. `conductor-v3` has a different name and is unaffected; outside the project, the global
-skill is unchanged.
-
-**Subagent depth and delegation**: The conductor runs as a top-level skill at depth 0, not as a
-subagent, so its specialist delegates (`architect`, `code-reviewer`, and others) start at depth 1
-and can still delegate one level further to depth 2 under Pi's default `maxSubagentDepth: 2`
-(main 0, subagent 1, nested child 2). A depth cap set below 2 silently disables the nested
-delegation that `architect` and `code-reviewer` require. Recommend `maxSubagentDepth: 2` or
-higher in `.pi/subagents.json` for full capability.
-
-**Fallback and strict dispatch**: By default, an unknown agent type falls back to Pi's
-`general-purpose` agent (all tools). To enforce strict dispatch of Squad agents only, set
-`fallbackSubagent: none` in the project's `.pi/subagents.json`; Squad does not write this file, so
-the operator manages it.
-
-**Tool vocabulary**: Pi renders a seven-tool vocabulary (`read, grep, find, ls, edit, write,
-bash`). `network.read: allow` has no expressible built-in Pi tool — bare `mcp` in `tools:` is
-refused by the loader (plain names must be built-ins) — so it still records
-`permission-not-expressible` on the renderer alone. Read-only web access arrives via the
-canonical per-target overlay: `research-agent` declares `pi-extensions: [pi-mcp-adapter]` and
+**Tool extensions**: Pi agents requesting MCP or external tools map their requirements to
 the verified `pi-tools` `ext:` entries, which render as `extensions: [pi-mcp-adapter]` plus
 those `ext:` tool names appended to its capability-derived `tools` CSV. That agent requires
 the `pi-mcp-adapter` extension in the deployment harness. `network.publish` still has no
@@ -423,7 +398,7 @@ frontmatter, and `devin skills list` lists discovered skills. Confirm names ther
 
 ## Deployment Scopes
 
-Kyber-Squad operates across two deployment scopes:
+Kyber-Squad operates across three deployment scopes:
 
 ### 1. Project Scope (Default)
 
@@ -498,6 +473,20 @@ and `flash` for the remaining profiles. Versioned model ids such as Claude's
 follow the harness's alias resolution. Cursor's planning pin carries `effort=high`.
 
 **Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
+
+### 3. Instance Scope (`SquadDeploymentScope.Instance`)
+
+Instance scope isolates harness configuration and agent deployment for concurrent execution across
+projects without modifying project trees or altering global harness configuration:
+
+- Each instance directory is located at `~/.kyber-weave/squad/instances/<target>/<preset>/`.
+- Deployment state (lock, receipt, and link manifests) lives in
+  `~/.kyber-weave/squad/instance-state/<target>/<preset>/`.
+- Mutex synchronization is keyed to the physical instance root key (`kyber-weave-squad-<root-key>`).
+- Links back to the user's main harness home directory allow shared history, authentication, and
+  user settings to function seamlessly while agents and models remain completely isolated.
+- Instance roots are managed via `squad run`, listed in `squad status --global`, and cleaned via
+  `squad instance remove`.
 
 ### Registered projects
 
@@ -739,6 +728,164 @@ registered project. A project uninstall also removes that project's registry ent
 
 ---
 
+## Model Presets and Concurrent Harness Instances
+
+A **model preset** is a named, user-owned YAML configuration that overrides default agent model
+assignments across harnesses. While canonical agents define semantic model profiles (`fast`,
+`architect`, `general`, `reviewer`, `deep-planning`) mapped to default tokens in the bundled
+`models.yml`, presets allow switching inference providers or models on demand without editing
+managed agent files or waiting for upstream releases.
+
+### 1. Model Preset Files
+
+Presets live in the user home directory under `~/.kyber-weave/squad/presets/<name>.yml`.
+The preset name is the file stem and must match `^[a-z0-9][a-z0-9-]{0,63}$`.
+
+Preset files use the `kyber-squad.model-preset/v1` schema and mirror the profile shape of
+`models.yml`:
+
+```yaml
+schema: kyber-squad.model-preset/v1
+profiles:
+  fast:
+    claude: claude-haiku-5-5
+    opencode: zai-coding-plan/glm-5.3-flash
+  architect:
+    claude: inherit
+```
+
+- **Inheritance and fallbacks**: A preset performs a key-by-key merge per category. Categories or
+  harnesses omitted by the preset fall back to bundled `models.yml` definitions.
+- **Explicit inherit**: Setting a model token to `inherit` omits the `model` frontmatter key on
+  rendered agents, matching bundled behavior.
+- **Default token**: An optional `default` key per profile category specifies a fallback token for
+  any harness not explicitly mapped in that category.
+- **Validation**: When applied or rendered, preset keys are strictly checked against the active
+  release's `models.yml`. Referencing an unknown profile category or harness fails validation
+  immediately with **exit code 1**, reporting the exact file path and line number before writing any files.
+
+### 2. Managing Presets (`squad preset`)
+
+Model presets are managed using four subcommands:
+
+```bash
+# Apply a preset to target harnesses in project scope
+kyber-weave squad preset use <name> --target claude,copilot
+
+# Apply a preset globally across all deployments of the target
+kyber-weave squad preset use <name> --target claude --global
+
+# Preview model changes without modifying files or state
+kyber-weave squad preset use <name> --target claude --dry-run
+
+# Revert target harnesses to bundled model profiles
+kyber-weave squad preset clear --target claude [--global]
+
+# List all available presets and their active deployments
+kyber-weave squad preset list
+
+# Inspect resolved models for a preset and target harness
+kyber-weave squad preset show <name> --target claude
+```
+
+- **Transactional updates**: `squad preset use` executes through the existing atomic `update`
+  transaction engine. It updates `squad.lock.yml` to schema v2 (`kyber-squad.lock/v2`),
+  recording the applied preset name and lowercase SHA-256 digest under `model-presets`.
+- **Preserved versioning**: Switching presets never changes the release version of deployed agents.
+- **Dry run preview**: Passing `--dry-run` prints each agent whose resolved model changes in the format
+  `<agent>: <old-model> -> <new-model>` and exits without modifying state or files.
+- **Status reporting**: `squad status` reports the active preset per target. If a preset file has
+  been modified since it was applied, status flags `(changed since applied)`. If a referenced
+  preset file has been deleted, status flags `(missing)` and exits with **exit code 1**, because
+  future updates will fail until repaired.
+
+### 3. Project Preset Selections
+
+When running in project scope without `--global`, `squad preset use` records the project's chosen
+preset under `~/.kyber-weave/squad/selections/<root-key>.yml` (schema `kyber-squad.project-selection/v1`),
+where `<root-key>` is the SHA-256 of the project's canonical physical path.
+
+- **Clean repositories**: Selections are saved exclusively in the user's home state tree. No preset
+  or configuration file is written into the repository, leaving `git status` clean.
+- **Automatic persistence**: Project selections survive releases and updates. Running `squad update`
+  or installing additional targets automatically honors the recorded project selection.
+
+### 4. Running Isolated Harness Instances (`squad run`)
+
+Different projects frequently require different model presets on the same harness simultaneously.
+Deploying agents directly into project repositories clutters source control, while modifying the
+global home creates cross-project interference.
+
+Kyber-Squad solves this with `squad run`:
+
+```bash
+# Launch a harness using the active project preset selection
+kyber-weave squad run claude
+
+# Pass arguments directly to the underlying harness executable
+kyber-weave squad run claude -- --verbose --dangerously-skip-permissions
+```
+
+When `kyber-weave squad run <target> [-- <args>...]` is executed:
+1. Squad resolves the current project's selection from `~/.kyber-weave/squad/selections/<root-key>.yml`.
+   If no selection is configured for `<target>`, it exits with **exit code 2** and suggests `squad preset use`.
+2. It looks up the harness in `SquadInstanceCatalog`. If the target status is `Unsupported` or
+   `SpikePending`, it exits with **exit code 2** stating the reason.
+3. It provisions or refreshes an isolated instance directory at
+   `~/.kyber-weave/squad/instances/<target>/<preset>/` under `SquadDeploymentScope.Instance`.
+4. It synchronizes links from the main harness home directory into the instance, ensuring user
+   authentication, settings, and command history remain available.
+5. It spawns the harness CLI with the appropriate configuration or home redirection environment
+   variable (e.g. `CLAUDE_CONFIG_DIR`) pointing at the instance directory.
+6. Arguments following `--` are forwarded verbatim to the harness CLI. On Windows, npm `.cmd` shims
+   are located via `PATHEXT` and executed under `cmd.exe` with proper argument escaping.
+7. Squad waits for harness process exit and propagates its exact exit code.
+
+### 5. Cleaning Instances (`squad instance remove`)
+
+Harness instances can be inspected via `squad status --global` (under the `Instances` heading)
+and pruned with `instance remove`:
+
+```bash
+kyber-weave squad instance remove --target claude --preset fast [--yes]
+```
+
+Removal reads the instance's `links.json` manifest and safely removes created symbolic links,
+hard links, and directory junctions without following them into the user's main home directory.
+
+### 6. Harness Instance Support Matrix
+
+The `SquadInstanceCatalog` defines the redirection mechanism and support status for each target:
+
+| Target | Executable | Kind | Environment Variable | Status | Behavior and Isolation |
+|---|---|---|---|---|---|
+| `claude` | `claude` | `HomeReplace` | `CLAUDE_CONFIG_DIR` | `Ready` | Replaces home; settings/history linked; Keychain sign-in shared. |
+| `codex` | `codex` | `HomeReplace` | `CODEX_HOME` | `Ready` | Replaces home; `auth.json` linked in file mode; keyring mode per instance. |
+| `copilot` | `copilot` | `HomeReplace` | `COPILOT_HOME` | `Ready` | Replaces entire home; keychain token shared. |
+| `pi` | `pi` | `HomeReplace` | `PI_CODING_AGENT_DIR` | `Ready` | Replaces agent dir; settings, sessions, and auth linked. |
+| `opencode` | `opencode` | `ConfigLayer` | `OPENCODE_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
+| `kilo` | `kilo` | `ConfigLayer` | `KILO_CONFIG_DIR` | `SpikePending` | Layers config over global home; override priority pending verification. |
+| `cursor` | `cursor` | `ConfigLayer` | `CURSOR_CONFIG_DIR` | `SpikePending` | Config layer; CLI config redirection pending verification. |
+| `zcode` | `zcode` | `ConfigLayer` | `ZCODE_STORAGE_DIR` | `SpikePending` | Config layer; `ZCODE_STORAGE_DIR` vs `ZCODE_DATA_BASE_DIR` pending verification. |
+| `antigravity` | `antigravity` | `None` | *None* | `Unsupported` | Antigravity does not support configuration or home directory redirection via environment variable. |
+| `factory` | `factory` | `None` | *None* | `Unsupported` | Factory does not support configuration or home directory redirection via environment variable. |
+| `commandcode` | `commandcode` | `None` | *None* | `Unsupported` | CommandCode only supports global `HOME` redirection, which affects all system tools. |
+| `devin` | `devin` | `None` | *None* | `Unsupported` | Devin stores configuration in system app data and does not support instance directory redirection. |
+| `warp` | `warp` | `None` | *None* | `Unsupported` | Warp deploys skills only and does not support agent directory redirection. |
+
+- **`HomeReplace`**: The environment variable points the harness at a complete home directory.
+  Rendered agents exist directly in the instance, while all other top-level directories and files
+  from the main home are linked.
+- **`ConfigLayer`**: The harness supports a secondary configuration folder loaded after global config.
+  Only rendered agents reside in the instance folder.
+- **`Ready`**: Verified and supported for concurrent execution via `squad run`.
+- **`SpikePending`**: Candidate configuration variables identified; awaiting live platform verification.
+  Attempting `squad run` exits 2 with guidance.
+- **`Unsupported`**: Harness cannot isolate configuration per instance without global side effects.
+  Attempting `squad run` exits 2 with explanation.
+
+---
+
 ## PR review workflows
 
 Use the [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -824,8 +971,8 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 | Exit Code | Meaning |
 |---|---|
 | `0` | Success, healthy/clean status, or successful dry run. |
-| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. |
-| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. Also `--projects` outside `squad update --global`, or a named project path that is neither registered nor holds importable in-repo state. |
+| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. Also preset file syntax error (`file:line`), unknown profile category / harness key validation failure, missing preset referenced by lock, harness executable missing on `PATH`, or filesystem link creation failure during `squad run`. |
+| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. Also `--projects` outside `squad update --global`, or a named project path that is neither registered nor holds importable in-repo state. Also unknown preset name, `squad run` with no preset selection for target, or attempting `squad run` against a harness with status `Unsupported` or `SpikePending`. |
 
 ---
 
@@ -833,6 +980,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
+- [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

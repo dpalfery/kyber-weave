@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -107,7 +106,7 @@ public sealed class CursorRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Cursor);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -169,7 +168,7 @@ public sealed class CursorRenderer : ISquadRenderer
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
                             capabilityVocabulary,
-                            reusedCanonicalSkill: true));
+                            true));
                         continue;
                     }
 
@@ -367,30 +366,34 @@ public sealed class CursorRenderer : ISquadRenderer
         StringBuilder details = new();
         if (unexpressed.Count > 0)
         {
-            details.Append(CultureInfo.InvariantCulture, $"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
+            details.Append(CultureInfo.InvariantCulture,
+                $"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
         }
         else
         {
-            details.Append("Cursor subagent configuration enforces readonly mode, but cannot express other fine-grained permissions.");
+            details.Append(
+                "Cursor subagent configuration enforces readonly mode, but cannot express other fine-grained permissions.");
         }
 
         if (unenforcedDenials.Count > 0)
         {
-            details.Append(CultureInfo.InvariantCulture, $" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
+            details.Append(CultureInfo.InvariantCulture,
+                $" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
         }
 
         if (agent.DelegatesTo.Count > 0)
         {
-            details.Append(" Permitted delegation roster cannot be pinned in subagent frontmatter (Cursor resolves subagents at Task-call time).");
+            details.Append(
+                " Permitted delegation roster cannot be pinned in subagent frontmatter (Cursor resolves subagents at Task-call time).");
         }
 
         return new SquadDegradationRecord(
-            Target: "cursor",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: details.ToString());
+            "cursor",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            details.ToString());
     }
 
     private static SquadDegradationRecord BuildPrimaryAgentDegradation(
@@ -406,16 +409,16 @@ public sealed class CursorRenderer : ISquadRenderer
 
         string projectionText = reusedCanonicalSkill
             ? "this agent reuses the same-name canonical skill as its entry point, because the " +
-                "canonical skill already occupies that identity; no separate agent file is emitted"
+              "canonical skill already occupies that identity; no separate agent file is emitted"
             : "this agent renders as a top-level Cursor skill instead of a '.cursor/agents/' file";
 
         return new SquadDegradationRecord(
-            Target: "cursor",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Cursor has no primary-agent selection primitive, so fallback profile " +
+            "cursor",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            "Cursor has no primary-agent selection primitive, so fallback profile " +
             $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent} and " +
             projectionText + ". Capability decisions " +
             $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +

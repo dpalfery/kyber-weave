@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -52,8 +51,7 @@ public sealed class KiloRenderer : ISquadRenderer
     private const string AgentsDirectory = ".kilo/agents";
     private const string SkillsDirectory = ".kilo/skills";
 
-    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
-        () => new SerializerBuilder().Build());
+    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(() => new SerializerBuilder().Build());
 
     /// <summary>
     /// Under <c>Scope: Global</c> the physical root already is Kilo's global directory
@@ -95,7 +93,7 @@ public sealed class KiloRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Kilo);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -266,11 +264,11 @@ public sealed class KiloRenderer : ISquadRenderer
             $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
 
         return new SquadDegradationRecord(
-            Target: "kilo",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: details);
+            "kilo",
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            details);
     }
 }

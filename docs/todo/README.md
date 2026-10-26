@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-25
 ---
 
 # Todos
@@ -43,6 +43,7 @@ last-reviewed: YYYY-MM-DD
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [squad-model-presets-windows-e2e-and-spikes.md](squad-model-presets-windows-e2e-and-spikes.md) | KyberSquad | draft | Windows end-to-end verification (E-win) and harness spikes S1–S8 (including S4 ZCODE_STORAGE_DIR vs ZCODE_DATA_BASE_DIR) deferred from the squad-model-presets specification closeout. |
 | [kyberdash-lightsaber-status-icon.md](kyberdash-lightsaber-status-icon.md) | KyberDash | draft | Restore the lightsaber status icon with a red or green blade glow matching status, instead of a colored circle. |
 | [tauri-glib-upstream-removal.md](tauri-glib-upstream-removal.md) | KyberDash | draft | Remove the patched GLib 0.18.5 source after a released Tauri GTK migration resolves the Linux tray graph to `glib >= 0.20.0` and the Linux gates pass. |
 | [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill and retained subagent in a live Claude Code session; the renderer and CI checks do not establish runtime behaviour. |

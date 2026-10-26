@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -128,18 +127,18 @@ public sealed class CopilotRenderer : ISquadRenderer
             out bool changed);
 
         degradations.Add(new SquadDegradationRecord(
-            Target: "copilot",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "resource-links-rewritten",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Copilot does not reliably anchor a relative link in a user-level agent to " +
-                "the agent file, so the agent's " +
-                $"{agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} resource file(s) " +
-                "stay beside their principal and " +
-                (changed
-                    ? "the agent's authored links were rewritten to absolute paths under the resolved Copilot global root."
-                    : "no authored link required rewriting.")));
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "resource-links-rewritten",
+            agent.BodyDigest,
+            "Copilot does not reliably anchor a relative link in a user-level agent to " +
+            "the agent file, so the agent's " +
+            $"{agent.Resources.Count.ToString(CultureInfo.InvariantCulture)} resource file(s) " +
+            "stay beside their principal and " +
+            (changed
+                ? "the agent's authored links were rewritten to absolute paths under the resolved Copilot global root."
+                : "no authored link required rewriting.")));
 
         return body;
     }
@@ -167,7 +166,7 @@ public sealed class CopilotRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Copilot);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -400,15 +399,15 @@ public sealed class CopilotRenderer : ISquadRenderer
         }
 
         return new SquadDegradationRecord(
-            Target: "copilot",
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "safety-narrowed",
-            InstructionDigest: agent.BodyDigest,
-            Details: $"Copilot capability profile '{profileName}' requires 'ask' for " +
-                $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
-                "cannot prompt for confirmation, so these narrow to 'deny' and the " +
-                "corresponding tools are withheld from the agent's 'tools' list.");
+            "copilot",
+            agent.Name,
+            agent.Name,
+            "safety-narrowed",
+            agent.BodyDigest,
+            $"Copilot capability profile '{profileName}' requires 'ask' for " +
+            $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
+            "cannot prompt for confirmation, so these narrow to 'deny' and the " +
+            "corresponding tools are withheld from the agent's 'tools' list.");
     }
 
     /// <summary>
@@ -430,7 +429,10 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// </summary>
     private sealed class CopilotAgentsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CopilotAgentsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CopilotAgentsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -444,10 +446,10 @@ public sealed class CopilotRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string agent in agents)
             {
-                emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, agent, ScalarStyle.SingleQuoted, isPlainImplicit: true, isQuotedImplicit: true));
+                emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, agent, ScalarStyle.SingleQuoted, true, true));
             }
 
             emitter.Emit(new SequenceEnd());
@@ -460,7 +462,10 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// </summary>
     private sealed class CopilotToolsFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CopilotToolsFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CopilotToolsFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -474,17 +479,18 @@ public sealed class CopilotRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string tool in tools)
             {
                 if (tool.Contains('*', StringComparison.Ordinal))
                 {
                     string unquoted = tool.Trim('\'');
-                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, unquoted, ScalarStyle.SingleQuoted, isPlainImplicit: true, isQuotedImplicit: true));
+                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, unquoted, ScalarStyle.SingleQuoted, true,
+                        true));
                 }
                 else
                 {
-                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, tool, ScalarStyle.Plain, isPlainImplicit: true, isQuotedImplicit: true));
+                    emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, tool, ScalarStyle.Plain, true, true));
                 }
             }
 
