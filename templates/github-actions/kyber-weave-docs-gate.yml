@@ -55,13 +55,29 @@ jobs:
 
       # Pull-request gate: --merge-ready fails the build on open work
       # (KW-DOC-LIFECYCLE-003) and on archived entries without closeout evidence
-      # (KW-DOC-LIFECYCLE-004), scoped to the PR diff via --base. On push events
-      # use --base ${{ github.event.before }} instead.
+      # (KW-DOC-LIFECYCLE-004), scoped to the change under review: the PR target
+      # on pull_request, the pushed range on push, and the remote default branch
+      # elsewhere (schedule, dispatch). Full history (fetch-depth: 0 above) is
+      # what lets git merge-base resolve that scope.
       - name: Validate documentation frontmatter
-        run: >
-          kyber-weave docs validate "${{ env.PROJECT_ROOT }}"
-          --merge-ready --base origin/${{ github.base_ref }}
-          --format table
+        env:
+          # Event values travel through env, never interpolated into run:, so a
+          # hostile ref cannot reach the shell.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            BASE="origin/${BASE_REF}"
+          elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${EVENT_BEFORE}"
+          else
+            BASE="origin/HEAD"
+          fi
+          kyber-weave docs validate "${{ env.PROJECT_ROOT }}" \
+            --merge-ready --base "$BASE" \
+            --format table
 
   docs-drift:
     name: Docs drift
