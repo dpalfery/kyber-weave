@@ -1002,6 +1002,33 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Empty(steps);
     }
 
+    /// <summary>
+    /// The --no-kyberdash skip is logged with its exact wording. The CI update loop greps for this sentence, so a
+    /// change here must change scripts/update-loop.sh in the same commit.
+    /// </summary>
+    [Fact]
+    public void RunWithNoKyberDashLogsTheSkipWithItsExactWording()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false, true),
+            log,
+            steps);
+
+        Assert.Contains(
+            log,
+            line => line.Contains(
+                "--no-kyberdash given; leaving the KyberDash engine, tray and capture plugin unchanged",
+                StringComparison.Ordinal));
+    }
+
     /// <summary>A failed engine step is named, and the binaries committed before it are kept.</summary>
     [Fact]
     public void RunWhenTheEngineStepFailsNamesItAndKeepsTheCommittedBinaries()

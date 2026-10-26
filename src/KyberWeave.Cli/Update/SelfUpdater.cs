@@ -284,15 +284,6 @@ internal sealed class SelfUpdater : IDisposable
             return false;
         }
 
-        if (options.NoKyberDash)
-        {
-            // The tray installer is the kyberdash binary. Leaving that at its old
-            // version and then asking it to update the tray would install a tray
-            // from whichever release the old binary resolves.
-            _log("--no-kyberdash given; leaving the KyberDash tray unchanged");
-            return false;
-        }
-
         if (ReleaseVersion.Compare(version, TrayMinVersion) < 0)
         {
             _log(
