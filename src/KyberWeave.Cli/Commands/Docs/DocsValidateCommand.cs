@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -101,7 +102,9 @@ public sealed class DocsValidateCommand : Command<DocsValidateSettings>
         {
             changes = ChangedFiles.ResolveSinceMergeBase(settings.Path, baseRef);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException
+            or IOException or UnauthorizedAccessException
+            or Win32Exception or TimeoutException)
         {
             report.Add(new Diagnostic(
                 ArchiveCloseoutValidator.MissingCloseoutEvidence,

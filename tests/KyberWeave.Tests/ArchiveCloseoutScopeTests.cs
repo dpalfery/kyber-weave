@@ -507,6 +507,27 @@ public sealed class ArchiveCloseoutScopeTests
     }
 
     /// <summary>
+    /// A process-launch failure while scoping the change (a file passed as the working
+    /// directory, so git cannot start there) fails closed with a C0 diagnostic instead
+    /// of escaping as an unhandled crash.
+    /// </summary>
+    [Fact]
+    public void AProcessLaunchFailureWhileScopingFailsClosedUnderMergeReady()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
+            .Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
+
+        string fileAsWorkingDirectory = Path.Combine(
+            fixture.Root, "6-Docs", "reference", "widget.md");
+
+        CapturedConsoleExecution<int> execution = RunValidate(fileAsWorkingDirectory, true);
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("scope is unknown (C0)", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The closeout gate is part of merge-ready: an archived plan without evidence passes a
     /// normal validate and fails only when the merge gate runs.
     /// </summary>
