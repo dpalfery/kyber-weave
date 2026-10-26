@@ -31,6 +31,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-25-opencode-capture-deploy-kyberdash.md](2026-10-25-opencode-capture-deploy-kyberdash.md) | Draft — decision-complete (Q1, Q2 answered 2026-10-25); AP1 open; docs checks pending | 2026-10-25 | Make OpenCode capture actually deploy: an OpenCode 1.x-loadable plugin bundled into kyberdash, installed by `kyber-weave squad install/update --global` without overwriting user edits, upgraded and the engine and tray restarted by one `kyber-weave update`, consent through a KyberDash-owned file (off at install, switched by the KyberDash Settings OpenCode toggle), evidence-driven OpenCode measurability, absent-versus-zero buckets in the report, and a test network guard. |
 
 ## Archived Plans
 
