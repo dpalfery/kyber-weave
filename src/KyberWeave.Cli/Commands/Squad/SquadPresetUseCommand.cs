@@ -133,13 +133,20 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
                 }
             }
 
+            if (globalReceipt is null)
+            {
+                SquadCommandComposition.WriteClientInputError(
+                    "Global deployment receipt is missing or unreadable. Run `kyber-weave squad install --global` to repair the deployment.");
+                return 1;
+            }
+
             return ApplyPresetToDeployment(
                 targets: targets,
                 preset: preset,
                 scope: SquadDeploymentScope.Global,
                 anchorRoot: globalAnchor,
                 projectRoot: projectRoot,
-                activeReceipt: globalReceipt!,
+                activeReceipt: globalReceipt,
                 activeLock: globalLock,
                 effectiveStateStore: stateStore,
                 selectionStores: selectionStores,
@@ -191,13 +198,20 @@ public sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             return 0;
         }
 
+        if (projectReceipt is null)
+        {
+            SquadCommandComposition.WriteClientInputError(
+                "Project deployment receipt is missing or unreadable. Run `kyber-weave squad install` to repair the deployment.");
+            return 1;
+        }
+
         return ApplyPresetToDeployment(
             targets: targets,
             preset: preset,
             scope: SquadDeploymentScope.Project,
             anchorRoot: projectRoot,
             projectRoot: projectRoot,
-            activeReceipt: projectReceipt!,
+            activeReceipt: projectReceipt,
             activeLock: projectLock,
             effectiveStateStore: stateStore,
             selectionStores: selectionStores,

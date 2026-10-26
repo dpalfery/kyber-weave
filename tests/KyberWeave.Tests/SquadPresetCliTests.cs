@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -10,22 +11,22 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Task 7 test suite: Pins the <c>kyber-weave squad preset</c> CLI command surface,
-/// verbs (<c>use</c>, <c>clear</c>, <c>list</c>, <c>show</c>), outcomes, and exit codes.
-/// Acceptance criteria covered:
-/// - 2.1: <c>squad preset use &lt;name&gt;</c> applies preset through update transaction.
-/// - 2.4: <c>--dry-run</c> prints diffs and writes nothing.
-/// - 3.3: <c>squad preset clear</c> restores bundled models.
-/// - 4.1: Unknown names/targets exit non-zero naming offending key.
-/// - 5.1: <c>squad preset list</c> output.
-/// - 5.2: <c>squad preset show</c> output.
+///     Task 7 test suite: Pins the <c>kyber-weave squad preset</c> CLI command surface,
+///     verbs (<c>use</c>, <c>clear</c>, <c>list</c>, <c>show</c>), outcomes, and exit codes.
+///     Acceptance criteria covered:
+///     - 2.1: <c>squad preset use &lt;name&gt;</c> applies preset through update transaction.
+///     - 2.4: <c>--dry-run</c> prints diffs and writes nothing.
+///     - 3.3: <c>squad preset clear</c> restores bundled models.
+///     - 4.1: Unknown names/targets exit non-zero naming offending key.
+///     - 5.1: <c>squad preset list</c> output.
+///     - 5.2: <c>squad preset show</c> output.
 /// </summary>
 /// <remarks>
-/// Drives the built CLI host as a child process rather than calling command classes directly,
-/// verifying that command routing, argument parsing, strict option validation, and process
-/// exit codes follow the CLI contract. Running the CLI binary compiles against the current
-/// tree where the preset branch is not yet implemented, recording authentic runtime RED
-/// failure evidence.
+///     Drives the built CLI host as a child process rather than calling command classes directly,
+///     verifying that command routing, argument parsing, strict option validation, and process
+///     exit codes follow the CLI contract. Running the CLI binary compiles against the current
+///     tree where the preset branch is not yet implemented, recording authentic runtime RED
+///     failure evidence.
 /// </remarks>
 public sealed class SquadPresetCliTests : IDisposable
 {
@@ -40,12 +41,13 @@ public sealed class SquadPresetCliTests : IDisposable
                                               claude: gpt-4o-mini
                                           """;
 
-    private readonly TempDirectory _temp = new();
     private readonly string _home;
     private readonly string _projectDir;
-    private readonly FakeSquadUserPaths _userPaths;
     private readonly SquadModelPresetSelectionStore _selectionStore;
     private readonly SquadStateStore _stateStore;
+
+    private readonly TempDirectory _temp = new();
+    private readonly FakeSquadUserPaths _userPaths;
 
     public SquadPresetCliTests()
     {
@@ -63,6 +65,87 @@ public sealed class SquadPresetCliTests : IDisposable
     {
         _temp.Dispose();
     }
+
+    #region Target Not Deployed in Project Scope
+
+    [Fact]
+    public void UseWhenTargetNotDeployedInProjectRecordsSelectionAndExitsZeroWithGuidance()
+    {
+        WritePreset("fast", FastPresetYaml);
+
+        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Recorded `fast` for `claude` in this project; it applies on install or `squad run`.",
+            result.Output, StringComparison.Ordinal);
+
+        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
+        Assert.NotNull(selection);
+        Assert.Equal("fast", selection.ModelPresets[SquadTarget.Claude]);
+        Assert.Empty(Directory.GetFileSystemEntries(_projectDir));
+    }
+
+    #endregion
+
+    #region Acceptance Criterion 2.1: Use on Deployed Target Updates Files via Transaction
+
+    [Fact]
+    public void UseOnDeployedProjectTargetUpdatesFilesThroughTransactionAndRecordsSelection()
+    {
+        WritePreset("fast", FastPresetYaml);
+
+        string initialAgentContent = """
+                                     ---
+                                     name: architect
+                                     model: bundled-model
+                                     ---
+                                     You are architect.
+                                     """;
+        SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
+
+        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+
+        Assert.Equal(0, result.ExitCode);
+
+        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
+        Assert.NotNull(selection);
+        Assert.Equal("fast", selection.ModelPresets[SquadTarget.Claude]);
+
+        string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
+    }
+
+    #endregion
+
+    #region Acceptance Criterion 2.4: Dry-Run Prints Diffs and Writes Nothing
+
+    [Fact]
+    public void UseWithDryRunPrintsAgentDiffsAndWritesNothing()
+    {
+        WritePreset("fast", FastPresetYaml);
+
+        string initialAgentContent = """
+                                     ---
+                                     name: architect
+                                     model: bundled-model
+                                     ---
+                                     You are architect.
+                                     """;
+        SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
+
+        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--dry-run");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("architect: bundled-model -> gpt-4o-mini", result.Output, StringComparison.Ordinal);
+
+        string agentContentAfter = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        Assert.Equal(initialAgentContent, agentContentAfter);
+
+        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
+        Assert.Null(selection);
+    }
+
+    #endregion
 
     #region Acceptance Criterion 4.1: Unknown Names and Targets Exit Non-Zero
 
@@ -146,87 +229,6 @@ public sealed class SquadPresetCliTests : IDisposable
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("claude is not deployed globally", result.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("kyber-weave squad install --global --target claude", result.Output, StringComparison.Ordinal);
-    }
-
-    #endregion
-
-    #region Target Not Deployed in Project Scope
-
-    [Fact]
-    public void UseWhenTargetNotDeployedInProjectRecordsSelectionAndExitsZeroWithGuidance()
-    {
-        WritePreset("fast", FastPresetYaml);
-
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Recorded `fast` for `claude` in this project; it applies on install or `squad run`.",
-            result.Output, StringComparison.Ordinal);
-
-        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
-        Assert.NotNull(selection);
-        Assert.Equal("fast", selection.ModelPresets[SquadTarget.Claude]);
-        Assert.Empty(Directory.GetFileSystemEntries(_projectDir));
-    }
-
-    #endregion
-
-    #region Acceptance Criterion 2.1: Use on Deployed Target Updates Files via Transaction
-
-    [Fact]
-    public void UseOnDeployedProjectTargetUpdatesFilesThroughTransactionAndRecordsSelection()
-    {
-        WritePreset("fast", FastPresetYaml);
-
-        string initialAgentContent = """
-                                     ---
-                                     name: architect
-                                     model: bundled-model
-                                     ---
-                                     You are architect.
-                                     """;
-        SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
-
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
-
-        Assert.Equal(0, result.ExitCode);
-
-        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
-        Assert.NotNull(selection);
-        Assert.Equal("fast", selection.ModelPresets[SquadTarget.Claude]);
-
-        string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
-        Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
-    }
-
-    #endregion
-
-    #region Acceptance Criterion 2.4: Dry-Run Prints Diffs and Writes Nothing
-
-    [Fact]
-    public void UseWithDryRunPrintsAgentDiffsAndWritesNothing()
-    {
-        WritePreset("fast", FastPresetYaml);
-
-        string initialAgentContent = """
-                                     ---
-                                     name: architect
-                                     model: bundled-model
-                                     ---
-                                     You are architect.
-                                     """;
-        SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
-
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--dry-run");
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.Contains("architect: bundled-model -> gpt-4o-mini", result.Output, StringComparison.Ordinal);
-
-        string agentContentAfter = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
-        Assert.Equal(initialAgentContent, agentContentAfter);
-
-        SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
-        Assert.Null(selection);
     }
 
     #endregion
@@ -394,6 +396,57 @@ public sealed class SquadPresetCliTests : IDisposable
         File.WriteAllText(lockPath, _stateStore.SerializeLock(squadLock), Encoding.UTF8);
     }
 
+    [Fact]
+    public void PresetUseGlobalWhenLockExistsWithTargetsButReceiptIsMissingExitsNonZeroWithoutNullReferenceException()
+    {
+        WritePreset("fast", FastPresetYaml);
+
+        string globalAnchor = _userPaths.ApplicationDataDirectory;
+        string lockPath = _stateStore.ResolveLockPath(globalAnchor, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+
+        SquadLock squadLock = new(
+            "kyber-squad.lock/v1",
+            "1.2.3",
+            "1.2.3",
+            "1.2.3",
+            "full",
+            ["claude"],
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        File.WriteAllText(lockPath, _stateStore.SerializeLock(squadLock), Encoding.UTF8);
+
+        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--global");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.DoesNotContain("NullReferenceException", result.Output, StringComparison.Ordinal);
+        Assert.Contains("receipt", result.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FrontmatterHelperHandlesWindowsCrlfLineEndingsWithoutBodySlicingOrCorruption()
+    {
+        const string original = "---\r\nname: test\r\n---\r\n# Body content\r\n";
+        bool parsed = SquadFrontmatterHelper.TryParseFrontmatter(
+            original,
+            out string frontmatter,
+            out string body,
+            out string newline);
+
+        Assert.True(parsed);
+        Assert.Equal("\r\n", newline);
+        Assert.Equal("name: test", frontmatter);
+        Assert.Equal("\r\n# Body content\r\n", body);
+        Assert.StartsWith("\r\n", body, StringComparison.Ordinal);
+
+        string reconstructed = $"---{newline}{frontmatter}{newline}---{body}";
+        Assert.Equal(original, reconstructed);
+    }
+
     private CliResult Run(params string[] args)
     {
         return RunIn(_projectDir, args);
@@ -412,10 +465,7 @@ public sealed class SquadPresetCliTests : IDisposable
             CreateNoWindow = true
         };
 
-        foreach (string argument in args)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (string argument in args) startInfo.ArgumentList.Add(argument);
 
         string userHome = _userPaths.HomeDirectory;
         Directory.CreateDirectory(userHome);
@@ -429,10 +479,7 @@ public sealed class SquadPresetCliTests : IDisposable
         foreach (string key in new[] { "PATH", "PATHEXT", "SystemRoot", "ComSpec", "windir", "TEMP", "TMP" })
         {
             string? value = Environment.GetEnvironmentVariable(key);
-            if (value is not null)
-            {
-                startInfo.Environment[key] = value;
-            }
+            if (value is not null) startInfo.Environment[key] = value;
         }
 
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));

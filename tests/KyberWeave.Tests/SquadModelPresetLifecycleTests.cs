@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -8,13 +9,13 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Verifies Squad install and update lifecycle behaviors when applying, persisting, and diffing model presets.
-/// Acceptance criteria:
-/// - 2.1: Squad re-renders selected targets with preset through same transaction update uses.
-/// - 2.2: Squad SHALL NOT modify a deployed file outside that transaction.
-/// - 3.1: Squad SHALL record active preset per scope and target in Squad state.
-/// - 3.2: WHEN update runs, Squad SHALL re-apply recorded preset.
-/// - 3.4: WHEN recorded preset no longer exists, update SHALL fail before writing and name missing preset.
+///     Verifies Squad install and update lifecycle behaviors when applying, persisting, and diffing model presets.
+///     Acceptance criteria:
+///     - 2.1: Squad re-renders selected targets with preset through same transaction update uses.
+///     - 2.2: Squad SHALL NOT modify a deployed file outside that transaction.
+///     - 3.1: Squad SHALL record active preset per scope and target in Squad state.
+///     - 3.2: WHEN update runs, Squad SHALL re-apply recorded preset.
+///     - 3.4: WHEN recorded preset no longer exists, update SHALL fail before writing and name missing preset.
 /// </summary>
 public sealed class SquadModelPresetLifecycleTests : IDisposable
 {
@@ -552,6 +553,32 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.Contains("requires exactly one target", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task InstallWithPresetAndCorruptExtractedSquadSourceThrowsSourceValidationExceptionWithoutSwallowing()
+    {
+        string targetRoot = Path.Combine(_temp.Path, "corrupt-source-root");
+        Directory.CreateDirectory(targetRoot);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        await WritePresetAsync(userPaths, "fast", FastPresetYaml);
+
+        SquadStateStore stateStore = new(userPaths);
+        using TruncatedReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadInstallRequest request = new(
+            targetRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
+            Version: "1.0.0",
+            ModelPresets: new Dictionary<SquadTarget, string>
+            {
+                [SquadTarget.Copilot] = "fast"
+            });
+
+        await Assert.ThrowsAsync<SquadSourceValidationException>(() => service.InstallAsync(request));
+    }
+
     private static async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)
     {
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
@@ -569,15 +596,10 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     private static Dictionary<string, byte[]> CaptureDirectorySnapshot(string root)
     {
         Dictionary<string, byte[]> snapshot = new(StringComparer.Ordinal);
-        if (!Directory.Exists(root))
-        {
-            return snapshot;
-        }
+        if (!Directory.Exists(root)) return snapshot;
 
         foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-        {
             snapshot[file] = File.ReadAllBytes(file);
-        }
 
         return snapshot;
     }
@@ -592,6 +614,37 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             Assert.True(actual.TryGetValue(kvp.Key, out byte[]? actualBytes),
                 $"File '{kvp.Key}' missing from snapshot.");
             Assert.True(actualBytes.SequenceEqual(kvp.Value), $"File '{kvp.Key}' contents differed from snapshot.");
+        }
+    }
+
+    private sealed class TruncatedReleaseSource : ISquadReleaseSource, IDisposable
+    {
+        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
+            SquadReleaseRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Directory.CreateDirectory(request.DestinationPath);
+            string squadYmlPath = Path.Combine(request.DestinationPath, "squad.yml");
+            await File.WriteAllTextAsync(squadYmlPath, "name: kyber-squad\nschema: invalid-schema-v999\n",
+                cancellationToken);
+
+            string toolchainYmlPath = Path.Combine(request.DestinationPath, "toolchain.yml");
+            await File.WriteAllTextAsync(toolchainYmlPath,
+                "schema: kyber-squad.toolchain/v1\nrequired-features: []\nvalidated-release: null\n",
+                cancellationToken);
+
+            SquadReleaseResult result = new(
+                request.Version,
+                new SquadReleaseAsset("asset", new Uri("https://example.com/asset.zip"), 1024),
+                new SquadReleaseChecksum("asset", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+                Path.GetFullPath(request.DestinationPath),
+                ["squad.yml", "toolchain.yml"]);
+
+            return result;
+        }
+
+        public void Dispose()
+        {
         }
     }
 }

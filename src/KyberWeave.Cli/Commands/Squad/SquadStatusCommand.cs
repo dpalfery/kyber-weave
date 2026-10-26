@@ -150,20 +150,22 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
-        bool hasMissingPreset = WriteModelPresets(stateStore, targetRoot, scope);
+        (bool hasMissingPreset, bool hasLockError) = WriteModelPresets(stateStore, targetRoot, scope);
 
         if (scope == SquadDeploymentScope.Global) WriteInstances(instances);
 
         bool registryUnreadable = scope == SquadDeploymentScope.Global && !WriteRegisteredProjects(stateStore);
 
-        if (hasIssues || hasMissingPreset)
+        if (hasIssues || hasMissingPreset || hasLockError)
         {
             AnsiConsole.WriteLine();
-            string summary = hasMissing
-                ? "Drift or missing files detected in Kyber-Squad deployment."
-                : hasMissingPreset
-                    ? "Missing model preset detected in Kyber-Squad deployment."
-                    : "Drift detected in Kyber-Squad deployment.";
+            string summary = hasLockError
+                ? "Error detected in Kyber-Squad deployment lock."
+                : hasMissing
+                    ? "Drift or missing files detected in Kyber-Squad deployment."
+                    : hasMissingPreset
+                        ? "Missing model preset detected in Kyber-Squad deployment."
+                        : "Drift detected in Kyber-Squad deployment.";
             AnsiConsole.MarkupLine($"[red]{summary}[/]");
             return 1;
         }
@@ -184,23 +186,25 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     ///     Inspects and renders the active model presets recorded in the deployment lock.
     /// </summary>
     /// <returns><see langword="true" /> when a recorded preset file is missing; otherwise <see langword="false" />.</returns>
-    private static bool WriteModelPresets(SquadStateStore stateStore, string targetRoot, SquadDeploymentScope scope)
+    private static (bool HasMissingPreset, bool HasLockError) WriteModelPresets(SquadStateStore stateStore, string targetRoot, SquadDeploymentScope scope)
     {
-        SquadLock? squadLock = null;
+        SquadLock? squadLock;
         try
         {
             squadLock = stateStore.ReadLock(targetRoot, scope);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // If the lock file is missing or unreadable, treat as having no recorded presets.
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[red]Error reading Squad lock file: {Markup.Escape(ex.Message)}[/]");
+            return (false, true);
         }
 
         AnsiConsole.WriteLine();
         if (squadLock?.ModelPresets is null || squadLock.ModelPresets.Count == 0)
         {
             AnsiConsole.MarkupLine("Model presets: [grey]none[/]");
-            return false;
+            return (false, false);
         }
 
         AnsiConsole.MarkupLine("Model presets:");
@@ -240,7 +244,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             }
         }
 
-        return hasMissingPreset;
+        return (hasMissingPreset, false);
     }
 
 

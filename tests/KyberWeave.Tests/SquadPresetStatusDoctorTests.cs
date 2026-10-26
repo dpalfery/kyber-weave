@@ -1,9 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -11,35 +9,39 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Integration tests verifying that <see cref="SquadStatusCommand"/> and <see cref="SquadDoctorCommand"/>
-/// correctly inspect, report, and apply model presets recorded in deployment locks.
-/// Acceptance criteria:
-/// - 3.4: WHEN a recorded preset no longer exists THEN squad update/status SHALL fail before writing / exit 1 and name the missing preset.
-/// - 5.3: squad status SHALL show the active preset per target, or that none is active.
+///     Integration tests verifying that <see cref="SquadStatusCommand" /> and <see cref="SquadDoctorCommand" />
+///     correctly inspect, report, and apply model presets recorded in deployment locks.
+///     Acceptance criteria:
+///     - 3.4: WHEN a recorded preset no longer exists THEN squad update/status SHALL fail before writing / exit 1 and name
+///     the missing preset.
+///     - 5.3: squad status SHALL show the active preset per target, or that none is active.
 /// </summary>
 public sealed class SquadPresetStatusDoctorTests : IDisposable
 {
     private const string SamplePresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            claude: claude-3-7-sonnet
-          general:
-            claude: claude-3-7-sonnet
-        """;
+                                            schema: kyber-squad.model-preset/v1
+                                            profiles:
+                                              deep-planning:
+                                                claude: claude-3-7-sonnet
+                                              general:
+                                                claude: claude-3-7-sonnet
+                                            """;
 
     private const string ModifiedPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          deep-planning:
-            claude: claude-3-5-haiku
-          general:
-            claude: claude-3-5-haiku
-        """;
+                                              schema: kyber-squad.model-preset/v1
+                                              profiles:
+                                                deep-planning:
+                                                  claude: claude-3-5-haiku
+                                                general:
+                                                  claude: claude-3-5-haiku
+                                              """;
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     [Fact]
     public void StatusShowsActivePresetPerTargetWhenLockHasPresetsAndDigestMatches()
@@ -89,7 +91,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets: null,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
         SquadStatusCommand command = new(userPaths, stateStore);
@@ -105,7 +107,8 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Assert.Equal(0, execution.Result);
         bool showsNone = execution.Output.Contains("none", StringComparison.OrdinalIgnoreCase) ||
                          execution.Output.Contains("bundled", StringComparison.OrdinalIgnoreCase);
-        Assert.True(showsNone, $"Expected status output to mention 'none' or 'bundled' for presets, but got:\n{execution.Output}");
+        Assert.True(showsNone,
+            $"Expected status output to mention 'none' or 'bundled' for presets, but got:\n{execution.Output}");
     }
 
     [Fact]
@@ -212,10 +215,10 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadDoctorCommand command = new(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
-            globalRoots: globalRoots,
-            renderer: renderer,
-            stateStore: stateStore);
+            KyberWeaveTestPaths.ToolRoot,
+            globalRoots,
+            renderer,
+            stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -226,7 +229,8 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             }));
 
         Assert.NotEmpty(renderer.RenderRequests);
-        SquadRenderRequest? claudeRequest = renderer.RenderRequests.FirstOrDefault(req => req.Targets.Contains(SquadTarget.Claude));
+        SquadRenderRequest? claudeRequest =
+            renderer.RenderRequests.FirstOrDefault(req => req.Targets.Contains(SquadTarget.Claude));
         Assert.NotNull(claudeRequest);
         Assert.NotNull(claudeRequest.ModelPresets);
         Assert.True(claudeRequest.ModelPresets.ContainsKey(SquadTarget.Claude));
@@ -269,10 +273,10 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadDoctorCommand command = new(
             executor,
             userPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
-            globalRoots: globalRoots,
-            renderer: renderer,
-            stateStore: stateStore);
+            KyberWeaveTestPaths.ToolRoot,
+            globalRoots,
+            renderer,
+            stateStore);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -285,6 +289,36 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Assert.Equal(0, execution.Result);
         Assert.Contains("Global unmanaged collisions: none", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StatusWhenSquadLockIsCorruptExitsWithCodeOneAndReportsError()
+    {
+        string targetDir = Path.Combine(_temp.Path, "corrupt-lock-project");
+        Directory.CreateDirectory(targetDir);
+
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
+            ("agents/architect.md", "You are architect.\nPlan first.\n"));
+
+        string lockPath = stateStore.ResolveLockPath(targetDir, SquadDeploymentScope.Project);
+        File.WriteAllText(lockPath, "{ this is corrupt lock yaml : [ unclosed", Encoding.UTF8);
+
+        SquadStatusCommand command = new(userPaths, stateStore);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetDir,
+                Global = false
+            }));
+
+        Assert.NotEqual(0, execution.Result);
+        Assert.DoesNotContain("Model presets: none", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string WritePreset(ISquadUserPaths userPaths, string name, string yaml)
@@ -324,39 +358,39 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             byte[] bytes = Encoding.UTF8.GetBytes(content);
             File.WriteAllBytes(fullPath, bytes);
             string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
-            ownedFiles.Add(new SquadOwnedFile(relPath, sha256, "claude", Adopted: false));
+            ownedFiles.Add(new SquadOwnedFile(relPath, sha256, "claude", false));
         }
 
         SquadReceipt receipt = new(
-            Schema: scope == SquadDeploymentScope.Global ? SquadStateStore.ReceiptSchemaV2 : SquadStateStore.ReceiptSchemaV1,
-            Scope: scope,
-            TargetRoot: targetRoot,
-            InstalledAtUtc: DateTimeOffset.UtcNow,
-            Degradations: [],
-            Files: ownedFiles);
+            scope == SquadDeploymentScope.Global ? SquadStateStore.ReceiptSchemaV2 : SquadStateStore.ReceiptSchemaV1,
+            scope,
+            targetRoot,
+            DateTimeOffset.UtcNow,
+            [],
+            ownedFiles);
 
         string schema = presets is { Count: > 0 } ? SquadStateStore.LockSchemaV2 : SquadStateStore.LockSchemaV1;
 
         SquadLock squadLock = new(
-            Schema: schema,
-            SquadVersion: "1.2.3",
-            CliVersion: "1.2.3",
-            McpVersion: "1.2.3",
-            Bundle: "full",
-            Targets: ["claude"],
-            Exclusions: [],
-            Translation: "best-effort",
-            BundleDigest: "a".PadRight(64, '0'),
-            AssetDigest: "b".PadRight(64, '0'),
-            Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')),
-            ModelPresets: presets);
+            schema,
+            "1.2.3",
+            "1.2.3",
+            "1.2.3",
+            "full",
+            ["claude"],
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')),
+            presets);
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
     }
 
     /// <summary>
-    /// Test renderer that differentiates rendered content when an active preset is provided in the request.
+    ///     Test renderer that differentiates rendered content when an active preset is provided in the request.
     /// </summary>
     private sealed class DoctorPresetTestRenderer : ISquadRenderer
     {
@@ -384,11 +418,11 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             }
 
             return Task.FromResult(new SquadRenderResult(
-                Success: true,
-                Files: files,
-                Degradations: [],
-                Warnings: [],
-                Errors: []));
+                true,
+                files,
+                [],
+                [],
+                []));
         }
     }
 }

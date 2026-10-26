@@ -48,10 +48,12 @@ internal static class SquadFrontmatterHelper
             return false;
         }
 
-        int secondDashes = trimmedContent.IndexOf($"{newline}---", firstNewline, StringComparison.Ordinal);
+        string secondDelimiter = $"{newline}---";
+        int secondDashes = trimmedContent.IndexOf(secondDelimiter, firstNewline, StringComparison.Ordinal);
         if (secondDashes < 0)
         {
-            secondDashes = trimmedContent.IndexOf("\n---", firstNewline, StringComparison.Ordinal);
+            secondDelimiter = "\n---";
+            secondDashes = trimmedContent.IndexOf(secondDelimiter, firstNewline, StringComparison.Ordinal);
             if (secondDashes < 0)
             {
                 return false;
@@ -59,8 +61,8 @@ internal static class SquadFrontmatterHelper
         }
 
         frontmatter = trimmedContent[(firstNewline + 1)..secondDashes].Trim('\r', '\n');
-        int relIdx = trimmedContent.AsSpan(secondDashes + 4).IndexOf('\n');
-        int endOfSecondDashes = relIdx >= 0 ? secondDashes + 4 + relIdx : -1;
+        int relIdx = trimmedContent.AsSpan(secondDashes + secondDelimiter.Length).IndexOfAny('\r', '\n');
+        int endOfSecondDashes = relIdx >= 0 ? secondDashes + secondDelimiter.Length + relIdx : -1;
         body = endOfSecondDashes >= 0 ? trimmedContent[endOfSecondDashes..] : string.Empty;
         return true;
     }

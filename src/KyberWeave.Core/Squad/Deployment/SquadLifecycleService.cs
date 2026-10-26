@@ -135,6 +135,10 @@ public sealed class SquadLifecycleService
 
                     if (request.DryRun) modelChanges = ComputeModelChanges(source, request.Targets, loadedPresets);
                 }
+                else if (loadedPresets.Count > 0)
+                {
+                    throw new InvalidOperationException("Cannot validate model presets because Squad source could not be resolved.");
+                }
             }
 
             string? userScopeDir = request.Scope is SquadDeploymentScope.Global or SquadDeploymentScope.Instance
@@ -312,6 +316,10 @@ public sealed class SquadLifecycleService
                         SquadModelPresetValidator.Validate(kvp.Value, source.ModelProfiles);
 
                     if (request.DryRun) modelChanges = ComputeModelChanges(source, targets, loadedPresets);
+                }
+                else if (loadedPresets.Count > 0)
+                {
+                    throw new InvalidOperationException("Cannot validate model presets because Squad source could not be resolved.");
                 }
             }
 
@@ -545,18 +553,11 @@ public sealed class SquadLifecycleService
     /// </summary>
     private static SquadSource? TryResolveSquadSource(string extractionRoot)
     {
-        try
+        string squadPath = Path.Combine(extractionRoot, "squad.yml");
+        if (File.Exists(squadPath))
         {
-            string squadPath = Path.Combine(extractionRoot, "squad.yml");
-            if (File.Exists(squadPath))
-            {
-                string text = File.ReadAllText(squadPath);
-                if (text.Contains("name:", StringComparison.Ordinal)) return SquadSourceLoader.Load(extractionRoot);
-            }
-        }
-        catch
-        {
-            // Fall back to canonical product root if present (for test environments)
+            string text = File.ReadAllText(squadPath);
+            if (text.Contains("name:", StringComparison.Ordinal)) return SquadSourceLoader.Load(extractionRoot);
         }
 
         try
@@ -570,9 +571,9 @@ public sealed class SquadLifecycleService
                 dir = dir.Parent;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Ignore
+            // Ignore filesystem errors when searching parent directories
         }
 
         return null;
