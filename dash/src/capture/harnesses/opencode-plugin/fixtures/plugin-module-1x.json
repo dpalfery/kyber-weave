@@ -1,5 +1,5 @@
 {
-  "t0": "OpenCode 1.x plugin contract pin for T2/T3/T7 (plan docs/plans/2026-10-25-opencode-capture-deploy-kyberdash.md §5 T0, §2.2 G1/G2/G4). Facts only, no emission logic. Every quote below is verbatim from the named file on the owner machine at the version shown.",
+  "t0": "OpenCode 1.x plugin contract pin for T2/T3/T7 (plan docs/archive/plans/2026-10-25-opencode-capture-deploy-kyberdash.md §5 T0, §2.2 G1/G2/G4). Facts only, no emission logic. Every quote below is verbatim from the named file on the owner machine at the version shown.",
   "pinned_on": "2026-10-26",
   "installed_versions": {
     "opencode_cli": {

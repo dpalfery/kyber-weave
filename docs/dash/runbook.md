@@ -1375,6 +1375,11 @@ starts nothing when none runs. It prints one line: `engine: not-running`, `engin
 or `engine: replaced <old> -> <new>`. It exits 1 with `engine: unresponsive` or `engine: failed` when it
 cannot act. `kyber-weave update` runs it after the binaries commit.
 
+**Engine version in status.** `kyberdash kyber capture status` prints the running engine's version
+against the CLI's own, as `engine: running <engine>, cli <cli>`. When they differ it adds `(differs)`
+and the remedy `kyber-weave update`. It prints `engine: not-running (cli <cli>)` when no engine holds
+the endpoint, and `engine: unresponsive` when the holder never answers.
+
 **Re-projection after an upgrade.** The engine re-projects the store on its own start. The job host
 runs one maintenance tick at once, and when the store's detector stamp is older than this build's
 (`DETECTOR_VERSION`), that tick projects the store to the new rules. You do not need `kyber build`.

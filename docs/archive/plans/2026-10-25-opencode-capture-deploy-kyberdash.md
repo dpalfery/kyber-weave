@@ -2,7 +2,7 @@
 id: plans/2026-10-25-opencode-capture-deploy-kyberdash
 title: "OpenCode capture that actually deploys: loadable plugin, one-command install and update, consent file, engine restart, honest measurability"
 doc-type: plan
-status: draft
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-26
@@ -13,12 +13,12 @@ development-mode: test-first
 
 # OpenCode capture that actually deploys: loadable plugin, one-command install and update, consent file, engine restart, honest measurability
 
-**Status: Draft — revision R1 (2026-10-26). T0 ran on the approved plan and showed that the
-installed OpenCode runtime is CLI 2.1.4, which rejects the `{ id, server }` shape D1 chose.
-R1 changes D1, D2, D6, and the Test-contract rows for T2, T3, and T7. Changing an approved
-Test contract is a scope change, so the plan is back in Draft and needs owner re-approval
-(AP2) before T1–T12 run. T0 is complete and stays valid. `docs validate` / `docs drift`
-not yet run by this harness (no process tool); the conductor runs both before presenting AP2.**
+**Status: Complete — archived 2026-10-26 (revision R1 applied; owner chose to complete now
+and to run the manual gate after the merge and rc.8). T0–T12 delivered on PR 435. The owner
+live gate (§7) is `[NOT LIVE-VERIFIED]`: it needs rc.8, because `kyber-weave update` installs
+released builds only and the machine's engine is still rc.6. Residual items are listed in the
+Closeout mapping section below and in [docs/todo](../../todo/README.md). Validation evidence is
+recorded in the closeout commit.**
 
 **Development mode:** `test-first` (default; no opt-out supplied).
 **Autonomy:** `supervised`.
@@ -31,7 +31,7 @@ Owner report: "opencode is not sending or showing telemetry data in kyberdash, n
 prompt, no tools, no skills, and the tray is not showing token counts. We designed a solution
 with hooks but it does not seem to be working or it is not deployed."
 
-The hook design from [the archived context-capture plan](../archive/plans/2026-10-23-opencode-context-capture-kyberdash.md)
+The hook design from [the archived context-capture plan](2026-10-23-opencode-context-capture-kyberdash.md)
 (PR #425, envelope contract `'2'`) is on `main` and in `v0.1.8-rc.7`, but five separate
 breaks stop any of it reaching the owner's dashboard:
 
@@ -322,7 +322,7 @@ Permanent table; preserved intact across all lifecycle transitions.
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
-| C1–C4 | Owner constraints for install, update, restart, and non-overwrite. | Fixed constraints as stated in §1.2. | Relayed verbatim-intent by the conductor. They supersede archived D7 ("no installer") and drive D11–D14. | ANSWERED — owner requirement, relayed by conductor 2026-10-25 |
+| C1, C2, C3, C4 | Owner constraints for install, update, restart, and non-overwrite. | Fixed constraints as stated in §1.2. | Relayed verbatim-intent by the conductor. They supersede archived D7 ("no installer") and drive D11–D14. | ANSWERED — owner requirement, relayed by conductor 2026-10-25 |
 | Q1 | How does the owner give consent for OpenCode content (system prompt, tool definitions, skills)? | **A KyberDash-owned config file that the installer writes and the plugin reads** (§3.4). The `KYBERDASH_OPENCODE_CONTEXT` env var stays only as an optional override. | An installer cannot set OpenCode's process env, and Desktop does not inherit shell variables. The file is preserved once written (C4). | ANSWERED — owner YES, relayed by conductor 2026-10-25 |
 | Q2 | When the installer first writes the consent file, is content on? | **Off.** Install/update (Squad, `kyber-weave update`, preserve mode) creates the consent file with `content: false` only if none exists and never overwrites an existing one. Turning OpenCode capture **on in the KyberDash Settings drawer** (the same path as `capture enable --harness opencode` / `runEnable`) sets `content: true`; turning it off (`runDisable`) sets `content: false`. | Keeps the archived D5 "off by default, explicit opt-in" stance; the opt-in is the existing Settings switch, so it needs no new verb or env var. The architect's earlier recommendation (on at install) was not taken. | ANSWERED — owner decision, relayed by conductor 2026-10-25 |
 | D1 | What plugin shape does the bundle export? | **R1: `export default { id: 'kyberdash-opencode', setup }`**, the shape the installed 2.1.4 loader accepts. `setup(ctx)` registers only `ctx.session.hook("context", cb)` and reads (never mutates) `sessionID`, `model.id`, the provider id, `agent`, `system[].text`, and `tools`. It is the entry's existing `KyberdashOpencodePlugin` logic, moved to `default`. The invented dotted-kinds default map and the `registerOpencodePlugin` host bridge are removed from the entry. *(Superseded original text: "1.x `PluginModule` `{ id, server }` with `experimental.chat.system.transform`, `tool.definition`, `chat.params`" — rejected by the 2.1.4 loader per T0; those hooks do not exist in the 2.1.4 binary, byte search R1.)* | T0 fixture `loader_default_vs_named_exports` quotes the 2.1.4 schema `{ id, effect } \| { id, setup }` and its error text. A byte search of the 2.1.4 binary (R1) finds 9 `session.hook("context", …)` registrations by OpenCode's own built-in plugins, reading `model.id`, `tools`, and `system[n].text`, and zero occurrences of `chat.params`, `tool.definition`, or `system.transform`. `setup` was chosen over `effect` because `effect` requires the Effect runtime types the bundle must not import; the loader wraps `setup` itself. | RECOMMENDED — architect technical call, R1 2026-10-26 (re-verified against the installed 2.1.4 binary) |
@@ -342,7 +342,7 @@ Permanent table; preserved intact across all lifecycle transitions.
 | D15 | Does the Settings drawer need UI code for consent? | **No new logic.** The drawer's existing OpenCode switch already calls `POST /api/kyber/capture` → `runEnable` / `runDisable`; consent rides on those. The capture status API gains a consent field that the drawer renders as text (a render test only, if the drawer already lists status lines generically). | ADR 0033 display-layer rule: the decision lives in the capture engine, not the UI. | RECOMMENDED — architect technical call |
 | AP1 | Approve-and-execute gate. | Approved; execution began with T0. | The conductor reported T0 executed "on the approved plan" (2026-10-26). Superseded by R1, which changed approved Test-contract rows. | Approved per conductor relay 2026-10-26; superseded by R1 |
 | R1 | T0 found the installed runtime is OpenCode 2.1.4, which rejects D1's `{ id, server }`. How does the plan change? | D1, D2, D6 revised (above). Test-contract rows T2, T3, T7 rewritten for the 2.1.4 `setup` / `context` hook shape and `<available_skills>` parsing. §1.1 finding 3, §2.1, §2.2, §3.2 corrected. Quarantine count 35 → 41. T0 stays complete. | Test-first contract rule: changing an approved Test-contract row is a scope change, so the plan returns to Draft and needs re-approval (AP2). The C#, measurability, report, installer, and update work (T1, T4–T6, T8–T12) is unchanged in scope; T4–T5 file scopes are unchanged. | Architect revision 2026-10-26 |
-| AP2 | Re-approve and execute after R1. | OPEN. | Presented by the conductor once `docs validate` and `docs drift` pass. | OPEN — awaiting owner |
+| AP2 | Re-approve and execute after R1. | Closed by owner direction 2026-10-26: complete the plan now; the manual live gate is run after merge and rc.8. | Recorded in the Closeout mapping section. | CLOSED 2026-10-26 — owner direction relayed by the orchestrator |
 
 ## 5. Task graph
 
@@ -437,7 +437,25 @@ KyberDash Settings drawer and confirm consent flips to `content:true`. Restart O
 Context view shows system prompt and tool definitions, Skills shows the listing, the tray
 shows token counts and a context window, and absent buckets read "not measurable". Edit the
 plugin file, rerun `squad update --global`, and confirm the edit is kept with a warning.
-Recorded `[NOT LIVE-VERIFIED]` if not performed.
+**Owner live gate status: `[NOT LIVE-VERIFIED]`.** Not performed at closeout (2026-10-26).
+It needs release candidate rc.8: `kyber-weave update` installs only released builds, and the
+owner's machine still runs the rc.6 engine. The owner runs it after merge and rc.8 with this
+script, and bugs found there come back as issues:
+
+1. `kyber-weave update` (no other command). Confirm the engine and tray report the new version
+   and the rc.6 engine is gone.
+2. `kyber-weave squad update --global` (OpenCode target). Confirm
+   `~/.config/opencode/plugins/kyberdash-opencode.js` exists, `~/.kyberdash/opencode-plugin.json`
+   holds `"content": false`, and `opencode.jsonc` is unchanged.
+3. Open KyberDash, click Settings, and turn OpenCode on. Confirm the consent file now holds
+   `"content": true`.
+4. Restart OpenCode (2.1.4). Confirm its log has no "Plugin must export a default definition"
+   error for `kyberdash-opencode.js`.
+5. Run one OpenCode turn, then open the session in KyberDash. Confirm the Context view shows the
+   system prompt and tool definitions, the Skills view shows the listing, and the tray shows token
+   counts and a context window. Any bucket that was not sent must read "not measurable", never 0.
+6. Edit `kyberdash-opencode.js` by hand, then run `kyber-weave squad update --global` again.
+   Confirm the output keeps the edited file with a warning, and the file is unchanged.
 
 ## 8. Review and closeout (docs-dev)
 
@@ -448,6 +466,30 @@ drives ensure-or-attach after an upgrade (amend in place if docs-dev judges it a
 invariant). Other items take an ADR waiver as refinements of ADRs 0009, 0011, 0033, 0035.
 Proposed todos (only if the owner accepts): OpenCode 1.x runtime support, verified against a real 1.x install (R1, D2); and plugin-sourced per-message tokens (the 2.1.4 hook for them still to be pinned).
 Archive per `KW-DOC-LIFECYCLE-003` by the finishing pull request.
+
+**Closeout record (2026-10-26).** Done in this closeout:
+
+- Verified each harvest id against its governed document (see the Closeout mapping section).
+  The F3 change is in the docs and in code: preserve mode keeps an older KyberDash plugin with no
+  matching receipt as `kept-edited` (`dash/src/capture/harnesses/opencode-plugin/install.ts`,
+  preserve branch, `kept-edited` when `found.proven` is false); strict mode still upgrades.
+- Set the Decisions id cell `C1–C4` to `C1, C2, C3, C4` so each id matches the decision-id
+  pattern. The row content is unchanged.
+- Closed AP2 by owner direction on 2026-10-26.
+- Corrected the stale detector generation in `docs/dash/architecture.md` to `DETECTOR_VERSION` 5,
+  which matches `dash/src/canon/store.ts`.
+- Residual todos: [OpenCode 1.x runtime support](../../todo/opencode-1x-runtime-support.md),
+  [per-message OpenCode tokens](../../todo/opencode-plugin-per-message-tokens.md), and
+  [C# formatter churn split](../../todo/csharp-formatter-churn-split.md). The esbuild devDependency
+  declared in `9541bc4` needed no todo: section 8 does not list one.
+
+**ADR disposition.** ADR 0031 is amended in place (preserve mode and the managed writer's file
+plugin). ADR 0039 is amended in place (2026-10-26 note: `kyber-weave update` is a new caller of
+ensure-or-attach, with no invariant changed). The other decisions refine ADRs 0009, 0011, 0033, and
+0035 and take this waiver: no ADR — ADR waiver: refinements of existing KyberDash architecture (the
+display-layer rule, contract-versioned envelope, quarantine evidence, and capture key ownership) that
+add no new boundary, dependency, schema, or external surface beyond the plugin file that ADR 0031
+already covers.
 
 ## Design harvest
 
@@ -466,3 +508,58 @@ Archive per `KW-DOC-LIFECYCLE-003` by the finishing pull request.
 | H10 | Test network guard for the live receiver (D10, T1) | KyberDash | runbook |
 | H11 | Squad global install/update runs the KyberDash plugin step; non-overwrite; opt-out (C1, C4, D11, D14, T9) | KyberSquad | architecture; reference |
 | H12 | `kyber-weave update` restarts engine and tray and upgrades an installed plugin in one command, including the "already on" path; `--no-restart` (C2, C3, D12, D13, D14, T10) | KyberDash | runbook; reference |
+
+## Closeout mapping
+
+Closed 2026-10-26 by the docs-dev closeout. Every Decisions id and every Design harvest id maps
+to a live governed document (`docs/` path shown relative to this file) or carries a Documentation
+waiver with its reason. Each mapped document was re-verified against the shipped source and carries
+`last-reviewed` 2026-10-26. The documentation-impact of each item is the component of the mapped
+document; both impact components, KyberDash and KyberSquad, are covered.
+
+| ID | Destination | Documentation-impact | Status |
+|---|---|---|---|
+| C1 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (global scope, OpenCode capture plugin); [kyber-squad/architecture.md](../../kyber-squad/architecture.md) (OpenCode plugin step) | KyberSquad | archived |
+| C2, C3 | [install.md](../../install.md#updating) (one command restarts engine and tray); [dash/runbook.md](../../dash/runbook.md) (engine check) | Distribution, KyberDash | archived |
+| C4 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (preserve mode keeps edited or foreign files); [install.md](../../install.md#updating) (edited plugin file kept with a warning) | KyberSquad, Distribution | archived |
+| Q1 | [dash/architecture.md](../../dash/architecture.md) (consent file, `~/.kyberdash/opencode-plugin.json`); [dash/runbook.md](../../dash/runbook.md) (content consent) | KyberDash | archived |
+| Q2 | [dash/architecture.md](../../dash/architecture.md) (consent file: created off only when absent, Settings switch sets it on); [dash/runbook.md](../../dash/runbook.md) (content consent) | KyberDash | archived |
+| D1 | [dash/architecture.md](../../dash/architecture.md) (OpenCode 2.1.4 entry, one default export `{ id, setup }`) | KyberDash | archived |
+| D2 | [dash/architecture.md](../../dash/architecture.md) (entry: 1.x unsupported); [todo: OpenCode 1.x runtime support](../../todo/opencode-1x-runtime-support.md) | KyberDash | archived |
+| D3 | [dash/architecture.md](../../dash/architecture.md) (bundle and delivery, generated text module, drift test) | KyberDash | archived |
+| D4 | [dash/architecture.md](../../dash/architecture.md) (installer strict and preserve modes); [ADR 0031](../../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) (amended: managed writer owns a plugin file) | KyberDash | archived |
+| D5 | [dash/architecture.md](../../dash/architecture.md) (engine ensure and projection); [dash/runbook.md](../../dash/runbook.md) (engine check and engine version in status) | KyberDash | archived |
+| D6 | [dash/architecture.md](../../dash/architecture.md) (context window: reported attribute, catalog fallback, contract `'2'` unchanged) | KyberDash | archived |
+| D7 | [dash/architecture.md](../../dash/architecture.md) (measurability: observed token, cache, and cost evidence) | KyberDash | archived |
+| D8 | [dash/architecture.md](../../dash/architecture.md) (absent versus zero in `buildContextReport`) | KyberDash | archived |
+| D9 | [dash/runbook.md](../../dash/runbook.md) (quarantined spans from before this change, left in place) | KyberDash | archived |
+| D10 | [dash/runbook.md](../../dash/runbook.md) (tests: network guard refuses the live receiver port) | KyberDash | archived |
+| D11 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) (OpenCode plugin step, `--preserve --config-dir`); [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (global scope) | KyberSquad | archived |
+| D12 | [install.md](../../install.md#updating) (engine and tray reconciliation, including "already on"); [ADR 0039](../../adr/0039-single-instance-engine.md) (amended 2026-10-26) | KyberDash, Distribution | archived |
+| D13 | [install.md](../../install.md#updating) (plugin upgraded when installed; re-projection on engine start); [dash/runbook.md](../../dash/runbook.md) (re-projection after an upgrade) | KyberDash, Distribution | archived |
+| D14 | [cli-command-surface.md](../../cli-command-surface.md) (`kyber-weave update --no-restart`, `squad --no-capture-plugin`) | KyberDash, KyberSquad | archived |
+| D15 | [dash/architecture.md](../../dash/architecture.md) (consent rides the existing Settings switch); [dash/runbook.md](../../dash/runbook.md) (Settings drawer, consent on and off) | KyberDash | archived |
+| R1 | Documentation waiver: R1 is the plan's own revision record of the Test contract. Its surviving invariants (the 2.1.4 default shape, no 1.x support, consent off at install) are captured by the D1, D2, and Q2 rows above. | none | archived |
+| AP1 | Documentation waiver: approval-gate record for the approve-and-execute step, transient and superseded by R1. No surviving invariant. | none | archived |
+| AP2 | Documentation waiver: approval record closed by owner direction on 2026-10-26; the owner's decision to complete now and run the live gate after rc.8 is a closeout record, with no surviving invariant beyond the live gate in section 7. | none | archived |
+| H1 | [dash/architecture.md](../../dash/architecture.md) (OpenCode plugin span/turn envelope, entry R1) | KyberDash | archived |
+| H2 | [dash/architecture.md](../../dash/architecture.md) (bundle and delivery) | KyberDash | archived |
+| H3 | [dash/architecture.md](../../dash/architecture.md) (installer: strict and preserve modes, root precedence, receipt, file plugin; F3 preserve keeps an older plugin with no receipt as `kept-edited`); [dash/runbook.md](../../dash/runbook.md) (OpenCode capture plugin, install and update) | KyberDash | archived |
+| H4 | [dash/architecture.md](../../dash/architecture.md) (consent file); [dash/runbook.md](../../dash/runbook.md) (content consent, on and off) | KyberDash | archived |
+| H5 | [dash/architecture.md](../../dash/architecture.md) (`engine ensure --if-running`); [dash/runbook.md](../../dash/runbook.md) (engine check, engine version in status); [cli-command-surface.md](../../cli-command-surface.md) (engine ensure verb) | KyberDash | archived |
+| H6 | [dash/architecture.md](../../dash/architecture.md) (context window: `opencode.model.context_limit` reported, catalog fallback) | KyberDash | archived |
+| H7 | [dash/architecture.md](../../dash/architecture.md) (measurability, D7) | KyberDash | archived |
+| H8 | [dash/architecture.md](../../dash/architecture.md) (absent versus zero; start-up projection on an older detector stamp) | KyberDash | archived |
+| H9 | [dash/runbook.md](../../dash/runbook.md) (quarantined spans, `opencode-session-7f3a`, not relinked) | KyberDash | archived |
+| H10 | [dash/runbook.md](../../dash/runbook.md) (tests: network guard) | KyberDash | archived |
+| H11 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) (OpenCode plugin step); [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (global scope) | KyberSquad | archived |
+| H12 | [install.md](../../install.md#updating) (one-command update, restarts, plugin upgrade); [dash/runbook.md](../../dash/runbook.md) (install and update: one command) | KyberDash, Distribution | archived |
+| H13 | [dash/architecture.md](../../dash/architecture.md) (skills from the `<available_skills>` block; catalog window fallback) | KyberDash | archived |
+
+**ADR disposition.** ADR 0031 amended in place (2026-10-26). ADR 0039 amended in place (2026-10-26,
+`kyber-weave update` as a new caller of ensure-or-attach). Every other decision takes this waiver:
+no ADR — ADR waiver: refinements of existing KyberDash architecture (display-layer rule, contract
+versioned envelope, quarantine evidence, capture key ownership) that add no new boundary, dependency,
+schema, or external surface beyond the plugin file that ADR 0031 already covers.
+
+**Owner live gate.** `[NOT LIVE-VERIFIED]` (section 7; needs release candidate rc.8).

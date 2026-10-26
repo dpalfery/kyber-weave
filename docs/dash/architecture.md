@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -922,8 +922,10 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `DETECTOR_VERSION` is `4` (`dash/src/canon/store.ts`). Stores stamped with
-generation `3` report their findings as outdated and need a rebuild.
+**Detector version.** `DETECTOR_VERSION` is `5` (`dash/src/canon/store.ts`). Stores stamped with
+an older generation (for example `3` or `4`) report their findings as outdated; the engine re-projects
+them to the current generation on its next maintenance tick (see the engine and projection paragraph
+in the OpenCode plugin section above).
 
 **Web.** The Sessions page section **4 · Skills** has two tiles (skills listed, skills invoked) and
 a headline, "X of Y listed skills had no observed invocation". The headline is rendered from the

@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 ---
 
 # Todos
@@ -71,6 +71,9 @@ last-reviewed: YYYY-MM-DD
 | [transcript-segment-single-sweep.md](transcript-segment-single-sweep.md) | KyberDash | draft | `segmentTranscript` filters every step once per call, O(calls x steps); replace it with one sorted sweep if conversations grow large enough to measure. |
 | [antigravity-file-session-skill-listing.md](antigravity-file-session-skill-listing.md) | KyberDash | draft | File-only Antigravity sessions have no skill listing, since it exists only on OTLP spans; surface it from OTLP when the labels join, or document the panel as listing-free. |
 | [antigravity-offered-label-per-definition.md](antigravity-offered-label-per-definition.md) | KyberDash | draft | A mixed tool-definitions block carries one `offered (MCP catalogue)` label for every member; label per definition and add a block-member test. |
+| [opencode-1x-runtime-support.md](opencode-1x-runtime-support.md) | KyberDash | draft | The KyberDash OpenCode capture plugin is shaped for the installed 2.1.4 loader; OpenCode 1.x support is unverified because no 1.x runtime is installed to test against. |
+| [opencode-plugin-per-message-tokens.md](opencode-plugin-per-message-tokens.md) | KyberDash | draft | The OpenCode capture plugin sends no per-message token counts; a future change could emit them through the OpenCode `event` hook after pinning that hook for 2.1.4, with a double-count guard. |
+| [csharp-formatter-churn-split.md](csharp-formatter-churn-split.md) | CI Pipelines | draft | The OpenCode capture deploy change mixed C# formatter churn with behaviour changes; land formatter-only passes as separate commits so reviews show one kind of change. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.
