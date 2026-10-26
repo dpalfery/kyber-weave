@@ -14,7 +14,7 @@
 // `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` (the precedence Squad uses).
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { basename, dirname, isAbsolute } from 'node:path'
 
 import { envJoin, type PathEnv } from '../../paths.js'
 import { sha256Hex } from '../../receipt.js'
@@ -125,6 +125,28 @@ function readReceipt(path: string): Receipt | undefined {
     // a missing or unreadable receipt means nothing was recorded
   }
   return undefined
+}
+
+/**
+ * Status and uninstall may be asked from a process that does not share the installer's
+ * `--config-dir` or `$OPENCODE_CONFIG_DIR` (Squad installs into a custom root; the Settings
+ * server and `disable` run elsewhere). When the resolved root holds no plugin and no explicit
+ * `--config-dir` was given, follow the path the receipt recorded. Only a recorded path that
+ * names our plugin file is followed, so a damaged receipt cannot aim a removal elsewhere.
+ */
+function withReceiptFallback(
+  paths: OpencodePluginPaths,
+  options: Pick<OpencodePluginOptions, 'configDir'>,
+): OpencodePluginPaths {
+  if (options.configDir !== undefined && options.configDir !== '') return paths
+  if (existsSync(paths.pluginFile)) return paths
+  const recorded = readReceipt(paths.receiptFile)?.path
+  if (recorded === undefined || recorded === paths.pluginFile) return paths
+  const usable =
+    basename(recorded.replace(/\\/g, '/')) === OPENCODE_PLUGIN_FILE_NAME &&
+    (isAbsolute(recorded) || /^[A-Za-z]:[\\/]/.test(recorded))
+  if (!usable || !existsSync(recorded)) return paths
+  return { ...paths, pluginFile: recorded }
 }
 
 function versionOf(text: string): number | undefined {
@@ -273,7 +295,7 @@ export function uninstallOpencodePlugin(
   env?: PathEnv,
   options: Pick<OpencodePluginOptions, 'dryRun' | 'configDir' | 'processEnv'> = {},
 ): OpencodePluginResult {
-  const paths = opencodePluginPaths(home, env, options)
+  const paths = withReceiptFallback(opencodePluginPaths(home, env, options), options)
   const { pluginFile, receiptFile } = paths
   const slot = readSlot(pluginFile)
   if (slot.kind === 'unreadable') {
@@ -335,7 +357,7 @@ export function opencodePluginState(
   env?: PathEnv,
   options: Pick<OpencodePluginOptions, 'configDir' | 'processEnv'> = {},
 ): OpencodePluginState {
-  const paths = opencodePluginPaths(home, env, options)
+  const paths = withReceiptFallback(opencodePluginPaths(home, env, options), options)
   const receipt = readReceipt(paths.receiptFile)
   const slot = readSlot(paths.pluginFile)
   if (slot.kind === 'unreadable') return { state: 'unknown', exists: true, receipt: receipt !== undefined, unreadable: true }

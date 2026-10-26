@@ -369,3 +369,60 @@ describe('opencodePluginState and describeOpencodePluginStatus', () => {
     expect(lines()).not.toContain('SECRET-OWNER-TEXT')
   })
 })
+
+describe('receipt fallback for status and uninstall (a custom-root install is not invisible)', () => {
+  /** Installed into a custom root, as Squad does; the later caller has no flag and no env. */
+  function installedInCustomRoot(prefix: string): { home: string; root: string; pluginFile: string } {
+    const home = temp(prefix)
+    const root = temp(`${prefix}root-`)
+    installOpencodePlugin(home, undefined, { mode: 'preserve', configDir: root, processEnv: NO_ENV })
+    return { home, root, pluginFile: join(root, 'plugins', 'kyberdash-opencode.js') }
+  }
+
+  it('opencodePluginState finds the plugin at the receipt path when the resolved root has none', () => {
+    const { home } = installedInCustomRoot('oc-fb-state-')
+    expect(opencodePluginState(home, undefined, { processEnv: NO_ENV })).toMatchObject({ state: 'on', exists: true, receipt: true })
+    expect(describeOpencodePluginStatus(home, undefined, { processEnv: NO_ENV })[0]).toBe('plugin: installed')
+  })
+
+  it('uninstall removes the plugin recorded in the receipt and then the receipt', () => {
+    const { home, pluginFile } = installedInCustomRoot('oc-fb-rm-')
+    const result = uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV })
+    expect(result.exitCode).toBe(0)
+    expect(result.outcome).toBe('restored')
+    expect(existsSync(pluginFile)).toBe(false)
+    expect(existsSync(opencodePluginPaths(home, undefined, { processEnv: NO_ENV }).receiptFile)).toBe(false)
+  })
+
+  it('an explicit --config-dir keeps its own root and does not borrow the receipt path', () => {
+    const { home, pluginFile } = installedInCustomRoot('oc-fb-flag-')
+    const elsewhere = temp('oc-fb-else-')
+    expect(opencodePluginState(home, undefined, { processEnv: NO_ENV, configDir: elsewhere }).state).toBe('off')
+    expect(uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV, configDir: elsewhere }).outcome).toBe('noop')
+    expect(existsSync(pluginFile)).toBe(true)
+  })
+
+  it('a plugin at the resolved root wins over the receipt path', () => {
+    const { home } = installedInCustomRoot('oc-fb-win-')
+    const envRoot = temp('oc-fb-env-')
+    const env = { OPENCODE_CONFIG_DIR: envRoot }
+    // An env root with no plugin falls back to the receipt path ...
+    expect(opencodePluginState(home, undefined, { processEnv: env }).state).toBe('on')
+    // ... but a file at the resolved root is what status reports.
+    mkdirSync(join(envRoot, 'plugins'), { recursive: true })
+    writeFileSync(join(envRoot, 'plugins', 'kyberdash-opencode.js'), 'export default {}\n')
+    expect(opencodePluginState(home, undefined, { processEnv: env }).state).toBe('unknown')
+  })
+
+  it('ignores a receipt whose path is not a KyberDash plugin file name', () => {
+    const home = temp('oc-fb-bad-')
+    const victim = join(temp('oc-fb-victim-'), 'other.js')
+    writeFileSync(victim, OPENCODE_PLUGIN_SOURCE)
+    const { receiptFile } = opencodePluginPaths(home, undefined, { processEnv: NO_ENV })
+    mkdirSync(join(receiptFile, '..'), { recursive: true })
+    writeFileSync(receiptFile, JSON.stringify({ version: 1, path: victim, sha256: sha256Hex(OPENCODE_PLUGIN_SOURCE) }))
+    expect(opencodePluginState(home, undefined, { processEnv: NO_ENV }).state).toBe('off')
+    expect(uninstallOpencodePlugin(home, undefined, { processEnv: NO_ENV }).outcome).toBe('noop')
+    expect(existsSync(victim)).toBe(true)
+  })
+})

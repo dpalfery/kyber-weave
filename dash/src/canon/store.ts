@@ -236,8 +236,11 @@ export const WAL_SIZE_LIMIT_BYTES = 32 * 1024 * 1024
  * and say so in the PR, so the stamp stays a truthful witness instead of a
  * forgotten counter. 4 reads skill listings and invocations from canon/skills.ts
  * (Skill tool calls and the invoked key) instead of prompt-text regexes and tool names.
+ * 5 derives unmeasurable context buckets (a part never observed is absent, not zero) and
+ * carries observed-parts evidence (OpenCode capture T6/T8). Both change derived output
+ * without moving the corpus, so a store stamped 4 must re-project (D13).
  */
-export const DETECTOR_VERSION = 4
+export const DETECTOR_VERSION = 5
 
 /**
  * Metadata key: the records-write marker.

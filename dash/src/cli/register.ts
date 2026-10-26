@@ -389,6 +389,19 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       )
       .option('--endpoint <url>', 'OTLP receiver origin (default: http://127.0.0.1:4318)', parseEndpoint, DEFAULT_CAPTURE_ENDPOINT)
 
+  /** The running engine against this CLI's version (status) and ensure-once (OpenCode enable). */
+  const captureEngineSeams = async () => {
+    const { engineContext } = await import('./engine-context.js')
+    const context = await engineContext()
+    const { queryEngine } = await import('../engine/instance.js')
+    const { ensureEngine } = await import('../engine/ensure.js')
+    return {
+      cliVersion: context.version,
+      probe: () => queryEngine(context.stateDir),
+      ensure: () => ensureEngine({ stateDir: context.stateDir, version: context.version, program: context.program, programArgs: context.programArgs }),
+    }
+  }
+
   const runCaptureAction =
     (action: CaptureAction) =>
     async (opts: { harness?: string[]; endpoint?: string; dryRun?: boolean }): Promise<void> => {
@@ -397,6 +410,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
         harnessIds: opts.harness !== undefined && opts.harness.length > 0 ? opts.harness : undefined,
         endpoint: opts.endpoint,
         dryRun: opts.dryRun,
+        ...(action === 'disable' ? {} : { engine: await captureEngineSeams() }),
       })
       if (result.stdout !== '') process.stdout.write(result.stdout)
       if (result.stderr !== '') process.stderr.write(result.stderr)
@@ -454,6 +468,24 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
         process.exitCode = result.exitCode
       },
     )
+
+  // `kyberdash engine ensure --if-running` (D12): bring a live engine to this CLI's version.
+  // Contract in cli/engine.ts.
+  program
+    .command('engine')
+    .description('Manage the running KyberDash engine')
+    .command('ensure')
+    .description('Replace a live engine of another version; start nothing when none is running')
+    .option('--if-running', 'Act only when an engine is already running (required)')
+    .action(async (opts: { ifRunning?: boolean }) => {
+      const { engineContext } = await import('./engine-context.js')
+      const { runEngineEnsure } = await import('./engine.js')
+      const context = await engineContext()
+      const result = await runEngineEnsure({ ifRunning: opts.ifRunning === true, ...context })
+      if (result.stdout !== '') process.stdout.write(result.stdout)
+      if (result.stderr !== '') process.stderr.write(result.stderr)
+      process.exitCode = result.exitCode
+    })
 
   kyber
     .command('backfill')

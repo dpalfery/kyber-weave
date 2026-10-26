@@ -767,16 +767,17 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     store.close()
   })
 
-  it('stamps DETECTOR_VERSION 4 so stale generations report outdated', () => {
+  it('stamps DETECTOR_VERSION 5 so stale generations report outdated', () => {
     // Generation 2 removed the duplicate-tool-call 250-token fallback;
     // Generation 3 (issues #181/#182/#191) added honest compaction windows
     // and folded twin-harness identity; Generation 4 reads skill listings and
-    // invocations from canon/skills.ts instead of prompt regexes and tool names.
+    // invocations from canon/skills.ts instead of prompt regexes and tool names;
+    // Generation 5 derives unmeasurable context buckets and observed parts (OpenCode T6/T8).
     // The literal below pins the current generation so an accidental bump or
     // revert fails loudly; the behavioral contract is the lines after it: a
     // store stamped below current reports outdated. (The stamp itself is
     // informational — rebuilds are authoritative — see the DETECTOR_VERSION comment.)
-    expect(DETECTOR_VERSION).toBe(4)
+    expect(DETECTOR_VERSION).toBe(5)
     const path = tempStorePath()
     const store = new CanonStore(path)
     store.setDetectorVersion(1)

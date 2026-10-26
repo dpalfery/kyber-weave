@@ -51,6 +51,8 @@ import {
   type ManagedFilePlugin,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
+import type { EngineEnsureResult } from '../engine/ensure.js'
+import { engineStatusLines, formatEnsureOutcome, type EngineProbeResult } from '../engine/outcome.js'
 import { classifyFsError, type FsErrorReason } from './errno.js'
 import type { PathEnv } from './paths.js'
 
@@ -107,6 +109,18 @@ export type CaptureRunOptions = {
    * restored, so a profile removed since enable cannot strand its keys.
    */
   fileFilter?: CaptureFileFilter
+  /**
+   * Engine seams, supplied by the CLI only (the Settings server is the engine and passes none).
+   * `probe` + `cliVersion` add the engine-version lines to `status` (D5); `ensure` is called
+   * once after a successful, non-dry-run `enable` that includes OpenCode.
+   */
+  engine?: CaptureEngineSeams
+}
+
+export type CaptureEngineSeams = {
+  cliVersion: string
+  probe: () => Promise<EngineProbeResult>
+  ensure?: () => Promise<EngineEnsureResult>
 }
 
 export type CaptureFileFilter = (file: {
@@ -384,6 +398,9 @@ export async function runCapture(
     out.push(...statusLines(selected, home, pathEnv, endpoint))
     out.push(`receiver: ${probe.state}`, `  ${probe.detail}`)
     if (probe.state === 'none') out.push(RECEIVER_DOWN_REMEDY)
+    if (options.engine !== undefined) {
+      out.push(...engineStatusLines(await options.engine.probe(), options.engine.cliVersion))
+    }
     return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [] }
   }
 
@@ -393,7 +410,7 @@ export async function runCapture(
   const events: CaptureEvent[] = []
   try {
     if (action === 'enable') {
-      return await runEnable(
+      const enabled = await runEnable(
         events,
         selected,
         home,
@@ -404,6 +421,7 @@ export async function runCapture(
         options.dryRun ?? false,
         options.fileFilter,
       )
+      return await ensureEngineAfterEnable(enabled, selected, options)
     }
     return await runDisable(
       events,
@@ -421,6 +439,21 @@ export async function runCapture(
     }
     throw error
   }
+}
+
+/** OpenCode's plugin reports to the receiver, so enabling it makes sure an engine of this version runs. */
+async function ensureEngineAfterEnable(
+  enabled: CaptureRunResult,
+  selected: readonly CaptureHarnessWriter[],
+  options: CaptureRunOptions,
+): Promise<CaptureRunResult> {
+  const ensure = options.engine?.ensure
+  if (ensure === undefined || options.dryRun === true || enabled.exitCode !== 0) return enabled
+  if (!selected.some((writer) => writer.id === 'opencode')) return enabled
+  const outcome = formatEnsureOutcome(await ensure())
+  return outcome.stream === 'stdout'
+    ? { ...enabled, stdout: `${enabled.stdout}${outcome.line}\n` }
+    : { ...enabled, stderr: `${enabled.stderr}${outcome.line}\n` }
 }
 
 function statusLines(

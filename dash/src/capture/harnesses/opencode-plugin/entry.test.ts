@@ -157,7 +157,7 @@ describe('setup registers exactly one context hook', () => {
   })
 
   it('the shipped default setup registers one context hook', async () => {
-    const hook = vi.fn(() => Promise.resolve({ dispose: () => Promise.resolve() }))
+    const hook = vi.fn((_name: string, _callback: unknown) => Promise.resolve({ dispose: () => Promise.resolve() }))
     await expect(entryDefault.setup({ session: { hook } } as never)).resolves.toBeUndefined()
     expect(hook).toHaveBeenCalledTimes(1)
     expect(hook.mock.calls[0]?.[0]).toBe('context')
