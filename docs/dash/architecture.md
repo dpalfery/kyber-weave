@@ -322,7 +322,11 @@ which the installer reads as the version marker.
   present, and otherwise prints `skipped-not-installed` and writes nothing.
 
 The root is `--config-dir`, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`, the same order
-Squad's `SquadGlobalRoots` uses. The plugin is `<root>/plugins/kyberdash-opencode.js`. The receipt is
+Squad's `SquadGlobalRoots` uses. `capture enable` has no `--config-dir` flag, so it resolves `$OPENCODE_CONFIG_DIR`, else the default; only
+Squad and the plugin install verb take the flag. `capture status` and `disable` follow the receipt's
+recorded path when the resolved root holds no plugin, and only when it is
+`<dir>/plugins/kyberdash-opencode.js`, a regular non-symlink file carrying the marker. Writes are
+atomic (random temp name, `wx`, rename) and refuse a symlink at the plugin path. The plugin is `<root>/plugins/kyberdash-opencode.js`. The receipt is
 `~/.kyberdash/opencode-plugin-receipt.json`. `--dry-run` writes nothing. Stdout is `opencode plugin: <token> <file>`, with
 tokens `installed`, `upgraded`, `unchanged`, `kept-edited`, `kept-newer`, `kept-foreign`,
 `kept-unreadable`, `skipped-not-installed`, `would-install`, or `would-upgrade`. The install verb is
