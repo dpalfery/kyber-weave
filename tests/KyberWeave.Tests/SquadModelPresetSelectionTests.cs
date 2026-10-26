@@ -1,32 +1,34 @@
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Verifies Squad project model preset selection persistence, canonical path keying,
-/// project tree isolation, and lifecycle interaction.
-/// Acceptance criteria:
-/// - 6.1: Squad SHALL store a project's preset selection under ~/.kyber-weave/, keyed by canonical path.
-/// - 6.2: Squad SHALL NOT write a preset or selection file into the project's tree.
-/// - 6.3: A project selection SHALL NOT change a global install.
+///     Verifies Squad project model preset selection persistence, canonical path keying,
+///     project tree isolation, and lifecycle interaction.
+///     Acceptance criteria:
+///     - 6.1: Squad SHALL store a project's preset selection under ~/.kyber-weave/, keyed by canonical path.
+///     - 6.2: Squad SHALL NOT write a preset or selection file into the project's tree.
+///     - 6.3: A project selection SHALL NOT change a global install.
 /// </summary>
 public sealed class SquadModelPresetSelectionTests : IDisposable
 {
     private const string FastPresetYaml = """
-        schema: kyber-squad.model-preset/v1
-        profiles:
-          general:
-            default: gpt-4o-mini
-            copilot: gpt-4o-mini
-        """;
+                                          schema: kyber-squad.model-preset/v1
+                                          profiles:
+                                            general:
+                                              default: gpt-4o-mini
+                                              copilot: gpt-4o-mini
+                                          """;
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     [Fact]
     public void ReadReturnsNullWhenSelectionFileDoesNotExist()
@@ -59,7 +61,8 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         // Assert
         string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
         string rootKey = SquadPhysicalRootIdentity.KeyOf(canonicalPath);
-        string expectedFilePath = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
+        string expectedFilePath =
+            Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
 
         Assert.True(File.Exists(expectedFilePath), $"Expected selection file at '{expectedFilePath}'.");
 
@@ -169,7 +172,8 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
 
         string canonicalPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
         string rootKey = SquadPhysicalRootIdentity.KeyOf(canonicalPath);
-        string expectedFilePath = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
+        string expectedFilePath =
+            Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections", $"{rootKey}.yml");
         Assert.True(File.Exists(expectedFilePath));
 
         // Act
@@ -269,9 +273,9 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Copilot],
+            projectRoot,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: null);
 
@@ -305,9 +309,9 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         SquadLifecycleService service = new(releaseSource, renderer, stateStore, selectionStore: selectionStore);
 
         SquadInstallRequest request = new(
-            TargetRoot: projectRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
+            projectRoot,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Copilot],
             Version: "1.0.0",
             ModelPresets: null);
 
@@ -321,5 +325,37 @@ public sealed class SquadModelPresetSelectionTests : IDisposable
         Assert.NotNull(appliedPresets);
         Assert.True(appliedPresets.ContainsKey(SquadTarget.Copilot));
         Assert.Equal("fast", appliedPresets[SquadTarget.Copilot].Name);
+    }
+
+    [Theory]
+    [InlineData("Invalid Name")]
+    [InlineData("injected\n  root: bad")]
+    [InlineData("-starts-with-hyphen")]
+    public void SetRejectsInvalidPresetNamesWithArgumentException(string invalidPresetName)
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string projectRoot = Path.Combine(_temp.Path, "test-invalid-preset");
+        Directory.CreateDirectory(projectRoot);
+        SquadModelPresetSelectionStore store = new(userPaths);
+
+        Assert.Throws<ArgumentException>(() => store.Set(projectRoot, SquadTarget.Claude, invalidPresetName));
+    }
+
+    [Fact]
+    public void SetAndReadRoundTripsProjectPathWithYamlSpecialCharacters()
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string projectRoot = Path.Combine(_temp.Path, "project # with special characters");
+        Directory.CreateDirectory(projectRoot);
+        SquadModelPresetSelectionStore store = new(userPaths);
+
+        store.Set(projectRoot, SquadTarget.Claude, "fast");
+        SquadModelPresetSelection? selection = store.Read(projectRoot);
+
+        Assert.NotNull(selection);
+        string expectedPath = SquadPhysicalRootIdentity.Resolve(projectRoot).PhysicalPath;
+        Assert.Equal(expectedPath, selection.Root);
+        Assert.True(selection.ModelPresets.TryGetValue(SquadTarget.Claude, out string? presetName));
+        Assert.Equal("fast", presetName);
     }
 }

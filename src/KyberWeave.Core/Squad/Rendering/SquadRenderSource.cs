@@ -25,7 +25,7 @@ internal static class SquadRenderSource
         ArgumentNullException.ThrowIfNull(request);
 
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
-        if (request.ModelPresets != null && request.ModelPresets.TryGetValue(target, out SquadModelPreset? preset))
+        if (request.ModelPresets != null && request.ModelPresets.TryGetValue(target, out SquadModelPreset? preset) && preset is not null)
         {
             return source with { ModelProfiles = preset.ApplyTo(source.ModelProfiles) };
         }

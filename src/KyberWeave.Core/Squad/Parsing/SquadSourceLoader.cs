@@ -369,6 +369,17 @@ public static class SquadSourceLoader
                 }
             }
 
+            if (defaultModel is null && harnessModels.Count == 0)
+            {
+                SquadSourceValidator.Throw(
+                    $"Profile category '{categoryName}' must specify a 'default' model or at least one harness model override.",
+                    categoryName,
+                    file.RelativePath,
+                    $"Specify a 'default' model or harness models under '{categoryName}'.",
+                    StartLine(pair.Key));
+                throw new InvalidOperationException("Unreachable after validation failure.");
+            }
+
             profiles.Add(categoryName, new SquadModelProfile(defaultModel!, harnessModels));
         }
 

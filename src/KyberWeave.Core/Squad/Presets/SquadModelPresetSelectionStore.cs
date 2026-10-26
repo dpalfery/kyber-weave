@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
@@ -22,12 +23,15 @@ public sealed record SquadModelPresetSelection(
 ///     (<c>~/.kyber-weave/squad/selections/</c>) rather than inside the project tree. This preserves
 ///     strict project isolation and prevents uncommitted artifacts from appearing in working copies.
 /// </remarks>
-public sealed class SquadModelPresetSelectionStore
+public sealed partial class SquadModelPresetSelectionStore
 {
     /// <summary>
     ///     The YAML schema version identifier for project model preset selections.
     /// </summary>
     public const string Schema = "kyber-squad.project-selection/v1";
+
+    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
+    private static partial Regex PresetNameRegex();
 
     private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByCanonicalToken =
         SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, static t => t, StringComparer.Ordinal);
@@ -112,6 +116,10 @@ public sealed class SquadModelPresetSelectionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(presetName);
+        if (!PresetNameRegex().IsMatch(presetName))
+            throw new ArgumentException(
+                $"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.",
+                nameof(presetName));
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot);
         SquadModelPresetSelection? existing = Read(projectRoot);
@@ -165,6 +173,23 @@ public sealed class SquadModelPresetSelectionStore
         if (File.Exists(targetPath)) File.Delete(targetPath);
     }
 
+    private static string FormatYamlValue(string value)
+    {
+        if (NeedsQuoting(value))
+        {
+            return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+        }
+
+        return value;
+    }
+
+    private static bool NeedsQuoting(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return true;
+        if (char.IsWhiteSpace(s[0]) || char.IsWhiteSpace(s[^1])) return true;
+        return s.IndexOfAny(['#', ':', '\'', '"', '\n', '\r', '\t', '`', '*', '&', '!', '|', '>', '%', '@', '[', ']', '{', '}']) >= 0;
+    }
+
     private void WriteSelection(SquadPhysicalRootIdentity identity, IReadOnlyDictionary<SquadTarget, string> presets)
     {
         Directory.CreateDirectory(_selectionsDirectory);
@@ -176,7 +201,7 @@ public sealed class SquadModelPresetSelectionStore
         builder.Append(Schema);
         builder.Append('\n');
         builder.Append("root: ");
-        builder.Append(identity.PhysicalPath);
+        builder.Append(FormatYamlValue(identity.PhysicalPath));
         builder.Append('\n');
         builder.Append("model-presets:\n");
 
@@ -186,7 +211,7 @@ public sealed class SquadModelPresetSelectionStore
             builder.Append("  ");
             builder.Append(SquadTargetCatalog.GetToken(entry.Key));
             builder.Append(": ");
-            builder.Append(entry.Value);
+            builder.Append(FormatYamlValue(entry.Value));
             builder.Append('\n');
         }
 

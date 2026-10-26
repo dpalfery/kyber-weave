@@ -375,4 +375,17 @@ public sealed class SquadModelPresetRenderTests
         byte[] afterBytes = await File.ReadAllBytesAsync(modelsPath);
         Assert.Equal(beforeBytes, afterBytes);
     }
+
+    [Fact]
+    public void LoadWithPresentButNullPresetInDictionaryDoesNotThrowAndReturnsUnmodifiedSource()
+    {
+        SquadRenderRequest request = new(
+            ProductRoot,
+            [SquadTarget.Claude],
+            SquadDeploymentScope.Project,
+            ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = null! });
+
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
+        Assert.NotNull(source);
+    }
 }

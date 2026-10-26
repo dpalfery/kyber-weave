@@ -18,6 +18,7 @@ public sealed partial class SquadModelPresetStore
     public SquadModelPresetStore(ISquadUserPaths userPaths)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
         _presetsDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
     }
 

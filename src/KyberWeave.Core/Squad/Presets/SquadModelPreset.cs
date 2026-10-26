@@ -46,12 +46,16 @@ public sealed record SquadModelPreset(
             }
 
             string? mergedDefault = presetProfile.Default ?? kvp.Value.Default;
+            if (string.IsNullOrWhiteSpace(mergedDefault))
+                throw new InvalidOperationException(
+                    $"Profile category '{kvp.Key}' has no default model configured in either preset or bundled profiles.");
+
             Dictionary<string, string> mergedHarnesses = new(kvp.Value.HarnessModels, StringComparer.Ordinal);
 
             foreach (KeyValuePair<string, string> harness in presetProfile.HarnessModels)
                 mergedHarnesses[harness.Key] = harness.Value;
 
-            merged[kvp.Key] = new SquadModelProfile(mergedDefault!, mergedHarnesses);
+            merged[kvp.Key] = new SquadModelProfile(mergedDefault, mergedHarnesses);
         }
 
         foreach (KeyValuePair<string, SquadModelProfile> kvp in Profiles)

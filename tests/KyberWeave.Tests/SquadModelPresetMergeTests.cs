@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Diagnostics;
@@ -13,10 +9,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit tests for Squad model preset merging (<see cref="SquadModelPreset.ApplyTo"/>),
-/// preset validation (<see cref="SquadModelPresetValidator.Validate"/>),
-/// model token resolution (<see cref="SquadModelResolution.ResolveToken"/>),
-/// and agent model diffing (<see cref="SquadModelDiff.Compute"/>).
+///     Unit tests for Squad model preset merging (<see cref="SquadModelPreset.ApplyTo" />),
+///     preset validation (<see cref="SquadModelPresetValidator.Validate" />),
+///     model token resolution (<see cref="SquadModelResolution.ResolveToken" />),
+///     and agent model diffing (<see cref="SquadModelDiff.Compute" />).
 /// </summary>
 public sealed class SquadModelPresetMergeTests
 {
@@ -30,12 +26,13 @@ public sealed class SquadModelPresetMergeTests
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                claude: claude-3-7-sonnet
-            """;
-        SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("test-preset.yml", Encoding.UTF8.GetBytes(presetYaml));
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    general:
+                                      claude: claude-3-7-sonnet
+                                  """;
+        SquadModelPreset preset =
+            SquadSourceLoader.ParseModelPreset("test-preset.yml", Encoding.UTF8.GetBytes(presetYaml));
 
         SquadModelProfiles merged = preset.ApplyTo(bundled);
 
@@ -61,8 +58,8 @@ public sealed class SquadModelPresetMergeTests
     public void ApplyToOverridesSpecifiedCategoryDefaultAndHarnessKeys()
     {
         SquadModelProfile bundledGeneral = new(
-            Default: "inherit",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "inherit",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["claude"] = "claude-sonnet-5-5",
                 ["copilot"] = "Grok 4.7 (copilot)",
@@ -70,20 +67,20 @@ public sealed class SquadModelPresetMergeTests
             });
 
         SquadModelProfiles bundled = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["general"] = bundledGeneral
             },
-            SourcePath: "profiles/models.yml");
+            "profiles/models.yml");
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                default: gpt-4o
-                claude: claude-3-7-sonnet
-            """;
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    general:
+                                      default: gpt-4o
+                                      claude: claude-3-7-sonnet
+                                  """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("preset.yml", Encoding.UTF8.GetBytes(presetYaml));
 
         SquadModelProfiles merged = preset.ApplyTo(bundled);
@@ -100,28 +97,29 @@ public sealed class SquadModelPresetMergeTests
     public void ApplyToPreservesBundledCategoryDefaultWhenPresetOmitsDefault()
     {
         SquadModelProfile bundledFast = new(
-            Default: "inherit",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "inherit",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["claude"] = "claude-haiku-5-5",
                 ["copilot"] = "MAI-Code-1.1-Flash (copilot)"
             });
 
         SquadModelProfiles bundled = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["fast"] = bundledFast
             },
-            SourcePath: "profiles/models.yml");
+            "profiles/models.yml");
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              fast:
-                claude: custom-haiku
-            """;
-        SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("no-default.yml", Encoding.UTF8.GetBytes(presetYaml));
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    fast:
+                                      claude: custom-haiku
+                                  """;
+        SquadModelPreset preset =
+            SquadSourceLoader.ParseModelPreset("no-default.yml", Encoding.UTF8.GetBytes(presetYaml));
 
         SquadModelProfiles merged = preset.ApplyTo(bundled);
 
@@ -133,30 +131,60 @@ public sealed class SquadModelPresetMergeTests
     }
 
     [Fact]
+    public void ApplyToWhenBothPresetAndBundledProfileHaveNullDefaultThrowsInvalidOperationException()
+    {
+        SquadModelProfile bundledFast = new(
+            null!,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["claude"] = "claude-haiku-5-5"
+            });
+
+        SquadModelProfiles bundled = new(
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            {
+                ["fast"] = bundledFast
+            },
+            "profiles/models.yml");
+
+        const string presetYaml = """
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    fast:
+                                      copilot: inherit
+                                  """;
+        SquadModelPreset preset =
+            SquadSourceLoader.ParseModelPreset("no-default.yml", Encoding.UTF8.GetBytes(presetYaml));
+
+        Assert.Throws<InvalidOperationException>(() => preset.ApplyTo(bundled));
+    }
+
+    [Fact]
     public void ApplyToPresetDefaultReachesOnlyHarnessesNeitherFileNames()
     {
         SquadModelProfile bundledProfile = new(
-            Default: "bundled-default",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "bundled-default",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["copilot"] = "bundled-copilot"
             });
 
         SquadModelProfiles bundled = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["planning"] = bundledProfile
             },
-            SourcePath: "profiles/models.yml");
+            "profiles/models.yml");
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              planning:
-                default: preset-default
-                claude: preset-claude
-            """;
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    planning:
+                                      default: preset-default
+                                      claude: preset-claude
+                                  """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("rules.yml", Encoding.UTF8.GetBytes(presetYaml));
 
         SquadModelProfiles merged = preset.ApplyTo(bundled);
@@ -181,13 +209,13 @@ public sealed class SquadModelPresetMergeTests
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                claude: claude-3-7-sonnet
-              fast:
-                copilot: inherit
-            """;
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    general:
+                                      claude: claude-3-7-sonnet
+                                    fast:
+                                      copilot: inherit
+                                  """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("valid.yml", Encoding.UTF8.GetBytes(presetYaml));
 
         SquadModelPresetValidator.Validate(preset, bundled);
@@ -201,15 +229,15 @@ public sealed class SquadModelPresetMergeTests
 
         const string relativePath = "presets/unknown-category.yml";
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              nonexistent-category:
-                default: inherit
-            """;
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    nonexistent-category:
+                                      default: inherit
+                                  """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset(relativePath, Encoding.UTF8.GetBytes(presetYaml));
 
-        SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadModelPresetValidator.Validate(preset, bundled));
+        SquadSourceValidationException exception =
+            Assert.Throws<SquadSourceValidationException>(() => SquadModelPresetValidator.Validate(preset, bundled));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -225,24 +253,25 @@ public sealed class SquadModelPresetMergeTests
     public void ValidateThrowsWhenBundledSourceHasExpectedCategoryRemoved()
     {
         SquadModelProfiles bundledWithoutFast = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["general"] = new("inherit", new Dictionary<string, string>(StringComparer.Ordinal))
             },
-            SourcePath: "profiles/models.yml");
+            "profiles/models.yml");
 
         const string relativePath = "presets/needs-fast.yml";
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              fast:
-                claude: claude-haiku-5-5
-            """;
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    fast:
+                                      claude: claude-haiku-5-5
+                                  """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset(relativePath, Encoding.UTF8.GetBytes(presetYaml));
 
-        SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadModelPresetValidator.Validate(preset, bundledWithoutFast));
+        SquadSourceValidationException exception =
+            Assert.Throws<SquadSourceValidationException>(() =>
+                SquadModelPresetValidator.Validate(preset, bundledWithoutFast));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -258,45 +287,46 @@ public sealed class SquadModelPresetMergeTests
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         const string validYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              architect:
-                claude: opus
-              reviewer:
-                claude: sonnet
-            """;
-        SquadModelPreset validPreset = SquadSourceLoader.ParseModelPreset("valid-source.yml", Encoding.UTF8.GetBytes(validYaml));
+                                 schema: kyber-squad.model-preset/v1
+                                 profiles:
+                                   architect:
+                                     claude: opus
+                                   reviewer:
+                                     claude: sonnet
+                                 """;
+        SquadModelPreset validPreset =
+            SquadSourceLoader.ParseModelPreset("valid-source.yml", Encoding.UTF8.GetBytes(validYaml));
         SquadModelPresetValidator.Validate(validPreset, source);
 
         const string invalidYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              invalid-profile-name:
-                default: inherit
-            """;
-        SquadModelPreset invalidPreset = SquadSourceLoader.ParseModelPreset("invalid-source.yml", Encoding.UTF8.GetBytes(invalidYaml));
-        Assert.Throws<SquadSourceValidationException>(
-            () => SquadModelPresetValidator.Validate(invalidPreset, source));
+                                   schema: kyber-squad.model-preset/v1
+                                   profiles:
+                                     invalid-profile-name:
+                                       default: inherit
+                                   """;
+        SquadModelPreset invalidPreset =
+            SquadSourceLoader.ParseModelPreset("invalid-source.yml", Encoding.UTF8.GetBytes(invalidYaml));
+        Assert.Throws<SquadSourceValidationException>(() => SquadModelPresetValidator.Validate(invalidPreset, source));
     }
 
     [Fact]
     public void ResolveTokenReturnsTargetSpecificModelWhenPresent()
     {
         SquadModelProfile profile = new(
-            Default: "default-model",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "default-model",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["claude"] = "claude-sonnet-5-5",
                 ["copilot"] = "gpt-4o"
             });
 
         SquadModelProfiles profiles = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["general"] = profile
             },
-            SourcePath: "models.yml");
+            "models.yml");
 
         string? resolved = SquadModelResolution.ResolveToken(profiles, "general", "claude");
 
@@ -307,19 +337,19 @@ public sealed class SquadModelPresetMergeTests
     public void ResolveTokenFallsBackToDefaultWhenTargetHarnessNotExplicitlyNamed()
     {
         SquadModelProfile profile = new(
-            Default: "default-model",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "default-model",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["claude"] = "claude-sonnet-5-5"
             });
 
         SquadModelProfiles profiles = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["general"] = profile
             },
-            SourcePath: "models.yml");
+            "models.yml");
 
         string? resolved = SquadModelResolution.ResolveToken(profiles, "general", "cursor");
 
@@ -330,19 +360,19 @@ public sealed class SquadModelPresetMergeTests
     public void ResolveTokenReturnsNullWhenTargetHarnessSpecifiesInherit()
     {
         SquadModelProfile profile = new(
-            Default: "gpt-4o",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "gpt-4o",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["devin"] = "inherit"
             });
 
         SquadModelProfiles profiles = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["orchestration"] = profile
             },
-            SourcePath: "models.yml");
+            "models.yml");
 
         string? resolved = SquadModelResolution.ResolveToken(profiles, "orchestration", "devin");
 
@@ -353,16 +383,16 @@ public sealed class SquadModelPresetMergeTests
     public void ResolveTokenReturnsNullWhenDefaultIsInheritAndTargetHarnessNotNamed()
     {
         SquadModelProfile profile = new(
-            Default: "inherit",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal));
+            "inherit",
+            new Dictionary<string, string>(StringComparer.Ordinal));
 
         SquadModelProfiles profiles = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["orchestration"] = profile
             },
-            SourcePath: "models.yml");
+            "models.yml");
 
         string? resolved = SquadModelResolution.ResolveToken(profiles, "orchestration", "cursor");
 
@@ -373,19 +403,19 @@ public sealed class SquadModelPresetMergeTests
     public void ResolveTokenReturnsCustomModelWhenTargetHarnessOverridesInheritDefault()
     {
         SquadModelProfile profile = new(
-            Default: "inherit",
-            HarnessModels: new Dictionary<string, string>(StringComparer.Ordinal)
+            "inherit",
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["claude"] = "opus"
             });
 
         SquadModelProfiles profiles = new(
-            Schema: "kyber-squad.model-profiles/v1",
-            Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
+            "kyber-squad.model-profiles/v1",
+            new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
                 ["architect"] = profile
             },
-            SourcePath: "models.yml");
+            "models.yml");
 
         string? resolved = SquadModelResolution.ResolveToken(profiles, "architect", "claude");
 
@@ -412,21 +442,30 @@ public sealed class SquadModelPresetMergeTests
 
         SquadSource source = CreateSyntheticSource([agentAlpha, agentBeta, agentGamma]);
 
-        SquadModelProfiles beforeProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["general"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-sonnet-5-5" }),
-            ["fast"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-haiku-5-5" }),
-            ["reviewer"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "sonnet" })
-        });
+        SquadModelProfiles beforeProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["general"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-sonnet-5-5" }),
+                ["fast"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-haiku-5-5" }),
+                ["reviewer"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "sonnet" })
+            });
 
-        SquadModelProfiles afterProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["general"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-3-7-sonnet" }),
-            ["fast"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-haiku-5-5" }),
-            ["reviewer"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "sonnet" })
-        });
+        SquadModelProfiles afterProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["general"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-3-7-sonnet" }),
+                ["fast"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "claude-haiku-5-5" }),
+                ["reviewer"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "sonnet" })
+            });
 
-        IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
+        IReadOnlyList<SquadModelDiffItem> diffs =
+            SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
 
         SquadModelDiffItem item = Assert.Single(diffs);
         Assert.Equal("alpha", item.Agent);
@@ -443,17 +482,22 @@ public sealed class SquadModelPresetMergeTests
 
         SquadSource source = CreateSyntheticSource([agentZeta, agentAlpha, agentMike]);
 
-        SquadModelProfiles beforeProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["fast"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "haiku-old" })
-        });
+        SquadModelProfiles beforeProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["fast"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "haiku-old" })
+            });
 
-        SquadModelProfiles afterProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["fast"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "haiku-new" })
-        });
+        SquadModelProfiles afterProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["fast"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "haiku-new" })
+            });
 
-        IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
+        IReadOnlyList<SquadModelDiffItem> diffs =
+            SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
 
         Assert.Equal(3, diffs.Count);
         Assert.Equal("alpha", diffs[0].Agent);
@@ -469,19 +513,25 @@ public sealed class SquadModelPresetMergeTests
 
         SquadSource source = CreateSyntheticSource([agentToExplicit, agentToInherit]);
 
-        SquadModelProfiles beforeProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["cat-a"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal)),
-            ["cat-b"] = ("default-model", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "custom-claude" })
-        });
+        SquadModelProfiles beforeProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["cat-a"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal)),
+                ["cat-b"] = ("default-model",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "custom-claude" })
+            });
 
-        SquadModelProfiles afterProfiles = CreateProfiles(new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
-        {
-            ["cat-a"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "new-claude" }),
-            ["cat-b"] = ("inherit", new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "inherit" })
-        });
+        SquadModelProfiles afterProfiles = CreateProfiles(
+            new Dictionary<string, (string Default, Dictionary<string, string> HarnessModels)>(StringComparer.Ordinal)
+            {
+                ["cat-a"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "new-claude" }),
+                ["cat-b"] = ("inherit",
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["claude"] = "inherit" })
+            });
 
-        IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
+        IReadOnlyList<SquadModelDiffItem> diffs =
+            SquadModelDiff.Compute(source, "claude", beforeProfiles, afterProfiles);
 
         Assert.Equal(2, diffs.Count);
 
@@ -503,12 +553,13 @@ public sealed class SquadModelPresetMergeTests
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
-            schema: kyber-squad.model-preset/v1
-            profiles:
-              general:
-                claude: claude-override
-            """;
-        SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("override.yml", Encoding.UTF8.GetBytes(presetYaml));
+                                  schema: kyber-squad.model-preset/v1
+                                  profiles:
+                                    general:
+                                      claude: claude-override
+                                  """;
+        SquadModelPreset preset =
+            SquadSourceLoader.ParseModelPreset("override.yml", Encoding.UTF8.GetBytes(presetYaml));
         SquadModelProfiles merged = preset.ApplyTo(bundled);
 
         IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", bundled, merged);
@@ -536,24 +587,24 @@ public sealed class SquadModelPresetMergeTests
     private static SquadAgent CreateAgent(string name, string modelProfile)
     {
         return new SquadAgent(
-            Schema: "kyber-squad.agent/v1",
-            Name: name,
-            Description: $"Test agent {name}",
-            Invocation: SquadInvocation.Primary,
-            ModelProfile: modelProfile,
-            CapabilityProfile: "standard",
-            CopilotCapabilityProfile: null,
-            CopilotTools: [],
-            PiExtensions: [],
-            PiTools: [],
-            DevinCapabilityProfile: null,
-            DelegatesTo: [],
-            Fallback: "none",
-            Aliases: [],
-            InstructionBody: "Test instructions",
-            BodyDigest: "digest",
-            SourcePath: $"agents/{name}.md",
-            Resources: []);
+            "kyber-squad.agent/v1",
+            name,
+            $"Test agent {name}",
+            SquadInvocation.Primary,
+            modelProfile,
+            "standard",
+            null,
+            [],
+            [],
+            [],
+            null,
+            [],
+            "none",
+            [],
+            "Test instructions",
+            "digest",
+            $"agents/{name}.md",
+            []);
     }
 
     private static SquadSource CreateSyntheticSource(IReadOnlyList<SquadAgent> agents)
@@ -562,45 +613,45 @@ public sealed class SquadModelPresetMergeTests
         JsonElement root = doc.RootElement.Clone();
 
         return new SquadSource(
-            RootPath: "synthetic",
-            Manifest: new SquadManifest(
-                Schema: "kyber-squad.squad/v1",
-                Name: "test-squad",
-                VersionSource: "kyber-weave-assembly",
-                DefaultBundle: "default",
-                Bundles: new Dictionary<string, string>(StringComparer.Ordinal) { ["default"] = "bundle.yml" },
-                Profiles: new SquadProfilePaths("models.yml", "caps.yml", "fallbacks.yml"),
-                ToolchainPath: "toolchain.yml",
-                McpPath: "mcp.json",
-                SourcePath: "squad.yml"),
-            Bundle: new SquadBundle(
-                Schema: "kyber-squad.bundle/v1",
-                Name: "default",
-                AgentNames: agents.Select(a => a.Name).ToList(),
-                SkillNames: [],
-                SourcePath: "bundle.yml"),
-            Agents: agents,
-            Skills: [],
-            ModelProfiles: new SquadModelProfiles(
-                Schema: "kyber-squad.model-profiles/v1",
-                Profiles: new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal),
-                SourcePath: "models.yml"),
-            CapabilityProfiles: new SquadCapabilityProfiles(
-                Schema: "kyber-squad.capability-profiles/v1",
-                Capabilities: [],
-                Profiles: new Dictionary<string, SquadCapabilityProfile>(StringComparer.Ordinal),
-                SourcePath: "caps.yml"),
-            FallbackProfiles: new SquadFallbackProfiles(
-                Schema: "kyber-squad.fallback-profiles/v1",
-                Profiles: new Dictionary<string, SquadFallbackProfile>(StringComparer.Ordinal),
-                SourcePath: "fallbacks.yml"),
-            Toolchain: new SquadToolchain(
-                Schema: "kyber-squad.toolchain/v1",
-                RequiredFeatures: [],
-                ValidatedRelease: null,
-                SourcePath: "toolchain.yml",
-                RequiredMcpTools: new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)),
-            McpConfiguration: root);
+            "synthetic",
+            new SquadManifest(
+                "kyber-squad.squad/v1",
+                "test-squad",
+                "kyber-weave-assembly",
+                "default",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["default"] = "bundle.yml" },
+                new SquadProfilePaths("models.yml", "caps.yml", "fallbacks.yml"),
+                "toolchain.yml",
+                "mcp.json",
+                "squad.yml"),
+            new SquadBundle(
+                "kyber-squad.bundle/v1",
+                "default",
+                agents.Select(a => a.Name).ToList(),
+                [],
+                "bundle.yml"),
+            agents,
+            [],
+            new SquadModelProfiles(
+                "kyber-squad.model-profiles/v1",
+                new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal),
+                "models.yml"),
+            new SquadCapabilityProfiles(
+                "kyber-squad.capability-profiles/v1",
+                [],
+                new Dictionary<string, SquadCapabilityProfile>(StringComparer.Ordinal),
+                "caps.yml"),
+            new SquadFallbackProfiles(
+                "kyber-squad.fallback-profiles/v1",
+                new Dictionary<string, SquadFallbackProfile>(StringComparer.Ordinal),
+                "fallbacks.yml"),
+            new SquadToolchain(
+                "kyber-squad.toolchain/v1",
+                [],
+                null,
+                "toolchain.yml",
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)),
+            root);
     }
 
     private static SquadModelProfiles CreateProfiles(
@@ -608,9 +659,7 @@ public sealed class SquadModelPresetMergeTests
     {
         Dictionary<string, SquadModelProfile> map = new(StringComparer.Ordinal);
         foreach (KeyValuePair<string, (string Default, Dictionary<string, string> HarnessModels)> entry in entries)
-        {
             map[entry.Key] = new SquadModelProfile(entry.Value.Default, entry.Value.HarnessModels);
-        }
 
         return new SquadModelProfiles("kyber-squad.model-profiles/v1", map, "models.yml");
     }

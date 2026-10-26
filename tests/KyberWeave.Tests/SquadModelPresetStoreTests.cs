@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
@@ -323,6 +324,35 @@ public sealed class SquadModelPresetStoreTests
         Assert.Empty(stems);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConstructorWithEmptyOrWhitespaceHomeDirectoryThrowsArgumentException(string homeDirectory)
+    {
+        ISquadUserPaths userPaths = new FakeSquadUserPathsWithCustomHome(homeDirectory);
+        Assert.Throws<ArgumentException>(() => new SquadModelPresetStore(userPaths));
+    }
+
+    [Fact]
+    public void ParseModelPresetRejectsEmptyProfileCategoryNamingCategory()
+    {
+        const string relativePath = "empty-category.yml";
+        const string yaml = """
+                            schema: kyber-squad.model-preset/v1
+                            profiles:
+                              fast: {}
+                            """;
+        byte[] bytes = Encoding.UTF8.GetBytes(yaml);
+
+        Diagnostic diagnostic = AssertSourceValidationException(
+            () => SquadSourceLoader.ParseModelPreset(relativePath, bytes),
+            relativePath,
+            "fast",
+            3);
+
+        Assert.Equal(3, diagnostic.StartLine);
+    }
+
     private static Diagnostic AssertSourceValidationException(
         Action action,
         string expectedPath,
@@ -344,5 +374,11 @@ public sealed class SquadModelPresetStoreTests
             Assert.NotNull(diagnostic.StartLine);
 
         return diagnostic;
+    }
+
+    private sealed class FakeSquadUserPathsWithCustomHome(string homeDirectory) : ISquadUserPaths
+    {
+        public string ApplicationDataDirectory => "/dummy/appdata";
+        public string HomeDirectory { get; } = homeDirectory;
     }
 }
