@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { CanonStore } from '../canon/store.js'
 import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 function seedWindowDb(canonDb: DatabaseSync): void {
   canonDb.exec(`

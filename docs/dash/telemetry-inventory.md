@@ -853,6 +853,8 @@ automatic system notifications when a response is ready or a session errors; CLI
 no equivalent surface. Desktop troubleshooting is disable-plugins then clear-cache and
 restart; CLIv2 uses watched-config reload / `opencode service restart`.
 
+**T0 pin — OpenCode 1.x plugin contract (2026-10-26, fixture `fixtures/plugin-module-1x.json`).** The installed runtime is OpenCode CLI 2.1.4, whose loader reads only the default export and accepts only `{ id, effect }` or `{ id, setup }`, so the 1.x `{ id, server }` shape is rejected there. Skill listings are prompt text in an `<available_skills>` block. `chat.params` input carries `model.limit.context` (number) and `provider.info.id`. The 1.x named-export rule is not pinned because no 1.x runtime is installed locally. The quarantined `contract version` rows (41 at pin time, 35 before 2026-10-25) all carry the test fixture session `opencode-session-7f3a`, so they are test pollution.
+
 ## Sources
 
 - [Claude Code monitoring & usage](https://code.claude.com/docs/en/monitoring-usage)

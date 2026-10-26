@@ -16,6 +16,9 @@ import {
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord, ContentPart } from '../canon/types.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   let server: Server

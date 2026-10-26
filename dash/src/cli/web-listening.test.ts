@@ -17,6 +17,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { REPORT_SCHEMA_VERSION } from '../analysis/report/types.js'
 import { formatValidViewForms } from '../server/view-paths.js'
 import { runWebDashboard } from './web.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const DASH_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const PACKAGE_VERSION = String(

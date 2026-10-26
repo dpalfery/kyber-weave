@@ -21,6 +21,9 @@ import {
   type OpencodePluginHost,
 } from './plugin.js'
 
+// The default sender would POST to the live receiver at 127.0.0.1:4318 (D10); inject a stub.
+const acceptingReceiver = () => Promise.resolve(new Response(null, { status: 200 }))
+
 const SESSION_ID = 'opencode-session-7f3a'
 const TURN_INDEX = 3
 const SPAN_ID = 'span-00c1'
@@ -244,7 +247,7 @@ describe('Opencode plugin session.context hook (T2, fixture: fixtures/context-pa
 
 describe('Opencode installed pipeline stamper forwards session.context content (T2 missing link)', () => {
   it('stamps context content onto the mapper payload when present', async () => {
-    const installed = createInstalledOpencodePlugin({ spool: true })
+    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
     await installed.plugin.context({
       sessionId: SESSION_ID,
       turnIndex: TURN_INDEX,
@@ -263,7 +266,7 @@ describe('Opencode installed pipeline stamper forwards session.context content (
   })
 
   it('leaves content keys absent when the event names no content (lifecycle stamps byte-unchanged)', async () => {
-    const installed = createInstalledOpencodePlugin({ spool: true })
+    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
     await installed.plugin.context({ sessionId: SESSION_ID })
     const contextSpan = installed.mappedSpans.at(-1)
     for (const key of [

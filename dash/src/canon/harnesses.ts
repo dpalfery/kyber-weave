@@ -105,6 +105,12 @@ export type SessionDigest = {
   bucketParts: Set<string>
   /** Window provenance of every session that named one, the evidence for pressure. */
   windowSources: Set<ContextLimitSource>
+  /** Whether any session carried observed token counters, the evidence for token usage and cost. */
+  tokenUsage: boolean
+  /** Whether any session carried an observed cache-read counter. */
+  cacheRead: boolean
+  /** Whether any session carried a priced cost figure. */
+  cost: boolean
 }
 
 /** True when a stored bucket value is an observed, positive token count. */
@@ -150,8 +156,17 @@ function positiveFiniteLimit(value: unknown): value is number {
 export function evidenceOf(digest: SessionDigest): {
   bucketParts: Set<string>
   windowSources: Set<ContextLimitSource>
+  tokenUsage: boolean
+  cacheRead: boolean
+  cost: boolean
 } {
-  return { bucketParts: digest.bucketParts, windowSources: digest.windowSources }
+  return {
+    bucketParts: digest.bucketParts,
+    windowSources: digest.windowSources,
+    tokenUsage: digest.tokenUsage,
+    cacheRead: digest.cacheRead,
+    cost: digest.cost,
+  }
 }
 
 /**
@@ -172,6 +187,9 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     subagentSessions: 0,
     bucketParts: new Set(),
     windowSources: new Set(),
+    tokenUsage: false,
+    cacheRead: false,
+    cost: false,
   }
 
   for (const payload of payloads) {
@@ -234,6 +252,15 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     if (summary) {
       if (typeof summary.total_cache_read === 'number') digest.totalCacheRead += summary.total_cache_read
       if (typeof summary.total_input === 'number') digest.totalInput += summary.total_input
+      // Evidence is an observed, positive counter: a zero or an unmeasurable
+      // block is not proof the harness exports the counter.
+      if (observedBucket(summary.total_input) || observedBucket(summary.total_output)) digest.tokenUsage = true
+      if (observedBucket(summary.total_cache_read)) digest.cacheRead = true
+      const cost = summary.cost as { status?: unknown; value?: unknown } | undefined
+      // A priced block (a value, not a no_rate marker) is the only cost evidence.
+      if (cost !== undefined && cost !== null && cost.status === 'priced' && typeof cost.value === 'number' && Number.isFinite(cost.value)) {
+        digest.cost = true
+      }
     }
 
     // Tool yield: per-tool rows where the session has them, per-server counts
@@ -440,7 +467,7 @@ export function assembleRollup(
 
   // 2. Cache Hit Rate
   let cacheHitRate: number | null = null
-  const cacheAvail = harnessDimensionAvailability(harness, 'cache_hit_rate')
+  const cacheAvail = harnessDimensionAvailability(harness, 'cache_hit_rate', evidence)
 
   if (isNotMeasurable(cacheAvail)) {
     cacheHitRate = null

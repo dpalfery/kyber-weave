@@ -5,7 +5,7 @@ doc-type: plan
 status: draft
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 documentation-impact: extends-component
 impact-components: [KyberDash, KyberSquad]
 development-mode: test-first
@@ -13,9 +13,12 @@ development-mode: test-first
 
 # OpenCode capture that actually deploys: loadable plugin, one-command install and update, consent file, engine restart, honest measurability
 
-**Status: Draft — decision-complete (Q1, Q2 answered by the owner 2026-10-25). Awaiting the
-approve-and-execute gate (AP1). `docs validate` / `docs drift` not yet run by this harness
-(no process tool); the conductor runs both before presenting AP1.**
+**Status: Draft — revision R1 (2026-10-26). T0 ran on the approved plan and showed that the
+installed OpenCode runtime is CLI 2.1.4, which rejects the `{ id, server }` shape D1 chose.
+R1 changes D1, D2, D6, and the Test-contract rows for T2, T3, and T7. Changing an approved
+Test contract is a scope change, so the plan is back in Draft and needs owner re-approval
+(AP2) before T1–T12 run. T0 is complete and stays valid. `docs validate` / `docs drift`
+not yet run by this harness (no process tool); the conductor runs both before presenting AP2.**
 
 **Development mode:** `test-first` (default; no opt-out supplied).
 **Autonomy:** `supervised`.
@@ -41,17 +44,17 @@ breaks stop any of it reaching the owner's dashboard:
 2. **The released binary cannot ship the plugin.** `entry.ts` is not a build entry
    (`dash/tsup.config.ts:4`, `dash/tsup.sea.config.ts:11`); it is only an allowlisted entry
    in `dash/scripts/unreachable.mjs:149`. There is no self-contained file to copy.
-3. **Even if copied, the installed OpenCode would not load it (new finding).** The entry was
-   pinned against `@opencode/plugin 2.1.4` (`fixtures/context-payload.json`). The owner's
-   OpenCode plugin API is `@opencode-ai/plugin 1.17.3`
-   (`~/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts`), whose module
-   contract is `PluginModule = { id?, server: Plugin }` with
-   `Plugin = (input, options?) => Promise<Hooks>`, and whose hooks include
-   `experimental.chat.system.transform`, `tool.definition`, `chat.params`, `event`, and
-   `tool.execute.before/after`. The entry's default export is a plain map keyed by invented
-   kinds (`session.start`, `session.context`, …) and its named export is `{ id, setup }`.
-   Neither is a 1.x plugin. The live-proven Kilo plugin (`dash/src/capture/kilo-plugin/source.ts`,
-   an OpenCode fork) uses exactly the 1.x `{ id, server }` shape and those three hooks.
+3. **Even if copied, the installed OpenCode would not load it (corrected in R1).** The
+   runtime on the owner's PATH is OpenCode CLI 2.1.4 (`/opt/homebrew/Cellar/opencode/2.1.4`).
+   Its loader reads only `.default`, which must match `{ id, effect: fn }` or
+   `{ id, setup: fn }`; anything else fails with "Plugin must export a default definition
+   with an id and an effect or setup function" (T0 fixture `plugin-module-1x.json`,
+   `loader_default_vs_named_exports`). The entry's default export is a plain map keyed by
+   invented kinds (`session.start`, …), so it is rejected. The correct `{ id, setup }`
+   object exists in the entry, but only as the named export `KyberdashOpencodePlugin`, which
+   2.1.4 never reads. (The `@opencode-ai/plugin 1.17.3` package in `~/.config/opencode` is
+   types only; no 1.x runtime is installed. The original plan text took those types as the
+   runtime contract; R1 corrects that.)
 4. **Content consent cannot reach OpenCode.** System prompt, tool definitions, and skills
    ride only when `KYBERDASH_OPENCODE_CONTEXT=1` is in OpenCode's process environment
    (`entry.ts:36-41`). An installer cannot set that, and a Desktop app started from the Dock
@@ -64,7 +67,8 @@ breaks stop any of it reaching the owner's dashboard:
    `kyberdash menubar --update` (which quits and relaunches the tray,
    `dash/src/install/menubar.ts:188-212`). Nothing restarts the engine, and the
    "already on <version>" early return (`SelfUpdater.cs:131-132`) skips every follow-up.
-   `canon.db` holds 35 spans quarantined as "unknown opencode contract version".
+   `canon.db` holds 41 spans quarantined as "unknown opencode contract version" (35 at
+   planning, 6 more since; T0 count).
 
 Two display faults sit on top, independent of the plugin:
 
@@ -80,15 +84,17 @@ Two display faults sit on top, independent of the plugin:
    `system_prompt` or `tool_definitions` bucket that the analysis zero-filled because no such
    part was observed shows "0 tokens" in the tray
    (`dash/tray/ui/src/components/SessionPanel.tsx:83-94`). The context window reads "source
-   reported no context window", although OpenCode's `chat.params` input carries
-   `model.limit.context` (`@opencode-ai/sdk` `Model.limit.context`, required).
+   reported no context window". In 2.1.4 the `context` hook input carries only a model
+   reference (`model.id` plus provider id); the runtime resolves the window from its provider
+   catalog (`providers…models[modelID].limit.context`, binary byte search, R1). D6 covers how
+   KyberDash gets a window.
 8. **Test pollution (code-confirmed).** `KyberdashOpencodePlugin.setup` calls
    `createEntryHandlers()` with no transport options, so the default endpoint
    `http://127.0.0.1:4318/v1/traces` and the global `fetch` are used. `entry.test.ts:131`,
    `:141`, and `:153` call `setup` without `fetchFn`, so a developer machine with a live
    receiver receives contract-`'2'` spans from the test run. `dash/tests/setup/env-isolation.ts`
-   isolates environment variables but not the network. Likely source of the 35 quarantined
-   spans; T0 confirms.
+   isolates environment variables but not the network. T0 confirmed it: all 41 quarantined
+   rows carry the hardcoded test session id `opencode-session-7f3a`, and rows keep arriving.
 
 ### 1.2 Fixed owner constraints (relayed by the conductor, 2026-10-25)
 
@@ -121,15 +127,17 @@ receiver.
   keep arriving through OpenCode's own OpenTelemetry export (and the owner's third-party
   `@devtheops/opencode-plugin-otel`); this plan only stops declaring them unmeasurable. A todo
   is proposed in closeout.
-- No lifecycle span emission from real 1.x hooks (such spans carry no model markers and would
-  only add non-model quarantine rows).
+- No lifecycle span emission (such spans carry no model markers and would only add non-model
+  quarantine rows).
+- No OpenCode 1.x runtime support in this plan (no 1.x runtime exists on the owner's machine,
+  so its loader cannot be verified; D2). Proposed as a todo in closeout.
 - The Squad and update paths never edit `opencode.jsonc` or the owner's `plugin` array (C4).
   The plugin is installed by file into local discovery. Only an explicit
   `kyberdash kyber capture enable --harness opencode` still writes `experimental.openTelemetry`,
   with its existing drift refusal.
 - No restart of the owner's OpenCode process; both commands print that OpenCode must be
   restarted to load a new or upgraded plugin.
-- No automatic relink or deletion of the 35 quarantined spans (D9).
+- No automatic relink or deletion of the 41 quarantined test-pollution spans (D9).
 - No envelope contract bump (D6).
 - No display logic in the tray or web dashboard (ADR 0033).
 - No new runtime dependency (the bundle uses the esbuild tsup already brings).
@@ -185,7 +193,11 @@ Owner-machine reads (read-only, outside the repo, labelled self-gathered):
    correct contract-`'2'` receiver side (`applyEnvelope` bucketing, `opencode.context.skills`).
 2. A proven file-plugin installer: `kilo-plugin/install.ts` (marker, SHA-256 receipt,
    conflict and drift refusal, dry run, uninstall, `partial` for an older marker).
-3. A proven 1.x hook surface for this data: the Kilo plugin's three hooks.
+3. A proven 2.1.4 hook surface for this data: OpenCode's own built-in plugins register
+   `session.hook("context", cb)` and read `cb`'s input `model.id`, `tools` (a record keyed by
+   tool id), and `system[n].text` (binary byte search, R1). The entry's existing
+   `KyberdashOpencodePlugin = { id, setup }` already registers this hook; it is only exported
+   under the wrong name.
 4. ADR 0039 `ensureEngine`: replaces an engine of another version and starts the new one
    detached, with test seams.
 5. Tray update already quits and relaunches the tray (`installMacos`, `installWindows`).
@@ -197,15 +209,20 @@ Owner-machine reads (read-only, outside the repo, labelled self-gathered):
 
 ### 2.2 GAPS
 
-- **G1 — 1.x loader rule for extra named exports.** Mitigation: the bundle exports only
-  `default` (D2); T0 pins the rule from the OpenCode source at the installed tag.
-- **G2 — where OpenCode 1.x lists skills** (the `skill` tool description, or the system
-  prompt). T0 pins it; otherwise the `readSystemPromptListing` fallback and a named
-  not-measurable reason.
+- **G1 — loader rule. RESOLVED by T0 for 2.1.4:** only `.default` is read, and it must be
+  `{ id, effect }` or `{ id, setup }`. The 1.x rule stays unpinned (no 1.x runtime present),
+  so 1.x is out of scope (D2).
+- **G2 — skills location. RESOLVED by T0 for 2.1.4:** an `<available_skills>` block in the
+  system prompt text, one `<skill>` per skill with `<id>`, `<name>`, `<description>`; a
+  mid-session change re-emits the block with "The available skills have changed…". The
+  `skill` tool description lists no skills.
 - **G3 — validation toolchain.** No process tool here; the conductor runs `docs validate` /
-  `docs drift` before PLAN_READY.
-- **G4 — the 35 quarantined spans.** T0 confirms test pollution by comparing their session
-  ids against test fixture ids (read-only query on a copy of `canon.db`).
+  `docs drift` before presenting AP2.
+- **G4 — quarantined spans. RESOLVED by T0:** 41 rows, all test session
+  `opencode-session-7f3a`; still arriving until T1 lands.
+- **G6 — whether the 2.1.4 `setup` context exposes a provider/model catalog** from which the
+  plugin could read the context window. Not pinned. D6 makes this optional: T2 pins it from
+  the binary in its RED step; if absent, KyberDash uses its own catalog window.
 - **G5 — engine liveness probe from C#.** `SelfUpdater` must know whether an engine or tray
   is running. Mitigation: the new `kyberdash engine ensure --if-running` verb (D12) owns that
   decision in TypeScript; C# only calls it.
@@ -252,10 +269,14 @@ KyberDash Settings drawer: OpenCode on/off  ≡  kyberdash kyber capture enable|
    │           sets consent content = ON, ensures the engine
    └─ disable: sets consent content = OFF, removes the plugin and the JSONC key (unchanged restore rules)
 
-OpenCode 1.x loads kyberdash-opencode.js → default { id: 'kyberdash-opencode', server }
-   server() hooks: experimental.chat.system.transform, tool.definition, chat.params
-   chat.params → one session.context event: sessionId, messageId, model, agent, provider,
-                 contextLimit, + systemPrompt/toolsText/skills when consent allows
+OpenCode 2.1.4 loads kyberdash-opencode.js → default { id: 'kyberdash-opencode', setup }
+   setup(ctx): await ctx.session.hook("context", cb)          (the only registration; no v1 hooks exist in 2.1.4)
+   cb(input) per request assembly → one session.context event:
+       sessionId (input.sessionID), model (input.model.id), provider (provider id on the ref),
+       agent (input.agent), contextLimit (only if ctx exposes the catalog, D6),
+       + systemPrompt (input.system[].text joined), toolsText (JSON of input.tools),
+         skills (<id> values parsed from the <available_skills> block) — only when consent allows
+   cb never mutates input (system/tools/messages are mutable in 2.1.4; KyberDash only reads)
    consent = consent file (read per event) ; env KYBERDASH_OPENCODE_CONTEXT=0 forces off, =1 forces on
    → outbox → 127.0.0.1:4318 (contract '2', + opencode.model.context_limit) → engine → report
 ```
@@ -283,7 +304,7 @@ A drift test fails when the committed text differs from a fresh bundle. First li
   it without deriving anything (ADR 0033).
 
 No separate consent verb is added; the Settings switch is the consent. The plugin reads it on
-each `chat.params` (cheap, synchronous, failure means off), so a change takes effect without
+each `context` hook call (cheap, synchronous, failure means off), so a change takes effect without
 reinstalling. `KYBERDASH_OPENCODE_CONTEXT` stays as an optional override (`0` off, `1` on).
 Content still follows the 14-day content purge.
 

@@ -28,6 +28,9 @@ import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge, type TurnContentResult } from '../server/bridge.js'
 import { OTLP_LOGS_PATH, OTLP_TRACES_PATH } from './receiver.js'
 import { startOtlpCollectorService } from './service.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // ---------------------------------------------------------------------------
 // The synthetic packet

@@ -15,11 +15,26 @@ import entryDefault, {
   createEntryHandlers,
   readContextConsent,
   toHookPayload,
+  type EntryHandlers,
+  type EntryHandlersOptions,
 } from './entry.js'
 import type { OpencodeHookEvent } from './plugin.js'
 import { OPENCODE_PLUGIN_ID } from './plugin.js'
+import type { OtlpFetch } from './transport/otlp-sender.js'
 
 const SESSION_ID = 'opencode-session-7f3a'
+
+/**
+ * A stub receiver. Entry tests emit events, and the default sender would POST
+ * them to the live KyberDash receiver at 127.0.0.1:4318 (D10). The stub keeps
+ * the test off the network; the test setup guard fails any test that reaches it.
+ */
+const stubReceiver = (): OtlpFetch =>
+  vi.fn(() => Promise.resolve(new Response(null, { status: 200 })))
+
+/** Entry handlers that deliver through the stub receiver. */
+const handlersFor = (options: Omit<EntryHandlersOptions, 'fetchFn'>): EntryHandlers =>
+  createEntryHandlers({ ...options, fetchFn: stubReceiver() })
 
 const FULL_PAYLOAD = {
   sessionId: SESSION_ID,
@@ -76,7 +91,7 @@ describe('entry handlers (consent observable at the emitted event)', () => {
   }
 
   it('consent unset → emitted event carries no content fields', async () => {
-    const handlers = createEntryHandlers({
+    const handlers = handlersFor({
       env: {},
       now: () => '2026-10-23T00:00:00.000Z',
     })
@@ -89,7 +104,7 @@ describe('entry handlers (consent observable at the emitted event)', () => {
   })
 
   it('consent set → emitted event carries content', async () => {
-    const handlers = createEntryHandlers({
+    const handlers = handlersFor({
       env: { KYBERDASH_OPENCODE_CONTEXT: '1' },
       now: () => '2026-10-23T00:00:00.000Z',
     })
@@ -102,7 +117,7 @@ describe('entry handlers (consent observable at the emitted event)', () => {
   })
 
   it('never fails the host when delivery throws', async () => {
-    const handlers = createEntryHandlers({
+    const handlers = handlersFor({
       env: {},
       now: () => '2026-10-23T00:00:00.000Z',
       onError: () => {
@@ -157,7 +172,7 @@ describe('opencode-loadable shape (T0 pin)', () => {
 
 describe('session.context entry boundary (review PR #425 finding, round 2)', () => {
   it('drops an identity-less payload: no event emitted', async () => {
-    const handlers = createEntryHandlers({
+    const handlers = handlersFor({
       env: {},
       now: () => '2026-10-23T00:00:00.000Z',
     })
@@ -167,7 +182,7 @@ describe('session.context entry boundary (review PR #425 finding, round 2)', () 
   })
 
   it('drops a toHookPayload identity-less input: no event emitted', async () => {
-    const handlers = createEntryHandlers({
+    const handlers = handlersFor({
       env: {},
       now: () => '2026-10-23T00:00:00.000Z',
     })

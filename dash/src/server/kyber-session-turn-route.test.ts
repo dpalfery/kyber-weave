@@ -8,6 +8,9 @@ import { runWebDashboard } from '../cli/web.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord, ContentPart } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // RED contract for the bounded per-turn read (change A): a new additive route
 // `GET /api/kyber/session/:id/turn/:index` serving one turn's measured figures.
