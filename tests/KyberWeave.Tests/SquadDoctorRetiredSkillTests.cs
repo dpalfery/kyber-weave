@@ -75,6 +75,29 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
         Assert.Contains("kyber-docs-", normalizedOutput, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A corrupt project receipt is state doctor could not read: it warns naming the
+    /// receipt instead of reporting healthy over unread state. A warning, not a
+    /// failure: the stale copy works and the registry check below still runs.
+    /// </summary>
+    [Fact]
+    public void Doctor_ProjectWorkspaceWithCorruptReceipt_WarnsAboutUnreadableReceipt()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-retired-corrupt");
+        Directory.CreateDirectory(workingDir);
+        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        string receiptPath = stateStore.ResolveReceiptPath(workingDir, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
+
+        CommandExecution execution = RunProjectDoctor(workingDir);
+        string normalizedOutput = Normalize(execution.Output);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("receipt", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
     private CommandExecution RunProjectDoctor(string workingDir)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()

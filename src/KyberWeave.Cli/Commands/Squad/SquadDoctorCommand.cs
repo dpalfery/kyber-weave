@@ -360,6 +360,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         List<string> retained = [];
+        string? receiptError = null;
         try
         {
             SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Project);
@@ -370,8 +371,22 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            // An unreadable receipt already fails elsewhere; the retired-skill check
-            // must not hide that failure behind its own diagnostic.
+            // An unreadable receipt is state this check could not read. Warn with the
+            // reason rather than reporting healthy over unknown state; the registry
+            // check below still applies, so this stays a warning, not a failure.
+            receiptError = ex.Message;
+        }
+
+        if (receiptError is not null)
+        {
+            string message = receiptError;
+            SquadCommandComposition.WriteUnfolded(() =>
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] Deployment receipt is unreadable: {Markup.Escape(message)}");
+                AnsiConsole.MarkupLine(
+                    "         Delete the receipt and lock, then run [grey]squad update[/] to reconcile them.");
+            });
         }
 
         if (staleDirs.Count == 0 && retained.Count == 0)
