@@ -73,7 +73,14 @@ profiles:
       filesystem.read: allow
       filesystem.search: allow
       filesystem.write: allow
-      process.execute: deny
+      # The grant is for plan and spec archival (`git mv` into the archive folders) and for
+      # the docs validate, docs drift, and doc-pinning test commands. allow rather than ask
+      # because ask narrowed to withheld on Claude, Pi, ZCode, and Devin subagents, which
+      # left the archiver unable to move a closed plan. The lattice has no command scoping,
+      # so the boundary is instruction-only: docs-dev's body names the commands it runs
+      # under "## Commands you run". This profile has exactly one consumer, docs-dev, and a
+      # test pins that, so a second consumer is a reviewed change.
+      process.execute: allow
       network.read: deny
       network.publish: deny
       delegate: deny

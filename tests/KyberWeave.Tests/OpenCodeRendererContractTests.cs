@@ -468,6 +468,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
         AssertPermissions(
             result,
             "docs-dev",
@@ -482,7 +483,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["glob"] = "allow",
                 ["list"] = "allow",
                 ["edit"] = "allow",
-                ["bash"] = "deny",
+                ["bash"] = "allow",
                 ["webfetch"] = "deny",
                 ["websearch"] = "deny",
                 ["external_directory"] = "deny",

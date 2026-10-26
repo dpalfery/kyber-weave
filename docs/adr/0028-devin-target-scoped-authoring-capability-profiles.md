@@ -4,7 +4,7 @@ title: Devin Target-Scoped Capability Profiles for Headless Authoring Roles, wit
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-26
 component: KyberSquad
 ---
 
@@ -17,6 +17,14 @@ authoring roles persist a *new* governed document on Devin ([issue #161](https:/
 Extends [ADR 0025](0025-devin-native-agents-and-skill-lowering.md), whose decisions 3 and 4 hold
 unchanged: the decision below changes which profile Devin resolves for two roles, not how Devin
 lowers a capability or whether subagents delegate. Does not change any other target.
+
+Amended 2026-10-26, in place: `docs-dev` now holds `process.execute: allow` on every target through
+the shared `documentation` profile, for plan and spec archival (`git mv`) and `docs validate` /
+`docs drift`. It was observed unable to archive, which is this ADR's own widening trigger ("widen to
+a role when that role is observed failing the same way"). The grant is shared across targets and has
+exactly one consumer, `docs-dev`, pinned by a test. On Copilot the grant renders as the seven
+`execute/*` tools in `docs-dev`'s tool list, which the source validator requires to match the
+profile. `task-reviewer` is unchanged.
 
 ## Context
 
@@ -57,10 +65,13 @@ ready, and both were unreachable on this target for the same reason.
 
 2. **`architect` and `product-owner` are the only roles that name one.** `architect-devin` and
    `product-planning-devin` mirror their shared profiles exactly except for
-   `process.execute: allow`, which the shared profiles hold as `ask` and `deny`. Two roles remain
-   deliberately unchanged: `docs-dev`, which writes documents through the edit tool and has no
-   execution-dependent completion contract, and `task-reviewer`, which is read-only apart from its
-   findings artifact. Widen to a role when that role is observed failing the same way, not before.
+   `process.execute: allow`, which the shared profiles hold as `ask` and `deny`. `docs-dev` needs no
+   Devin-scoped profile: its shared `documentation` profile grants `process.execute: allow` on every
+   target (amended 2026-10-26). That profile has one consumer, `docs-dev`, pinned by a test, and the
+   grant is instruction-scoped in the `docs-dev` body to archival `git mv`, `docs validate` and
+   `docs drift`, and doc-pinning tests. `task-reviewer` remains deliberately unchanged, as it is
+   read-only apart from its findings artifact. Widen to a role when that role is observed failing the
+   same way, not before.
 
 3. **Validation keeps the envelope target-scoped in both directions.** A `target: devin` profile is
    rejected as an agent's shared `capability-profile` — the shared-profile diagnostic now names the
@@ -95,8 +106,10 @@ ready, and both were unreachable on this target for the same reason.
 - **Keeping the roles write-only and relying on the conductor alone.** Leaves `architect` unable to
   run `docs validate` and `docs drift`, so its `PLAN_READY` contract still cannot be met
   autonomously on Devin. The pre-creation protocol is kept as the fallback, not as the mechanism.
-- **Widening `docs-dev` and `task-reviewer` too.** Neither was observed failing, and a Devin-scoped
-  profile for a role that needs no shell is a grant with no reader.
+- **Widening `task-reviewer` too; or dropping the `docs-dev` half.** `task-reviewer` was not observed
+  failing, and a Devin-scoped profile for a role that needs no shell is a grant with no reader.
+  Dropping the `docs-dev` half was rejected on 2026-10-26: `docs-dev` was observed unable to archive,
+  so the closeout path stayed blocked.
 - **Emitting `write` alone.** `write` is recognised in `allowed-tools` from CLI v3000.11.1, but the
   observed failure is that the harness exposes `edit` to this model, not that the name is
   unrecognised. Naming a tool the harness does not hand the model reproduces the original bug.
@@ -107,14 +120,15 @@ ready, and both were unreachable on this target for the same reason.
 ## Consequences
 
 - `architect` and `product-owner` receive `exec` and its three companions on Devin, and no longer
-  record `safety-narrowed` for `process.execute` there. `docs-dev` and `task-reviewer` still do.
-- `capability-not-isolable` does not arise for these two roles on Devin: with
+  record `safety-narrowed` for `process.execute` there. `docs-dev` also receives them, through its
+  shared `documentation` profile (amended 2026-10-26); `task-reviewer` still records `safety-narrowed`.
+- `capability-not-isolable` does not arise for these three roles (`architect`, `product-owner`, `docs-dev`) on Devin: with
   `filesystem.write: allow` alongside `process.execute: allow`, there is no withheld write-tool name
   to name. The record is still emitted for Devin roles that grant execution while withholding writes.
 - Devin authoring roles hold a shell. That is a real widening of what the deployed subagent can do,
   accepted because the alternative is a harness that cannot create the artifact the role exists to
-  write. Both roles use the shell to initialise a missing destination before editing and to run
-  their documentation checks; the conductor pre-creation protocol stays as the fallback if a write
+  write. `architect` and `product-owner` use the shell to initialise a missing destination before
+  editing and to run their documentation checks; `docs-dev` uses it to archive and run its checks. The conductor pre-creation protocol stays as the fallback if a write
   still fails on a nonexistent file. The shared profile's narrower intent — a grant scoped to two
   commands rather than a shell — is preserved everywhere else.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
@@ -129,7 +143,8 @@ ready, and both were unreachable on this target for the same reason.
 - [ADR 0025](0025-devin-native-agents-and-skill-lowering.md) — Devin rendering decisions this extends
 - [ADR 0017](0017-copilot-deterministic-tool-order.md) — Copilot tool membership and emission order, the projection the `copilot-capability-profile` field feeds
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering, target-scoped profiles and where `architect-copilot` is declared
-- [`products/kyber-squad/profiles/capabilities.yml`](../../products/kyber-squad/profiles/capabilities.yml) — the `architect-copilot`, `architect-devin`, and `product-planning-devin` profiles
+- [`products/kyber-squad/profiles/capabilities.yml`](../../products/kyber-squad/profiles/capabilities.yml) — the `architect-copilot`, `architect-devin`, `product-planning-devin`, and shared `documentation` profiles
+- [`products/kyber-squad/agents/docs-dev.md`](../../products/kyber-squad/agents/docs-dev.md) — the single consumer of the `documentation` profile and its `## Commands you run` boundary
 - [`products/kyber-squad/agents/architect/references/plan-authoring.md`](../../products/kyber-squad/agents/architect/references/plan-authoring.md) — architect initialise-before-edit instruction
 - [`products/kyber-squad/skills/product-owner/references/spec-authoring.md`](../../products/kyber-squad/skills/product-owner/references/spec-authoring.md) — product-owner initialise-before-edit instruction
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — Devin notes for operators

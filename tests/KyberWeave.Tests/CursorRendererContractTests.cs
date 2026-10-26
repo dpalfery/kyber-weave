@@ -316,8 +316,19 @@ public sealed class CursorRendererContractTests
         Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "architect", expectedReadOnly: false);
 
+        // Cursor has no tools allow-list, so the documentation grant reaches the rendered output
+        // only through the readonly boolean. Either filesystem.write or process.execute being
+        // allowed omits readonly, so the rendered effect alone cannot distinguish process.execute
+        // Allow from Ask here. The grant is therefore pinned on the loaded profile, as the Claude
+        // and OpenCode renderer contracts do; the artifact assertions below check the rendered output.
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
-        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.True(
+            docProfile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision docExecuteDecision),
+            "The 'documentation' capability profile must declare process.execute.");
+        Assert.True(
+            docExecuteDecision == SquadPermissionDecision.Allow,
+            $"The 'documentation' capability profile must grant process.execute Allow, but declares {docExecuteDecision}.");
+        Assert.Single(result.Files, f => f.RelativePath == ".cursor/agents/docs-dev.md");
         AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];

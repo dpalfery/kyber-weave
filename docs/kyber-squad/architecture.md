@@ -709,10 +709,12 @@ and validates.
   directory that sidecar would need). Each tells the role to initialise a destination that
   does not exist before editing. `architect`'s `PLAN_READY`
   contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
-  `docs drift` to pass. `docs-dev` deliberately names no
-  Devin profile and keeps narrowing: it has no an execution-dependent completion contract, and a
-  grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
-  also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
+  `docs drift` to pass. `docs-dev` needs no Devin profile: its shared `documentation` profile
+  grants `process.execute: allow` on every target, for archival `git mv` and the two docs checks
+  (ADR 0028, amended 2026-10-26), so on Devin it receives `exec` and its companions and records no
+  `safety-narrowed`. On Antigravity it receives `run_command` beside `write_to_file` and records no
+  `capability-not-isolable` (ADR 0022). With `filesystem.write: allow` beside the shell, these three roles
+  (`architect`, `product-owner`, and `docs-dev`) also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
   and `spec-path` references pre-create an empty destination before dispatching, and again before
   redispatching a role that reported a write error on a nonexistent file — the harness-neutral
   fallback for any harness that withholds file creation from subagents.
