@@ -27,7 +27,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                 settings.ReleaseCandidate,
                 settings.NoMcp,
                 settings.NoKyberDash,
-                settings.NoMenubar));
+                settings.NoMenubar,
+                settings.NoRestart));
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }
@@ -38,10 +39,15 @@ public sealed class UpdateCommand : Command<UpdateSettings>
         }
     }
 
-    public int Execute(CommandContext context, UpdateSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, UpdateSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 
-    private static void Log(string message) =>
+    private static void Log(string message)
+    {
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(message)}[/]");
+    }
 
     private static void WriteOutcome(SelfUpdateOutcome outcome)
     {

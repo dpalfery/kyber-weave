@@ -1,5 +1,9 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
+using System.Text.Json;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Cli.Update;
 
@@ -46,20 +50,28 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, IReadOnlyList<string>, int> _runProcess;
     private readonly Func<string, string?> _readEnvironment;
     private readonly Func<string, bool> _canWriteDirectory;
+    private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
 
+    /// <param name="captureProcess">
+    /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
+    /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the restart
+    /// line depends on what the verb printed. Tests pass a fake so no reconciliation starts a real process.
+    /// </param>
     internal SelfUpdater(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         Action<string>? log = null,
         Func<string, string?>? readEnvironment = null,
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
-        Func<string, bool>? canWriteDirectory = null)
+        Func<string, bool>? canWriteDirectory = null,
+        Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
         _log = log ?? (_ => { });
         _runProcess = runProcess ?? RunProcess;
+        _captureProcess = captureProcess ?? RunCapture;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
@@ -74,8 +86,10 @@ internal sealed class SelfUpdater : IDisposable
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "HttpClient takes ownership of the handler (disposeHandler: true).")]
-    internal static SelfUpdater Create(SelfUpdateHost host, Action<string>? log = null) =>
-        new(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log);
+    internal static SelfUpdater Create(SelfUpdateHost host, Action<string>? log = null)
+    {
+        return new SelfUpdater(new SocketsHttpHandler { AllowAutoRedirect = true }, host, log);
+    }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
     {
@@ -93,13 +107,17 @@ internal sealed class SelfUpdater : IDisposable
                 1,
                 "the GitHub request timed out. Check the network connection and retry.");
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException
+                                       or InvalidDataException)
         {
             return new SelfUpdateOutcome(1, ex.Message);
         }
     }
 
-    public void Dispose() => _releases.Dispose();
+    public void Dispose()
+    {
+        _releases.Dispose();
+    }
 
     private SelfUpdateOutcome RunCore(SelfUpdateOptions options)
     {
@@ -127,12 +145,17 @@ internal sealed class SelfUpdater : IDisposable
             version = _releases.ResolveLatestStable();
         }
 
+        bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         string current = ReleaseVersion.Normalize(_host.CurrentVersion);
         if (string.Equals(current, version, StringComparison.Ordinal))
+        {
+            // Nothing to download, but a new kyberdash can still be running an old engine, a tray, or an
+            // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
+            ReconcileKyberDash(options, version, windows, false);
             return new SelfUpdateOutcome(0, $"already on {version}");
+        }
 
         string tag = ReleaseVersion.Tag(version);
-        bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         DirectoryInfo work = Directory.CreateTempSubdirectory("kyber-weave-update-");
         try
         {
@@ -178,8 +201,9 @@ internal sealed class SelfUpdater : IDisposable
                     bool existed = File.Exists(item.Destination);
                     if (existed)
                     {
-                        File.Copy(item.Destination, backupFile, overwrite: true);
+                        File.Copy(item.Destination, backupFile, true);
                     }
+
                     backups.Add((backupFile, item.Destination, existed));
                 }
 
@@ -196,7 +220,7 @@ internal sealed class SelfUpdater : IDisposable
                         {
                             if (backup.Existed && File.Exists(backup.BackupPath))
                             {
-                                File.Copy(backup.BackupPath, backup.Destination, overwrite: true);
+                                File.Copy(backup.BackupPath, backup.Destination, true);
                             }
                             else if (!backup.Existed && File.Exists(backup.Destination))
                             {
@@ -235,10 +259,9 @@ internal sealed class SelfUpdater : IDisposable
             }
         }
 
-        // After the binaries are in place, so the tray installer that runs is the
-        // new one and it resolves the release this update just installed.
-        if (ShouldUpdateTray(options, version, windows))
-            UpdateTray(windows, version);
+        // After the binaries are in place, so every step that runs is the new kyberdash, and the tray
+        // installer resolves the release this update just installed.
+        ReconcileKyberDash(options, version, windows, true);
 
         string installed = Path.Combine(
             _host.InstallDirectory,
@@ -253,7 +276,7 @@ internal sealed class SelfUpdater : IDisposable
     /// left out. Every skip is logged, because a silent one reads as the update
     /// having covered the tray when it did not.
     /// </remarks>
-    private bool ShouldUpdateTray(SelfUpdateOptions options, string version, bool windows)
+    private bool ShouldUpdateTray(SelfUpdateOptions options, string version, bool windows, bool releaseChanged)
     {
         if (options.NoMenubar)
         {
@@ -272,7 +295,8 @@ internal sealed class SelfUpdater : IDisposable
 
         if (ReleaseVersion.Compare(version, TrayMinVersion) < 0)
         {
-            _log($"release {version} predates the KyberDash tray (first published in {TrayMinVersion}); leaving the tray unchanged");
+            _log(
+                $"release {version} predates the KyberDash tray (first published in {TrayMinVersion}); leaving the tray unchanged");
             return false;
         }
 
@@ -281,6 +305,26 @@ internal sealed class SelfUpdater : IDisposable
         {
             _log($"no tray install recorded in {record}; install it with `kyberdash menubar`");
             return false;
+        }
+
+        // With no release change the binaries did not move, so the tray is relaunched only when the
+        // tray that is running was recorded older than the kyberdash just reconciled.
+        if (!releaseChanged)
+        {
+            string? recorded = ReadRecordedTrayVersion(record);
+            if (recorded is null)
+            {
+                _log($"the tray record {record} has no readable version; leaving the KyberDash tray unchanged");
+                return false;
+            }
+
+            if (ReleaseVersion.Compare(recorded, version) >= 0)
+            {
+                _log($"the KyberDash tray is already on {recorded}; leaving it unchanged");
+                return false;
+            }
+
+            _log($"the KyberDash tray is on {recorded}, older than kyberdash {version}; relaunching it");
         }
 
         string kyberdash = Path.Combine(
@@ -293,6 +337,199 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Brings the running KyberDash processes in line with the installed kyberdash: the engine (D12, C2, C3), the
+    /// tray (D12), then the OpenCode capture plugin (D13). Runs after the binaries commit on both the release-changed
+    /// path and the "already on" path, so one command clears a stale engine.
+    /// </summary>
+    /// <remarks>
+    /// A failed engine step throws a named failure, which the caller reports as exit 1. Nothing is rolled back: the
+    /// binaries are already committed and are the new release. A failed plugin step is only a warning, because the
+    /// plugin is an optional surface and the owner can rerun it with the printed command.
+    /// </remarks>
+    private void ReconcileKyberDash(SelfUpdateOptions options, string version, bool windows, bool releaseChanged)
+    {
+        if (options.NoKyberDash)
+        {
+            // Every step here is kyberdash itself. Running any of them would run whichever kyberdash is installed.
+            _log("--no-kyberdash given; leaving the KyberDash engine, tray and capture plugin unchanged");
+            return;
+        }
+
+        if (options.NoRestart)
+        {
+            _log("--no-restart given; leaving the KyberDash engine and tray running as they are");
+        }
+        else
+        {
+            EnsureEngine(windows);
+            if (ShouldUpdateTray(options, version, windows, releaseChanged))
+                UpdateTray(windows, version);
+        }
+
+        UpdateCapturePlugin(windows);
+    }
+
+    /// <summary>Asks the installed kyberdash to replace a running engine of another version. Starts nothing when none runs.</summary>
+    private void EnsureEngine(bool windows)
+    {
+        string kyberdash = InstalledKyberDash(windows);
+        if (!File.Exists(kyberdash))
+        {
+            _log($"kyberdash is not installed in {_host.InstallDirectory}; leaving the KyberDash engine unchanged");
+            return;
+        }
+
+        _log("checking the KyberDash engine…");
+        ProcessResult result;
+        try
+        {
+            result = _captureProcess(kyberdash, ["engine", "ensure", "--if-running"]);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
+        {
+            throw new SelfUpdateException(
+                $"the KyberDash engine step could not start `{kyberdash} engine ensure --if-running`: {ex.Message}. " +
+                "The binaries are already updated; run `kyberdash engine ensure --if-running` to retry.");
+        }
+
+        if (result.ExitCode == 0)
+        {
+            _log(FirstLine(result.StandardOutput, "the KyberDash engine is checked"));
+            return;
+        }
+
+        if (MentionsUnknownCommand(result))
+        {
+            _log("this KyberDash predates `engine ensure`; the running engine was not restarted");
+            return;
+        }
+
+        throw new SelfUpdateException(
+            $"the KyberDash engine step failed: `{kyberdash} engine ensure --if-running` exited {result.ExitCode}" +
+            $"{Reason(result)}. The binaries are already updated; run `kyberdash engine ensure --if-running` to retry.");
+    }
+
+    /// <summary>
+    /// Installs or upgrades the OpenCode capture plugin, but only when it is already installed (D13), so an update
+    /// never adds a surface the owner did not choose. Prints the restart line when the plugin file changed.
+    /// </summary>
+    private void UpdateCapturePlugin(bool windows)
+    {
+        string kyberdash = InstalledKyberDash(windows);
+        if (!File.Exists(kyberdash))
+        {
+            _log(
+                $"kyberdash is not installed in {_host.InstallDirectory}; leaving the OpenCode capture plugin unchanged");
+            return;
+        }
+
+        ProcessResult result;
+        try
+        {
+            result = _captureProcess(
+                kyberdash,
+                ["kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"]);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
+        {
+            _log($"warning: the OpenCode capture plugin step could not run KyberDash: {ex.Message}");
+            return;
+        }
+
+        if (result.ExitCode != 0)
+        {
+            if (MentionsUnknownCommand(result))
+                _log("this KyberDash predates the capture plugin command; the OpenCode capture plugin was not updated");
+            else
+                _log(
+                    $"warning: the OpenCode capture plugin step failed (exit {result.ExitCode}){Reason(result)}. " +
+                    "The update is otherwise complete. Retry with " +
+                    "`kyberdash kyber capture plugin install --harness opencode --preserve --if-installed`.");
+            return;
+        }
+
+        string verdict = FirstLine(result.StandardOutput, "the OpenCode capture plugin is checked");
+        _log(verdict);
+        if (PluginChanged(verdict))
+            _log("Restart OpenCode to load the upgraded capture plugin.");
+    }
+
+    /// <summary>The installed kyberdash, beside kyber-weave. Reconciliation never looks on PATH, so it only touches the binary this update installed.</summary>
+    private string InstalledKyberDash(bool windows)
+    {
+        return Path.Combine(_host.InstallDirectory, BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
+    }
+
+    /// <summary>The version the tray record names, or null when the record cannot be read or names no valid version.</summary>
+    private static string? ReadRecordedTrayVersion(string record)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(record));
+            if (document.RootElement.TryGetProperty("version", out JsonElement version)
+                && version.ValueKind == JsonValueKind.String)
+                return ReleaseVersion.Normalize(version.GetString() ?? string.Empty);
+            return null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException
+                                       or SelfUpdateException)
+        {
+            return null;
+        }
+    }
+
+    private static bool PluginChanged(string verdict)
+    {
+        if (!verdict.StartsWith("opencode plugin: ", StringComparison.Ordinal))
+            return false;
+
+        string[] fields = verdict.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return fields.Length >= 3 && fields[2] is "installed" or "upgraded";
+    }
+
+    private static bool MentionsUnknownCommand(ProcessResult result)
+    {
+        return (result.StandardOutput + "\n" + result.StandardError).Contains("unknown command",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FirstLine(string text, string fallback)
+    {
+        foreach (string line in text.Split('\n'))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.Length > 0)
+                return trimmed;
+        }
+
+        return fallback;
+    }
+
+    /// <summary>Names the first line of stderr (or stdout) as the reason, when the process printed one.</summary>
+    private static string Reason(ProcessResult result)
+    {
+        string text = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+        string first = FirstLine(text, string.Empty);
+        return first.Length == 0 ? string.Empty : $": {first}";
+    }
+
+    /// <summary>Runs a verb and captures what it printed. A process that cannot start surfaces as the caller's named failure.</summary>
+    private static ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments)
+    {
+        ProcessStartInfo start = new(fileName)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in arguments)
+            start.ArgumentList.Add(argument);
+
+        return ProcessRunner.Run(start, string.Empty);
     }
 
     private void UpdateTray(bool windows, string version)
@@ -311,6 +548,7 @@ internal sealed class SelfUpdater : IDisposable
             throw new SelfUpdateException(
                 $"the KyberDash tray step failed: `{kyberdash} menubar --update --version {version}` exited {exitCode}.");
         }
+
         _log("updated the KyberDash tray");
     }
 
@@ -334,11 +572,11 @@ internal sealed class SelfUpdater : IDisposable
 
     private static int RunProcess(string fileName, IReadOnlyList<string> arguments)
     {
-        System.Diagnostics.ProcessStartInfo start = new(fileName) { UseShellExecute = false };
+        ProcessStartInfo start = new(fileName) { UseShellExecute = false };
         foreach (string argument in arguments)
             start.ArgumentList.Add(argument);
 
-        using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(start);
+        using Process? process = Process.Start(start);
         if (process is null)
             throw new SelfUpdateException($"the KyberDash tray step could not start {fileName}.");
 
@@ -400,7 +638,8 @@ internal sealed class SelfUpdater : IDisposable
 
         if (ReleaseVersion.Compare(version, KyberDashMinVersion) < 0)
         {
-            _log($"release {version} predates KyberDash (first published in {KyberDashMinVersion}); leaving kyberdash unchanged");
+            _log(
+                $"release {version} predates KyberDash (first published in {KyberDashMinVersion}); leaving kyberdash unchanged");
             return false;
         }
 
@@ -458,7 +697,7 @@ internal sealed class SelfUpdater : IDisposable
     {
         string normalized = processPath.Replace('\\', '/');
         return normalized.Contains("/.dotnet/tools/", StringComparison.OrdinalIgnoreCase)
-            || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
+               || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static bool CanWriteDirectory(string directory)
@@ -466,7 +705,8 @@ internal sealed class SelfUpdater : IDisposable
         try
         {
             string probe = Path.Combine(directory, ".kyber-weave-update-" + Guid.NewGuid().ToString("N"));
-            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
+            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1,
+                       FileOptions.DeleteOnClose))
             {
             }
 
