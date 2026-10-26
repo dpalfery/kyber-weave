@@ -177,6 +177,27 @@ export type ManagedHarnessWriter = {
   configFiles?: readonly CaptureConfigFile[]
   statusWarnings?: readonly CaptureStatusWarning[]
   statusEnvSnippet?: CaptureStatusEnvSnippet
+  /**
+   * A whole file this harness also owns beside its config keys (the OpenCode plugin).
+   * `enable` runs `install` (strict) then `consent.set(true)`; `disable` runs
+   * `consent.set(false)` then `uninstall`. The file keeps its own receipt, so none of
+   * it touches the key receipt or the harness config.
+   */
+  filePlugin?: ManagedFilePlugin
+}
+
+/** The whole-file plugin a managed harness owns. Results reuse the Kilo plugin shape. */
+export type ManagedFilePlugin = {
+  install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
+  uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean }) => KiloPluginResult
+  path: (home: string, env: PathEnv | undefined) => string
+  state: (home: string, env: PathEnv | undefined) => KiloPluginState
+  /** Fixed-format status lines for the plugin and its consent. Never echoes owner text. */
+  describeStatus: (home: string, env: PathEnv | undefined) => readonly string[]
+  /** The Settings switch is the consent: on for `enable`, off for `disable`. */
+  consent: {
+    set: (home: string, env: PathEnv | undefined, content: boolean, options: { dryRun: boolean }) => { out: string[] }
+  }
 }
 
 export type CaptureHarnessWriter = PendingHarnessWriter | ManagedHarnessWriter

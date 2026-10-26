@@ -429,6 +429,32 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .exitOverride(captureUsageExit)
     .action(runCaptureAction('disable'))
 
+  // Whole-file plugin install for callers outside the Settings drawer (Squad, `kyber-weave
+  // update`). `--preserve` keeps an edited or foreign plugin and an existing consent file and
+  // exits 0; without it the install is strict, like `capture enable`. Contract in
+  // capture/harnesses/opencode-plugin/install-command.ts.
+  capture
+    .command('plugin')
+    .description('Install the harness capture plugin file')
+    .command('install')
+    .description('Install or upgrade the OpenCode capture plugin (opencode.jsonc is never touched)')
+    .option('--harness <id>', 'Harness whose plugin to install (only: opencode)')
+    .option('--preserve', 'Keep an edited or foreign plugin and an existing consent file; warn and exit 0')
+    .option('--if-installed', 'Act only when the plugin file is already present')
+    .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)')
+    .option('--dry-run', 'Print what would change and write nothing')
+    .exitOverride(captureUsageExit)
+    .action(
+      async (opts: { harness?: string; preserve?: boolean; ifInstalled?: boolean; configDir?: string; dryRun?: boolean }) => {
+        const { homedir } = await import('node:os')
+        const { runPluginInstall } = await import('../capture/harnesses/opencode-plugin/install-command.js')
+        const result = runPluginInstall({ ...opts, homeDir: homedir() })
+        if (result.stdout !== '') process.stdout.write(result.stdout)
+        if (result.stderr !== '') process.stderr.write(result.stderr)
+        process.exitCode = result.exitCode
+      },
+    )
+
   kyber
     .command('backfill')
     .description('Re-derive canonical content for stored records from their raw payloads')

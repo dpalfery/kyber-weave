@@ -88,7 +88,7 @@ describe('kyber capture command registration', () => {
     const capture = kyber?.commands.find((command) => command.name() === 'capture')
     expect(capture).toBeDefined()
     const subcommands = (capture?.commands ?? []).map((command) => command.name()).sort()
-    expect(subcommands).toEqual(['disable', 'enable', 'status'])
+    expect(subcommands).toEqual(['disable', 'enable', 'plugin', 'status'])
   })
 
   it('declares --harness, --dry-run and --endpoint on every capture action', () => {

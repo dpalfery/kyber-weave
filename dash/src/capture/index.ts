@@ -48,6 +48,7 @@ import {
   type CaptureExporterResolution,
   type CaptureFileFormat,
   type CaptureHarnessWriter,
+  type ManagedFilePlugin,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
 import { classifyFsError, type FsErrorReason } from './errno.js'
@@ -461,6 +462,9 @@ function statusLines(
     // `enable` writes, so they never enter the receipt.
     lines.push(...statusWarningLines(writer, home, env))
     lines.push(...statusEnvSnippetLines(writer))
+    if (writer.filePlugin !== undefined) {
+      for (const line of writer.filePlugin.describeStatus(home, env)) lines.push(`  ${line}`)
+    }
   }
   return lines
 }
@@ -795,6 +799,63 @@ function dryRunLines(
   return lines
 }
 
+/**
+ * A managed harness's whole-file plugin on `enable`: strict install, then the consent
+ * switch on. A refused install leaves consent alone, so content is never opted in
+ * without the plugin that would send it.
+ */
+function enableFilePlugin(
+  harness: string,
+  plugin: ManagedFilePlugin,
+  home: string,
+  env: PathEnv,
+  dryRun: boolean,
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
+  const installed = plugin.install(home, env, { dryRun })
+  const out = [...installed.out]
+  // A noop adds nothing beside the config file's own event, so it stays in the text only.
+  const events: CaptureEvent[] =
+    installed.outcome === 'noop' || installed.outcome === 'restored' || installed.outcome === 'would-restore'
+      ? []
+      : [
+          {
+            kind: installed.outcome,
+            harness,
+            fileId: 'plugin',
+            path: plugin.path(home, env),
+            ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
+          },
+        ]
+  if (installed.exitCode === 0) out.push(...plugin.consent.set(home, env, true, { dryRun }).out)
+  return { exitCode: installed.exitCode, out, err: [...installed.err], events }
+}
+
+/** `disable`: consent off first (so content stops even if the file is kept), then uninstall. */
+function disableFilePlugin(
+  harness: string,
+  plugin: ManagedFilePlugin,
+  home: string,
+  env: PathEnv,
+  dryRun: boolean,
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
+  const out = [...plugin.consent.set(home, env, false, { dryRun }).out]
+  const removed = plugin.uninstall(home, env, { dryRun })
+  out.push(...removed.out)
+  const events: CaptureEvent[] =
+    removed.outcome === 'wrote' || removed.outcome === 'would-write' || removed.outcome === 'noop'
+      ? []
+      : [
+          {
+            kind: removed.outcome,
+            harness,
+            fileId: 'plugin',
+            path: plugin.path(home, env),
+            ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
+          },
+        ]
+  return { exitCode: removed.exitCode, out, err: [...removed.err], events }
+}
+
 async function runEnable(
   events: CaptureEvent[],
   writers: readonly CaptureHarnessWriter[],
@@ -850,13 +911,17 @@ async function runEnable(
         out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
         continue
       }
+      let writerFailed = false
       for (const file of declaredFiles(writer, home, env)) {
         if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path: file.path }) === false) continue
         const enabled = enableFile(writer, file, endpoint, dryRun)
         out.push(...enabled.out)
         err.push(...enabled.err)
         events.push(...enabled.events)
-        if (enabled.exitCode !== 0) exitCode = enabled.exitCode
+        if (enabled.exitCode !== 0) {
+          exitCode = enabled.exitCode
+          writerFailed = true
+        }
         if (enabled.record === undefined) continue
         const existing = receipt.files.find((entry) => entry.path === file.path)
         const ensure =
@@ -874,6 +939,13 @@ async function runEnable(
           enabled.record.postSha,
         )
         wroteAny = true
+      }
+      if (writer.filePlugin !== undefined && !writerFailed) {
+        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun)
+        out.push(...plugin.out)
+        err.push(...plugin.err)
+        events.push(...plugin.events)
+        if (plugin.exitCode !== 0) exitCode = plugin.exitCode
       }
     }
 
@@ -1270,6 +1342,13 @@ async function runDisable(
       }
       out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
       continue
+    }
+    if (writer.filePlugin !== undefined) {
+      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun)
+      out.push(...plugin.out)
+      err.push(...plugin.err)
+      events.push(...plugin.events)
+      if (plugin.exitCode !== 0) exitCode = plugin.exitCode
     }
     const files = declaredFiles(writer, home, env)
     // Drift is decided for every file before any revert is written. One

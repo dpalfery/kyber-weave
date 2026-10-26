@@ -475,7 +475,8 @@ function buildOne(
     files: analyses.map((analysis) => analysis.status),
     warnings: [...ownerValueWarnings(files, analyses, ctx), ...configWarnings, ...exporterWarnings],
     manualSteps: manualStepsFor(writer, ctx.endpoint),
-    statusLines: exporterLines,
+    // The plugin and consent state are decided here, in the engine; the drawer only renders them.
+    statusLines: [...exporterLines, ...(writer.filePlugin?.describeStatus(ctx.home, ctx.env) ?? [])],
   }
 }
 

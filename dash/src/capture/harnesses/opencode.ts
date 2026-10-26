@@ -15,7 +15,39 @@
 
 import { envJoin, type PathEnv } from '../paths.js'
 
-import type { ManagedHarnessWriter } from './registry.js'
+import {
+  describeOpencodePluginStatus,
+  installOpencodePlugin,
+  opencodePluginPaths,
+  opencodePluginState,
+  setOpencodeContentConsent,
+  uninstallOpencodePlugin,
+  type OpencodePluginResult,
+} from './opencode-plugin/install.js'
+import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
+
+/** Strict mode only ever kept-newer/noop/refused/wrote; fold the preserve-only outcomes away. */
+function narrow(result: OpencodePluginResult) {
+  const outcome = result.outcome === 'kept' || result.outcome === 'skipped' ? 'noop' : result.outcome
+  return {
+    exitCode: result.exitCode,
+    outcome,
+    ...(result.reason !== undefined ? { reason: result.reason } : {}),
+    out: result.out,
+    err: result.err,
+  } as const
+}
+
+const opencodeFilePlugin: ManagedFilePlugin = {
+  install: (home, env, options) => narrow(installOpencodePlugin(home, env, { mode: 'strict', dryRun: options.dryRun })),
+  uninstall: (home, env, options) => narrow(uninstallOpencodePlugin(home, env, { dryRun: options.dryRun })),
+  path: (home, env) => opencodePluginPaths(home, env).pluginFile,
+  state: (home, env) => opencodePluginState(home, env),
+  describeStatus: (home, env) => describeOpencodePluginStatus(home, env),
+  consent: {
+    set: (home, env, content, options) => setOpencodeContentConsent(home, content, { dryRun: options.dryRun, env }),
+  },
+}
 
 /**
  * The plugin capture contract, declared here and never written (T6
@@ -57,6 +89,7 @@ export const opencodeHarness: ManagedHarnessWriter = {
   desiredKeys: () => ({
     [OPENCODE_OTEL_FLAG_KEY]: true,
   }),
+  filePlugin: opencodeFilePlugin,
   statusEnvSnippet: {
     label:
       'process env (upstream #13438; non-model spans are emitted with model spans and are not written here)',
