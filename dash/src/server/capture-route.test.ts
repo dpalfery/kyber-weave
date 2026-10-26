@@ -398,7 +398,11 @@ describe('GET /api/kyber/capture', () => {
       state: 'off',
       receipt: 'absent',
       warnings: [],
-      statusLines: [],
+      // T4: the OpenCode plugin and its consent are reported as fixed engine-decided lines.
+      statusLines: [
+        'plugin: not installed',
+        expect.stringMatching(/^content consent: not set/),
+      ],
     })
     expect(harnessById(body, 'opencode').manualSteps).toEqual([
       {

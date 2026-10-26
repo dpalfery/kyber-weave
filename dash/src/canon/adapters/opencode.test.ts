@@ -14,6 +14,15 @@ import { describe, expect, it } from 'vitest'
 
 import { ADAPTERS, ingestBatch } from '../ingest.js'
 import { CanonStore } from '../store.js'
+import { contextLimitOf } from '../context-window.js'
+import { readModelCatalogFixture } from '../fixtures/model-window-catalog/fixtures.js'
+import {
+  catalogWindowForRecords,
+  parseVendorCatalogDocument,
+  refreshModelWindowCatalog,
+  resolveContextWindowForModel,
+} from '../model-window-catalog.js'
+import { OPENCODE_MODEL_CONTEXT_LIMIT_KEY } from '../../capture/harnesses/opencode-plugin/mapper.js'
 import { opencodeAdapter } from './opencode.js'
 import { OPENCODE_CONTRACT_VERSION_KEY } from './opencode-envelope.js'
 import { AdapterRegistry } from './registry.js'
@@ -318,5 +327,83 @@ describe('opencode envelope v2 context bucketing (plan 2026-10-23 §5-T5, D4)', 
     expect(record.tokens.freshInput).toBe(0)
     expect(record.tokens.output).toBe(0)
     expect(record.measurability?.cache_read).toMatchObject({ availability: 'not_measurable' })
+  })
+})
+
+// T7 (R1, D6): the context window of an envelope-v2 context span. A reported
+// `opencode.model.context_limit` is the `reported` window; without it the
+// KyberDash model catalog answers by `opencode.model.id` with source `catalog`;
+// an unknown model is a named not-measurable reason, never a guessed window.
+describe('opencode envelope context window (T7, D6)', () => {
+  const attributes = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    'opencode.session.id': 'ses_t7_window',
+    [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+    'opencode.model.id': 'zz-synth-alpha-1',
+    'opencode.model.provider': 'synth',
+    'opencode.context.system': 'you are a build agent',
+    ...over,
+  })
+
+  const seededStore = (): CanonStore => {
+    const store = new CanonStore(':memory:')
+    refreshModelWindowCatalog(store, {
+      readVendor: (vendor) =>
+        parseVendorCatalogDocument(
+          readModelCatalogFixture(vendor === 'synth-vendor-a' ? 'vendor-a-initial.json' : 'vendor-b-initial.json'),
+        ),
+      now: () => '2026-10-01T10:00:00.000Z',
+    })
+    return store
+  }
+
+  it('reads opencode.model.context_limit as a reported window', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'win-reported', attributes: attributes({ [OPENCODE_MODEL_CONTEXT_LIMIT_KEY]: 400_000 }) }),
+    )
+    expect(contextLimitOf([record])).toEqual({ contextLimit: 400_000, contextLimitSource: 'reported' })
+  })
+
+  it('a reported window outranks the catalog row for the same model', () => {
+    const store = seededStore()
+    const record = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'win-both', attributes: attributes({ [OPENCODE_MODEL_CONTEXT_LIMIT_KEY]: 400_000 }) }),
+    )
+    expect(resolveContextWindowForModel([record], 'zz-synth-alpha-1', store)).toEqual({
+      measurable: true,
+      contextLimit: 400_000,
+      contextLimitSource: 'reported',
+    })
+    store.close()
+  })
+
+  it('falls back to the catalog window by opencode.model.id, labelled catalog', () => {
+    const store = seededStore()
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'win-catalog', attributes: attributes() }))
+    expect(catalogWindowForRecords([record], store)).toEqual({
+      contextLimit: 128_000,
+      contextLimitSource: 'catalog',
+    })
+    store.close()
+  })
+
+  it('an unknown model id has no window and names why', () => {
+    const store = seededStore()
+    const record = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'win-unknown', attributes: attributes({ 'opencode.model.id': 'zz-synth-missing-404' }) }),
+    )
+    expect(catalogWindowForRecords([record], store)).toBeUndefined()
+    const resolved = resolveContextWindowForModel([record], 'zz-synth-missing-404', store)
+    expect(resolved.measurable).toBe(false)
+    if (!resolved.measurable) expect(resolved.reason).toContain('No exact model catalog row')
+    store.close()
+  })
+
+  it('a non-positive reported limit is not a window and does not fall to the catalog', () => {
+    const store = seededStore()
+    const record = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'win-bad', attributes: attributes({ [OPENCODE_MODEL_CONTEXT_LIMIT_KEY]: 0 }) }),
+    )
+    expect(resolveContextWindowForModel([record], 'zz-synth-alpha-1', store).measurable).toBe(false)
+    store.close()
   })
 })

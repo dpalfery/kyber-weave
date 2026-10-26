@@ -75,8 +75,12 @@ export type OpencodeHookPayload = {
   toolsText?: string
   /** Skill names listed for the session (v2 SessionContext extension per the T0 pin). */
   skills?: readonly string[]
-  /** Model identity (v2 SessionContext.model; v1 chat.params model.id). */
+  /** Model identity (v2 SessionContext.model.id; v1 chat.params model.id). */
   model?: string
+  /** Provider identity (2.1.4 SessionContext.model.providerID). */
+  provider?: string
+  /** Model context window from the 2.1.4 catalog (`limit.context`); absent when the catalog cannot say (D6). */
+  contextLimit?: number
   /** Agent identity (v2 SessionContext.agent; v1 chat.params agent). */
   agent?: string
 }
@@ -320,6 +324,10 @@ function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload
       : {}),
     ...(event.skills !== undefined && event.skills.length > 0 ? { skills: [...event.skills] } : {}),
     ...(event.model !== undefined && event.model !== '' ? { modelId: event.model } : {}),
+    ...(event.provider !== undefined && event.provider !== ''
+      ? { model: { providerID: event.provider, modelID: event.model ?? '' } }
+      : {}),
+    ...(event.contextLimit !== undefined ? { contextLimit: event.contextLimit } : {}),
     ...(event.agent !== undefined && event.agent !== '' ? { agent: event.agent } : {}),
     startTimeUnixNano: nanos,
     endTimeUnixNano: nanos,

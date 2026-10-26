@@ -95,6 +95,11 @@ describe('receipt safety', () => {
     writeFileSync(path, '{}\n')
     await runCaptureAction(req(home, 'opencode', 'enable'))
     expect(existsSync(receiptPathForHome(home))).toBe(true)
-    expect(readdirSync(dirname(receiptPathForHome(home)))).toEqual(['capture-receipt.json'])
+    // The key receipt plus OpenCode's own plugin receipt and consent file (T4); no `.tmp` leftovers.
+    expect(readdirSync(dirname(receiptPathForHome(home))).sort()).toEqual([
+      'capture-receipt.json',
+      'opencode-plugin-receipt.json',
+      'opencode-plugin.json',
+    ])
   })
 })

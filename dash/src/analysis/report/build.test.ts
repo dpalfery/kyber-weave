@@ -338,6 +338,79 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
     expect(turn.pressure).toMatchObject({ reason: 'source reported no context window' })
   })
 
+  describe('absent versus zero (D8, ADR 0033)', () => {
+    // An OpenCode session whose plugin sent tools and history but never a
+    // system prompt: the bucket row is 0 in the payload, yet nothing was
+    // observed. The decision lives here, in buildContextReport.
+    const opencodePayload = (observedParts: string[] | undefined, overrides: Record<string, unknown> = {}) => ({
+      summary: { turn_count: 1, total_input: 40_000 },
+      context: {
+        measurable: true,
+        contextLimit: 200_000,
+        contextLimitSource: 'reported',
+        ...(observedParts === undefined ? {} : { observedParts }),
+        turns: [
+          {
+            index: 1,
+            pressure: 0.2,
+            buckets: {
+              system_prompt: 0,
+              tool_definitions: 9000,
+              instruction_context: 0,
+              conversation_history: 30_000,
+              tool_result_content: 0,
+            },
+            residual: { tokens: 1000 },
+            toolDefinitionsByServer: {},
+          },
+        ],
+        ...overrides,
+      },
+    })
+    const latest = (payload: unknown) =>
+      build(bridgeOf({ sessions: [session({ harness: 'opencode' })], payload })).latestSession!.latestTurn
+
+    it('reports a never-observed bucket as unmeasurable with a named reason, not measured(0)', () => {
+      const turn = latest(opencodePayload(['tool_definitions', 'conversation_history']))
+
+      for (const key of ['system_prompt', 'instruction_context', 'tool_result_content'] as const) {
+        const figure = turn.buckets[key]
+        expect(isUnmeasurable(figure)).toBe(true)
+        expect(figure.value).not.toBe(0)
+        expect(isUnmeasurable(figure) && figure.reason).toContain(key)
+      }
+    })
+
+    it('keeps an observed bucket measured', () => {
+      const turn = latest(opencodePayload(['tool_definitions', 'conversation_history']))
+
+      expect(turn.buckets.tool_definitions).toEqual({ value: 9000, unit: 'tokens' })
+      expect(turn.buckets.conversation_history).toEqual({ value: 30_000, unit: 'tokens' })
+    })
+
+    it('keeps an observed part whose total is genuinely zero as a measured zero', () => {
+      const turn = latest(opencodePayload(['system_prompt', 'tool_definitions', 'conversation_history']))
+
+      expect(turn.buckets.system_prompt).toEqual({ value: 0, unit: 'tokens' })
+    })
+
+    it('shows the reported window and its pressure as measured on the same block', () => {
+      const turn = latest(opencodePayload(['tool_definitions', 'conversation_history']))
+
+      expect(turn.contextWindow).toEqual({ value: 200_000, unit: 'tokens' })
+      expect(turn.pressure).toEqual({ value: 0.2 })
+    })
+
+    it('leaves a row projected before the evidence existed as it was read', () => {
+      // Rows from the previous projection carry no `observedParts`; D13's
+      // start-up projection replaces them. Until then the stored figures are
+      // served unchanged rather than guessed at.
+      const turn = latest(opencodePayload(undefined))
+
+      expect(turn.buckets.tool_definitions).toEqual({ value: 9000, unit: 'tokens' })
+    })
+  })
+
   it('is null when no session is in scope, rather than an empty shell', () => {
     expect(build(bridgeOf({ sessions: [] })).latestSession).toBeNull()
   })

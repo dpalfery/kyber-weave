@@ -114,3 +114,17 @@ describe('HarnessCollectionList: the issue list', () => {
     expect(container.textContent).not.toContain('Warning (endpoint-differs)')
   })
 })
+
+describe('HarnessCollectionList: OpenCode plugin and consent lines (T4, D15)', () => {
+  it('renders the engine-decided plugin and consent status lines as text, deriving nothing', () => {
+    const harness = JSON.parse(JSON.stringify(statusMixed.harnesses[0])) as KyberCaptureHarness
+    harness.id = 'opencode'
+    harness.statusLines = ['plugin: installed', 'content consent: on (system prompt, tool definitions and skills are captured)']
+    render(
+      <HarnessCollectionList harnesses={[harness]} busy={false} alerts={{}} onToggle={() => {}} onReset={() => {}} />,
+    )
+    const lines = screen.getByTestId('settings-harness-status-lines-opencode')
+    expect(lines.textContent).toContain('plugin: installed')
+    expect(lines.textContent).toContain('content consent: on')
+  })
+})

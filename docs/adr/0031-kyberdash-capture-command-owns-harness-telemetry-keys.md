@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-26
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -91,6 +91,20 @@ definitions and skills catalog to local files under `~/.kyberdash/capture/kilo` 
 code; this replaces the OTLP framing of the earlier amendment, because Kilo's OTLP stream cannot
 carry those buckets and its plugin hooks can. Nothing in decisions 1 to 4 moves: no telemetry
 export key is written, and the receiver coupling is untouched.
+
+Amended 2026-10-26 (OpenCode capture deploy plan, decisions D4 and D11): the managed writer may
+own a whole plugin file, and the install path has a preserve mode. `ManagedHarnessWriter` gains an
+optional `filePlugin` slot, which OpenCode uses for `<root>/plugins/kyberdash-opencode.js`, so
+KyberDash owns that file, its receipt, and the consent file under the same one-owner rule as the
+Kilo file plugin. `kyber-weave` (Squad and `kyber-weave update`) never writes those files itself. It
+calls `kyberdash kyber capture plugin install --harness opencode --preserve`, and the verb owns the
+decision. Strict mode (`capture enable`) refuses a foreign or edited file with exit 1. Preserve mode
+(Squad and update callers) keeps such a file with a warning and exits 0, and creates the consent file
+with `content: false` only when it is absent. `capture enable` and `disable` flip that consent through
+the same `runEnable` and `runDisable` paths as the Settings switch, so the decision stays in the
+capture engine (ADR 0033). The departure is still scoped to KyberDash's own plugin file. Squad and
+update never edit `opencode.jsonc` or the owner's `plugin` array, and every key rule above is
+unchanged.
 
 ## Context
 

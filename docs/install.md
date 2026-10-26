@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 ---
 
 # Installing Kyber-Weave
@@ -450,11 +450,28 @@ kyber-weave update 0.2.0              # pin a tag (leading v is optional)
 kyber-weave update --no-mcp           # CLI only
 kyber-weave update --no-kyberdash     # leave an installed kyberdash unchanged
 kyber-weave update --no-menubar       # leave an installed KyberDash tray unchanged
+kyber-weave update --no-restart       # replace binaries; do not restart the KyberDash engine or tray
 ```
 
-When a tray is installed, `kyber-weave update` also hands off to `kyberdash menubar --update`,
-which quits the running tray, replaces it, and relaunches it — restoring the previous app if
-any step fails. Update the tray directly with:
+When a KyberDash binary is installed, `kyber-weave update` finishes the KyberDash side in the same
+run, with no second command:
+
+- **Engine.** It runs `kyberdash engine ensure --if-running`. A live engine of another version is
+  replaced by the new one. When no engine is running, nothing starts. This also runs when the
+  release is unchanged ("already on"), which clears an engine left over from an older build.
+- **Tray.** When a tray is installed, it hands off to `kyberdash menubar --update`, which quits the
+  running tray, replaces it, and relaunches it, restoring the previous app if any step fails. It also
+  runs when the release is unchanged but the recorded tray is older than the installed `kyberdash`.
+- **OpenCode capture plugin.** It runs `kyberdash kyber capture plugin install --harness opencode
+  --preserve --if-installed`. An installed plugin is upgraded. A plugin you never installed is not
+  added. An edited plugin file is kept with a warning.
+
+`--no-restart` skips the engine and tray steps. The plugin step still runs when the plugin is
+installed. `--no-kyberdash` skips all three. A failed step is reported by name and does not roll back
+the binaries. When the plugin file changed, the output says to restart OpenCode, because KyberDash
+cannot restart it.
+
+Update the tray directly with:
 
 ```bash
 kyberdash menubar --update

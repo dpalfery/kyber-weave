@@ -12,6 +12,9 @@ import type { Server } from 'http'
 import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
 import { BRAND } from '../brand-overlay.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // Mock node:sea before importing the module under test
 const mockGetAsset = vi.fn((_key: string): string | Buffer | undefined => undefined)

@@ -597,3 +597,55 @@ describe('analyzeContext — non-resident tool definitions (D7)', () => {
     expect(result.turns[0].residual.tokens).toBe(0)
   })
 })
+
+describe('analyzeContext — observed-parts evidence (D8, ADR 0033)', () => {
+  // A bucket total of 0 and a part that was never observed are different
+  // facts. The analysis carries which parts it actually saw so the report can
+  // tell the two apart; the zero in `buckets` alone cannot.
+  it('names exactly the part types some turn supplied', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [
+          turn({ parts: [part('tool_definitions', 2_000), part('conversation_history', 3_000)], inputTokens: 5_000, freshInput: 5_000 }),
+          turn({ parts: [part('tool_result_content', 400)], inputTokens: 5_400, freshInput: 400 }),
+        ],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect([...result.observedParts].sort()).toEqual(
+      ['conversation_history', 'tool_definitions', 'tool_result_content']
+    )
+    expect(result.observedParts).not.toContain('system_prompt')
+    // The bucket row still reads zero; the evidence is what says it was never seen.
+    expect(result.turns[0].buckets.system_prompt).toBe(0)
+  })
+
+  it('does not count a non-resident part as observed content', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [
+          turn({
+            parts: [part('tool_definitions', 900, { resident: false }), part('conversation_history', 100)],
+            inputTokens: 100,
+            freshInput: 100,
+          }),
+        ],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect(result.observedParts).toEqual(['conversation_history'])
+  })
+
+  it('counts a part with a measured count of zero as observed', () => {
+    const result = expectMeasurable(
+      analyzeContext(
+        [turn({ parts: [part('system_prompt', 0, { text: '' }), part('conversation_history', 50)], inputTokens: 50, freshInput: 50 })],
+        { contextLimit: LIMIT }
+      )
+    )
+
+    expect(result.observedParts).toContain('system_prompt')
+  })
+})

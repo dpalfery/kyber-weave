@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const { acquireStoreRefreshLockMock } = vi.hoisted(() => ({
   acquireStoreRefreshLockMock: vi.fn(),

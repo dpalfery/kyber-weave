@@ -422,6 +422,32 @@ completed global copy and project import, so migration is one-shot per source:
 - A malformed or unreadable ledger is treated as empty, and a warning says so. The next successful write
   replaces it with a valid one.
 
+### Global OpenCode capture-plugin step
+
+KyberDash's OpenCode capture plugin is global capture, not a Squad pack resource, so Squad does not
+render it. After a successful `squad install --global` or `squad update --global` whose resolved
+targets include OpenCode, the command runs one KyberDash verb through an injectable process runner:
+
+```text
+kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <Squad-resolved OpenCode root>
+```
+
+- **Owner of the file.** KyberDash owns the plugin file, its receipt, and the consent file. Squad
+  passes its resolved OpenCode global root as `--config-dir`, so both agree on the path. Squad keeps
+  its own receipts for its own files and reads none of KyberDash's.
+- **Non-overwrite (C4).** Preserve mode keeps an edited or foreign plugin file with a warning. It
+  creates the consent file with content off only when that file is absent, and never touches an
+  existing one. The step never writes `opencode.jsonc`.
+- **Locating the verb.** `kyberdash` is found beside `kyber-weave` in the install directory, then on
+  `PATH`. When it is absent, Squad logs one skip line that names `kyber-weave update`.
+- **Failure isolation.** A non-zero exit from the verb prints a warning line that names the retry
+  command. It does not change Squad's exit code, and nothing rolls back. An older `kyberdash` without the
+  verb prints a named skip.
+- **Scope and opt-out.** Project-scope runs do not run the step. `--no-capture-plugin` on `squad install`
+  or `squad update` skips it, and `--dry-run` passes `--dry-run` through to the verb.
+- **Consent.** Install never turns content capture on. The Settings switch (or `kyberdash kyber capture
+  enable --harness opencode`) does that. Until then Squad's output says so in one line.
+
 ---
 
 ## 5. Write-Ahead Journal and Transaction Engine

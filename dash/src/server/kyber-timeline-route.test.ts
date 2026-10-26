@@ -8,6 +8,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
 import { handleKyberRequest } from './routes.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // RED contract for the bounded timeline read (change B):
 // `GET /api/kyber/timeline` serves `payload.timeline` (15.3 MB in, 13.8 KB

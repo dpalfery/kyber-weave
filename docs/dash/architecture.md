@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-26
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -299,7 +299,61 @@ database directly and serves no API: rows reach `canon.db` only through the rece
 `ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
 `/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
 `enable` writes only `experimental.openTelemetry`; the `plugins` registration key and
-`OTEL_EXPORTER_OTLP_ENDPOINT` never enter a receipt.
+`OTEL_EXPORTER_OTLP_ENDPOINT` never enter a receipt. The plugin file itself is owned by
+KyberDash and written through the managed harness writer (see **Installer** below), so
+Squad and `kyber-weave update` never write it.
+
+**Bundle and delivery.** `dash/scripts/bundle-opencode-plugin.mjs` bundles `entry.ts` with esbuild
+into one ESM file that imports only `node:` built-ins and uses the global `fetch`. The text is
+committed as `opencode-plugin/generated/plugin-source.ts` (`OPENCODE_PLUGIN_SOURCE`,
+`OPENCODE_PLUGIN_MARKER`), so npm and SEA builds carry the same bytes. A drift test fails when the
+committed text differs from a fresh bundle. The first line is `// kyberdash-opencode-plugin v<N>`,
+which the installer reads as the version marker.
+
+**Installer.** `opencode-plugin/install.ts` mirrors the Kilo file-plugin installer. Its two modes:
+
+- **Strict** (`capture enable`, `capture plugin install` without flags): refuses a foreign or
+  edited plugin file with exit 1.
+- **Preserve** (`--preserve`, used by Squad and `kyber-weave update`): keeps a foreign or edited
+  file with a warning and exits 0. An older plugin of ours is upgraded only when the receipt for
+  that path proves it unmodified; with no receipt, or one for another path, it is kept as
+  `kept-edited` because its origin cannot be proven. An absent file is written
+  when the caller is not `--if-installed`. `--if-installed` acts only when a plugin file is already
+  present, and otherwise prints `skipped-not-installed` and writes nothing.
+
+The root is `--config-dir`, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`, the same order
+Squad's `SquadGlobalRoots` uses. `capture enable`, `disable` and `status` all take `--config-dir` and
+forward it to the file plugin; `capture status` and `disable` additionally follow the receipt's
+recorded path when the resolved root holds no plugin, and only when it is
+`<dir>/plugins/kyberdash-opencode.js`, a regular non-symlink file carrying the marker. Writes are
+atomic (random temp name, `wx`, rename) and refuse a symlink at the plugin path. The plugin is `<root>/plugins/kyberdash-opencode.js`. The receipt is
+`~/.kyberdash/opencode-plugin-receipt.json`. `--dry-run` writes nothing. Stdout is `opencode plugin: <token> <file>`, with
+tokens `installed`, `upgraded`, `unchanged`, `kept-edited`, `kept-newer`, `kept-foreign`,
+`kept-unreadable`, `skipped-not-installed`, `would-install`, or `would-upgrade`. The install verb is
+`kyberdash kyber capture plugin install`, and the managed writer's `filePlugin` slot runs the same code.
+
+**Consent file.** `~/.kyberdash/opencode-plugin.json` (`{ "version": 1, "content": <boolean> }`) is
+created with `content: false` by an install only when it is absent, and an existing file is never
+rewritten. The Settings switch and `capture enable|disable --harness opencode` set it to `true` and
+`false` through `runEnable` and `runDisable`. The plugin reads it on each `context` event
+(`consent.ts`, node built-ins only). Any missing, unreadable, oversized, or malformed file means off.
+`KYBERDASH_OPENCODE_CONTEXT=1` forces on and `0` forces off. `capture status` and the status API
+report the consent state, so the drawer does not derive it.
+
+**Engine and projection.** `kyberdash engine ensure --if-running` (`dash/src/cli/engine.ts`) calls
+`ensureEngine` (ADR 0039) only when a live engine holds the endpoint, and starts nothing when none runs.
+`kyber-weave update` runs it after the binaries commit, then the tray step. `capture enable --harness
+opencode` also ensures the engine once. The detector generation is `DETECTOR_VERSION` `5`
+(`dash/src/canon/store.ts`). `projectionIsCurrent` (`dash/src/canon/projection.ts`) treats a store
+stamped with any other value as stale, so the derived findings are rebuilt with the new rules rather
+than kept. The engine re-projects on its own start. `runWebDashboard` starts the job host, whose `start()`
+runs one tick at once, and that tick calls the maintenance pass (`runMaintenancePass`,
+`dash/src/refresh/folder-import.ts`). The pass purges expired content, then calls
+`projectCanonicalStore` when `projectionIsCurrent` is false. A store stamped with an older detector
+version is therefore re-projected to `DETECTOR_VERSION` on the first tick, and a current stamp
+triggers no projection. This is how rows projected by an older build lose their zero-filled buckets
+after `kyber-weave update`, with no separate `kyber build`. `dash/src/cli/web-startup-projection.test.ts`
+starts the real `runWebDashboard` and pins both cases.
 
 The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
 
@@ -321,19 +375,34 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   `fixtures/context-payload.json` at `@opencode/plugin` 2.1.4) rides these attributes
   via the mapper; `eventToSpan` includes them on the wire span. Model markers map when
   the payload names them.
-- **Entry.** The loadable entry (`entry.ts`) exports both the v2 CLI shape
-  (`Plugin.define({ id, setup })` registering `ctx.session.hook("context", …)`) and the
-  v1 Desktop default-export hooks map (including `session.context`), both bridging to
-  `createInstalledOpencodePlugin` + `registerOpencodePlugin`. `session.context` is
-  registered on both the v2 namespaced and v1 dotted host surfaces; lifecycle kinds are
-  unchanged. Context capture extends this in-repo envelope plugin; a standalone plugin
-  POSTing raw JSON is rejected — the wrong port and body bypass the version guard, the
-  bounded outbox, and the never-fail-host contract.
-- **Consent.** System prompt, tool definitions, and the skills listing are content and
-  flow only under the sender-owned env consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
-  default; true only for exactly `1`). With consent absent the context event still emits
-  identity/markers with content fields dropped pre-emit. Capture never writes or receipts
-  the key (declare-only, the `OTEL_EXPORTER_OTLP_ENDPOINT` pattern).
+- **Entry (R1, OpenCode 2.1.4).** The loadable entry (`entry.ts`) has one export, `default`:
+  `{ id: 'kyberdash-opencode', setup }`. The 2.1.4 loader reads only `.default`, and it must be
+  `{ id, effect }` or `{ id, setup }`, so the entry carries no named exports and no dotted-kinds map.
+  `setup(ctx)` registers exactly one hook, `ctx.session.hook("context", cb)`. There is no 1.x hook
+  surface in this plan. OpenCode 1.x is unverified and not supported (D2). The request input is
+  read, never mutated: `sessionID`, `model.id` and the provider id on the model ref, `agent`,
+  `system[n].text` joined, and `tools` serialized. Each request emits one `session.context` event.
+  A callback that throws, or a `setup` whose hook registration rejects, never fails the host.
+  Nothing runs at import.
+- **Context window.** The 2.1.4 `context` input carries only a model reference. The plugin asks
+  OpenCode's model list once per setup (`ctx.model.list()`, row `limit.context`) and sends
+  `opencode.model.context_limit` only when it finds a positive finite value. The lookup is
+  bounded (500 ms), and a failure is sticky, so a broken catalog costs one wait. No value means
+  no attribute, never zero. The adapter reports that attribute as a `reported` window. Without it,
+  the window comes from KyberDash's model-window catalog (`dash/src/canon/model-window-catalog.ts`)
+  as source `catalog`, which the report labels as catalog-derived. Contract stays `'2'`. The
+  attribute is additive, so an rc.7 engine ignores it (D6).
+- **Skills (R1).** When `opencode.context.skills` is absent or empty, the listing is parsed from
+  the `<available_skills>` block in the captured system prompt (`opencode-plugin/skills-block.ts`,
+  shared by the plugin and the adapter). Each `<skill>` contributes its `<id>`. A malformed or
+  missing block yields a named not-measurable reason, never an empty measured list.
+- **Consent.** System prompt, tool definitions, and the skills listing flow only when the
+  consent file `~/.kyberdash/opencode-plugin.json` holds `{ "version": 1, "content": true }`
+  (Q1, §3.4). The file is read on every `context` event, so a change needs no reinstall. The
+  env override `KYBERDASH_OPENCODE_CONTEXT=1` (on) or `0` (off) is read first. With consent off the
+  event still emits identity and markers, with content fields dropped before emit. Install never
+  flips consent on, and the Settings switch is the only path to `content: true` (Q2).
+  Content still follows the 14-day purge.
 - **Claim rule.** The `opencode` adapter claims only the supported envelope (a supported
   envelope span scores 1; an envelope span under any other version scores 0). A bare
   `opencode.session.id` with no turn/model/tool/prompt/call/message/hook marker is not
@@ -347,11 +416,22 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
   The skills listing reads from raw `opencode.context.skills` (the `skills.ts` listing
   source, measurable only under consent; a malformed value yields a named
-  `notMeasurable` reason).
+  `notMeasurable` reason). When that key is absent or empty, it falls back to the
+  `<available_skills>` block of the system prompt, then to `readSystemPromptListing`.
   Prompt text (`opencode.prompt.text`) buckets as
   conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
   as non-model — the correct taxonomy for a boundary, not a rejection — with zero
   fabricated counters and session anchoring.
+- **Measurability (D7).** `DimensionEvidence` carries observed OpenCode token, cache-read, and
+  cost evidence from the harness's sessions (`canon/measurability.ts`, `evidencedAvailability`).
+  Token usage is `measured` and cost `derived` when the sessions carry counters. Cache is `measured`
+  when cache-read counters exist. Without counters the dimension stays `not_measurable` with the
+  OpenCode reason, never zero. Tool and pressure dimensions keep their existing evidence rules.
+- **Absent versus zero (D8, ADR 0033).** In `buildContextReport` (`analysis/report/build.ts`), a
+  context bucket whose part was never observed is `unmeasurable` with a named reason. It is not
+  `measured(0)`. Only a bucket with an observed part is `measured`. The tray renders that state and
+  does not decide it. An OpenCode session with no system prompt observed therefore shows the reason
+  text, not "0 tokens".
 - **Assembly.** The installed entry (`plugin.ts`, reached via the `opencode.ts`
   declare-only re-export) wires hook→mapper→turn→outbox→sender
   (`createInstalledOpencodePlugin`): every hook boundary maps through the mapper and turn
@@ -846,8 +926,10 @@ since an uncovered turn carries no key. The finding does not state that coverage
 Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
 invocations", with no deletion or waste claim.
 
-**Detector version.** `DETECTOR_VERSION` is `4` (`dash/src/canon/store.ts`). Stores stamped with
-generation `3` report their findings as outdated and need a rebuild.
+**Detector version.** `DETECTOR_VERSION` is `5` (`dash/src/canon/store.ts`). Stores stamped with
+an older generation (for example `3` or `4`) report their findings as outdated; the engine re-projects
+them to the current generation on its next maintenance tick (see the engine and projection paragraph
+in the OpenCode plugin section above).
 
 **Web.** The Sessions page section **4 · Skills** has two tiles (skills listed, skills invoked) and
 a headline, "X of Y listed skills had no observed invocation". The headline is rendered from the

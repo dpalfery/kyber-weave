@@ -112,6 +112,19 @@ describe('the projection gate watches the store schema version', () => {
     expect(projectionIsCurrent(store)).toBe(false)
   })
 
+  it('reports the projection stale for a store stamped with the previous detector generation', async () => {
+    // T6 (measurability) and T8 (observed parts) changed derived output, so a
+    // store projected by generation 4 must re-project (D13).
+    const store = seedStore(['detector-4'])
+
+    await projectCanonicalStore(store)
+    expect(projectionIsCurrent(store)).toBe(true)
+
+    store.setDetectorVersion(4)
+
+    expect(projectionIsCurrent(store)).toBe(false)
+  })
+
   it('reports the projection stale when the recorded schema version lags the store', async () => {
     // The same comparison from the other side: the state the last projection
     // recorded names an older schema than the store carries. This is the
