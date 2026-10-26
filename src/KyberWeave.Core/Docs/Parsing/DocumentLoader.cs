@@ -151,13 +151,32 @@ public sealed partial class DocumentLoader
     /// <remarks>
     /// The corpus walk excludes the archive subtree, so the closeout gate reads an archived
     /// entry through this narrow entry point instead: one named file, no directory walk,
-    /// no exclusion bypass beyond that file.
+    /// no exclusion bypass beyond that file. The named file is held to the same
+    /// containment rule as the walk: an absolute path, a <c>..</c> escape, or any
+    /// symlink on the path fails closed rather than following the link.
     /// </remarks>
     internal DocumentModel LoadArchivedDocument(string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-        string absolute = Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        return Parse(absolute, relativePath.Replace('\\', '/'));
+        string normalized = relativePath.Replace('\\', '/');
+        string absolute = Path.GetFullPath(Path.Combine(_repoRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
+        StringComparison comparison = ReferenceEquals(DocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!absolute.Equals(_repoRoot, comparison)
+            && !absolute.StartsWith(_repoRoot + Path.DirectorySeparatorChar, comparison))
+        {
+            throw new InvalidOperationException(
+                $"Archived entry '{relativePath}' escapes the repository root.");
+        }
+
+        if (!DocsRootPath.IsContainedFile(_repoRoot, normalized, _docsRoots))
+        {
+            throw new InvalidOperationException(
+                $"Archived entry '{relativePath}' is not reachable without crossing a symbolic link.");
+        }
+
+        return Parse(absolute, normalized);
     }
 
     /// <summary>
