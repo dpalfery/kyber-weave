@@ -880,121 +880,121 @@ jobs:
           merge-multiple: true
 
       - name: Attest kyber-weave-linux-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
 
       - name: Attest kyber-weave-linux-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-linux-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-linux-arm64.cdx.json
 
       - name: Attest kyber-weave-osx-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-osx-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-osx-x64.cdx.json
 
       - name: Attest kyber-weave-osx-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-osx-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-osx-arm64.cdx.json
 
       - name: Attest kyber-weave-win-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-win-x64.zip
           sbom-path: attest-assets/kyber-weave-win-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-linux-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-linux-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-linux-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-linux-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-linux-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-linux-arm64.cdx.json
 
       - name: Attest kyber-weave-mcp-osx-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-osx-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-osx-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-osx-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-osx-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-osx-arm64.cdx.json
 
       - name: Attest kyber-weave-mcp-win-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-win-x64.zip
           sbom-path: attest-assets/kyber-weave-mcp-win-x64.cdx.json
 
       - name: Attest kyberdash-darwin-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-darwin-arm64.tar.gz
           sbom-path: attest-assets/kyberdash-darwin-arm64.cdx.json
 
       - name: Attest kyberdash-darwin-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-darwin-x64.tar.gz
           sbom-path: attest-assets/kyberdash-darwin-x64.cdx.json
 
       - name: Attest kyberdash-linux-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-linux-arm64.tar.gz
           sbom-path: attest-assets/kyberdash-linux-arm64.cdx.json
 
       - name: Attest kyberdash-linux-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-linux-x64.tar.gz
           sbom-path: attest-assets/kyberdash-linux-x64.cdx.json
 
       - name: Attest kyberdash-win-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-win-x64.zip
           sbom-path: attest-assets/kyberdash-win-x64.cdx.json
 
       - name: Attest kyberdash-tray-darwin-arm64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-darwin-arm64.zip
           sbom-path: attest-assets/kyberdash-tray-darwin-arm64.cdx.json
 
       - name: Attest kyberdash-tray-darwin-x64 SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-darwin-x64.zip
           sbom-path: attest-assets/kyberdash-tray-darwin-x64.cdx.json
 
       - name: Attest kyberdash-tray-win-x64-setup SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-win-x64-setup.exe
           sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json
 
       - name: Attest kyber-squad SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.zip
           sbom-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.cdx.json
 
       - name: Attest kyber-squad-plugin SBOM
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.zip
           sbom-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.cdx.json
@@ -1004,7 +1004,7 @@ jobs:
       # The glob matches only archives (*.tar.gz/*.zip/*.exe), never the *.cdx.json
       # predicates beside them.
       - name: Attest aggregate SBOM against all archives
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
           sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
