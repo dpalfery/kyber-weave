@@ -78,7 +78,8 @@ public sealed class ReviewGuidanceCouncilContractTests
     [InlineData("go")]
     public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistExists(string technology)
     {
-        string agentsText = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md"));
+        string agentsText = ConfigRegBlock(
+            File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md")));
         string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/README.md`";
         string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, "README.md");
         string checklistPath = Path.Combine(ChecklistRoot, $"{technology}.md");
@@ -110,6 +111,10 @@ public sealed class ReviewGuidanceCouncilContractTests
         if (!File.Exists(checklistPath))
         {
             gaps.Add($"Review checklist '{checklistPath}' is missing.");
+        }
+        else if (!File.ReadAllText(checklistPath).Contains($"<{technology}-coding-standard>", StringComparison.Ordinal))
+        {
+            gaps.Add($"'{technology}.md' does not name its own '<{technology}-coding-standard>' token.");
         }
 
         Assert.True(
@@ -318,6 +323,16 @@ public sealed class ReviewGuidanceCouncilContractTests
             string.Join("; ", unknown) + ".");
     }
 
+    /// <summary>Returns the text between the Config Reg markers, or empty when either is missing.</summary>
+    private static string ConfigRegBlock(string text)
+    {
+        const string start = "<!-- KYBER_WEAVE_CONFIG_REG_START -->";
+        const string end = "<!-- KYBER_WEAVE_CONFIG_REG_END -->";
+        int from = text.IndexOf(start, StringComparison.Ordinal);
+        int to = text.IndexOf(end, StringComparison.Ordinal);
+        return from < 0 || to < from ? string.Empty : text[from..to];
+    }
+
     /// <summary>Returns the trimmed lines between the opening and closing <c>---</c> of a document's front matter.</summary>
     private static string[] FrontMatterLines(string text)
     {
@@ -328,12 +343,17 @@ public sealed class ReviewGuidanceCouncilContractTests
         }
 
         List<string> block = [];
-        for (int i = 1; i < lines.Length && lines[i].Trim() != "---"; i++)
+        for (int i = 1; i < lines.Length; i++)
         {
+            if (lines[i].Trim() == "---")
+            {
+                return block.ToArray();
+            }
+
             block.Add(lines[i].Trim());
         }
 
-        return block.ToArray();
+        return [];
     }
 
     private static string ReadProduct(string relativePath)
