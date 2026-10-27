@@ -104,7 +104,10 @@ def resolve_repo(given):
     if repo.count("/") != 1 or not all(part.strip() for part in repo.split("/")):
         fail(f"--repo must be owner/name, got '{repo}'")
     owner, name = (part.strip() for part in repo.split("/"))
-    return repo, owner, name
+    # Return the washed slug, not the raw argument: `--repo " octo / repo "`
+    # would otherwise validate, resolve over GraphQL, and then build a REST path
+    # with spaces in it and answer 404.
+    return f"{owner}/{name}", owner, name
 
 
 def gh(*args):
@@ -112,6 +115,29 @@ def gh(*args):
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip()[:300])
     return result.stdout
+
+
+def threads_page(response):
+    """The reviewThreads connection from one GraphQL response, or None.
+
+    A repository that does not resolve, a pull request number that does not
+    exist, a rate limit, or a partial error all answer 200 with a shape this
+    query did not expect — `data` absent, `repository` null, `pullRequest`
+    null. Indexing into any of those is a traceback in a helper whose whole job
+    is to fail politely, so the page is walked defensively and a missing piece
+    reads as "no page", never as a crash.
+    """
+    data = response.get("data") if isinstance(response, dict) else None
+    repository = data.get("repository") if isinstance(data, dict) else None
+    pull = repository.get("pullRequest") if isinstance(repository, dict) else None
+    connection = pull.get("reviewThreads") if isinstance(pull, dict) else None
+    if not isinstance(connection, dict):
+        return None
+    nodes = connection.get("nodes")
+    page = connection.get("pageInfo")
+    if not isinstance(nodes, list) or not isinstance(page, dict):
+        return None
+    return nodes, page
 
 
 def live_threads(owner, name, pr):
@@ -131,20 +157,31 @@ def live_threads(owner, name, pr):
         if cursor:
             args += ["-f", f"cursor={cursor}"]
         try:
-            out = json.loads(gh(*args))
+            response = json.loads(gh(*args))
         except (RuntimeError, json.JSONDecodeError) as error:
             print(f"WARN  #{pr}: cannot read threads ({error})")
             return {}
-        connection = out["data"]["repository"]["pullRequest"]["reviewThreads"]
-        for node in connection["nodes"]:
-            comments = node["comments"]["nodes"]
-            if comments:
-                threads[comments[0]["databaseId"]] = node
-        page = connection["pageInfo"]
-        if not page["hasNextPage"]:
+        page_data = threads_page(response)
+        if page_data is None:
+            print(f"WARN  #{pr}: thread inventory returned no usable page; skipping")
+            return {}
+        nodes, page = page_data
+        for node in nodes:
+            comments = node.get("comments") if isinstance(node, dict) else None
+            first = comments.get("nodes") if isinstance(comments, dict) else None
+            comment = first[0] if isinstance(first, list) and first else None
+            comment_id = comment.get("databaseId") if isinstance(comment, dict) else None
+            thread_id = node.get("id") if isinstance(node, dict) else None
+            if not isinstance(thread_id, str) or isinstance(comment_id, bool) or not isinstance(comment_id, int):
+                print(f"WARN  #{pr}: skipping a thread with no id or no first comment id")
+                continue
+            threads[comment_id] = node
+        # A missing `hasNextPage` stops here rather than looping: an unread page
+        # is reported as a warning, never followed on a guess.
+        if not page.get("hasNextPage"):
             return threads
         cursor = page.get("endCursor")
-        if not cursor:
+        if not isinstance(cursor, str) or not cursor:
             print(f"WARN  #{pr}: thread page claims another page but carries no cursor; stopping")
             return threads
 
