@@ -34,4 +34,8 @@ public sealed class DocsInitSettings : CommandSettings
     [CommandOption("--kyber-standards")]
     [Description("Scaffolds the full suite of rich Kyber Squad coding standards templates into the standards folder.")]
     public bool KyberStandards { get; set; }
+
+    [CommandOption("--no-review-gates")]
+    [Description("Do not write the catalogue review gates into .kyber-weave/kyber-weave.yml.")]
+    public bool NoReviewGates { get; set; }
 }

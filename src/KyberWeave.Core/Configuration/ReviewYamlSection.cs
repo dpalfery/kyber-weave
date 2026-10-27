@@ -29,11 +29,17 @@ internal sealed class ReviewGateYaml
 {
     public string? Id { get; init; }
 
+    public List<string>? Include { get; init; }
+
+    public string? Os { get; init; }
+
     public List<string>? Run { get; init; }
 
     public bool? Blocking { get; init; }
 
     public int? TimeoutSeconds { get; init; }
+
+    public string? WorkingDirectory { get; init; }
 }
 
 /// <summary>One entry of <c>review.task-gates.&lt;agent&gt;</c>.</summary>
@@ -52,6 +58,8 @@ internal sealed class ReviewTaskGateYaml
     public bool? Blocking { get; init; }
 
     public int? Timeout { get; init; }
+
+    public string? WorkingDirectory { get; init; }
 }
 
 /// <summary>The <c>review.coverage</c> mapping.</summary>

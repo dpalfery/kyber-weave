@@ -80,15 +80,36 @@ public sealed record ReviewFinding(
 /// <param name="ExitCode">The runner's exit code.</param>
 /// <param name="Summary">One line describing the outcome.</param>
 /// <param name="DurationMilliseconds">How long the gate took.</param>
+/// <param name="Outcome">
+/// How the gate ended: it ran to the end, it was stopped at its time limit, or its program never started.
+/// </param>
 public sealed record GateResult(
     string Id,
     bool Blocking,
     int ExitCode,
     string Summary,
-    long DurationMilliseconds = 0)
+    long DurationMilliseconds = 0,
+    GateOutcome Outcome = GateOutcome.Completed)
 {
     /// <summary>Whether the gate succeeded.</summary>
     public bool Passed => ExitCode == 0;
+}
+
+/// <summary>How a deterministic gate ended, kept apart from whether it passed.</summary>
+/// <remarks>
+/// A missing program and a failing check both block a change, but they are fixed in different places,
+/// so the outcome records which one happened.
+/// </remarks>
+public enum GateOutcome
+{
+    /// <summary>The program ran to the end, whether or not it passed.</summary>
+    Completed,
+
+    /// <summary>The program ran past its time limit and was stopped.</summary>
+    TimedOut,
+
+    /// <summary>The program could not be started, for example because it is not on the PATH.</summary>
+    NotStarted
 }
 
 /// <summary>Measured line coverage, as reported by the coverage gate.</summary>

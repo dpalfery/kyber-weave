@@ -1,0 +1,14 @@
+{
+  "name": "gate-catalogue-typescript-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "lint": "tsc --noEmit --noUnusedLocals -p .",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

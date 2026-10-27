@@ -1,0 +1,44 @@
+review:
+# Gates written by Kyber-Weave 0.1.0+f1fd593576a52d04c679b82a9001a47a0256a4cf 'docs init' from its shipped catalogue.
+# This block is yours: edit, remove or add gates freely; re-running 'docs init' never changes it.
+# 'kyber-weave review catalogue' prints the catalogue for newer releases, to copy in by hand.
+# CI: copy templates/github-actions/kyber-weave-review-gate.yml from
+# https://github.com/dpalfery/kyber-weave into .github/workflows/.
+  gates:
+    # go: format (.)
+    - id: go-fmt
+      run: ['gofmt', '-d', '.']
+    # go: lint (.)
+    - id: go-vet
+      run: ['go', 'vet', './...']
+    # go: build (.)
+    - id: go-build
+      run: ['go', 'build', './...']
+    # go: test (.)
+    - id: go-test
+      run: ['go', 'test', './...']
+    # go: lint (.)
+    # optional gate; uncomment to enable
+    # - id: go-lint
+    # run: ['golangci-lint', 'run', './...']
+  task-gates:
+    go-dev:
+      # go: format (.)
+      - id: go-fmt
+        include: ['**/*.go']
+        run: ['gofmt', '-d', '{changed}']
+        fix: ['gofmt', '-w', '{changed}']
+      # go: lint (.)
+      - id: go-vet
+        include: ['**/*.go']
+        run: ['go', 'vet', './...']
+    test-dev:
+      # go: format (test-dev copy)
+      - id: go-fmt
+        include: ['**/*.go']
+        run: ['gofmt', '-d', '{changed}']
+        fix: ['gofmt', '-w', '{changed}']
+      # go: lint (test-dev copy)
+      - id: go-vet
+        include: ['**/*.go']
+        run: ['go', 'vet', './...']

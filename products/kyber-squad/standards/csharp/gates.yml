@@ -1,0 +1,65 @@
+# Gate catalogue, family csharp (technology: csharp).
+# Rendered into the review council (gates) and developer task gates (task-gates).
+# Every run and fix row is an argv list, never a shell line. Every gate id has a source URL below.
+#
+# test: VSTest exits 0 when it finds no tests. Set <TreatNoTestsAsError>true</TreatNoTestsAsError>
+# in the test project (or Directory.Build.props) so an empty test run fails the gate.
+# The renderer picks the VSTest or MTP form from global.json (test.runner).
+schema: 1
+family: csharp
+technologies: [csharp]
+roots:
+  markers: ["*.slnx", "*.sln"]
+  fallback: ["*.csproj"]
+  nesting: each
+gates:
+  - id: format-whitespace
+    role: format
+    run: [dotnet, format, "{{marker}}", whitespace, --verify-no-changes, -v, minimal]
+  - id: format-style
+    role: format
+    run: [dotnet, format, "{{marker}}", style, --verify-no-changes, --severity, warn, -v, minimal]
+  - id: format-analyzers
+    role: lint
+    run: [dotnet, format, "{{marker}}", analyzers, --verify-no-changes, --severity, warn, -v, minimal]
+  - id: build
+    role: build
+    run: [dotnet, build, "{{marker}}", -c, Release]
+  - id: test
+    role: test
+    when: {runner: vstest}
+    run: [dotnet, test, "{{marker}}", -c, Release, --no-build]
+  - id: test
+    role: test
+    when: {runner: mtp}
+    run: [dotnet, test, --solution, "{{marker}}", -c, Release, --no-build]
+task-gates:
+  - id: format-whitespace
+    role: format
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, test-dev]
+    include: ["{{root-glob}}**/*.cs", "{{root-glob}}**/*.csproj", "{{root-glob}}**/*.props", "{{root-glob}}**/*.targets"]
+    run: [dotnet, format, "{{marker}}", whitespace, --verify-no-changes, --include, "{changed}"]
+    fix: [dotnet, format, "{{marker}}", whitespace, --include, "{changed}"]
+  - id: format-style
+    role: format
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, test-dev]
+    include: ["{{root-glob}}**/*.cs", "{{root-glob}}**/*.csproj", "{{root-glob}}**/*.props", "{{root-glob}}**/*.targets"]
+    run: [dotnet, format, "{{marker}}", style, --verify-no-changes, --severity, warn, --include, "{changed}"]
+    fix: [dotnet, format, "{{marker}}", style, --severity, warn, --include, "{changed}"]
+  - id: format-analyzers
+    role: lint
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev, test-dev]
+    include: ["{{root-glob}}**/*.cs", "{{root-glob}}**/*.csproj", "{{root-glob}}**/*.props", "{{root-glob}}**/*.targets"]
+    run: [dotnet, format, "{{marker}}", analyzers, --verify-no-changes, --severity, warn, --include, "{changed}"]
+    fix: [dotnet, format, "{{marker}}", analyzers, --severity, warn, --include, "{changed}"]
+  - id: build
+    role: build
+    agents: [csharp-dev, dal-dev, maui-dev, pulumi-dev]
+    run: [dotnet, build, "{{marker}}", -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+sources:
+  # Test (VSTest form). The MTP form is documented at https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-mtp
+  format-whitespace: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
+  format-style: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
+  format-analyzers: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-format
+  build: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build
+  test: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest
