@@ -796,4 +796,21 @@ describe('context analysis — untrusted part measurements', () => {
     expect('tokens' in (reduced as object)).toBe(false)
     expect(countTokens).not.toHaveBeenCalled()
   })
+
+  it('never subtracts a negative measured count from a bucket', () => {
+    // Kilo review: `Number.isFinite` alone admits -50, which would subtract
+    // from a bucket and make a prompt appear to give tokens back. A count is
+    // non-negative by definition, so a negative one is unusable, not measured.
+    const negative = { part: 'system_prompt', text: 'hello world', tokens: -50 } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [negative], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    expect(result.turns[0]?.buckets.system_prompt).toBe(11)
+    expect(result.derivedCounts).toBe(true)
+  })
 })
