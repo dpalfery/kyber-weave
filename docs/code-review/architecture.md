@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-27
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -125,7 +125,8 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
 | `code-review` | Skill — the procedure, the lens catalogue, the report format | `products/kyber-squad/skills/code-review/SKILL.md` |
 | Lens files | 15 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
-| Technology checklists | 7 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
+| Host review guidance | `REVIEW.md` at the repository root, bound as `<review-guidance>` in Config Reg. Recurring defect classes, a lens map, and the attestation format (see [Review guidance](#review-guidance)) | `REVIEW.md` |
+| Technology checklists | 11 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
 | `security-review` | Skill — invoked by the security lens, not duplicated | `products/kyber-squad/skills/security-review/SKILL.md` |
 | `GateRunner` | Runs declared gates, normalizes results | `src/KyberWeave.Core/Review/GateRunner.cs` |
@@ -134,6 +135,63 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Core/Review/VerdictEngine.cs` |
 | `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Core/Review/PathGlob.cs` |
 | `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Core/Configuration/ReviewConfig.cs` |
+
+## Review guidance
+
+A seat judges against rules the host owns, not against what the skill remembers about
+failure. There are two sources, and neither copies the other.
+
+- **Host guidance.** `REVIEW.md` at the repository root, bound as `<review-guidance>` in Config
+  Reg. It holds the defect classes this repository has actually been caught on. Each rule is
+  cited by id (`R2`–`R16`) or by section (`§N`). A new rule needs the same class of finding in
+  three or more reviews, across at least two PRs; otherwise it becomes an example bullet under an
+  existing section.
+- **Technology checklists.** Eleven pointer checklists under
+  `skills/code-review/references/`: C#, Python, React, SQL, Pulumi, Azure, GitHub Actions,
+  TypeScript (Node), Rust, Tauri and Go. Each names the host's `<technology>-coding-standard`
+  and states no rule of its own, so a host reverses a rule in its standard and the checklist
+  follows. Rust, Tauri and Go have no declared standard in this repository, so those checklists
+  say so and do not invent rules. Tauri also loads the Rust checklist for `.rs` files and the
+  React or TypeScript checklist for its WebView UI.
+
+The lens map has two axes:
+
+- **By lens**: each of the 15 catalogue lenses names the sections it takes. The three triage
+  seats (`duplicate-implementation`, `static-analysis-triage`, `dependency-supply-chain`) take
+  only the Ground rules and *What not to flag*, because they attribute tool output rather than
+  judge code.
+- **By technology present**: each checklist key lists the files that trigger it (for example
+  `*.cs` selects `csharp`) and the sections it takes.
+
+```mermaid
+flowchart LR
+    Host["REVIEW.md<br/>review-guidance"] --> Map["Lens map<br/>by lens · by technology present"]
+    Map -->|"lens row + technology rows + Ground rules"| Seat["review-lens seat"]
+    Map -->|"Ground rules + What not to flag"| Triage["review-triage seat"]
+    Map -->|"same sections as the seat it refutes"| Refuter["refuter"]
+    Seat -->|"guidance: ids · NO FINDINGS names sections"| Adj["code-reviewer adjudication"]
+    Triage --> Adj
+    Refuter --> Adj
+    Adj -->|"guided seat, no attestation"| Gap["council-coverage gap in the report"]
+    Adj -->|"findings, unchanged"| VE["VerdictEngine (no change)"]
+```
+
+Every council path receives this selection. Step 2 gives each seat its rows. The refuter (step 3)
+gets the same sections as the seat it challenges. On a harness that cannot delegate, such as
+Devin, `code-reviewer` applies each lens itself and uses the same selection, and the report says
+the council ran in-process. The developer's pre-push self-review gate walks the recurring defect
+classes for the technologies present. If a host has no `REVIEW.md`, the reviewer reports that
+rather than skipping guidance silently, and the portable checks in the skill still run.
+
+**Attestation.** Each judgement finding carries `guidance:` with the REVIEW.md section ids it
+derives from. A seat that finds nothing says so in its `NO FINDINGS` sentence and names the
+sections it checked.
+
+**Coverage gap, not a verdict input.** When a seat was given guidance and returns no
+attestation, `code-reviewer` records a council-coverage gap in the report and keeps that seat's
+findings. The verdict engine reads no attestation and is unchanged. The attestation shows the
+human reader what the seat claimed to check. It does not prove the seat applied the sections
+correctly, so a claim that does not hold is a review problem, not an engine rule.
 
 ## Why lenses are files, not agents
 

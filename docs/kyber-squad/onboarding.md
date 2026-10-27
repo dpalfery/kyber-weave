@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-27
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -988,11 +988,11 @@ kyber-weave squad pack --format all --out ./artifacts
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
 Both archive formats recurse through each skill directory. They contain all 28 canonical
-`SKILL.md` files plus the 82 retained supplemental resources, and retained local skill references
+`SKILL.md` files plus the 86 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 143 files on Copilot today — with authored relative links resolving inside
+beside its principal — 147 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

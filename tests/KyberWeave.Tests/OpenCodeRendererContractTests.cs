@@ -211,8 +211,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
+        // Derived from the loaded corpus, not a pinned literal: adding a checklist reference or
+        // resource file must not require editing this test. A dropped or duplicated file still
+        // fails here because the count is computed from the source, not from the renderer.
         Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.Equal(143, result.Files.Count);
 
         // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
         // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.

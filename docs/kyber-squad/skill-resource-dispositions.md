@@ -5,14 +5,14 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-22
+last-reviewed: 2026-10-27
 ---
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 82 supplemental files that sit
+This reference is the content-preservation audit for the 86 supplemental files that sit
 beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 82 resources, a reader can answer three questions: what kind of
+that, for every one of those 86 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -42,6 +42,8 @@ starting at a skill's own `SKILL.md`, actually reaches — a file named only in 
 packaged into both archives but never rendered beside its principal. Every resource below is
 `rendered` except `skills/setup-dev-environment/agents/openai.yaml`, which is `packaged-only`
 Codex skill-UI metadata that no instruction links to, and which stays that way by design (D6).
+The four technology checklists (`go.md`, `rust.md`, `tauri.md`, `typescript.md`) are `rendered`
+because `skills/code-review/SKILL.md` links them under Technology checklists.
 
 **Records, not guidance.** The Policy-line ledger below quotes verbatim excerpts from the
 resource files so that later edits can be checked against them (A5). A `migrated`,
@@ -57,6 +59,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/azure.md` | review-pointer | pointer-already-#126 | rendered | the declared `<azure-coding-standard>` | Pointer-only since #126 (finding 7); resolves the `<azure-coding-standard>` registry token where the host declares one. |
 | `skills/code-review/references/csharp.md` | review-pointer | pointer-already-#126 | rendered | the declared `<csharp-coding-standard>` | Pointer-only since #126; resolves `<csharp-coding-standard>` where declared. |
 | `skills/code-review/references/github-actions.md` | review-pointer | pointer-already-#126 | rendered | the declared `<github-actions-coding-standard>` | Pointer-only since #126; resolves `<github-actions-coding-standard>` where declared. |
+| `skills/code-review/references/go.md` | review-pointer | pointer-already-#126 | rendered | the declared `<go-coding-standard>` | Pointer-only; names the `<go-coding-standard>` registry token and reports "no Go standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
 | `skills/code-review/references/lenses/authz-tenancy.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria consumed directly by the code-review skill's parallel council; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/blast-radius-revertibility.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/correctness.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
@@ -75,7 +78,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/pulumi.md` | review-pointer | pointer-already-#126 | rendered | the declared `<pulumi-coding-standard>` | Pointer-only since #126; resolves `<pulumi-coding-standard>` where declared. |
 | `skills/code-review/references/python.md` | review-pointer | pointer-already-#126 | rendered | the declared `<python-coding-standard>` | Pointer-only since #126; resolves `<python-coding-standard>` where declared. |
 | `skills/code-review/references/react.md` | review-pointer | pointer-already-#126 | rendered | the declared `<react-coding-standard>` | Pointer-only since #126; resolves `<react-coding-standard>` where declared. |
+| `skills/code-review/references/rust.md` | review-pointer | pointer-already-#126 | rendered | the declared `<rust-coding-standard>` | Pointer-only; names the `<rust-coding-standard>` registry token and reports "no Rust standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
 | `skills/code-review/references/sql.md` | review-pointer | pointer-already-#126 | rendered | the declared `<sql-coding-standard>` | Pointer-only since #126 (finding 7 verified this file directly); resolves `<sql-coding-standard>` where declared. |
+| `skills/code-review/references/tauri.md` | review-pointer | pointer-already-#126 | rendered | the declared `<tauri-coding-standard>` | Pointer-only; names the `<tauri-coding-standard>` registry token and reports "no Tauri standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
+| `skills/code-review/references/typescript.md` | review-pointer | pointer-already-#126 | rendered | the declared `<typescript-coding-standard>` | Pointer-only; names the `<typescript-coding-standard>` registry token (`docs/standards/typescript/README.md`). Linked from `SKILL.md` under Technology checklists. |
 | `skills/create-pull-request/providers/azure-devops.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived [provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md); provider facts are sourced and cited in this file (D2). |
 | `skills/create-pull-request/providers/github.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived provider-aware create-pull-request plan; provider facts are sourced and cited in this file (D2). |
 | `skills/create-pull-request/scripts/github-create-pr.ps1` | script | retain-in-place | rendered | — | Rewritten by the archived provider-aware create-pull-request plan when `create-pull-request-github`'s scripts were relinked here (D2). |
@@ -136,10 +142,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/types-and-absent-values.md` | technique | retain-in-place | rendered | — | Narrowing and absent-value technique; typing and absent-value policy lives in `<typescript-coding-standard>` (D2). |
 
-Eighty-one rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 63
+Eighty-six rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 64
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 80 `rendered`, 1 `packaged-only`.
+`policy-migrated-to-template`). Delivery: 85 `rendered`, 1 `packaged-only` (`openai.yaml`).
 
 ## Policy-line ledger
 
