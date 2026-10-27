@@ -418,8 +418,7 @@ public sealed class ReviewTaskGatesConfigTests
 
         string[] agents =
         [
-            "go-dev",
-            "python-dev"
+            "go-dev"
         ];
 
         Assert.All(agents, agent => Assert.DoesNotContain(agent, taskGates.Keys));
@@ -449,6 +448,7 @@ public sealed class ReviewTaskGatesConfigTests
 
             Assert.Equal(expected.Include, actual.Include);
             Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
         }
 
         IReadOnlyList<ReviewTaskGate> tauri = taskGates["tauri-dev"];
@@ -465,6 +465,7 @@ public sealed class ReviewTaskGatesConfigTests
 
             Assert.Equal(expected.Include, actual.Include);
             Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
         }
     }
 
@@ -478,8 +479,17 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewTaskGate> gates = RepositoryTaskGates()["test-dev"];
 
-        Assert.Contains(gates, gate => gate.Id == "cargo-fmt");
-        Assert.Contains(gates, gate => gate.Id == "cargo-clippy");
+        IReadOnlyList<ReviewTaskGate> rust = RepositoryTaskGates()["rust-dev"];
+        foreach (string id in new[] { "cargo-fmt", "cargo-clippy" })
+        {
+            ReviewTaskGate expected = Assert.Single(rust, gate => gate.Id == id);
+            ReviewTaskGate actual = Assert.Single(gates, gate => gate.Id == id);
+
+            Assert.Equal(expected.Include, actual.Include);
+            Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
+        }
+
         Assert.Contains(gates, gate => gate.Id == "dash-typecheck");
         Assert.Contains(gates, gate => gate.Id == "dotnet-build");
     }
@@ -504,6 +514,7 @@ public sealed class ReviewTaskGatesConfigTests
         ReviewGate test = gates[tsReachable + 3];
 
         Assert.True(fmt.Blocking, "cargo-fmt must block.");
+        Assert.Equal(900, fmt.TimeoutSeconds);
         Assert.Equal(
             ["cargo", "fmt", "--manifest-path", "dash/tray/src-tauri/Cargo.toml", "--check"],
             fmt.Run);
@@ -519,6 +530,12 @@ public sealed class ReviewTaskGatesConfigTests
         Assert.Equal(
             ["cargo", "test", "--manifest-path", "dash/tray/src-tauri/Cargo.toml"],
             test.Run);
+
+        // The council gate and the per-task gate run the same argv, so a task that passes
+        // its gate passes the council's.
+        IReadOnlyList<ReviewTaskGate> rustTaskGates = RepositoryTaskGates()["rust-dev"];
+        Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-fmt").Run, fmt.Run);
+        Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-clippy").Run, clippy.Run);
     }
 
     /// <summary>
@@ -603,8 +620,7 @@ public sealed class ReviewTaskGatesConfigTests
         ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
 
         Assert.True(HasFlag(build.Run, "nr:false"), "Review build gate lacks -nr:false (or /nr:false).");
-        Assert.True(HasFlag(build.Run, "p:UseSharedCompilation=false"),
-            "Review build gate lacks -p:UseSharedCompilation=false.");
+        Assert.True(HasFlag(build.Run, "p:UseSharedCompilation=false"), "Review build gate lacks -p:UseSharedCompilation=false.");
     }
 
     /// <summary>
