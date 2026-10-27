@@ -70,6 +70,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "github-cli",
         "github-devops",
         "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
@@ -157,8 +158,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 27 canonical skills
-        Assert.Equal(27, CanonicalSkills.Length);
+        // Presence of all 28 canonical skills
+        Assert.Equal(28, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

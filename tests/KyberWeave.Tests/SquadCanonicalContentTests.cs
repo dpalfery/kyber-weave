@@ -121,6 +121,7 @@ public sealed class SquadCanonicalContentTests
         "github-cli",
         "github-devops",
         "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
@@ -235,7 +236,8 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// The product README is the human-readable skill roster. It must not list the retired
-    /// skill in its tree or its canonical-skill counts once the source no longer ships it.
+    /// skill in its tree or its canonical-skill counts once the source no longer ships it, and
+    /// it must state the count the tree actually holds — 28 once <c>kilo-review-loop</c> lands.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -243,7 +245,7 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.DoesNotContain("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
