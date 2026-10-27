@@ -17,6 +17,9 @@ ontology:
     - csharp
     - test
     - typescript
+    - rust
+    - tauri
+    - go
 
 # The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
 # cites their output as evidence rather than restating a claim that they passed.
