@@ -61,7 +61,7 @@ test names and sequencing; no task makes a design decision.
 
 ## Tasks
 
-- [ ] 1. **Gate config model and loader: `include`, `os` and `working-directory` on gates;
+- [x] 1. **Gate config model and loader: `include`, `os` and `working-directory` on gates;
   unknown-key warnings** · R4.7, R5.1, R5.2, R5.7, R3.5 · design §3, §4 (loader part), §5
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`.
   - **Files:**
@@ -102,7 +102,7 @@ test names and sequencing; no task makes a design decision.
     - **GREEN:** the class passes, and existing `ReviewConfigTests` and
       `ReviewTaskGatesConfigTests` still pass unchanged.
 
-- [ ] 2. **Gate runner: per-gate working directory, `NotStarted` outcome, council selection**
+- [x] 2. **Gate runner: per-gate working directory, `NotStarted` outcome, council selection**
   · R5.2, R5.3, R5.6, R8.1 · design §4 (selection), §6
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 1.
   - **Files:**
@@ -136,7 +136,7 @@ test names and sequencing; no task makes a design decision.
     - **GREEN:** these classes plus `TaskGateSelectionTests` and `ReviewGatesAgentCommandTests`
       pass.
 
-- [ ] 3. **`review gates` command: council changed set, `--base` and `--paths` without
+- [x] 3. **`review gates` command: council changed set, `--base` and `--paths` without
   `--agent`, `KW-REVIEW-033` and `KW-REVIEW-034`** · R5.3, R5.4, R5.5, R8.1, R8.2 · design §4,
   §6
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 2.
@@ -172,7 +172,7 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** the options are refused, and there is no selection or new ids.
     - **GREEN:** both classes pass.
 
-- [ ] 4. **Catalogue data files and embedding** · R1.1–R1.7, R4.1, R4.8, R6.1, R6.3, R6.5 ·
+- [x] 4. **Catalogue data files and embedding** · R1.1–R1.7, R4.1, R4.8, R6.1, R6.3, R6.5 ·
   design §1, §11
   - **Implementer:** `csharp-dev`. These files are executable configuration consumed by
     `GateCatalogue` and the gate runner, not documentation, so they sit with the code owner.
@@ -205,7 +205,7 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** the resources do not exist.
     - **GREEN:** the class passes.
 
-- [ ] 5. **Project root detector** · R4.2–R4.5 · design §2
+- [x] 5. **Project root detector** · R4.2–R4.5 · design §2
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** none.
   - **Files:** new `src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs` and
     `ProjectRoot.cs`.
@@ -235,7 +235,7 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** the type is missing.
     - **GREEN:** the class passes.
 
-- [ ] 6. **`GateCatalogue` loader and renderer** · R1.4, R1.6, R1.8, R2.4, R4.3, R4.4, R4.6,
+- [x] 6. **`GateCatalogue` loader and renderer** · R1.4, R1.6, R1.8, R2.4, R4.3, R4.4, R4.6,
   R6.1–R6.3, R6.5 · design §1, §2 (ids), §7 (rendered block)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 1, 4, 5.
   - **Files:** new `src/KyberWeave.Core/Review/Catalogue/GateCatalogue.cs`,
@@ -275,7 +275,7 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** the type is missing.
     - **GREEN:** the class passes.
 
-- [ ] 7. **`docs init` writes the review block** · R2.1–R2.8, R3.1–R3.3, R1.8, R6.4 · design §7
+- [x] 7. **`docs init` writes the review block** · R2.1–R2.8, R3.1–R3.3, R1.8, R6.4 · design §7
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 2, 6, 10.
   - **Files:**
     - new `src/KyberWeave.Core/Docs/Scaffolding/ReviewBlockWriter.cs`
@@ -313,7 +313,7 @@ test names and sequencing; no task makes a design decision.
       pass. Update an existing assertion only where it pinned the exact host-config text, and
       say why in the test.
 
-- [ ] 8. **Squad task-gate hint** · R6.6 · design §9
+- [x] 8. **Squad task-gate hint** · R6.6 · design §9
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** none.
   - **Files:** `src/KyberWeave.Cli/Commands/Squad/SquadInstallCommand.cs` and
     `src/KyberWeave.Cli/Commands/Squad/SquadUpdateCommand.cs`. A shared helper, if any, goes
@@ -335,7 +335,7 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** no hint is printed.
     - **GREEN:** the class passes.
 
-- [ ] 9. **Review-gate CI workflow template** · R7.1–R7.7 · design §10
+- [x] 9. **Review-gate CI workflow template** · R7.1–R7.7 · design §10
   - **Implementer:** `github-devops`. **Tests:** `test-dev`. **Depends on:** none. The command
     line it calls (`--base` without `--agent`) lands in task 3. The template is a sample, so
     it can merge in any order within this change.
@@ -368,7 +368,7 @@ test names and sequencing; no task makes a design decision.
     - **GREEN:** the class passes. As extra evidence, if `actionlint` is available, run it on
       the template and record the result.
 
-- [ ] 10. **Fixture projects per family** · R9.2, R9.6
+- [x] 10. **Fixture projects per family** · R9.2, R9.6
   - **Implementer:** `test-dev`. This is test data only. **Depends on:** none.
   - **Files:** new `tests/fixtures/gate-catalogue/<family>/clean/**` and
     `.../<family>/defects/**` for csharp, typescript, rust, go and python.
@@ -390,7 +390,7 @@ test names and sequencing; no task makes a design decision.
   - **No-test task.** Validation is task 13 (the clean fixtures pass, every defect fails) and
     task 7 (rendered output matches).
 
-- [ ] 11. **`kyber-weave review catalogue` command** · R3.4 · design §8
+- [x] 11. **`kyber-weave review catalogue` command** · R3.4 · design §8
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 6.
   - **Files:**
     - new `src/KyberWeave.Cli/Commands/Review/ReviewCatalogueCommand.cs`
@@ -413,14 +413,14 @@ test names and sequencing; no task makes a design decision.
     - **RED reason:** the command is not registered.
     - **GREEN:** the class passes.
 
-- [ ] 12. **Unit-test wiring for new test classes** · R9.7
+- [x] 12. **Unit-test wiring for new test classes** · R9.7
   - **Implementer:** `test-dev`. **Depends on:** 1–9 and 11. Task 4 is included because it
     creates `GateCatalogueResourceTests`. Run this task after the new classes exist.
   - **Files:** `scripts/fast-loop-classes.txt`, regenerated with
     `scripts/fast-loop.sh --regenerate`.
   - **No-test task.** Validation: `scripts/fast-loop.sh` lists and runs the new classes.
 
-- [ ] 13. **R9.6 real-toolchain run on Linux** · R9.6, R1.5, GAP-2 · design §11, testing
+- [x] 13. **R9.6 real-toolchain run on Linux** · R9.6, R1.5, GAP-2 · design §11, testing
   strategy 9
   - **Tests:** `test-dev` writes the test class. **CI job:** `github-devops`. **Probe fixes:**
     `csharp-dev`, in task 4's files. **Depends on:** 3, 7, 10.
@@ -471,7 +471,7 @@ test names and sequencing; no task makes a design decision.
     - **GREEN:** every clean fixture passes and every defect fails its intended gate on
       `ubuntu-latest`.
 
-- [ ] 14. **Documentation updates (harvest H1–H10)** · R10.1–R10.5 · design "Design harvest"
+- [x] 14. **Documentation updates (harvest H1–H10)** · R10.1–R10.5 · design "Design harvest"
   - **Implementer:** `docs-dev`. **Depends on:** 3, 7, 8, 9, 11. Drafting may start after
     wave A.
   - **Files:**
@@ -541,8 +541,53 @@ test names and sequencing; no task makes a design decision.
 
 ## Evidence
 
-Filled in as tasks complete: RED and GREEN runs (command, OS, result), the task-13 Linux
-workflow run URL with per-family results, probe outcomes, and the task-15 verdict.
+Closeout record 2026-10-27 (docs-dev task 16). Tasks 1–14 are ticked on the owner-approved
+closeout packet of 2026-10-27 (Linux toolchain run 24/24 green, full suite 3899 passed /
+0 failed, `docs validate` and `docs drift` clean except `--merge-ready`, which is blocked
+by this open specification by design) together with the on-disk corroboration below.
+RED/GREEN per-task runs and the task-13 workflow URL were recorded in the worker sessions,
+not in this file; the implementation, tests, fixtures and harvest listed here are the
+verifiable remainder.
+
+- Tasks 1–3 (loader keys, runner, council command): `ReviewGateKeysConfigTests`,
+  `CouncilGateSelectionTests`, `GateRunnerOutcomeTests`, `ReviewGatesCouncilCommandTests`
+  present under `tests/KyberWeave.Tests/`; new `CouncilGateSelection`, `GateOutcome` and
+  `KW-REVIEW-033` / `KW-REVIEW-034` paths in `src/`.
+- Tasks 4–6 (catalogue data, root detector, renderer): five `gates.yml` families under
+  `products/kyber-squad/standards/*/`, embedded as `Gates.<family>.yml`;
+  `src/KyberWeave.Core/Review/Catalogue/` (`GateCatalogue`, `ProjectRootDetector`,
+  `RenderedReviewBlock`); `GateCatalogueResourceTests`, `ProjectRootDetectorTests`,
+  `GateCatalogueRenderTests` present.
+- Task 7 (`docs init` block): `ReviewBlockWriter`, `--no-review-gates`,
+  `DocsInitReviewGatesTests` with per-family `expected-review.yml` approved files.
+- Task 8 (Squad hint): `SquadTaskGateHint` path in install/update commands,
+  `SquadTaskGateHintTests` present.
+- Task 9 (CI template): `templates/github-actions/kyber-weave-review-gate.yml` plus
+  README row, `ReviewGateWorkflowTemplateTests` present.
+- Task 10 (fixtures): `tests/fixtures/gate-catalogue/<family>/` clean/defect trees and
+  five `expected-review.yml` files present on disk.
+- Task 11 (`review catalogue`): `ReviewCatalogueCommand`, `ReviewCatalogueCommandTests`
+  present.
+- Task 12 (fast-loop wiring): new classes listed in `scripts/fast-loop-classes.txt`.
+- Task 13 (R9.6 Linux run): `GateCatalogueToolchainTests` plus
+  `.github/workflows/gate-catalogue-toolchains.yml` present; packet reports 24/24 green
+  on Linux. The workflow run URL was not recorded in this file.
+- Task 14 (harvest H1–H10): landed in the working tree and verified file by file
+  against the Closeout mapping in [README](README.md#closeout-mapping)
+  (`code-review/architecture.md`, `ci-pipelines/rule-reference.md`,
+  `docgraph/onboarding.md`, `cli-command-surface.md`, `kyber-squad/architecture.md`,
+  `ci-pipelines/workflows-runbook.md`, `install.md`, `todo/task-gate-config-review.md`,
+  new `todo/windows-node-gate-probe.md` + index row).
+- Task 15 (final council review): open — no verdict artifact is recorded in the
+  repository. Untracked `findings.json` (7 findings, 1 major) exists at the repo root
+  but carries no verdict and also ranges over unrelated branch history
+  (`.kyber-weave/kyber-weave.yml` edits from earlier commits, archived plans from other
+  work), so it is not task-15 evidence for this spec.
+- Task 16 (this closeout): structural closeout complete (Decisions preserved,
+  per-file Design harvest and Closeout mapping tables, archived statuses, index
+  updated, task boxes ticked). `docs validate . --merge-ready` reports no findings
+  (verified 2026-10-27 on a fresh build: 0 critical, 0 error, 0 warning, 0 info),
+  and `docs drift .` is clean (see task-16 report for the full outputs).
 
 ## Decisions
 
