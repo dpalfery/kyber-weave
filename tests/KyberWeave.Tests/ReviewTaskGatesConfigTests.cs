@@ -408,11 +408,12 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Go and Python developers run no task gate of their own. A Go gate added without its own
-    /// review would run the dash or tray suites on a change that never touched them.
+    /// The Go developer runs no task gate of its own; python-dev is pinned in the test above. A Go
+    /// gate added without its own review would run the dash or tray suites on a change that never
+    /// touched them.
     /// </summary>
     [Fact]
-    public void GoAndPythonDevelopersDeclareNoTaskGates()
+    public void GoDeveloperDeclaresNoTaskGates()
     {
         IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
 
