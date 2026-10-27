@@ -14,10 +14,6 @@ namespace KyberWeave.Tests;
 /// <c>docs init</c> step that writes them, and writes no configuration itself.
 /// Global scope prints nothing, because there is no project.
 /// </summary>
-/// <remarks>
-/// RED (task 8, test-first): no hint is printed yet, so every assertion that requires
-/// the hint fails. The no-hint cases already pass and guard against over-printing.
-/// </remarks>
 public sealed class SquadTaskGateHintTests : IDisposable
 {
     private const string HintFragment = "No task gates are declared";

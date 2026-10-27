@@ -104,12 +104,13 @@ authorization and tenancy, performance at scale, blast radius and revertibility,
 duplication, analyzer triage, dependency supply chain, and test adequacy against coverage. The
 council owns all of them, once, over everything.
 
-## Three commands
+## Four commands
 
 ```bash
 kyber-weave review gates .                                          # run the declared gates
 kyber-weave review duplicates .                                     # cluster duplicate bodies
 kyber-weave review verdict . --findings findings.json --gates gates.json
+kyber-weave review catalogue                                        # print the shipped per-technology gates
 ```
 
 Exit codes are distinct on purpose: `0` approve, `1` changes requested, `2` needs a human.

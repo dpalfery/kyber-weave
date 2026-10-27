@@ -18,11 +18,6 @@ namespace KyberWeave.Tests;
 /// none, never changes an existing block, and honours the opt-out. Each family fixture proves
 /// the written section byte for byte against its approved <c>expected-review.yml</c>.
 /// </summary>
-/// <remarks>
-/// RED (task 7, test-first): no review block is written, so every assertion that requires a
-/// written <c>review:</c> section fails. The <c>expected-review.yml</c> files are RED
-/// placeholders; GREEN replaces each with the approved first-run output after hand review.
-/// </remarks>
 public sealed class DocsInitReviewGatesTests : IDisposable
 {
     private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
