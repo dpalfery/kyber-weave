@@ -4,7 +4,7 @@ title: Specifications
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-27
 ---
 
 # Specifications
@@ -32,5 +32,6 @@ Every specification maintains a permanent `## Decisions` section (ID, Question, 
 
 | Spec | Component | Status | Date | Archive Date | Canonical Docs / Reference | Description |
 |---|---|---|---|---|---|---|
+| [Shipped review-gate catalogue](ship-gate-catalogue/README.md) | ReviewCouncil | Draft | 2026-10-27 | — | — | Per-technology council and task gates shipped with Kyber-Weave and written into an installing repository's `review:` configuration by `docs init`, with `include` on council gates and a copy-ready review-gate CI workflow. |
 | [Squad model presets](../archive/specs/squad-model-presets/README.md) | KyberSquad | Archived | 2026-10-24 | 2026-10-25 | [Kyber-Squad](../kyber-squad/onboarding.md), [Kyber-Squad architecture](../kyber-squad/architecture.md), [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) | Named, user-owned model presets applied at render time by `squad install`/`update`, and different presets in two projects at once without deploying into either. |
 | [KyberDash context surfaces](../archive/specs/kyberdash-context-surfaces/README.md) | KyberDash | Archived | 2026-09-18 | 2026-09-24 | [KyberDash](../dash/README.md), [ADR 0020](../adr/0020-kyberdash-one-time-fork.md), [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) | One-time fork of codeburn, removal of non-context features, a Tauri tray for macOS and Windows, deep-linkable dashboard views, and a context-troubleshooting CLI report. |
