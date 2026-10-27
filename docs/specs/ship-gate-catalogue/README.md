@@ -2,7 +2,7 @@
 id: specs/ship-gate-catalogue/index
 title: Shipped review-gate catalogue specification
 doc-type: index
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-27
 documentation-impact: extends-component
@@ -16,8 +16,9 @@ impact-components:
 
 # Shipped review-gate catalogue specification
 
-**Status:** Draft. Requirements, design and tasks are approved; execution is not yet approved
-and waits for the owner's go-ahead.
+**Status:** Ready. Requirements, design and tasks are approved, and the owner approved
+execution on 2026-10-27. The work is built on the same branch and pull request (#451), and the
+specification is archived there with its build work.
 
 Ship per-technology deterministic checks (format, lint, type-check, build, test) with
 Kyber-Weave, so a repository that installs it gets them as editable `review:` configuration
@@ -31,7 +32,7 @@ empty and `docs init` writes no `review:` section.
 |---|---|
 | [Requirements](requirements.md) | Approved 2026-10-27 (autonomous). 10 requirements in EARS form, non-goals, decisions. |
 | [Design](design.md) | Approved 2026-10-27 (autonomous). Embedded per-family catalogue, root detection, `working-directory`, council `include`/`os`, `docs init` review block, `review catalogue`, CI template, vendor-verified argv. |
-| [Tasks](tasks.md) | Approved 2026-10-27 (autonomous), test-first; execution not yet approved. 16 file-scoped tasks in four parallel waves, a Linux real-toolchain verification job, the final council review, and the docs-dev closeout. |
+| [Tasks](tasks.md) | Approved 2026-10-27 (autonomous), test-first; execution approved by the owner 2026-10-27. 16 file-scoped tasks in four parallel waves, a Linux real-toolchain verification job, the final council review, and the docs-dev closeout. |
 
 ## Design harvest
 

@@ -2,7 +2,7 @@
 id: specs/ship-gate-catalogue/design
 title: Shipped review-gate catalogue design
 doc-type: spec
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-27
 component: ReviewCouncil
@@ -109,7 +109,7 @@ flowchart LR
 
 ### 1. Catalogue storage format (R1)
 
-There are four **families**, each one embedded YAML file next to the coding standard it
+There are five **families**, each one embedded YAML file next to the coding standard it
 belongs to. This mirrors `Standards.<tech>.md`, so the single-file binary and the MCP server
 need no filesystem paths.
 
@@ -461,7 +461,9 @@ The new ids are added to `docs/ci-pipelines/rule-reference.md`.
 ## Testing strategy (test-first, R9)
 
 Each test is written failing first (R9.7). The fixtures are minimal projects under
-`tests/KyberWeave.Tests/Fixtures/GateCatalogue/<family>/`.
+`tests/fixtures/gate-catalogue/<family>/`. They sit outside the test project because the SDK
+compiles every `**/*.cs` under `tests/KyberWeave.Tests/`. Tests copy them into temp
+directories, so the repository's `Directory.Build.props` does not apply to them (decision T6).
 
 1. **Catalogue integrity (R9.1).** Every family is rendered against one synthetic root at
    `.`, then loaded through `ReviewConfigLoader`. The test also checks:

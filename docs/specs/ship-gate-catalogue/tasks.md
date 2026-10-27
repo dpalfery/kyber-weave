@@ -2,7 +2,7 @@
 id: specs/ship-gate-catalogue/tasks
 title: Shipped review-gate catalogue tasks
 doc-type: spec
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-27
 component: ReviewCouncil
@@ -10,7 +10,8 @@ component: ReviewCouncil
 
 # Implementation Tasks
 
-**Phase status:** Approved (autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27)). Execution is not yet approved: it waits for the owner's go-ahead.
+**Status:** Ready
+**Phase status:** Approved (autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27)). Execution was approved by the owner in chat on 2026-10-27 (decision T5).
 **Development mode:** test-first
 **Autonomy:** autonomous
 
@@ -287,7 +288,7 @@ test names and sequencing; no task makes a design decision.
     - **New file:** `tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs`.
     - **Behaviours to cover:**
       - **R9.2:** for each family fixture from task 10, the written `review:` section equals
-        `tests/KyberWeave.Tests/Fixtures/GateCatalogue/<family>/expected-review.yml`.
+        `tests/fixtures/gate-catalogue/<family>/expected-review.yml`.
       - **R9.3 cases:**
         - An existing `review:` is byte-identical after `docs init` and after
           `docs init --force`.
@@ -361,7 +362,7 @@ test names and sequencing; no task makes a design decision.
 
 - [ ] 10. **Fixture projects per family** · R9.2, R9.6
   - **Implementer:** `test-dev`. This is test data only. **Depends on:** none.
-  - **Files:** new `tests/KyberWeave.Tests/Fixtures/GateCatalogue/<family>/clean/**` and
+  - **Files:** new `tests/fixtures/gate-catalogue/<family>/clean/**` and
     `.../<family>/defects/**` for csharp, typescript, rust, go and python.
   - **Work:** build the smallest project that each family's gates accept:
     - **csharp:** a `.sln`, one class library and one xUnit test.
@@ -417,7 +418,7 @@ test names and sequencing; no task makes a design decision.
     `csharp-dev`, in task 4's files. **Depends on:** 3, 7, 10.
   - **Files:**
     - new `tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs`
-    - `.github/workflows/ci.yml` (one new job)
+    - new `.github/workflows/gate-catalogue-toolchains.yml` (decision T7)
   - **Work:**
     - **Test class** (`test-dev`):
       - Skip with `Assert.Skip` unless `KW_GATE_TOOLCHAIN=1`.
@@ -426,7 +427,7 @@ test names and sequencing; no task makes a design decision.
         All must pass.
       - For each defect copy, the matching gate must fail with `KW-REVIEW-022`, never
         `KW-REVIEW-033`.
-    - **CI job** (`github-devops`), named `gate-catalogue-toolchains`:
+    - **CI job** (`github-devops`), a workflow and job, both named `gate-catalogue-toolchains`:
       - Runs on `ubuntu-latest` and installs:
         - .NET from `global.json`
         - Node LTS, plus `npm ci` in the typescript fixture
@@ -500,7 +501,7 @@ test names and sequencing; no task makes a design decision.
       evidence (tasks 1–14, the task-13 Linux run, the task-15 verdict).
     - Confirm the H1–H10 harvest landed at the declared scale (`extends-component`; ReviewCouncil,
       DocGraph, KyberSquad, CI Pipelines, Distribution).
-    - Add the `Closeout mapping` table mapping every decision (D1–D23, T1–T4) and harvest id
+    - Add the `Closeout mapping` table mapping every decision (D1–D23, T1–T7) and harvest id
       (H1–H10) to a live governed document or a waiver.
     - Set frontmatter and body statuses to archived, and move the spec to
       `docs/archive/specs/ship-gate-catalogue/`.
@@ -546,3 +547,6 @@ Decisions D1–D23 live in [design.md](design.md#decisions) and
 | T2 | How does R9.6 run on Linux? | A gated xUnit class (`KW_GATE_TOOLCHAIN=1`) in a new `ci.yml` job on `ubuntu-latest` with all five toolchains | Keeps the default unit run fast; it gives Linux evidence a macOS developer cannot produce locally | autonomous: low-confidence, no authoritative source |
 | T3 | The `--base`/`--paths` without `--agent` exit-2 assertions in `ReviewGatesAgentCommandTests` | Updated on purpose in task 3 | Required by design §4; `--task` and `--fix` keep exit 2 | autonomous: recommendation accepted (design approved) |
 | T4 | Are the tasks approved, with T1–T3? | Yes, the tasks phase is approved and T1–T3 are accepted. The final approve-and-execute gate is **not** recorded: the owner asked only for the specification, so execution waits for the owner's go-ahead. | Conductor instruction | autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27) |
+| T5 | Final approve-and-execute gate | Approved: execute the tasks as written (waves and dependencies unchanged), on the same branch and pull request (#451), so the specification is archived with its build work | The owner said "execute the tasks" in chat on 2026-10-27, relayed by the conductor | owner approved in chat, 2026-10-27 (not autonomous) |
+| T7 | Should the R9.6 job live in `ci.yml`? | No. It goes in a separate `.github/workflows/gate-catalogue-toolchains.yml` with path filters and `workflow_dispatch`. | `ci.yml` has one workflow-wide trigger (push to main, every pull request, a schedule), so a job inside it cannot filter by path without adding a third-party action. A separate file keeps `ci.yml` unchanged. | autonomous: recommendation accepted |
+| T6 | Where do the fixture projects live? | `tests/fixtures/gate-catalogue/<family>/`, outside the test project | `tests/KyberWeave.Tests/KyberWeave.Tests.csproj` uses the SDK default compile globs (no `Compile Remove`), so fixture `.cs` files under it, including seeded defects, would break the test build. Found while writing the task packets. | autonomous: recommendation accepted |

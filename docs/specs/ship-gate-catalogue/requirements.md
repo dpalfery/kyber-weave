@@ -2,7 +2,7 @@
 id: specs/ship-gate-catalogue/requirements
 title: Shipped review-gate catalogue requirements
 doc-type: requirements
-status: draft
+status: current
 owner: dpalfery
 last-reviewed: 2026-10-27
 component: ReviewCouncil

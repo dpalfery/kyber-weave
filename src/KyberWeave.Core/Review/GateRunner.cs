@@ -86,14 +86,16 @@ public static class GateRunner
 
         foreach (PlannedTaskGate gate in gates)
         {
+            string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
+
             if (fix && gate.Fix.Count > 0)
             {
-                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, workingDirectory);
+                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, gateDirectory);
                 if (!applied.Passed)
                     fixFailures.Add(applied);
             }
 
-            GateResult result = RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, workingDirectory);
+            GateResult result = RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory);
             results.Add(result);
 
             if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
@@ -111,7 +113,20 @@ public static class GateRunner
 
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)
     {
-        return RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, workingDirectory);
+        string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
+        return RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory);
+    }
+
+    /// <summary>
+    /// The directory a gate starts in: the repository root, or the gate's declared subdirectory of it.
+    /// The loader has already refused a declared directory that is absolute, leaves the root, or does not exist.
+    /// </summary>
+    private static string ResolveWorkingDirectory(string root, string? repositoryRelative)
+    {
+        if (string.IsNullOrEmpty(repositoryRelative))
+            return root;
+
+        return Path.GetFullPath(Path.Combine(root, repositoryRelative.Replace('/', Path.DirectorySeparatorChar)));
     }
 
     private static GateResult RunArgv(
@@ -121,6 +136,18 @@ public static class GateRunner
         int timeoutSeconds,
         string workingDirectory)
     {
+        if (!Directory.Exists(workingDirectory))
+        {
+            // Reported as not started, not as a failed check: the command was never given a place to run.
+            return new GateResult(
+                id,
+                blocking,
+                -1,
+                $"working directory '{workingDirectory}' does not exist",
+                0,
+                GateOutcome.NotStarted);
+        }
+
         ProcessStartInfo startInfo = new(argv[0])
         {
             UseShellExecute = false,
@@ -144,7 +171,8 @@ public static class GateRunner
                 blocking,
                 process.ExitCode,
                 Summarize(process),
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                GateOutcome.Completed);
         }
         catch (TimeoutException ex)
         {
@@ -153,7 +181,8 @@ public static class GateRunner
                 blocking,
                 -1,
                 $"timed out after {timeoutSeconds} seconds: {ex.Message}",
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                GateOutcome.TimedOut);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
@@ -165,7 +194,8 @@ public static class GateRunner
                 blocking,
                 -1,
                 $"could not start '{argv[0]}': {ex.Message}",
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                GateOutcome.NotStarted);
         }
     }
 

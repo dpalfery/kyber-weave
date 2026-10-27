@@ -8,12 +8,14 @@ namespace KyberWeave.Core.Review;
 /// <param name="TimeoutSeconds">Seconds before the runner kills the process tree.</param>
 /// <param name="Fix">The expanded fix command; empty when the gate declares none.</param>
 /// <param name="Run">The expanded verify command.</param>
+/// <param name="WorkingDirectory">Repository-relative directory the gate runs in; null means the repository root.</param>
 public sealed record PlannedTaskGate(
     string Id,
     bool Blocking,
     int TimeoutSeconds,
     IReadOnlyList<string> Fix,
-    IReadOnlyList<string> Run);
+    IReadOnlyList<string> Run,
+    string? WorkingDirectory = null);
 
 /// <summary>A task gate that does not run for this change, and why.</summary>
 /// <param name="Id">The gate's slug.</param>
@@ -193,7 +195,8 @@ public static class TaskGateSelection
                 continue;
             }
 
-            planned.Add(new PlannedTaskGate(gate.Id, gate.Blocking, gate.TimeoutSeconds, fix, run));
+            planned.Add(new PlannedTaskGate(gate.Id, gate.Blocking, gate.TimeoutSeconds, fix, run,
+                gate.WorkingDirectory));
         }
 
         return new TaskGatePlan(planned, skipped, refusals.Distinct(StringComparer.Ordinal).ToArray());
@@ -243,7 +246,7 @@ public static class TaskGateSelection
     /// <summary>
     /// True when <paramref name="candidate"/> is <paramref name="root"/> or lies beneath it. Both must be full paths.
     /// </summary>
-    private static bool IsWithin(string root, string candidate)
+    internal static bool IsWithin(string root, string candidate)
     {
         string relative = Path.GetRelativePath(root, candidate);
         return !Path.IsPathRooted(relative) &&
@@ -267,7 +270,7 @@ public static class TaskGateSelection
     /// Only the link's target is read; nothing behind it is opened.
     /// </para>
     /// </remarks>
-    private static bool LeadsOutsideThroughSymlink(string root, string path)
+    internal static bool LeadsOutsideThroughSymlink(string root, string path)
     {
         string full = Path.GetFullPath(root);
         string current = full;

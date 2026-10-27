@@ -1,0 +1,51 @@
+# Gate catalogue, family go (technology: go).
+# Marker go.mod, nesting each: nested modules are excluded from a parent's ./... pattern.
+# Every council gate runs with working-directory set to the module root, except where noted.
+# golangci-lint is third-party: install and pin it yourself, then uncomment the gate (when: optional).
+schema: 1
+family: go
+technologies: [go]
+roots:
+  markers: ["go.mod"]
+  nesting: each
+gates:
+  - id: fmt
+    role: format
+    working-directory: "{{root}}"
+    run: [gofmt, -d, .]
+  - id: vet
+    role: lint
+    working-directory: "{{root}}"
+    run: [go, vet, "./..."]
+  - id: build
+    role: build
+    working-directory: "{{root}}"
+    run: [go, build, "./..."]
+  - id: test
+    role: test
+    working-directory: "{{root}}"
+    run: [go, test, "./..."]
+  - id: lint
+    role: lint
+    when: optional
+    working-directory: "{{root}}"
+    run: [golangci-lint, run, "./..."]
+task-gates:
+  - id: fmt
+    role: format
+    agents: [go-dev, test-dev]
+    include: ["{{root-glob}}**/*.go"]
+    run: [gofmt, -d, "{changed}"]
+    fix: [gofmt, -w, "{changed}"]
+  - id: vet
+    role: lint
+    agents: [go-dev, test-dev]
+    include: ["{{root-glob}}**/*.go"]
+    working-directory: "{{root}}"
+    run: [go, vet, "./..."]
+sources:
+  fmt: https://raw.githubusercontent.com/golang/go/master/src/cmd/gofmt/gofmt.go
+  vet: https://pkg.go.dev/cmd/vet
+  build: https://pkg.go.dev/cmd/go
+  test: https://pkg.go.dev/cmd/go
+  lint: https://golangci-lint.run/docs/welcome/install/local/

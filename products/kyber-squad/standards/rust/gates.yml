@@ -1,0 +1,36 @@
+# Gate catalogue, family rust (technologies: rust, tauri).
+# Marker Cargo.toml, outermost: workspace members are covered by their workspace root.
+# Rust has no separate build or typecheck gate here: clippy stands for the type check, because it runs
+# the compiler's checking pass (judgement call from the RED tests; confirm on the Linux run).
+# clippy is role lint, so the format, lint and test roles are all present for R1.3.
+schema: 1
+family: rust
+technologies: [rust, tauri]
+roots:
+  markers: ["Cargo.toml"]
+  nesting: outermost
+gates:
+  - id: fmt
+    role: format
+    run: [cargo, fmt, --manifest-path, "{{marker}}", --all, --check]
+  - id: clippy
+    role: lint
+    run: [cargo, clippy, --manifest-path, "{{marker}}", --, -D, warnings]
+  - id: test
+    role: test
+    run: [cargo, test, --manifest-path, "{{marker}}"]
+task-gates:
+  - id: fmt
+    role: format
+    agents: [rust-dev, tauri-dev, test-dev]
+    include: ["{{root-glob}}**/*.rs"]
+    run: [cargo, fmt, --manifest-path, "{{marker}}", --all, --check]
+    fix: [cargo, fmt, --manifest-path, "{{marker}}", --all]
+  - id: clippy
+    role: lint
+    agents: [rust-dev, tauri-dev, test-dev]
+    run: [cargo, clippy, --manifest-path, "{{marker}}", --target-dir, ".agent_scratchpad/{task}/target", --, -D, warnings]
+sources:
+  fmt: https://raw.githubusercontent.com/rust-lang/rustfmt/master/README.md
+  clippy: https://doc.rust-lang.org/clippy/usage.html
+  test: https://doc.rust-lang.org/cargo/commands/cargo-test.html
