@@ -59,8 +59,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsScaffolder.Scaffold(repo);
 
-        string written = ReadReviewSection(repo);
-        string expected = File.ReadAllText(ExpectedReviewPath(family));
+        string written = NormalizeVersionStamp(ReadReviewSection(repo));
+        string expected = NormalizeVersionStamp(File.ReadAllText(ExpectedReviewPath(family)));
         Assert.Equal(expected, written);
     }
 
@@ -374,6 +374,13 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     private static string ExpectedReviewPath(string family) =>
         Path.Combine(
             KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "expected-review.yml");
+
+    /// <summary>
+    /// The header comment stamps the build version, which carries the commit hash; blank it
+    /// so the fixtures stay valid on every commit.
+    /// </summary>
+    private static string NormalizeVersionStamp(string yaml) =>
+        Regex.Replace(yaml, "written by Kyber-Weave \\S+", "written by Kyber-Weave <version>");
 
     private static string ConfigPath(string repo) => Path.Combine(repo, ConfigRelativePath);
 
