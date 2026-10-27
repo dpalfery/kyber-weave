@@ -33,6 +33,15 @@ apply**, and **whether the change is reviewable at all**. A diff past the host's
 `review.policy.max-reviewable-lines` ceiling is not made safe by reviewing it harder; it
 escalates.
 
+**Load the review guidance.** Read the host's review guidance declared as
+**<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
+ground rules and the sections that match the changed technologies are the host's own standard
+for this change. Each seat receives its assigned sections and the ground rules in its
+invocation, and every seat must apply them. The same guidance binds the pre-push self-review
+gate, the refutation pass in step 3, and any in-process council fallback in step 2: none of
+them reviews against a generic standard instead. If the file is missing or no path is
+declared, the report says so in one line rather than reviewing without notice.
+
 ### 2. Start the gates and the council together
 
 They are independent. Neither waits on the other.
@@ -67,9 +76,16 @@ executed evidence is a weaker review, and the report must not read as though eve
 passed.
 
 **Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
-lens file and the review scope. Every lens declares an applicability predicate and returns
-`SKIPPED` with a reason when the diff holds nothing it owns — auto-skipping is what makes
-fifteen lenses affordable.
+lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
+applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
+owns — auto-skipping is what makes fifteen lenses affordable. Every seat given guidance sections
+ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
+findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
+findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
+report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
+attestation, and a missing attestation is never a verdict input. Where the harness cannot start
+separate seats, the reviewer applies each lens in turn with the same guidance sections and
+returns the same attestation line.
 
 The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
 takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
@@ -116,16 +132,23 @@ quoting the counterpart it found. Neither may report the other's unit.
 **Technology checklists.** The per-technology references —
 [C#](references/csharp.md), [Python](references/python.md), [React](references/react.md),
 [SQL](references/sql.md), [Pulumi](references/pulumi.md), [Azure](references/azure.md),
-[GitHub Actions](references/github-actions.md) — are lens modifiers, not lenses. A lens loads
+[GitHub Actions](references/github-actions.md), [TypeScript](references/typescript.md),
+[Rust](references/rust.md), [Tauri](references/tauri.md), [Go](references/go.md) — are lens
+modifiers, not lenses. A lens loads
 the checklists for the technologies actually present in the diff. Each checklist points at the
 host's declared `<technology>-coding-standard` and states no rule of its own; an undeclared or
-draft standard is reported, never replaced with a built-in checklist.
+draft standard is reported, never replaced with a built-in checklist. A checklist's Review traps
+section, where it has one, is a set of non-authoritative detection prompts: they are not rules,
+they do not substitute for the declared standard, and a finding raised from one needs quoted
+evidence like any other.
 
 ### 3. Confirm before believing
 
 For every `major` or `critical` finding, spend one more `review-lens` invocation trying to
 **refute** it. Say so explicitly in the invocation: the confirming instance argues the
-finding is wrong and defaults to refuted when it cannot establish otherwise.
+finding is wrong and defaults to refuted when it cannot establish otherwise. Pass it the same
+review-guidance sections, and have it test the finding's `guidance:` rule id against them: a
+finding that misapplies the rule it names is refuted.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability
 candidates, generalized to every lens and for the same reason — a confident wrong finding
@@ -230,12 +253,15 @@ Most severe first:
   - **Claim:** what is wrong.
   - **Evidence:** how it is known — a path and line read, or a gate result id.
   - **Failure:** the concrete scenario.
+  - **Guidance:** the review-guidance rule id (or section, for an untagged bullet) applied, when the finding applies one.
   - **Suggestion:** the specific fix.
 
 ### Council coverage
 Every lens, and its outcome: findings, `NO FINDINGS`, or `SKIPPED` with the reason. This
 section is not optional. It is the difference between a dimension that was reviewed and one
-that was quietly never looked at.
+that was quietly never looked at. A findings or `NO FINDINGS` outcome also carries its
+attestation line, which lists the review-guidance sections it checked. A seat with no attestation
+line is listed here as a coverage gap.
 
 ### Dropped
 What was reported and removed, with the `KW-REVIEW-*` rule that removed it. A review that

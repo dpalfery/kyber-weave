@@ -40,6 +40,21 @@ not report theoretical races you cannot construct.
 **Inverted or dropped conditions.** Negation errors, a short-circuit that skips a necessary
 side effect, an `else` attached to the wrong branch, a condition that can never be true.
 
+**Malformed and null input.** For every input the change parses, reads, or accepts from another
+component, trace what happens when it is null, empty, truncated, of the wrong type, or shaped
+differently from the happy path. Name the input and the wrong result it produces; a parser that
+throws on a missing field where the caller expects an absent value is a finding.
+
+**Non-finite numbers.** Where arithmetic or comparison touches a number that can arrive as
+`NaN`, `Infinity`, `-Infinity`, or a negative zero, check what each comparison, sum, and
+division does with it. A `NaN` that compares false to everything passes a range check it should
+fail.
+
+**Boundaries across line endings.** Where the change reads, splits, or counts lines or
+offsets, test the boundary on both `LF` and `CRLF` input: a split on `\n` that leaves a trailing
+`\r`, an offset that counts two characters where the code counts one, or a last line with no
+terminator are the defects this catches.
+
 **Silent truncation and conversion.** Narrowing casts, precision loss in money or time
 arithmetic, string operations that assume single-byte characters, time-zone-naive handling
 of instants.

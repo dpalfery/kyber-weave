@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-27
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -52,9 +52,9 @@ Modifying local developer environments or repository-level agent configurations 
 The canonical product contains 28 `SKILL.md` files. `code-review-loop` and `kilo-review-loop` are authored in Kyber-Squad;
 every imported skill except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches
-the designated canonical copy byte for byte. It also retains 82 supplemental references, scripts, provider
-instructions, and metadata files, for 110 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 110 files and
+the designated canonical copy byte for byte. It also retains 86 supplemental references, scripts, provider
+instructions, and metadata files, for 114 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 114 files and
 preserve each retained local reference.
 
 The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -69,7 +69,7 @@ pull request to ready.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 24 `.github/agents/<name>.agent.md` files, 28 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 143 files total, with authored relative links resolving in the output. Every
+linked resources, 147 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

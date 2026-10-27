@@ -44,6 +44,8 @@ A diff shows changed lines, not their meaning. Before reporting anything, open t
 
 Where the lens names a project standard, read the standard rather than inferring it. Where the change follows an existing pattern in the same file or module, that pattern is evidence about intent — say so rather than reporting the pattern as a novel defect.
 
+**Apply the review guidance.** The invocation supplies the host's review-guidance sections (from `REVIEW.md`) and their ground rules. Apply them to the diff alongside your lens: they are the host's own rules, and they outrank a generic standard where the two differ. A rule that does not match the change is not a finding. Where a finding applies a rule, name it in the finding's `guidance:` field: the REVIEW.md rule id where the rule has one (`R2` to `R16`), or its section number for an untagged bullet (for example `§1`). If the invocation supplies no guidance sections, say so in your output rather than applying your defaults silently.
+
 # 3. Report in one schema
 
 Every finding is one block in this exact shape:
@@ -60,10 +62,11 @@ Every finding is one block in this exact shape:
   claim: <one sentence: what is wrong>
   evidence: <how you know — the path and line you read, or the standard you checked>
   failure_scenario: <concrete inputs or conditions, and the wrong behaviour that results>
+  guidance: <optional: the REVIEW.md rule ids or sections applied, e.g. [R8, §1]>
   suggestion: <the specific change that fixes it>
 ```
 
-**`excerpt`, `evidence`, and `failure_scenario` are mandatory.** They are what separates a finding from an opinion, and the reviewer drops any finding missing one of them without reading the rest of it. If you cannot quote the code, name how you know, and describe a concrete way it fails, you do not have a finding yet — you have a suspicion, and the correct action is to not report it.
+**`excerpt`, `evidence`, and `failure_scenario` are mandatory.** They are what separates a finding from an opinion, and the reviewer drops any finding missing one of them without reading the rest of it. `guidance` is optional and does not affect whether a finding is kept; it tells the adjudicator which host rule the finding rests on. If you cannot quote the code, name how you know, and describe a concrete way it fails, you do not have a finding yet — you have a suspicion, and the correct action is to not report it.
 
 `failure_scenario` must be concrete. "Could cause problems under load" is not a scenario. "Two requests for the same tenant id arriving within the cache TTL both see the first tenant's rows" is.
 
@@ -96,10 +99,11 @@ Findings below 7 are noise. Suppressing them is part of the job, not a lapse in 
 
 # 5. Output
 
-Return the YAML findings list and nothing else — no preamble, no summary, no closing commentary. If the lens applied and found nothing, return:
+Return the YAML findings list, then the attestation line as its last line, and nothing else — no preamble, no summary, no closing commentary. If the lens applied and found nothing, return:
 
 ```
 NO FINDINGS: <one sentence on what you checked and why it is clean>
+REVIEW.md sections checked: [<rule ids and sections you applied, e.g. R8, §1>]
 ```
 
-That sentence matters. It is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.
+The attestation line is the same on both forms. It shows the guidance was read and applied, not skipped, so a report with no attestation line is recorded as a coverage gap. `SKIPPED` returns no attestation line; its reason stands on its own. The `NO FINDINGS` sentence matters too: it is the difference between a lens that ran and a lens that gave up, and it is the only way the reviewer can tell them apart.

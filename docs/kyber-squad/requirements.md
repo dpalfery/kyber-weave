@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-27
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -128,7 +128,7 @@ canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher
 canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
 skill is folded into `create-pull-request`, and the three retired `-v3` agent identities survive
 only as folded provenance in their canonical migration reports. Renderers project every file an
-owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 123
+owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 147
 files with no dangling link; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/`
