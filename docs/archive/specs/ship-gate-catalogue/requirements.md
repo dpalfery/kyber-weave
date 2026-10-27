@@ -1,10 +1,17 @@
 ---
-id: specs/ship-gate-catalogue/requirements
+id: archive/specs/ship-gate-catalogue/requirements
 title: Shipped review-gate catalogue requirements
 doc-type: requirements
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-10-27
+documentation-impact: extends-component
+impact-components:
+  - ReviewCouncil
+  - DocGraph
+  - KyberSquad
+  - CI Pipelines
+  - Distribution
 component: ReviewCouncil
 keywords:
   - gate catalogue
@@ -17,7 +24,8 @@ keywords:
 
 # Requirements Document
 
-**Phase status:** Approved (autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27))
+**Status:** Archived
+**Archive Date:** 2026-10-27
 **Autonomy:** autonomous
 **Development mode:** test-first
 
@@ -281,15 +289,15 @@ what gates I get and how to change them, so that I don't have to read the source
 
 #### Acceptance Criteria
 
-10.1. [`docs/code-review/architecture.md`](../../code-review/architecture.md) SHALL describe the
+10.1. [`docs/code-review/architecture.md`](../../../code-review/architecture.md) SHALL describe the
 catalogue, the materialisation rules, and `include` and `os` on council gates.
-10.2. [`docs/docgraph/onboarding.md`](../../docgraph/onboarding.md) SHALL list the `review:`
+10.2. [`docs/docgraph/onboarding.md`](../../../docgraph/onboarding.md) SHALL list the `review:`
 section among the things `docs init` writes, with the opt-out and the re-run rule.
-10.3. [`docs/install.md`](../../install.md) SHALL state what an installing repository gets and
+10.3. [`docs/install.md`](../../../install.md) SHALL state what an installing repository gets and
 which step writes it.
-10.4. [`docs/ci-pipelines/workflows-runbook.md`](../../ci-pipelines/workflows-runbook.md) SHALL
+10.4. [`docs/ci-pipelines/workflows-runbook.md`](../../../ci-pipelines/workflows-runbook.md) SHALL
 describe the review-gate workflow.
-10.5. [`docs/todo/task-gate-config-review.md`](../../todo/task-gate-config-review.md) SHALL be
+10.5. [`docs/todo/task-gate-config-review.md`](../../../todo/task-gate-config-review.md) SHALL be
 updated to say whether the catalogue's .NET agent mapping (6.1) answers its first question.
 
 ## Non-goals
@@ -301,7 +309,7 @@ updated to say whether the catalogue's .NET agent mapping (6.1) answers its firs
 - Installing toolchains (`dotnet`, `node`, `cargo`, `go`, Python tools) on a developer's
   machine.
 - Running only the tests that cover a task's changed files. That stays in
-  [task-gate test-project mapping](../../todo/task-gate-test-project-mapping.md).
+  [task-gate test-project mapping](../../../todo/task-gate-test-project-mapping.md).
 - Catalogue entries for `azure`, `data-access-layer`, `github-actions`, `maui`, `pulumi`,
   `sql` and `test` as technologies of their own.
 - Coverage floors, duplicate thresholds, or policy defaults in the written `review:` section.
@@ -323,3 +331,50 @@ updated to say whether the catalogue's .NET agent mapping (6.1) answers its firs
 | D8 | Which Go and Python commands ship? | Not named here. Design confirms each against current vendor documentation through `research-agent` (1.5). | The architect flagged the Go (`gofmt`, `go vet`, `golangci-lint`, `go test`) and Python (`ruff`, `mypy` or `pyright`, `pytest`) candidates as unverified. | deferred to design |
 | D20 | R1.5 said an unconfirmed command must not ship, while the design deferred some exit codes to the R9.6 run. How do the two fit? | R1.5 is reworded. The vendor docs confirm a command where they state its exit behaviour. Otherwise the R9.6 Linux run confirms it, and that run gates the release. A command confirmed by neither does not ship. | Raised by the docs-dev spec review on 2026-10-27. The intent is unchanged: no unproven command ships. | autonomous: recommendation accepted |
 | D9 | Are these requirements approved? | Yes: requirements phase approved; proceed to design. | `docs validate` and `docs drift` reported no findings on the staged requirements. | autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27) |
+
+## Design harvest
+
+The durable design answers to these requirements (H1–H10) are tabulated authoritatively in
+[design](design.md#design-harvest); the rows below map each harvest id to the requirement it
+answers so this file's closeout stands alone.
+
+| ID | Answers | Lives in |
+|---|---|---|
+| H1 | R1: catalogue format, families, placeholders | [design](design.md#design-harvest) |
+| H2 | R4: root detection and id derivation | [design](design.md#design-harvest) |
+| H3 | R4, R5: `working-directory`, council `include` and `os`, changed set | [design](design.md#design-harvest) |
+| H4 | R5, R8: new rule ids `KW-CONFIG-002`, `KW-REVIEW-033`, `KW-REVIEW-034` | [design](design.md#design-harvest) |
+| H5 | R2, R3: `docs init` review block, `--no-review-gates`, re-run rule | [design](design.md#design-harvest) |
+| H6 | R3: `review catalogue` command | [design](design.md#design-harvest) |
+| H7 | R6: Squad task-gate hint | [design](design.md#design-harvest) |
+| H8 | R7: review-gate CI workflow | [design](design.md#design-harvest) |
+| H9 | R2: what an installing repository gets | [design](design.md#design-harvest) |
+| H10 | R6, R10: answer to the .NET agent-mapping question | [design](design.md#design-harvest) |
+
+## Closeout mapping
+
+No ADR: these requirements refine the existing review architecture and established `docs init`
+/ `review gates` patterns, so no new architectural decision constrains future work — no ADR,
+ADR waiver: refines existing architecture.
+
+| ID | Canonical destination |
+|---|---|
+| D1 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D2 | [Review council architecture](../../../code-review/architecture.md#council-gates) |
+| D3 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Install](../../../install.md) |
+| D4 | [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| D5 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D6 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| D7 | [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| D8 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D9 | Documentation waiver — requirements-phase approval record; no surviving behavioral invariant. |
+| D20 | Documentation waiver — superseded wording decision; its effect is the shipped R1.5 text and the Linux confirmation run. |
+| H1, H2 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H3 | [Review council architecture](../../../code-review/architecture.md#council-gates), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H4 | [Rule reference](../../../ci-pipelines/rule-reference.md), [Workflows runbook](../../../ci-pipelines/workflows-runbook.md) |
+| H5 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Install](../../../install.md) |
+| H6 | [CLI command surface](../../../cli-command-surface.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H8 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| H9 | [Install](../../../install.md), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H10 | [Task-gate config review](../../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |

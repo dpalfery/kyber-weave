@@ -1,10 +1,17 @@
 ---
-id: specs/ship-gate-catalogue/design
+id: archive/specs/ship-gate-catalogue/design
 title: Shipped review-gate catalogue design
 doc-type: spec
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-10-27
+documentation-impact: extends-component
+impact-components:
+  - ReviewCouncil
+  - DocGraph
+  - KyberSquad
+  - CI Pipelines
+  - Distribution
 component: ReviewCouncil
 keywords:
   - gate catalogue
@@ -16,7 +23,8 @@ keywords:
 
 # Design Document
 
-**Phase status:** Approved (autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27))
+**Status:** Archived
+**Archive Date:** 2026-10-27
 **Requirements:** [requirements.md](requirements.md) (approved 2026-10-27)
 **documentation-impact:** `extends-component`. **impact-components:** ReviewCouncil, DocGraph,
 KyberSquad, CI Pipelines, Distribution.
@@ -545,6 +553,39 @@ directories, so the repository's `Directory.Build.props` does not apply to them 
 | D22 | Which csharp task gates does `test-dev` get? | All three format gates: whitespace and style (role `format`) and analyzers (role `lint`), consistent with §1 and R6.3 | This repository's `test-dev` set includes `format-analyzers` (`.kyber-weave/kyber-weave.yml:320-323`). The earlier table row was inconsistent. | autonomous: recommendation accepted |
 | D23 | When do *probe* rows ship? | Only after the task-13 Linux run confirms them; task 13 gates the release (requirements D20, reworded R1.5) | Resolves the conflict between R1.5 and §11 | autonomous: recommendation accepted |
 | D19 | Is the design approved, with its recommended options? | Yes. Design approved. The recommended options for GAP-1 (Node gates `os: unix` in v1 plus a Windows probe todo), GAP-2 (confirm probe exit codes in the R9.6 Linux run; drop or change any that fail) and GAP-3 (github-devops resolves real action SHAs at implementation) are accepted, and so are the D11–D15 and D18 calls | Conductor relayed acceptance | autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27) |
+
+## Closeout mapping
+
+No ADR: this design refines the existing review architecture and established `docs init` /
+`review gates` patterns, so no new architectural decision constrains future work — no ADR,
+ADR waiver: refines existing architecture.
+
+| ID | Canonical destination |
+|---|---|
+| D1 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D6 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| D10 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D11 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D12 | [Review council architecture](../../../code-review/architecture.md#council-gates) |
+| D13 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D14 | [DocGraph onboarding](../../../docgraph/onboarding.md), [CLI command surface](../../../cli-command-surface.md) |
+| D15 | [Windows Node gate probe](../../../todo/windows-node-gate-probe.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D16 | [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| D17 | [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| D18 | [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| D19 | Documentation waiver — design-phase approval record; no surviving behavioral invariant. |
+| D21 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D22 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| D23 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H1, H2 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H3 | [Review council architecture](../../../code-review/architecture.md#council-gates), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H4 | [Rule reference](../../../ci-pipelines/rule-reference.md), [Workflows runbook](../../../ci-pipelines/workflows-runbook.md) |
+| H5 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Install](../../../install.md) |
+| H6 | [CLI command surface](../../../cli-command-surface.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H8 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| H9 | [Install](../../../install.md), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H10 | [Task-gate config review](../../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |
 
 ## Gaps carried forward
 

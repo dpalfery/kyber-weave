@@ -1,17 +1,25 @@
 ---
-id: specs/ship-gate-catalogue/tasks
+id: archive/specs/ship-gate-catalogue/tasks
 title: Shipped review-gate catalogue tasks
 doc-type: spec
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-10-27
+documentation-impact: extends-component
+impact-components:
+  - ReviewCouncil
+  - DocGraph
+  - KyberSquad
+  - CI Pipelines
+  - Distribution
 component: ReviewCouncil
 ---
 
 # Implementation Tasks
 
-**Status:** Ready
-**Phase status:** Approved (autonomous: recommendation accepted (conductor AUTONOMOUS_APPROVAL, 2026-10-27)). Execution was approved by the owner in chat on 2026-10-27 (decision T5).
+**Status:** Archived
+**Archive Date:** 2026-10-27
+**Phase status:** Delivered and verified (implementation ships on the same branch and PR #451; harvest H1–H10 in canonical docs, see [README](README.md#closeout-mapping))
 **Development mode:** test-first
 **Autonomy:** autonomous
 
@@ -550,3 +558,46 @@ Decisions D1–D23 live in [design.md](design.md#decisions) and
 | T5 | Final approve-and-execute gate | Approved: execute the tasks as written (waves and dependencies unchanged), on the same branch and pull request (#451), so the specification is archived with its build work | The owner said "execute the tasks" in chat on 2026-10-27, relayed by the conductor | owner approved in chat, 2026-10-27 (not autonomous) |
 | T7 | Should the R9.6 job live in `ci.yml`? | No. It goes in a separate `.github/workflows/gate-catalogue-toolchains.yml` with path filters and `workflow_dispatch`. | `ci.yml` has one workflow-wide trigger (push to main, every pull request, a schedule), so a job inside it cannot filter by path without adding a third-party action. A separate file keeps `ci.yml` unchanged. | autonomous: recommendation accepted |
 | T6 | Where do the fixture projects live? | `tests/fixtures/gate-catalogue/<family>/`, outside the test project | `tests/KyberWeave.Tests/KyberWeave.Tests.csproj` uses the SDK default compile globs (no `Compile Remove`), so fixture `.cs` files under it, including seeded defects, would break the test build. Found while writing the task packets. | autonomous: recommendation accepted |
+
+## Design harvest
+
+The durable design items (H1–H10, tabulated authoritatively in
+[design](design.md#design-harvest)) and the tasks that built them:
+
+| ID | Design item | Built by |
+|---|---|---|
+| H1 | Catalogue format, families, placeholders | Tasks 4, 6 |
+| H2 | Root detection and id derivation | Tasks 5, 6 |
+| H3 | `working-directory`, council `include` and `os`, changed set | Tasks 1, 2, 3 |
+| H4 | New rule ids `KW-CONFIG-002`, `KW-REVIEW-033`, `KW-REVIEW-034` | Tasks 1, 2, 3 |
+| H5 | `docs init` review block, `--no-review-gates`, re-run rule | Task 7 |
+| H6 | `review catalogue` command | Task 11 |
+| H7 | Squad task-gate hint | Task 8 |
+| H8 | Review-gate CI workflow | Task 9 |
+| H9 | What an installing repository gets | Task 14 |
+| H10 | Answer to the .NET agent-mapping question | Task 14 |
+
+## Closeout mapping
+
+No ADR: the tasks execute the approved design, which refines the existing review
+architecture and established patterns — no ADR, ADR waiver: implementation of a refined
+existing architecture; task-phase decisions below are transient execution records.
+
+| ID | Canonical destination |
+|---|---|
+| T1 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| T2 | Documentation waiver — Linux-run mechanics; transient execution record, no surviving invariant. |
+| T3 | Documentation waiver — test-update note preserved in this file; no surviving invariant. |
+| T4 | Documentation waiver — phase approval record; historical, no surviving invariant. |
+| T5 | Documentation waiver — owner approval relay; historical, no surviving invariant. |
+| T6 | Documentation waiver — fixture-location rationale; test-scaffolding detail, no surviving invariant. |
+| T7 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| H1, H2 | [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H3 | [Review council architecture](../../../code-review/architecture.md#council-gates), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H4 | [Rule reference](../../../ci-pipelines/rule-reference.md), [Workflows runbook](../../../ci-pipelines/workflows-runbook.md) |
+| H5 | [DocGraph onboarding](../../../docgraph/onboarding.md), [Install](../../../install.md) |
+| H6 | [CLI command surface](../../../cli-command-surface.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md), [Review council architecture](../../../code-review/architecture.md#the-shipped-gate-catalogue) |
+| H8 | [Workflows runbook](../../../ci-pipelines/workflows-runbook.md#the-review-gate-template) |
+| H9 | [Install](../../../install.md), [DocGraph onboarding](../../../docgraph/onboarding.md) |
+| H10 | [Task-gate config review](../../../todo/task-gate-config-review.md), [Windows Node gate probe](../../../todo/windows-node-gate-probe.md) |
