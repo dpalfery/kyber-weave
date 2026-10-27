@@ -40,6 +40,7 @@ public sealed record FamilyGateCondition(FamilyGateConditionKind Kind, string? A
 /// <param name="Agents">The developer agent slugs a task gate is written for; empty for council gates.</param>
 /// <param name="When">The condition under which the gate is written; null means always.</param>
 /// <param name="Note">Free text the family author wrote, shown as the reason when the gate is commented out.</param>
+/// <param name="FailOnOutput">Whether the gate also fails when its command exits zero but prints to standard output.</param>
 public sealed record FamilyGate(
     string Id,
     string Role,
@@ -52,7 +53,8 @@ public sealed record FamilyGate(
     int? TimeoutSeconds,
     IReadOnlyList<string> Agents,
     FamilyGateCondition? When,
-    string? Note);
+    string? Note,
+    bool FailOnOutput = false);
 
 /// <summary>
 /// One embedded family file: the gates and task gates one or more technologies ship, and the markers

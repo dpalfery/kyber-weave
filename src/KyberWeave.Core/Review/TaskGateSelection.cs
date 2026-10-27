@@ -15,7 +15,11 @@ public sealed record PlannedTaskGate(
     int TimeoutSeconds,
     IReadOnlyList<string> Fix,
     IReadOnlyList<string> Run,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null)
+{
+    /// <summary>Whether the verify command also fails when it exits zero but prints to standard output.</summary>
+    public bool FailOnOutput { get; init; }
+}
 
 /// <summary>A task gate that does not run for this change, and why.</summary>
 /// <param name="Id">The gate's slug.</param>
@@ -196,7 +200,10 @@ public static class TaskGateSelection
             }
 
             planned.Add(new PlannedTaskGate(gate.Id, gate.Blocking, gate.TimeoutSeconds, fix, run,
-                gate.WorkingDirectory));
+                gate.WorkingDirectory)
+            {
+                FailOnOutput = gate.FailOnOutput
+            });
         }
 
         return new TaskGatePlan(planned, skipped, refusals.Distinct(StringComparer.Ordinal).ToArray());

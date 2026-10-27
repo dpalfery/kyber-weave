@@ -49,10 +49,13 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Setup Go
+      # Go is pinned, never `stable`, so a new Go release cannot change this job's result unreviewed.
+      # The catalogue run below uses the current pin; the Go 1.25 run after it repeats the whole class
+      # to prove the Go format gate fails on an older gofmt too (`gofmt -d` exits 0 there).
+      - name: Setup Go 1.27
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: stable
+          go-version: "1.27"
 
       # Pin is the v1 tag. The toolchain is the input, not the action rev —
       # dtolnay/rust-toolchain treats @rev as a rustc version unless
@@ -79,26 +82,18 @@ jobs:
           -c ${{ env.CONFIGURATION }}
           --filter-class KyberWeave.Tests.GateCatalogueToolchainTests
 
-      # The Go format gate runs `gofmt -d`, which exits 1 on a diff only from Go 1.26.
-      # Prove both sides of that boundary on the fmt defect fixture: the stable
-      # toolchain above must fail it, Go 1.25 must exit 0 (the documented limitation).
-      - name: Go format gate fails on stable Go
-        working-directory: tests/fixtures/gate-catalogue/go/defects/fmt
-        run: |
-          go version
-          status=0
-          gofmt -d . || status=$?
-          test "$status" -eq 1 || { echo "gofmt -d exited $status on stable Go, expected 1"; exit 1; }
-
       - name: Setup Go 1.25
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.25"
 
-      - name: Go format gate cannot fail on Go 1.25
-        working-directory: tests/fixtures/gate-catalogue/go/defects/fmt
+      # The Go format gate is `gofmt -l` with fail-on-output, so the defect fixture must fail it and the
+      # clean fixture must pass it on Go 1.25 as well, where `gofmt -d` would exit 0 on a diff.
+      - name: Run gate catalogue toolchain tests on Go 1.25
+        env:
+          KW_GATE_TOOLCHAIN: "1"
         run: |
           go version
-          status=0
-          gofmt -d . || status=$?
-          test "$status" -eq 0 || { echo "gofmt -d exited $status on Go 1.25, expected 0"; exit 1; }
+          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+            -c ${{ env.CONFIGURATION }} \
+            --filter-class KyberWeave.Tests.GateCatalogueToolchainTests

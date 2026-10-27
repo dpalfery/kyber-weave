@@ -6,9 +6,9 @@ review:
 # https://github.com/dpalfery/kyber-weave into .github/workflows/.
   gates:
     # go: format (.)
-    # requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail
     - id: go-fmt
-      run: ['gofmt', '-d', '.']
+      run: ['gofmt', '-l', '.']
+      fail-on-output: true
     # go: lint (.)
     - id: go-vet
       run: ['go', 'vet', './...']
@@ -25,22 +25,22 @@ review:
   task-gates:
     go-dev:
       # go: format (.)
-      # requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail
       - id: go-fmt
         include: ['**/*.go']
-        run: ['gofmt', '-d', '{changed}']
+        run: ['gofmt', '-l', '{changed}']
         fix: ['gofmt', '-w', '{changed}']
+        fail-on-output: true
       # go: lint (.)
       - id: go-vet
         include: ['**/*.go']
         run: ['go', 'vet', './...']
     test-dev:
       # go: format (test-dev copy)
-      # requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail
       - id: go-fmt
         include: ['**/*.go']
-        run: ['gofmt', '-d', '{changed}']
+        run: ['gofmt', '-l', '{changed}']
         fix: ['gofmt', '-w', '{changed}']
+        fail-on-output: true
       # go: lint (test-dev copy)
       - id: go-vet
         include: ['**/*.go']

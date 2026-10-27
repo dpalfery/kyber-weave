@@ -18,11 +18,11 @@ public static class ReviewConfigLoader
 
     /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] CouncilGateKeys =
-        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory"];
+        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output"];
 
     /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
     private static readonly string[] TaskGateKeys =
-        ["id", "include", "os", "run", "fix", "blocking", "timeout", "working-directory"];
+        ["id", "include", "os", "run", "fix", "blocking", "timeout", "working-directory", "fail-on-output"];
 
     /// <summary>Merges the parsed <c>review:</c> section over the defaults.</summary>
     /// <param name="defaults">The configuration a host gets when a key is absent.</param>
@@ -107,7 +107,8 @@ public static class ReviewConfigLoader
                 os,
                 workingDirectory)
             {
-                Include = include
+                Include = include,
+                FailOnOutput = gate.FailOnOutput ?? false
             });
         }
 
@@ -200,7 +201,10 @@ public static class ReviewConfigLoader
             string? workingDirectory = ParseWorkingDirectory(gate.WorkingDirectory, gateWhere, repositoryRoot, [run, fix]);
 
             parsed.Add(new ReviewTaskGate(
-                id, include, os, run, fix, gate.Blocking ?? true, timeoutSeconds, workingDirectory));
+                id, include, os, run, fix, gate.Blocking ?? true, timeoutSeconds, workingDirectory)
+            {
+                FailOnOutput = gate.FailOnOutput ?? false
+            });
         }
 
         return parsed;

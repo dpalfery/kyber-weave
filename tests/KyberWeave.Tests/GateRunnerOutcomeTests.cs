@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 
@@ -64,6 +65,85 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         Assert.All(run.Report.Gates, result => Assert.Equal(GateOutcome.Completed, result.Outcome));
         Assert.True(run.Report.Gates[0].Passed);
         Assert.False(run.Report.Gates[1].Passed);
+    }
+
+    /// <summary>
+    /// Some tools report a problem on stdout and still exit zero (<c>gofmt -l</c> on every Go before 1.26).
+    /// A gate declared <c>fail-on-output</c> must fail on that output, or it can never fail at all.
+    /// </summary>
+    [Fact]
+    public void AFailOnOutputGateFailsWhenACommandExitsZeroButPrintsSomething()
+    {
+        PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]) { FailOnOutput = true };
+
+        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+
+        GateResult result = Assert.Single(run.Report.Gates);
+        Assert.False(result.Passed);
+        Assert.Equal(GateOutcome.Completed, result.Outcome);
+        Assert.Contains("git version", result.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailOnOutputGatePassesWhenACommandExitsZeroAndPrintsNothing()
+    {
+        RunGit(_root.Path, "init", "-q");
+        PlannedTaskGate gate = new("silent", true, 30, [], ["git", "status", "--porcelain"]) { FailOnOutput = true };
+
+        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+
+        Assert.True(Assert.Single(run.Report.Gates).Passed);
+    }
+
+    /// <summary><c>git rev-parse --show-prefix</c> at the root prints one empty line: output, but nothing to report.</summary>
+    [Fact]
+    public void AFailOnOutputGatePassesWhenTheOnlyOutputIsWhitespace()
+    {
+        RunGit(_root.Path, "init", "-q");
+        PlannedTaskGate gate = new("blank", true, 30, [], ["git", "rev-parse", "--show-prefix"]) { FailOnOutput = true };
+
+        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+
+        Assert.True(Assert.Single(run.Report.Gates).Passed);
+    }
+
+    [Fact]
+    public void AFailOnOutputGateStillFailsOnANonZeroExit()
+    {
+        PlannedTaskGate gate = new("broken", true, 30, [], ["git", "kw-no-such-subcommand"]) { FailOnOutput = true };
+
+        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+
+        Assert.False(Assert.Single(run.Report.Gates).Passed);
+    }
+
+    /// <summary>Without the key, output on a zero exit is ignored: exit code stays the only judge.</summary>
+    [Fact]
+    public void AGateWithoutFailOnOutputIgnoresOutputOnAZeroExit()
+    {
+        PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]);
+
+        TaskGateRun run = GateRunner.RunTaskGates([gate], _root.Path, fix: false);
+
+        Assert.True(Assert.Single(run.Report.Gates).Passed);
+    }
+
+    [Fact]
+    public void ACouncilGateHonoursFailOnOutput()
+    {
+        ReviewConfig config = new()
+        {
+            Gates =
+            [
+                new ReviewGate("prints", ["git", "--version"]) { FailOnOutput = true },
+                new ReviewGate("quiet", ["git", "--version"])
+            ]
+        };
+
+        GateReport report = GateRunner.Run(config, _root.Path);
+
+        Assert.False(report.Gates[0].Passed);
+        Assert.True(report.Gates[1].Passed);
     }
 
     /// <summary>

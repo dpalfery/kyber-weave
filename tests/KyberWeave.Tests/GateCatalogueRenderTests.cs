@@ -91,6 +91,36 @@ public sealed class GateCatalogueRenderTests
         Assert.Contains("react-dev", config.Review.TaskGates.Keys);
     }
 
+    /// <summary>
+    /// The Go format gate must be able to fail on every Go version. <c>gofmt -l</c> exits 0 on all of them, so the
+    /// gate lists files and declares <c>fail-on-output</c>; <c>gofmt -d</c> only exits 1 from Go 1.26.
+    /// </summary>
+    [Fact]
+    public void TheGoFormatGatesListFilesAndFailOnOutputSoTheyFailOnEveryGoVersion()
+    {
+        GateCatalogueFamily family = Family("go");
+        using TempDirectory repository = new();
+        Dictionary<string, ProjectRootSet> roots = AtRepositoryRoot([family]);
+
+        RenderedReviewBlock block = GateCatalogue.Render(family.Technologies, roots, repository.Path);
+        KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
+
+        ReviewGate council = Assert.Single(config.Review.Gates, gate => gate.Id == "go-fmt");
+        Assert.Equal(["gofmt", "-l", "."], council.Run);
+        Assert.True(council.FailOnOutput);
+        foreach (string agent in new[] { "go-dev", "test-dev" })
+        {
+            ReviewTaskGate task = Assert.Single(config.Review.TaskGates[agent], gate => gate.Id == "go-fmt");
+            Assert.Equal(["gofmt", "-l", "{changed}"], task.Run);
+            Assert.Equal(["gofmt", "-w", "{changed}"], task.Fix);
+            Assert.True(task.FailOnOutput);
+        }
+
+        Assert.Contains("fail-on-output: true", block.Yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("1.26", block.Yaml, StringComparison.Ordinal);
+        Assert.Empty(config.Review.Warnings);
+    }
+
     /// <summary>A Rust root outside <c>src-tauri</c> goes to <c>rust-dev</c>, and a <c>src-tauri</c> root goes to <c>tauri-dev</c>.</summary>
     /// <remarks>
     /// Tauri's Rust crate sits under <c>src-tauri</c>. Sending it to <c>rust-dev</c> as well would run its checks

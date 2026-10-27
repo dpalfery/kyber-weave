@@ -601,3 +601,9 @@ ADR waiver: refines existing architecture.
 > prints the diff and exits 0, so the gate can never fail there. The shipped catalogue now states
 > "requires Go 1.26 or newer" on the gate, and the toolchain workflow proves both sides. The text
 > above is left as originally written.
+
+> **Correction, 2026-10-27 (second).** The "requires Go 1.26" note above is itself superseded. The
+> shipped Go `fmt` gates are now `gofmt -l .` and `gofmt -l {changed}` with the new gate key
+> `fail-on-output: true`, which fails a gate that exits 0 but prints to standard output. That fails on
+> every Go version, so the Go 1.26 requirement is gone. The toolchain workflow proves it on Go 1.25 and
+> a current Go. The text above is left as originally written.

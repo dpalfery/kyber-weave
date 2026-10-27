@@ -314,7 +314,7 @@ public static class GateCatalogue
         renderer.CouncilLines.Add($"    # {technologies}: {selected.Role} ({context.Label})");
         AddNoteComment(renderer.CouncilLines, selected, "    ");
         renderer.CouncilLines.AddRange(CouncilGateLines(id, run, include, selected.Os, workingDirectory,
-            selected.Blocking, selected.TimeoutSeconds, "    "));
+            selected.Blocking, selected.TimeoutSeconds, "    ", selected.FailOnOutput));
         renderer.Written.Add((served[0], id));
 
         if (string.Equals(family.Family, "csharp", StringComparison.Ordinal) &&
@@ -491,7 +491,7 @@ public static class GateCatalogue
         renderer.CouncilLines.Add($"    # {technologies}: {entry.Role} ({context.Label})");
         renderer.CouncilLines.Add($"    # {reason}");
         foreach (string line in CouncilGateLines(id, run, include, entry.Os, WorkingDirectoryFor(entry, context),
-                     entry.Blocking, entry.TimeoutSeconds, "    "))
+                     entry.Blocking, entry.TimeoutSeconds, "    ", entry.FailOnOutput))
             renderer.CouncilLines.Add($"    # {line.TrimStart()}");
 
         AddCommentedOut(renderer, id, reason);
@@ -623,7 +623,8 @@ public static class GateCatalogue
         string? workingDirectory,
         bool blocking,
         int? timeoutSeconds,
-        string indent)
+        string indent,
+        bool failOnOutput = false)
     {
         List<string> lines = [$"{indent}- id: {id}", $"{indent}  run: [{string.Join(", ", run.Select(Quote))}]"];
         if (!blocking)
@@ -636,6 +637,8 @@ public static class GateCatalogue
             lines.Add($"{indent}  os: {Quote(os)}");
         if (workingDirectory is not null)
             lines.Add($"{indent}  working-directory: {Quote(workingDirectory)}");
+        if (failOnOutput)
+            lines.Add($"{indent}  fail-on-output: true");
 
         return lines;
     }
@@ -656,6 +659,8 @@ public static class GateCatalogue
             lines.Add($"{indent}  timeout: {gate.TimeoutSeconds.Value}");
         if (gate.WorkingDirectory is not null)
             lines.Add($"{indent}  working-directory: {Quote(gate.WorkingDirectory)}");
+        if (gate.FailOnOutput)
+            lines.Add($"{indent}  fail-on-output: true");
 
         return lines;
     }
@@ -680,7 +685,8 @@ public static class GateCatalogue
             entry.Fix.Select(argument => Substitute(argument, context)).ToList(),
             entry.Blocking,
             entry.TimeoutSeconds,
-            WorkingDirectoryFor(entry, context));
+            WorkingDirectoryFor(entry, context),
+            entry.FailOnOutput);
     }
 
     private static string? WorkingDirectoryFor(FamilyGate entry, RootContext context)
@@ -933,6 +939,7 @@ public static class GateCatalogue
             workingDirectory = null;
 
         bool blocking = OptionalBoolean(mapping, "blocking", where, true);
+        bool failOnOutput = OptionalBoolean(mapping, "fail-on-output", where, false);
         int? timeoutSeconds = OptionalTimeout(mapping, where, id);
 
         List<string> agents = OptionalStrings(mapping, "agents") ?? [];
@@ -959,7 +966,7 @@ public static class GateCatalogue
         string? note = OptionalScalar(mapping, "note");
 
         return new FamilyGate(id, role, run, fix, include, os, workingDirectory, blocking, timeoutSeconds, agents, when,
-            note);
+            note, failOnOutput);
     }
 
     private static FamilyGateCondition? OptionalCondition(YamlMappingNode mapping, string where, string id)
@@ -1150,7 +1157,8 @@ public static class GateCatalogue
         IReadOnlyList<string> Fix,
         bool Blocking,
         int? TimeoutSeconds,
-        string? WorkingDirectory);
+        string? WorkingDirectory,
+        bool FailOnOutput = false);
 
     private sealed record LiveTaskRender(string Technology, FamilyGate Entry, SubstitutedTaskGate Gate);
 

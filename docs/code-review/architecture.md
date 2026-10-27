@@ -434,6 +434,7 @@ review:
 | `blocking` | no | `true` | Whether a failure fails the run |
 | `timeout` | no | `900` seconds | After this the runner kills the process tree; must be positive |
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
+| `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 Both `run` and `fix` are argv for the same reason `review.gates` is. Two tokens expand, and only
 in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
@@ -460,14 +461,15 @@ its tests span all three. `go-dev` and `python-dev` declare no task gates, becau
 has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
 only, because a whole-crate test run per task would fail on another worker's concurrent edit.
 
-The shipped Go format gate (`gofmt -d`, council and task) requires Go 1.26 or newer: `gofmt -d` exits 1
-on a diff only from 1.26, and exits 0 on Go 1.25 and older, where the gate cannot fail. `docs init`
-writes that requirement as a comment above the gate.
+The shipped Go format gate (`gofmt -l`, council and task) sets `fail-on-output: true`. `gofmt -l` exits 0
+on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff only from Go 1.26, so a
+gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
+on all of them.
 
 ### Council gates
 
 `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and,
-since the shipped catalogue, `include`, `os` and `working-directory`:
+since the shipped catalogue, `include`, `os`, `working-directory` and `fail-on-output`:
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
@@ -478,6 +480,7 @@ since the shipped catalogue, `include`, `os` and `working-directory`:
 | `include` | no | `[]`, which matches every change | Globs selecting the changed files the gate applies to; a gate with no `include` runs on every change |
 | `os` | no | every platform | `windows` or `unix`; a gate on another platform is skipped (`KW-REVIEW-026`) |
 | `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
+| `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 `CouncilGateSelection` plans the run against the changed set and the host OS: a gate
 whose `os` does not match is skipped, a gate whose `include` matches no changed file is

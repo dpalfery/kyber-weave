@@ -171,6 +171,50 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     }
 
     /// <summary>
+    /// <c>fail-on-output</c> is opt-in: a gate that omits it keeps judging by exit code alone, so
+    /// every host that upgrades without touching its configuration runs the gates it ran before.
+    /// </summary>
+    [Fact]
+    public void FailOnOutputDefaultsToFalseOnCouncilAndTaskGates()
+    {
+        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            review:
+              gates:
+                - id: build
+                  run: [dotnet, build]
+              task-gates:
+                typescript-dev:
+                  - id: format
+                    run: [dotnet, format]
+            """).Review;
+
+        Assert.False(Assert.Single(config.Gates).FailOnOutput);
+        Assert.False(Assert.Single(config.TaskGates[TaskAgent]).FailOnOutput);
+    }
+
+    [Fact]
+    public void FailOnOutputIsReadOnCouncilAndTaskGatesWithoutAWarning()
+    {
+        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            review:
+              gates:
+                - id: fmt
+                  run: [gofmt, -l, .]
+                  fail-on-output: true
+              task-gates:
+                typescript-dev:
+                  - id: format
+                    run: [gofmt, -l, "{changed}"]
+                    fix: [gofmt, -w, "{changed}"]
+                    fail-on-output: true
+            """).Review;
+
+        Assert.True(Assert.Single(config.Gates).FailOnOutput);
+        Assert.True(Assert.Single(config.TaskGates[TaskAgent]).FailOnOutput);
+        Assert.Empty(config.Warnings);
+    }
+
+    /// <summary>
     /// A misspelt key is ignored by the typed reader, so without a warning the operator's
     /// intent vanishes. The load still succeeds: a warning must not break a host.
     /// </summary>

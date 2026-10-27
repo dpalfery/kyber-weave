@@ -12,11 +12,10 @@ gates:
   - id: fmt
     role: format
     working-directory: "{{root}}"
-    # `gofmt -d` exits 1 on a formatting diff only from Go 1.26 (`-l` exits 0 on every version, so it
-    # cannot gate). On Go 1.25 and older `-d` exits 0 and this gate cannot fail. The toolchain
-    # workflow proves both sides of that boundary.
-    note: "requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail"
-    run: [gofmt, -d, .]
+    # `gofmt -l` lists unformatted files and exits 0 on every Go version, and `gofmt -d` exits 1 on a
+    # diff only from Go 1.26. `fail-on-output` makes any listed file fail the gate, so it fails on all.
+    run: [gofmt, -l, .]
+    fail-on-output: true
   - id: vet
     role: lint
     working-directory: "{{root}}"
@@ -39,9 +38,9 @@ task-gates:
     role: format
     agents: [go-dev, test-dev]
     include: ["{{root-glob}}**/*.go"]
-    note: "requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail"
-    run: [gofmt, -d, "{changed}"]
+    run: [gofmt, -l, "{changed}"]
     fix: [gofmt, -w, "{changed}"]
+    fail-on-output: true
   - id: vet
     role: lint
     agents: [go-dev, test-dev]

@@ -106,8 +106,7 @@ single-commit checkout cannot answer. The `--out` report lands in `artifacts/`.
 Every toolchain step is disabled (`if: false`): set it to `true` for the technologies
 the repository uses, so the gates can run their formatters, linters, builds and tests —
 .NET via `global.json`, Node with one `npm ci` per package root, Rust with rustfmt and
-clippy, Go via `go.mod` (the shipped Go format gate, `gofmt -d`, only fails on a diff from Go 1.26;
-on Go 1.25 and older it exits 0, so use 1.26 or newer), Python with `ruff`, `mypy` and `pytest` installed by `pip`.
+clippy, Go via `go.mod` (the shipped Go format gate is `gofmt -l` with `fail-on-output`, so it fails on a diff on every Go version), Python with `ruff`, `mypy` and `pytest` installed by `pip`.
 
 ## Merge-ready in pull-request CI
 

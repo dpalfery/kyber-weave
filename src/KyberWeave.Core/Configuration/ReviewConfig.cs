@@ -29,6 +29,12 @@ public sealed record ReviewGate(
 {
     /// <summary>Glob patterns selecting the changed files the gate applies to; empty for every change.</summary>
     public IReadOnlyList<string> Include { get; init; } = [];
+
+    /// <summary>
+    /// Whether the gate also fails when its command exits zero but writes anything other than whitespace to
+    /// standard output. For tools that report a problem by listing it and still exit zero, such as <c>gofmt -l</c>.
+    /// </summary>
+    public bool FailOnOutput { get; init; }
 }
 
 /// <summary>
@@ -59,7 +65,14 @@ public sealed record ReviewTaskGate(
     IReadOnlyList<string> Fix,
     bool Blocking = true,
     int TimeoutSeconds = 900,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null)
+{
+    /// <summary>
+    /// Whether the gate also fails when its command exits zero but writes anything other than whitespace to
+    /// standard output. For tools that report a problem by listing it and still exit zero, such as <c>gofmt -l</c>.
+    /// </summary>
+    public bool FailOnOutput { get; init; }
+}
 
 /// <summary>The unit-coverage floor a change must clear.</summary>
 /// <param name="FileLinePercent">Minimum line coverage across files.</param>

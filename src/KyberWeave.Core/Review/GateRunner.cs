@@ -90,12 +90,13 @@ public static class GateRunner
 
             if (fix && gate.Fix.Count > 0)
             {
-                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, gateDirectory);
+                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, gateDirectory, false);
                 if (!applied.Passed)
                     fixFailures.Add(applied);
             }
 
-            GateResult result = RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory);
+            GateResult result = RunArgv(
+                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
             results.Add(result);
 
             if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
@@ -114,7 +115,8 @@ public static class GateRunner
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)
     {
         string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
-        return RunArgv(gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory);
+        return RunArgv(
+            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput);
     }
 
     /// <summary>
@@ -134,7 +136,8 @@ public static class GateRunner
         bool blocking,
         IReadOnlyList<string> argv,
         int timeoutSeconds,
-        string workingDirectory)
+        string workingDirectory,
+        bool failOnOutput)
     {
         if (!Directory.Exists(workingDirectory))
         {
@@ -166,11 +169,16 @@ public static class GateRunner
         try
         {
             ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
+
+            // A tool that reports by listing (gofmt -l exits 0 on Go before 1.26 even when files differ) can
+            // only fail through its output. The exit code is rewritten to 1 so GateResult.Passed stays the single
+            // judge, and the summary says why, since the process itself exited zero.
+            bool printed = failOnOutput && process.ExitCode == 0 && !string.IsNullOrWhiteSpace(process.StandardOutput);
             return new GateResult(
                 id,
                 blocking,
-                process.ExitCode,
-                Summarize(process),
+                printed ? 1 : process.ExitCode,
+                printed ? SummarizeOutput(process.StandardOutput) : Summarize(process),
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
                 GateOutcome.Completed);
         }
@@ -197,6 +205,12 @@ public static class GateRunner
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
                 GateOutcome.NotStarted);
         }
+    }
+
+    private static string SummarizeOutput(string output)
+    {
+        string[] lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return "exited 0 but printed output (fail-on-output): " + string.Join(" | ", lines.Take(3));
     }
 
     private static string Summarize(ProcessResult process)
