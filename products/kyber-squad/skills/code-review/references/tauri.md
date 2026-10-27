@@ -17,7 +17,7 @@ still applies.
 ## Review traps
 
 Non-authoritative detection prompts for the correctness and security lenses when they read a
-changed Tauri file, including the Rust side of its IPC boundary. They name where defects recur
+changed Tauri file (`src-tauri/**/*.rs`, `src-tauri/capabilities/**/*.json`, `tauri.conf.json`, and frontend `invoke()` call sites), including the Rust side of its IPC boundary. A Rust file under `src-tauri` is read under this checklist, not rust.md. They name where defects recur
 in practice. They are not rules and not a substitute for the declared standard: whether a
 pattern is allowed is the standard's call, and a finding raised from a trap needs quoted
 evidence like any other.

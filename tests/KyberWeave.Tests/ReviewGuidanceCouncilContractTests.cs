@@ -189,7 +189,7 @@ public sealed class ReviewGuidanceCouncilContractTests
     {
         string text = ReadProduct("skills/code-review/references/lenses/correctness.md");
 
-        AssertContainsAll(text, "correctness.md", "malformed", "non-finite", "CRLF");
+        AssertContainsAll(text, "correctness.md", "Malformed", "Non-finite", "CRLF");
     }
 
     /// <summary>
@@ -247,10 +247,13 @@ public sealed class ReviewGuidanceCouncilContractTests
             }
 
             rowCount++;
-            string firstName = lensColumn.Split(separators)[0].Trim();
-            if (!lensNames.Contains(firstName))
+            foreach (string name in lensColumn.Split(
+                separators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
-                unknown.Add($"'{lensColumn}' names '{firstName}'");
+                if (!lensNames.Contains(name))
+                {
+                    unknown.Add($"'{lensColumn}' names '{name}'");
+                }
             }
         }
 
@@ -279,7 +282,7 @@ public sealed class ReviewGuidanceCouncilContractTests
     private static void AssertContainsAll(string text, string source, params string[] tokens)
     {
         string[] missing = tokens
-            .Where(token => !text.Contains(token, StringComparison.OrdinalIgnoreCase))
+            .Where(token => !text.Contains(token, StringComparison.Ordinal))
             .ToArray();
 
         Assert.True(

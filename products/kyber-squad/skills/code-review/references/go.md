@@ -16,7 +16,7 @@ still applies.
 
 ## Review traps
 
-Non-authoritative detection prompts for the correctness and supportability lenses when they read
+Non-authoritative detection prompts for the correctness and security lenses when they read
 a changed Go file. They name where defects recur in practice. They are not rules and not a
 substitute for the declared standard: whether a pattern is allowed is the standard's call, and
 a finding raised from a trap needs quoted evidence like any other.

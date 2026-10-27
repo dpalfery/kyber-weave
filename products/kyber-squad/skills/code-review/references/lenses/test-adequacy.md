@@ -44,7 +44,7 @@ exception assertion so broad that any failure satisfies it, including the wrong 
 exercised? This is where uncovered-branch analysis and correctness analysis meet, and it is
 the most valuable thing this lens produces.
 
-**Changed `.ts` and `.cs` files.** For every changed `.ts` or `.cs` file that holds logic, find
+**Changed `.ts`, `.cs`, `.rs` and `.go` files.** For every changed `.ts`, `.cs`, `.rs` or `.go` file that holds logic, find
 the test that exercises its behaviour and ask whether that test would fail if the change were
 reverted. A test that only calls the code and asserts it did not throw does not count. Require
 structural assertions: the returned value, the shape or fields of the result, the state left
