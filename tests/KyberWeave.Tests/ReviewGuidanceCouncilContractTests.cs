@@ -64,6 +64,64 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
+    /// Prevents a language the council reviews from having a checklist that points at a standard the
+    /// repository never declared. A checklist resolves <c>&lt;...-coding-standard&gt;</c> through the
+    /// Config Reg block in <c>AGENTS.md</c>, so each technology needs that declaration, a standard file
+    /// whose front matter is current, and a checklist that names the in-repo path. Without them the
+    /// "standard declared" fallback is the only thing that answers, and it answers every time.
+    /// </summary>
+    [Theory]
+    [InlineData("typescript")]
+    [InlineData("rust")]
+    [InlineData("tauri")]
+    [InlineData("go")]
+    public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistPointsAtIt(string technology)
+    {
+        string agentsText = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md"));
+        string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/README.md`";
+        string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, "README.md");
+        string checklistPath = Path.Combine(ChecklistRoot, $"{technology}.md");
+        string checklistToken = $"docs/standards/{technology}/README.md";
+
+        List<string> gaps = [];
+
+        if (!agentsText.Contains(declaration, StringComparison.Ordinal))
+        {
+            gaps.Add($"'AGENTS.md' Config Reg block does not declare '{declaration}'.");
+        }
+
+        if (!File.Exists(standardPath))
+        {
+            gaps.Add($"Coding standard '{standardPath}' is missing.");
+        }
+        else
+        {
+            string[] frontMatter = FrontMatterLines(File.ReadAllText(standardPath));
+            foreach (string expected in new[]
+                         { "doc-type: coding-standard", $"technology: {technology}", "status: current" })
+            {
+                if (!frontMatter.Any(line => string.Equals(line, expected, StringComparison.Ordinal)))
+                {
+                    gaps.Add($"'{standardPath}' front matter does not state '{expected}'.");
+                }
+            }
+        }
+
+        if (!File.Exists(checklistPath))
+        {
+            gaps.Add($"Review checklist '{checklistPath}' is missing.");
+        }
+        else if (!File.ReadAllText(checklistPath).Contains(checklistToken, StringComparison.Ordinal))
+        {
+            gaps.Add($"'{technology}.md' does not name the in-repo path '{checklistToken}'.");
+        }
+
+        Assert.True(
+            gaps.Count == 0,
+            $"Technology '{technology}' is not fully wired to a declared coding standard: " + string.Join(" ", gaps));
+    }
+
+    /// <summary>
     /// Prevents a council entry point from naming the review guidance without applying it. A bare
     /// mention of <c>REVIEW.md</c> or the <c>&lt;review-guidance&gt;</c> path was already present in
     /// code-reviewer.md before the change, so each entry point must carry the token that proves it
@@ -259,6 +317,24 @@ public sealed class ReviewGuidanceCouncilContractTests
             unknown.Count == 0,
             $"{GuidanceFileName} lens map names lenses that do not exist under references/lenses/: " +
             string.Join("; ", unknown) + ".");
+    }
+
+    /// <summary>Returns the trimmed lines between the opening and closing <c>---</c> of a document's front matter.</summary>
+    private static string[] FrontMatterLines(string text)
+    {
+        string[] lines = text.Split('\n');
+        if (lines.Length == 0 || lines[0].Trim() != "---")
+        {
+            return [];
+        }
+
+        List<string> block = [];
+        for (int i = 1; i < lines.Length && lines[i].Trim() != "---"; i++)
+        {
+            block.Add(lines[i].Trim());
+        }
+
+        return block.ToArray();
     }
 
     private static string ReadProduct(string relativePath)

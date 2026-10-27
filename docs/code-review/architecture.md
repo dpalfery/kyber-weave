@@ -150,8 +150,10 @@ failure. There are two sources, and neither copies the other.
   `skills/code-review/references/`: C#, Python, React, SQL, Pulumi, Azure, GitHub Actions,
   TypeScript (Node), Rust, Tauri and Go. Each names the host's `<technology>-coding-standard`
   and states no rule of its own, so a host reverses a rule in its standard and the checklist
-  follows. Rust, Tauri and Go have no declared standard in this repository, so those checklists
-  say so and do not invent rules. Tauri also loads the Rust checklist for `.rs` files and the
+  follows. This repository declares Rust, Tauri and Go standards at
+  `docs/standards/{rust,tauri,go}/README.md`. The shipped checklists keep the "no standard
+  declared" fallback for host repositories that declare none, and invent no rules of their own.
+  Tauri also loads the Rust checklist for `.rs` files and the
   React or TypeScript checklist for its WebView UI.
 
 The lens map has two axes:
