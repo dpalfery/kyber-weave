@@ -1,14 +1,15 @@
 # TypeScript review checklist
 
 Review TypeScript changes against the path declared as **<typescript-coding-standard>** in the root
-`AGENTS.md` registry (in this repository, `docs/standards/typescript/README.md`). That document is
+`AGENTS.md` registry. That document is
 the checklist. This file states no rule of its own, because a rule stated here is one a host
 repository cannot reverse. Its Review traps are non-authoritative detection prompts, not rules.
 
 When **<typescript-coding-standard>** is not declared, or the document it names is still
 `status: draft`, say so in the lens output — "no TypeScript standard declared" or "TypeScript
 standard is a draft" — so the reviewer surfaces it to the human. Do not substitute a
-built-in checklist, and do not report the absence as clean.
+built-in checklist. When no standard is declared, the lens may use the Review traps below only
+as detection prompts. Do not report the absence as clean.
 
 Where the standard is silent, the traps below stay detection prompts only, and the lens's own
 concern still applies.

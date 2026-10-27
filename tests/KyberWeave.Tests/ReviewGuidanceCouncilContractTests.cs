@@ -67,7 +67,8 @@ public sealed class ReviewGuidanceCouncilContractTests
     /// Prevents a language the council reviews from having a checklist that points at a standard the
     /// repository never declared. A checklist resolves <c>&lt;...-coding-standard&gt;</c> through the
     /// Config Reg block in <c>AGENTS.md</c>, so each technology needs that declaration, a standard file
-    /// whose front matter is current, and a checklist that names the in-repo path. Without them the
+    /// whose front matter is current, and a checklist file. The shipped checklist must not name this
+    /// repository's path, because host repositories copy it. Without them the
     /// "standard declared" fallback is the only thing that answers, and it answers every time.
     /// </summary>
     [Theory]
@@ -75,13 +76,12 @@ public sealed class ReviewGuidanceCouncilContractTests
     [InlineData("rust")]
     [InlineData("tauri")]
     [InlineData("go")]
-    public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistPointsAtIt(string technology)
+    public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistExists(string technology)
     {
         string agentsText = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md"));
         string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/README.md`";
         string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, "README.md");
         string checklistPath = Path.Combine(ChecklistRoot, $"{technology}.md");
-        string checklistToken = $"docs/standards/{technology}/README.md";
 
         List<string> gaps = [];
 
@@ -110,10 +110,6 @@ public sealed class ReviewGuidanceCouncilContractTests
         if (!File.Exists(checklistPath))
         {
             gaps.Add($"Review checklist '{checklistPath}' is missing.");
-        }
-        else if (!File.ReadAllText(checklistPath).Contains(checklistToken, StringComparison.Ordinal))
-        {
-            gaps.Add($"'{technology}.md' does not name the in-repo path '{checklistToken}'.");
         }
 
         Assert.True(
@@ -247,7 +243,7 @@ public sealed class ReviewGuidanceCouncilContractTests
     {
         string text = ReadProduct("skills/code-review/references/lenses/correctness.md");
 
-        AssertContainsAll(text, "correctness.md", "malformed", "non-finite", "CRLF");
+        AssertContainsAll(text, "correctness.md", "Malformed", "Non-finite", "CRLF");
     }
 
     /// <summary>
@@ -305,10 +301,13 @@ public sealed class ReviewGuidanceCouncilContractTests
             }
 
             rowCount++;
-            string firstName = lensColumn.Split(separators)[0].Trim();
-            if (!lensNames.Contains(firstName))
+            foreach (string name in lensColumn.Split(
+                separators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
-                unknown.Add($"'{lensColumn}' names '{firstName}'");
+                if (!lensNames.Contains(name))
+                {
+                    unknown.Add($"'{lensColumn}' names '{name}'");
+                }
             }
         }
 
@@ -355,7 +354,7 @@ public sealed class ReviewGuidanceCouncilContractTests
     private static void AssertContainsAll(string text, string source, params string[] tokens)
     {
         string[] missing = tokens
-            .Where(token => !text.Contains(token, StringComparison.OrdinalIgnoreCase))
+            .Where(token => !text.Contains(token, StringComparison.Ordinal))
             .ToArray();
 
         Assert.True(
