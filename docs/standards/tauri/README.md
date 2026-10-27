@@ -101,7 +101,10 @@ this boundary and needs its own review.
   but may not emit them. `core:event:default`, `core:event:allow-emit`, and
   `core:event:allow-emit-to` are not granted.
 - [`tests/capability_contract.rs`](../../../dash/tray/src-tauri/tests/capability_contract.rs)
-  pins this manifest. It asserts that the seven custom command permissions are present, that
+  pins this manifest. It asserts that seven of the nine custom command permissions are present (the other two,
+  `allow-import-folder-history` and `allow-set-shared-settings`, are granted in the capability
+  file and declared in `tray.toml` but not yet asserted by the test; they are webview-reachable,
+  so a change to either is a change to the security boundary), that
   event listening is granted, and that the three forbidden event permissions are absent. A
   change to the capability file that breaks the test is a change to the security boundary.
 
