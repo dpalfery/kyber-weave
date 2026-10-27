@@ -133,4 +133,35 @@ describe('dash_inspect MCP complete-context contract', () => {
       await server.close()
     }
   })
+
+  // The registered wire schema is the plain object, because the SDK turns a
+  // refined schema into an empty JSON Schema. Cross-field rules therefore run
+  // in the handler, and this pins that they still reject bad arguments before
+  // anything reaches the analytics server.
+  it('rejects cross-field violations the registered plain shape cannot express', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(contextEnvelope))
+    const analyticsClient = createAnalyticsClient({ serverUrl: 'http://127.0.0.1:4747', fetchImpl })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const server = createAnalyticsMcpServer({ client: analyticsClient })
+    const client = new Client({ name: 'inspect-refinement-test', version: '1.0.0' })
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    try {
+      const missingTarget = await client.callTool({ name: 'dash_inspect', arguments: { mode: 'content' } })
+      expect(missingTarget.isError).toBe(true)
+      expect(JSON.stringify(missingTarget.content)).toContain('mode and target must be supplied together.')
+
+      const assembledRun = await client.callTool({
+        name: 'dash_inspect',
+        arguments: { mode: 'content', target: { kind: 'run', runId: 'run-a' }, representation: 'assembled_turn' },
+      })
+      expect(assembledRun.isError).toBe(true)
+      expect(JSON.stringify(assembledRun.content)).toContain('assembled_turn is available only for a turn target.')
+
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
 })
