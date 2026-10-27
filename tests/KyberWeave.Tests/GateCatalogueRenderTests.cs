@@ -210,8 +210,8 @@ public sealed class GateCatalogueRenderTests
         RenderedReviewBlock block = GateCatalogue.Render(["csharp"], roots, repository.Path);
         KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
 
-        Assert.Contains("# - id: csharp-build", block.Yaml);
-        Assert.Contains($"no {marker} found", block.Yaml);
+        Assert.Contains("# - id: csharp-build", block.Yaml, StringComparison.Ordinal);
+        Assert.Contains($"no {marker} found", block.Yaml, StringComparison.Ordinal);
         Assert.Contains(block.CommentedOut, entry =>
             entry.GateId == "csharp-build" && entry.Reason.Contains(marker, StringComparison.Ordinal));
         Assert.Empty(config.Review.Gates);
@@ -236,7 +236,7 @@ public sealed class GateCatalogueRenderTests
 
         Assert.Contains(block.CommentedOut, entry =>
             entry.GateId == "typescript-lint" && entry.Reason.Contains("lint", StringComparison.Ordinal));
-        Assert.Contains("# - id: typescript-lint", block.Yaml);
+        Assert.Contains("# - id: typescript-lint", block.Yaml, StringComparison.Ordinal);
         Assert.DoesNotContain("typescript-lint", config.Review.Gates.Select(gate => gate.Id));
     }
 
@@ -266,7 +266,7 @@ public sealed class GateCatalogueRenderTests
         Assert.Contains(block.CommentedOut, entry => entry.GateId == "csharp-build");
         foreach (ProjectRoot root in roots)
         {
-            Assert.Contains(root.RootDirectory, block.Yaml);
+            Assert.Contains(root.RootDirectory, block.Yaml, StringComparison.Ordinal);
         }
     }
 
@@ -286,7 +286,7 @@ public sealed class GateCatalogueRenderTests
         KyberWeaveConfig config = LoadRendered(repository.Path, block, roots);
 
         ReviewTaskGate build = config.Review.TaskGates["csharp-dev"].Single(gate => gate.Id == "csharp-build");
-        int flag = build.Run.IndexOf("--artifacts-path");
+        int flag = build.Run.ToList().IndexOf("--artifacts-path");
         Assert.True(
             flag >= 0 && flag < build.Run.Count - 1,
             $"csharp-build argv has no --artifacts-path value: {string.Join(' ', build.Run)}");

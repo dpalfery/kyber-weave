@@ -1,6 +1,7 @@
 using System.IO.Enumeration;
 using System.Text;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review.Catalogue;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -56,7 +57,11 @@ public sealed record ScaffoldedFile(string RelativePath, ScaffoldOutcome Outcome
 public sealed record ScaffoldResult(
     string DocsRoot,
     DocsRootSource DocsRootSource,
-    IReadOnlyList<ScaffoldedFile> Files);
+    IReadOnlyList<ScaffoldedFile> Files)
+{
+    /// <summary>What <c>docs init</c> did about the catalogue review gates.</summary>
+    public ReviewGatesOutcome? ReviewGates { get; init; }
+}
 
 /// <summary>
 /// Bootstraps a host repository into a governable documentation corpus: host config, the
@@ -92,7 +97,8 @@ public static class DocsScaffolder
         string? docsRoot = null,
         string owner = "unassigned",
         bool force = false,
-        bool kyberStandards = false)
+        bool kyberStandards = false,
+        bool reviewGates = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         string root = Path.GetFullPath(repoRoot);
@@ -127,9 +133,18 @@ public static class DocsScaffolder
             ontology = ontology.Clone(technologies: mergedTechnologies);
         }
 
+        // Planned before the first host-config write so a newly created file carries the
+        // block at creation, and so the declared technologies are the merged ones when
+        // --kyber-standards is passed. Whether the file already had a review section is read
+        // up front too: the section is host-owned from then on and never rewritten.
+        ReviewGatesPlan? reviewPlan = reviewGates ? ReviewBlockWriter.Plan(root, ontology.Technologies) : null;
+        string? preexistingConfigPath = KyberWeaveConfigLoader.FindConfigPath(root);
+        bool hadReviewSection = preexistingConfigPath is not null
+            && ReviewBlockWriter.HasReviewSection(File.ReadAllText(preexistingConfigPath));
+
         List<ScaffoldedFile> files =
         [
-            WriteHostConfig(root, resolvedDocsRoot, kyberStandards),
+            WriteHostConfig(root, resolvedDocsRoot, kyberStandards, ReviewBlockFor(reviewPlan)),
             WriteAnalysisCacheIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
                 OntologyReference(resolvedDocsRoot, resolvedOwner), force),
@@ -158,7 +173,77 @@ public static class DocsScaffolder
         ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
         files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
-        return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files);
+        return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files)
+        {
+            ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
+        };
+    }
+
+    /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
+    private static RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
+        reviewPlan is { ShouldWrite: true } ? reviewPlan.Rendered : null;
+
+    /// <summary>
+    /// Accounts for the review section after the host config was written: what was appended,
+    /// what was already host-owned, or that nothing was declared to write.
+    /// </summary>
+    private static ReviewGatesOutcome BuildReviewOutcome(
+        string repoRoot,
+        ReviewGatesPlan? reviewPlan,
+        bool hadReviewSection,
+        ReviewConfig? hostReview)
+    {
+        if (reviewPlan is null)
+        {
+            return new ReviewGatesOutcome(
+                OptedOut: true,
+                AlreadyPresent: false,
+                Written: false,
+                WrittenGates: [],
+                CommentedOutGates: [],
+                NoFamily: [],
+                MissingFromExisting: []);
+        }
+
+        // WriteHostConfig always ensures a host config, so this resolves; the guard names the
+        // invariant rather than letting a null flow into the file read below.
+        string configPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot)
+            ?? throw new InvalidOperationException(
+                $"The scaffolded host configuration for '{repoRoot}' could not be found.");
+        bool hasReviewSection = ReviewBlockWriter.HasReviewSection(File.ReadAllText(configPath));
+
+        if (hasReviewSection && !hadReviewSection)
+        {
+            return new ReviewGatesOutcome(
+                OptedOut: false,
+                AlreadyPresent: false,
+                Written: true,
+                WrittenGates: reviewPlan.Rendered.Written,
+                CommentedOutGates: reviewPlan.Rendered.CommentedOut,
+                NoFamily: reviewPlan.Rendered.NoFamily,
+                MissingFromExisting: []);
+        }
+
+        if (hasReviewSection)
+        {
+            return new ReviewGatesOutcome(
+                OptedOut: false,
+                AlreadyPresent: true,
+                Written: false,
+                WrittenGates: [],
+                CommentedOutGates: [],
+                NoFamily: reviewPlan.Rendered.NoFamily,
+                MissingFromExisting: ReviewBlockWriter.MissingGateIds(hostReview, reviewPlan.Rendered));
+        }
+
+        return new ReviewGatesOutcome(
+            OptedOut: false,
+            AlreadyPresent: false,
+            Written: false,
+            WrittenGates: [],
+            CommentedOutGates: [],
+            NoFamily: reviewPlan.Rendered.NoFamily,
+            MissingFromExisting: []);
     }
 
     /// <summary>
@@ -300,15 +385,27 @@ public static class DocsScaffolder
     /// different tree than the one the catalog was just written to.
     /// </para>
     /// </remarks>
-    private static ScaffoldedFile WriteHostConfig(string repoRoot, string docsRoot, bool kyberStandards)
+    private static ScaffoldedFile WriteHostConfig(
+        string repoRoot,
+        string docsRoot,
+        bool kyberStandards,
+        RenderedReviewBlock? reviewBlock)
     {
         string? existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
         if (existingPath is null)
         {
+            string created = HostConfig(docsRoot, kyberStandards);
+            if (reviewBlock is not null)
+            {
+                string finalText = created.TrimEnd('\r', '\n') + "\n\n" + ReviewBlockWriter.KeyFirstYaml(reviewBlock);
+                ReviewBlockWriter.ValidateFinalText(finalText, repoRoot, reviewBlock);
+                created = finalText;
+            }
+
             return Write(
                 repoRoot,
                 $"{KyberWeaveYamlParser.DefaultDirectoryName}/{KyberWeaveYamlParser.DefaultFileName}",
-                HostConfig(docsRoot, kyberStandards),
+                created,
                 force: false);
         }
 
@@ -320,6 +417,16 @@ public static class DocsScaffolder
             updated = HostConfigYaml.WithTechnologies(updated, KyberStandardsTemplates.All);
         }
 
+        bool mergeChanged = !string.Equals(existing, updated, StringComparison.Ordinal);
+
+        // A host-owned review section is never rewritten, with or without --force.
+        bool reviewAppended = false;
+        if (reviewBlock is not null && !ReviewBlockWriter.HasReviewSection(updated))
+        {
+            updated = ReviewBlockWriter.AppendBlock(updated, reviewBlock, repoRoot);
+            reviewAppended = true;
+        }
+
         if (string.Equals(existing, updated, StringComparison.Ordinal))
         {
             return new ScaffoldedFile(
@@ -328,13 +435,31 @@ public static class DocsScaffolder
                 "your configuration, kept as-is; --force does not overwrite it");
         }
 
+        string note;
+        if (reviewAppended && mergeChanged)
+        {
+            note = kyberStandards
+                ? "docs-root and technologies, and review gates appended; the rest of the file is untouched"
+                : "docs-root and review gates appended; the rest of the file is untouched";
+        }
+        else if (reviewAppended)
+        {
+            note = "review gates appended; the rest of the file is untouched";
+        }
+        else if (kyberStandards)
+        {
+            note = "docs-root and technologies; the rest of the file is untouched";
+        }
+        else
+        {
+            note = "docs-root only; the rest of the file is untouched";
+        }
+
         File.WriteAllText(existingPath, updated);
         return new ScaffoldedFile(
             relativePath,
             ScaffoldOutcome.Updated,
-            kyberStandards
-                ? "docs-root and technologies; the rest of the file is untouched"
-                : "docs-root only; the rest of the file is untouched");
+            note);
     }
 
     /// <summary>
