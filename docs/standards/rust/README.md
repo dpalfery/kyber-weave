@@ -14,7 +14,8 @@ How Rust is written in this repository. Agents and skills resolve this document 
 `<rust-coding-standard>` in the repository root [`AGENTS.md`](../../../AGENTS.md), so what it
 says here outranks the defaults a portable agent shipped with.
 
-Every first-party Rust file in this repository is in one crate: the KyberDash menu-bar and
+Every first-party Rust file in this repository is in one crate (vendored third-party code
+under `dash/tray/vendor/` is not first-party): the KyberDash menu-bar and
 notification-area tray at [`dash/tray/src-tauri/`](../../../dash/tray/src-tauri/Cargo.toml)
 (package `kyberdash-tray`, library `kyberdash_tray_lib`, binary `kyberdash-tray`). This standard
 covers that crate's Rust. Its Tauri-specific rules (commands, IPC, capabilities, the webview

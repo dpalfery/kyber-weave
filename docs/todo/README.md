@@ -75,6 +75,7 @@ last-reviewed: YYYY-MM-DD
 | [opencode-plugin-per-message-tokens.md](opencode-plugin-per-message-tokens.md) | KyberDash | draft | The OpenCode capture plugin sends no per-message token counts; a future change could emit them through the OpenCode `event` hook after pinning that hook for 2.1.4, with a double-count guard. |
 | [csharp-formatter-churn-split.md](csharp-formatter-churn-split.md) | CI Pipelines | draft | The OpenCode capture deploy change mixed C# formatter churn with behaviour changes; land formatter-only passes as separate commits so reviews show one kind of change. |
 | [windows-node-gate-probe.md](windows-node-gate-probe.md) | ReviewCouncil | draft | Probe whether `npm`/`npx` start through the shell-free runner on Windows; lift the catalogue's `os: unix` restriction on Node gates if they do. |
+| [review-council-rust-tauri-go-standards.md](review-council-rust-tauri-go-standards.md) | ReviewCouncil | draft | Rust, Tauri and Go review checklists say no standard is declared, so the council cannot cite an authoritative rule for the Kilo findings on those languages; declare `rust`, `tauri` and `go` standards in `.kyber-weave/kyber-weave.yml`, each backed by a `docs/standards/<tech>/` doc. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

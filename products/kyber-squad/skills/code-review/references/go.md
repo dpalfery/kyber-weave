@@ -1,9 +1,9 @@
 # Go review checklist
 
 Review Go changes against the path declared as **<go-coding-standard>** in the root
-`AGENTS.md` registry (in this repository, `docs/standards/go/README.md`). That document is the
-checklist. This file states no rule of its own, because a rule stated here is one a host
-repository cannot reverse. Its Review traps are non-authoritative detection prompts, not rules.
+`AGENTS.md` registry. That document is the checklist. This file states no rule of its own,
+because a rule stated here is one a host repository cannot reverse. Its Review traps are
+non-authoritative detection prompts, not rules.
 
 When **<go-coding-standard>** is not declared, or the document it names is still
 `status: draft`, say so in the lens output — "no Go standard declared" or "Go standard is a
@@ -16,7 +16,7 @@ still applies.
 
 ## Review traps
 
-Non-authoritative detection prompts for the correctness and supportability lenses when they read
+Non-authoritative detection prompts for the correctness and security lenses when they read
 a changed Go file. They name where defects recur in practice. They are not rules and not a
 substitute for the declared standard: whether a pattern is allowed is the standard's call, and
 a finding raised from a trap needs quoted evidence like any other.

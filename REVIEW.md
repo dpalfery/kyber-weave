@@ -133,15 +133,15 @@ Most of the Major CodeRabbit findings were here.
 - Dedup passes are restricted to the sources that can actually produce twins; `isFileSource`
   is not evidence of a twin collector.
 - When merging counters, compare *every* dimension (including `reasoning`), not a subset.
+- **R8** A normalisation function exists once. A second copy of a predicate (`normalizeHarnessName`,
+  empty-vs-measured, token-total) is a finding; map keys built with it must be looked up with it
+  everywhere. Apply one sanitizer, validator, or normaliser per value on every sibling entry path,
+  and derive the same field the same way in every module. (#439, #435, #434, #431)
 - **R9** *(low evidence)* Substring or keyword matching is not identity. `codex-desktop` matching
   `desktop` → explicit equality or an explicit set. Likewise `Contains("documentation waiver")`
   and `.Contains(retired)` are not identity checks. (#434)
 - 0-based vs 1-based endpoints, and pagination `page` derived from the *applied* offset and
   limit, not the requested ones.
-- **R8** A normalisation function exists once. A second copy of a predicate (`normalizeHarnessName`,
-  empty-vs-measured, token-total) is a finding; map keys built with it must be looked up with it
-  everywhere. Apply one sanitizer, validator, or normaliser per value on every sibling entry path,
-  and derive the same field the same way in every module. (#439, #435, #434, #431)
 - *(low evidence)* Compare against the same root's receipt, not another root's, when checking
   drift (see the *compare like with like* rule in [§9](#9-net--c-renderers-and-tool-catalogs)).
   (#435)
@@ -332,6 +332,8 @@ and *What not to flag* only.
 ## Technology map
 
 ### By technology
+
+The sections named here are sections of this file. Only the technologies with a file under `references/` also have a standalone checklist; `shell` and `agent-prompts` use these sections alone.
 
 | Technology | Files | Take these sections |
 |---|---|---|

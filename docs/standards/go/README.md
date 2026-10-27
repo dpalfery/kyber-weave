@@ -20,9 +20,9 @@ the repository's gate configuration. This standard applies when Go is introduced
 language-level rules that change must follow, and it does not describe any Go code that exists.
 
 The change that introduces the first Go file must also add the Go gates: `gofmt`, `go vet`, and
-`go test`, declared in the review gates of
-[`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) and in the root
-`AGENTS.md`, and run before that change is reported done. Until then, no Go change has a
+`go test`, declared as `review.task-gates` entries for `go-dev` and `test-dev` in
+[`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) (plus `review.gates` for
+the council run) and in the root `AGENTS.md` loop commands, and run before that change is reported done. Until then, no Go change has a
 mechanical gate behind it, and a reviewer must say so rather than report it clean.
 
 The Go layout, the toolchain version, and the cross-platform targets are not decided here. The

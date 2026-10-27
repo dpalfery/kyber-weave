@@ -1,9 +1,9 @@
 # Rust review checklist
 
 Review Rust changes against the path declared as **<rust-coding-standard>** in the root
-`AGENTS.md` registry (in this repository, `docs/standards/rust/README.md`). That document is
-the checklist. This file states no rule of its own, because a rule stated here is one a host
-repository cannot reverse. Its Review traps are non-authoritative detection prompts, not rules.
+`AGENTS.md` registry. That document is the checklist. This file states no rule of its own,
+because a rule stated here is one a host repository cannot reverse. Its Review traps are
+non-authoritative detection prompts, not rules.
 
 When **<rust-coding-standard>** is not declared, or the document it names is still
 `status: draft`, say so in the lens output — "no Rust standard declared" or "Rust
