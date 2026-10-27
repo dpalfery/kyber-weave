@@ -989,10 +989,10 @@ Running `squad pack` outside the repository root fails immediately with a diagno
 
 Both archive formats recurse through each skill directory. They contain all 28 canonical
 `SKILL.md` files plus the 82 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 23 canonical
+must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 140 files on Copilot today — with authored relative links resolving inside
+beside its principal — 143 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

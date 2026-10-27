@@ -138,8 +138,8 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 27 top-level `SKILL.md`
-  identities. The canonical tree separately retains 81 supplemental files, giving 108 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+  identities. The canonical tree separately retains 82 supplemental files, giving 110 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 - **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
   domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
@@ -753,19 +753,20 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 138 files — 24 agents, 27 skills, plus projected
+  the principal. A fresh Copilot render is 143 files — 24 agents, 28 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the render requirement). The
   earlier 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill canonical bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad.
+- **Skill canonical bytes and retained resources**: `code-review-loop` and
+  `kilo-review-loop` are authored in Kyber-Squad.
   Every imported canonical raw `SKILL.md` except the
   five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 81 skill resources (108 files under
+  recursive package formats retain all 82 skill resources (110 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays

@@ -21,6 +21,7 @@ import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
+import { measuredCount } from './measured.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { formatSessionTitle } from './naming.js'
 import { buildFindingsYielding } from './findings.js'
@@ -442,15 +443,23 @@ function partsOf(
   parts: readonly ContentPart[] | undefined,
 ): ContextPart[] {
   if (parts !== undefined && parts.length > 0) {
-    return parts.map((part) => ({
-      part: part.part,
-      text: part.text,
-      ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
-      ...(part.server !== undefined ? { server: part.server } : {}),
-      // Residency survives the mapping: analyzeContext reads the flag to keep
-      // an offered-but-unloaded definition out of the composition (D7).
-      ...(part.resident === false ? { resident: false } : {}),
-    }))
+    // WHY: parts arrive from untrusted payloads, so a part can carry a
+    // non-string text (e.g. a number) despite the type. Drop the text rather
+    // than coerce it, mirroring the flat-path filter below — but keep the part
+    // when it carries a usable measured count, because dropping it would
+    // discard a number the harness did measure and make this path disagree
+    // with a direct `analyzeContext` over the same payload.
+    return parts
+      .filter((part) => typeof part.text === 'string' || measuredCount(part.tokens) !== undefined)
+      .map((part) => ({
+        part: part.part,
+        text: typeof part.text === 'string' ? part.text : '',
+        ...(measuredCount(part.tokens) !== undefined ? { tokens: part.tokens } : {}),
+        ...(part.server !== undefined ? { server: part.server } : {}),
+        // Residency survives the mapping: analyzeContext reads the flag to keep
+        // an offered-but-unloaded definition out of the composition (D7).
+        ...(part.resident === false ? { resident: false } : {}),
+      }))
   }
   return Object.entries(record.content)
     .filter((entry): entry is [ContextPart['part'], string] => typeof entry[1] === 'string')
@@ -526,6 +535,9 @@ function reduceRecordParts(
   if (parts !== undefined && parts.length > 0) {
     for (const part of parts) {
       if (part.part !== 'tool_definitions' && (part.part as string) !== 'tool_definition') continue
+      // WHY: a definition part can carry non-string text from an untrusted
+      // payload; skip it before the catalogue parse reads .trim().
+      if (typeof part.text !== 'string') continue
       definitions.push({
         text: part.text,
         catalogue: part.part === 'tool_definitions',
@@ -593,7 +605,7 @@ function taskSummaryOf(record: CanonicalRecord): string | undefined {
     const parts = record.parts
     if (parts !== undefined && parts.length > 0) {
       for (const part of parts) {
-        if (part.part === 'conversation_history' && part.text && part.text.trim()) {
+        if (part.part === 'conversation_history' && typeof part.text === 'string' && part.text.trim()) {
           return part.text.trim()
         }
       }
@@ -876,6 +888,8 @@ function hasEvidence(
 export type BuildSessionsReport = {
   built: number
   skipped: number
+  /** Sessions skipped because their derivation threw; the build continued. */
+  derivationDegraded: number
   /** Rows removed because their session no longer builds. */
   pruned: number
   /** Harness rollup rows rebuilt over the sessions, runs and executions. */
@@ -1041,7 +1055,7 @@ export async function buildSessions(
   // every session, and a rebuild is the common case.
   const counter = createCachedCounter(store.tokenCache(), await activeTokenizer(), await loadO200kCounter())
   const countTokens = counter.count
-  const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
+  const report: BuildSessionsReport = { built: 0, skipped: 0, derivationDegraded: 0, pruned: 0, rollups: 0, findings: 0 }
   const built = new Set<string>()
   const identities = store.sessionIdentities()
 
@@ -1049,6 +1063,7 @@ export async function buildSessions(
     // Before the unit, not after: a session that is skipped still consumed a
     // turn, and the waiter's wait is bounded by one session either way.
     await yieldToLoop()
+    try {
     // The session's payloads are reduced as they are read: the records stay
     // (the twin collapse, the descendant collection and the subagent
     // projection need the whole session), their decompressed telemetry does
@@ -1275,6 +1290,26 @@ export async function buildSessions(
           report.built += 1
         }
       }
+    }
+    } catch (error) {
+      // One bad session must not fail the refresh: record it as a problem so
+      // the dashboard can explain the gap, count it as skipped and degraded,
+      // and continue with the next session. The token-cache flush below still
+      // runs because the loop continues rather than returning early.
+      const err = error instanceof Error ? error : new Error(String(error))
+      const message = err.message.trim() !== '' ? err.message : 'session derivation failed'
+      store.recordProblem({
+        spanId: key.key,
+        code: 'derivation_failed',
+        severity: 'error',
+        message,
+        sessionId: key.key,
+        harness: key.harness,
+        stack: err.stack ?? null,
+      })
+      report.skipped += 1
+      report.derivationDegraded += 1
+      continue
     }
   }
 

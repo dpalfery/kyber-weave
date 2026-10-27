@@ -316,6 +316,22 @@ describe('createCachedCounter', () => {
     expect(cachedRow(store, long('delta '), 'gpt-4o')).toBeUndefined()
   })
 
+  it('fails closed on non-string input with a domain TypeError', () => {
+    const store = memoryStore()
+    const countTokens = vi.fn((text: string) => text.length)
+    const counter = createCachedCounter(store, 'gpt-4o', countTokens)
+
+    expect(() => counter.count(28 as never)).toThrow(TypeError)
+    expect(() => counter.count(28 as never)).toThrow(/requires text: string/)
+    expect(() => counter.count(28 as never)).toThrow(/number/)
+    expect(countTokens).not.toHaveBeenCalled()
+
+    // String paths are unchanged: short text stays uncached, long text counts.
+    const text = long('epsilon ')
+    expect(counter.count(text)).toBe(text.length)
+    expect(counter.count('short')).toBe(5)
+  })
+
   it('reports the same counts the bare counter would', () => {
     // The memo may change what counting costs, never what it says.
     const store = memoryStore()

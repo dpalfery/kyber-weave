@@ -311,6 +311,16 @@ export function createCachedCounter(
   }
 
   const count = (text: string): number => {
+    if (typeof text !== 'string') {
+      const receivedType = typeof (text as unknown)
+      let preview: string
+      try {
+        preview = String(text as unknown).slice(0, 100)
+      } catch {
+        preview = '<unprintable>'
+      }
+      throw new TypeError(`token counter requires text: string (received typeof ${receivedType}: ${preview})`)
+    }
     if (text.length < minLength) {
       uncached += 1
       return countTokens(text)

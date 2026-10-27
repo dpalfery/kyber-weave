@@ -72,7 +72,7 @@ public sealed class SkillResourceDispositionAuditTests
 
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
-    /// table's Resource column must equal, one-for-one, the 81 files on disk under
+    /// table's Resource column must equal, one-for-one, the 82 files on disk under
     /// <c>products/kyber-squad/skills/**</c> other than <c>SKILL.md</c>.
     /// </summary>
     [Fact]
@@ -109,7 +109,7 @@ public sealed class SkillResourceDispositionAuditTests
             missing.Length == 0 && extra.Length == 0,
             $"'Resource dispositions' does not match disk. Missing: [{string.Join(", ", missing)}]. " +
             $"Extra: [{string.Join(", ", extra)}].");
-        Assert.Equal(81, rows.Count);
+        Assert.Equal(82, rows.Count);
     }
 
     /// <summary>

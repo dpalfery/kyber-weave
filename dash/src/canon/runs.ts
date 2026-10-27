@@ -11,6 +11,7 @@
 // an explicit explanation.
 
 import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
+import { measuredCount } from './measured.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
 import { CanonStore, reduceRecordPayloads } from './store.js'
@@ -384,13 +385,22 @@ export function linkExecutions(
 function hasTurnEvidence(records: readonly CanonicalRecord[]): boolean {
   const turns = records.filter((r) => r.op === 'llm.invoke')
   if (turns.length === 0) return false
-  return turns.some(
-    (r) =>
-      r.tokens.reportedInput > 0 ||
-      r.tokens.output > 0 ||
-      (r.parts?.length ?? 0) > 0 ||
-      Object.keys(r.content).length > 0,
-  )
+  return turns.some((r) => {
+    // Same malformed-row guard as twin-dedupe `isUnreportedCounters`: a corrupt
+    // row can carry null (or a non-object) where counters belong; that reads as
+    // no token evidence, never a throw on property access. The counts go
+    // through `measuredCount` because `>` coerces: `'28' > 0` is true, which
+    // would build a run from bytes twin-dedupe had already read as unmeasured.
+    const tokens: unknown = r.tokens
+    const counters =
+      typeof tokens === 'object' && tokens !== null ? (tokens as Record<string, unknown>) : {}
+    const hasTokenEvidence =
+      (measuredCount(counters['reportedInput']) ?? 0) > 0 || (measuredCount(counters['output']) ?? 0) > 0
+    // `content` is typed as a map but a corrupt row can carry null, and
+    // `Object.keys(null)` throws — fail the whole build over one bad row.
+    const content = typeof r.content === 'object' && r.content !== null ? r.content : {}
+    return hasTokenEvidence || (r.parts?.length ?? 0) > 0 || Object.keys(content).length > 0
+  })
 }
 
 export type BuildRunsOptions = {

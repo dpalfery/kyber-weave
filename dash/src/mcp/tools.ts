@@ -18,7 +18,13 @@ export type AnalyticsToolDefinition = {
   readonly operation: string
   readonly method: 'GET' | 'POST'
   readonly description: string
+  /** The plain object schema the MCP SDK converts into the wire JSON Schema. */
   readonly inputSchema: z.ZodObject<z.ZodRawShape>
+  /**
+   * The schema the handler parses arguments against, when it carries cross-field
+   * rules the registered plain shape cannot express. Defaults to `inputSchema`.
+   */
+  readonly validationSchema?: z.ZodTypeAny
 }
 
 const scope = z.object({
@@ -35,7 +41,12 @@ const inspectTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('turn'), sessionId: z.string(), turnIndex: z.number().int().min(0) }).strict(),
 ])
 
-const inspect = z.object({
+// The registered MCP shape must stay a plain ZodObject: the MCP SDK builds the
+// JSON Schema from it, and a refined schema converts to an empty property set.
+// Cross-field rules live on `inspect` below and are enforced by the tool
+// handler (server.ts), so the wire contract keeps both the strict shape and
+// the refinement without reaching into zod's refinement internals.
+const inspectBase = z.object({
   ...base,
   mode: z.enum(['manifest', 'content']).optional(),
   target: inspectTarget.optional(),
@@ -47,7 +58,9 @@ const inspect = z.object({
   sessionId: z.string().optional(),
   turnIndex: z.number().int().min(0).optional(),
   blockId: z.string().optional(),
-}).strict().superRefine((value, ctx) => {
+}).strict()
+
+const inspect = inspectBase.superRefine((value, ctx) => {
   const hasMode = value.mode !== undefined
   const hasTarget = value.target !== undefined
   if (hasMode !== hasTarget) {
@@ -69,7 +82,7 @@ export const analyticsTools: readonly AnalyticsToolDefinition[] = [
   { name: 'dash_catalog', operation: 'catalog', method: 'GET', description: 'Read-only KyberDash analytics catalog.', inputSchema: z.object({}).strict() },
   { name: 'dash_query', operation: 'query', method: 'POST', description: 'Read-only KyberDash analytics query. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: query },
   { name: 'dash_search_sessions', operation: 'search-sessions', method: 'POST', description: 'Read-only KyberDash analytics search-sessions. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, text: z.string().max(200).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
-  { name: 'dash_inspect', operation: 'inspect', method: 'POST', description: inspectDescription, inputSchema: inspect },
+  { name: 'dash_inspect', operation: 'inspect', method: 'POST', description: inspectDescription, inputSchema: inspectBase, validationSchema: inspect },
   { name: 'dash_findings', operation: 'findings', method: 'POST', description: 'Read-only KyberDash analytics findings. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },
   { name: 'dash_compare', operation: 'compare', method: 'POST', description: 'Read-only KyberDash analytics compare.', inputSchema: z.object({ scopes: z.array(scope).min(2).max(2), metrics: z.array(z.string()).max(8).optional() }).strict() },
   { name: 'dash_outcomes', operation: 'outcomes', method: 'POST', description: 'Read-only KyberDash analytics outcomes. windowDays (1-365) sets the scope window ending now when the scope omits from/to; an explicit scope range wins.', inputSchema: z.object({ ...base, runIds: z.array(z.string()).max(100).optional(), windowDays: z.number().int().min(1).max(365).optional() }).strict() },

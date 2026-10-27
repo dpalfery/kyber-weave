@@ -1250,6 +1250,40 @@ Derived token counts (R4.6) come from `dash/src/canon/tokens.ts`, a tokenizer wr
 store-backed memo cache, and are tagged as derived with the model name so consumers present
 them as a lower bound.
 
+### Part-text boundary rule (`ContentPart.text` is a string at derivation)
+
+`ContentPart.text` is a string by contract (`dash/src/canon/types.ts`). Every consumer on
+the projection path enforces it rather than assuming it:
+
+- `partsOf` (`dash/src/canon/sessions.ts`) drops parts whose `text` is not a string on both
+  the flat and structured paths, so a non-string never becomes a `ContextPart`.
+- The token counter (`dash/src/canon/tokens.ts`) fails closed: non-string input throws a
+  domain `TypeError` naming the contract before the memo/`cacheKey` path, instead of
+  reaching `createHash` as a crypto argument error.
+- The in-file consumers in `sessions.ts` (tool-definitions loop, `taskSummaryOf`) skip
+  non-string text instead of calling `.trim()`, and the analysis layer
+  (`dash/src/analysis/context.ts`) reads part text through one module-local safe-text
+  helper, so `reduceContextParts` and `analyzeContext` never call string methods or the
+  counter on a non-string.
+
+A corrupt part is therefore dropped visibly — its session carries a `derivation_failed`
+problem row when derivation itself throws (next section) — rather than crashing the
+projection.
+
+### Per-session derivation degrade contract
+
+`buildSessions` (`dash/src/canon/sessions.ts`) degrades per session: the per-session unit
+(record collection → grouping → view derivation → row build/upsert → subagent projection)
+runs in a try/catch. On catch it records a `SpanProblem` (`code: 'derivation_failed'`,
+severity `error`, with the session id/harness where known and the stack carried),
+increments `skipped` and the `derivationDegraded` counter on `BuildSessionsReport`, and
+continues with the next session. The counter's `flush()` still runs on the normal path.
+
+A refresh with only degraded sessions **succeeds** (exit 0); its summary names the
+degraded count. The coarse `projectCanonicalStore` catch in `refreshHarnessSources`
+(`dash/src/refresh/orchestrator.ts`) stays as the outer belt: a projection-level failure
+still closes the run as `failure` (exit 1).
+
 ## Diagnostic Spine and Progressive Disclosure (ADR 0012)
 
 KyberDash structures agent context analysis into a six-level progressive-disclosure hierarchy:

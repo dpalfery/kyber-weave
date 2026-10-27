@@ -69,7 +69,7 @@ function claimableSpan(): OtlpSpan {
 }
 
 /** A pass-shaped return value for projectors whose purpose is timing, not derivation. */
-const NO_OP_REPORT: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
+const NO_OP_REPORT: BuildSessionsReport = { built: 0, skipped: 0, derivationDegraded: 0, pruned: 0, rollups: 0, findings: 0 }
 
 type Deferred = { resolve: () => void; promise: Promise<void> }
 

@@ -9,11 +9,12 @@
 // sharp fresh-input rise between consecutive turns is flagged. A source with
 // no message structure is not measurable and is never handed a residual.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { CANONICAL_CONTENT_KEYS, type CanonicalContentKey } from '../canon/types.js'
 import {
   analyzeContext,
+  reduceContextParts,
   type ContextAnalysis,
   type ContextPart,
   type ContextTurn,
@@ -647,5 +648,169 @@ describe('analyzeContext — observed-parts evidence (D8, ADR 0033)', () => {
     )
 
     expect(result.observedParts).toContain('system_prompt')
+  })
+})
+
+// Numeric part text: the normalization boundary can hand this module a
+// non-string `text` at runtime despite the type (untrusted JSON/SQLite rows).
+// RED without the fix: `text.includes`/`countTokens(text)` received the raw
+// number, so `reduceContextParts` and `analyzeContext` threw instead of
+// bucketing. The fix reads non-string text as `''` via `partText` while still
+// honouring a measured `tokens` count.
+describe('reduceContextParts — numeric part text', () => {
+  it('leaves a numeric-text part without tokens countless and derived, without calling countTokens', () => {
+    const countTokens = vi.fn((text: string): number => text.length)
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string } as ContextPart
+
+    const reduced = reduceContextParts([numeric], { countTokens })
+
+    expect(reduced).toHaveLength(1)
+    expect(reduced[0]?.text).toBe('')
+    expect('tokens' in (reduced[0] as object)).toBe(false)
+    expect(reduced[0]?.derived).toBe(true)
+    expect(countTokens).not.toHaveBeenCalled()
+  })
+
+  it('keeps the measured count of a numeric-text part without calling countTokens', () => {
+    const countTokens = vi.fn((text: string): number => text.length)
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string, tokens: 123 } as ContextPart
+
+    const reduced = reduceContextParts([numeric], { countTokens })
+
+    expect(reduced[0]?.tokens).toBe(123)
+    expect(countTokens).not.toHaveBeenCalled()
+  })
+})
+
+describe('analyzeContext — numeric part text', () => {
+  it('does not throw on a numeric-text part without tokens and buckets nothing', () => {
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [numeric], inputTokens: 50, freshInput: 50 })], { contextLimit: LIMIT })
+    )
+
+    expect(result.turns[0]?.buckets.system_prompt).toBe(0)
+    expect(result.turns[0]?.bucketedTokens).toBe(0)
+    expect(result.turns[0]?.residual.tokens).toBe(50)
+  })
+
+  it('buckets the measured count of a numeric-text part', () => {
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string, tokens: 123 } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [numeric], inputTokens: 123, freshInput: 123 })], { contextLimit: LIMIT })
+    )
+
+    expect(result.turns[0]?.buckets.system_prompt).toBe(123)
+    expect(result.turns[0]?.bucketedTokens).toBe(123)
+    expect(result.turns[0]?.residual.tokens).toBe(0)
+  })
+
+  it('never hands a non-string to the guarded countTokens', () => {
+    const seen: unknown[] = []
+    const countTokens = vi.fn((text: string): number => {
+      seen.push(text)
+      return text.length
+    })
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string } as ContextPart
+    const sibling = { part: 'conversation_history', text: 'hello world' } as ContextPart
+
+    reduceContextParts([numeric, sibling], { countTokens })
+    analyzeContext(
+      [turn({ parts: [numeric, sibling], inputTokens: 11, freshInput: 11 })],
+      { contextLimit: LIMIT, countTokens }
+    )
+
+    expect(seen.length).toBeGreaterThan(0)
+    for (const value of seen) expect(typeof value).toBe('string')
+    expect(seen).toContain('hello world')
+  })
+})
+
+// Kilo review: `partText` sanitized the bucket read, but `observedParts` and
+// the measured-count read still took the raw values. A numeric-text part with
+// no count was recorded as observed while contributing nothing, and a
+// non-finite or non-numeric `tokens` value was trusted into a bucket — where
+// `NaN` poisons every total and a string concatenates instead of adding.
+describe('context analysis — untrusted part measurements', () => {
+  it('does not record a numeric-text part with no count as observed', () => {
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [numeric], inputTokens: 50, freshInput: 50 })], { contextLimit: LIMIT })
+    )
+
+    // Nothing was supplied: empty and never-observed must not look alike.
+    expect(result.observedParts).not.toContain('system_prompt')
+  })
+
+  it('derives a count from the text when the measured value is not finite', () => {
+    const poisoned = { part: 'system_prompt', text: 'hello world', tokens: Number.NaN } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [poisoned], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    const pressure = result.turns[0]!
+    expect(pressure.buckets.system_prompt).toBe(11)
+    expect(Number.isFinite(pressure.residual.tokens)).toBe(true)
+    expect(Number.isFinite(result.residualTotal)).toBe(true)
+    expect(result.derivedCounts).toBe(true)
+  })
+
+  it('never adds a non-numeric measured count to a bucket', () => {
+    const stringy = { part: 'system_prompt', text: 'hello world', tokens: '123' as unknown as number } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [stringy], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    // '123' would otherwise concatenate: '0123' and a NaN residual.
+    expect(result.turns[0]?.buckets.system_prompt).toBe(11)
+  })
+
+  it('drops a non-finite measured count in reduceContextParts and counts the text instead', () => {
+    const poisoned = { part: 'system_prompt', text: 'hello', tokens: Number.POSITIVE_INFINITY } as ContextPart
+    const countTokens = vi.fn((text: string): number => text.length)
+
+    const [reduced] = reduceContextParts([poisoned], { countTokens })
+
+    expect(reduced?.tokens).toBe(5)
+    expect(reduced?.derived).toBe(true)
+    expect(countTokens).toHaveBeenCalledWith('hello')
+  })
+
+  it('does not read a non-finite count as structure in reduceContextParts', () => {
+    const poisoned = { part: 'system_prompt', text: 28 as unknown as string, tokens: Number.NaN } as ContextPart
+    const countTokens = vi.fn((text: string): number => text.length)
+
+    const [reduced] = reduceContextParts([poisoned], { countTokens })
+
+    expect('tokens' in (reduced as object)).toBe(false)
+    expect(countTokens).not.toHaveBeenCalled()
+  })
+
+  it('never subtracts a negative measured count from a bucket', () => {
+    // Kilo review: `Number.isFinite` alone admits -50, which would subtract
+    // from a bucket and make a prompt appear to give tokens back. A count is
+    // non-negative by definition, so a negative one is unusable, not measured.
+    const negative = { part: 'system_prompt', text: 'hello world', tokens: -50 } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [negative], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    expect(result.turns[0]?.buckets.system_prompt).toBe(11)
+    expect(result.derivedCounts).toBe(true)
   })
 })

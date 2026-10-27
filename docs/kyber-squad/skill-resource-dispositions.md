@@ -10,9 +10,9 @@ last-reviewed: 2026-10-22
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 81 supplemental files that sit
-beside the 27 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 81 resources, a reader can answer three questions: what kind of
+This reference is the content-preservation audit for the 82 supplemental files that sit
+beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+that, for every one of those 82 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -99,6 +99,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/go-dev/references/errors-and-context.md` | technique | retain-in-place | rendered | — | Error-wrapping and context-propagation technique; the policy lives in `<go-coding-standard>` (D2). |
 | `skills/go-dev/references/gates-and-platforms.md` | procedure | retain-in-place | rendered | — | Per-platform procedure for running the Go gates; the commands themselves are named by `<go-coding-standard>` (D2). |
 | `skills/go-dev/references/modules-and-cross-compilation.md` | technique | retain-in-place | rendered | — | Module and cross-build technique; target and dependency policy lives in `<go-coding-standard>` (D2). |
+| `skills/kilo-review-loop/scripts/post_replies.py` | script | retain-in-place | rendered | — | Posts and resolves bot review-thread replies from an outcomes file; linked from its `SKILL.md` and delivered beside the principal in every harness. |
 | `skills/maui-dev/references/app-lifecycle.md` | technique | retain-in-place | rendered | — | MAUI platform technique; not a host-reversible policy (D2). |
 | `skills/maui-dev/references/collectionview.md` | policy-bearing | policy-migrated-to-template | rendered | maui standard (MVVM) | 4 Policy-line ledger rows below: 2 duplicate (`:25`, `:199`) point to `<maui-coding-standard>` § MVVM; 2 retained framework-correctness pitfalls (D2). |
 | `skills/maui-dev/references/data-binding.md` | policy-bearing | policy-migrated-to-template | rendered | maui standard (MVVM) | 2 Policy-line ledger rows below: 1 duplicate (`:11`) points to `<maui-coding-standard>` § MVVM; 1 retained framework-correctness detail (D2). |

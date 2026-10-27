@@ -1725,3 +1725,141 @@ describe('buildSessionRow — Claude Code and Copilot CLI skills are unchanged b
     expect(skillsViewOf(row)).not.toHaveProperty('invocationsCoverage')
   })
 })
+
+// Numeric part text (refresh crash): untrusted payloads can carry a non-string
+// `text` despite the type, and the refresh must survive it rather than throw.
+// RED without the fix: the numeric text reached `countTokens`/`cacheKey`
+// (`createHash.update` throws on a non-string) and the tool-def catalogue
+// parse read `.trim()` off a number, so `buildSessionRow` threw instead of
+// building. The fix filters non-string text in `partsOf` and skips non-string
+// definitions before the catalogue parse, and `taskSummaryOf` skips
+// non-string history before `.trim()`.
+describe('buildSessionRow — numeric part text is dropped, never counted', () => {
+  it('drops a numeric tool_definitions part while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-tooldef',
+      [
+        turn('num-1', [
+          { part: 'tool_definitions', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+    const payload = sessionPayload(row)
+
+    // The build itself is the no-throw assertion; the outcomes pin the drop.
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    // The numeric blob is not a catalogue: no names, no offered catalogue.
+    expect(payload.summary.tools_offered).toBeUndefined()
+    expect(payload.tools.some((tool) => String(tool.name ?? '').includes('28'))).toBe(false)
+  })
+
+  it('drops numeric conversation_history while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-history',
+      [
+        turn('num-2', [
+          { part: 'conversation_history', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.conversation_history ?? 0).toBe(0)
+  })
+
+  it('keeps the measured count of a numeric-text part', () => {
+    // Kilo review: dropping the whole part discarded a count the harness did
+    // measure, so direct `analyzeContext` read 123 while `buildSessionRow` read
+    // 0 for the same payload. The text is dropped; the measurement is not.
+    const row = buildSessionRow(
+      'sess-numeric-measured',
+      [
+        turn('num-3', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: 123 },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions).toBe(123)
+    expect(context.observedParts).toContain('tool_definitions')
+  })
+
+  it('does not keep a numeric-text part whose measured count is not finite', () => {
+    const row = buildSessionRow(
+      'sess-numeric-nonfinite',
+      [
+        turn('num-4', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: Number.NaN },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    expect(context.observedParts ?? []).not.toContain('tool_definitions')
+  })
+})
+
+// T4 — one bad session must not fail the refresh (numeric-part-text crash):
+// the per-session try/catch in `buildSessions` isolates a derivation throw,
+// records it as a `derivation_failed` problem, and continues with the next
+// session. RED without the fix: the throw propagated out of `buildSessions`,
+// so the healthy sibling never built and the refresh failed outright.
+describe('buildSessions — a failing session degrades the build instead of failing it', () => {
+  it('builds the healthy session while the failed one is skipped, degraded, and recorded', async () => {
+    // The numeric-part-text refresh crash: one malformed session must not
+    // fail the refresh. RED without the per-session try/catch: the throw
+    // propagated out of `buildSessions`, so the healthy sibling never built.
+    // The failure is injected at the persistence seam rather than through
+    // malformed bytes because a genuinely malformed record (e.g. numeric
+    // part text) currently also throws later in the findings phase
+    // (`extractListedSkills` → `parseBodyListing`), outside the guarded
+    // region — tracked as a follow-up gap — while this test pins the
+    // isolation contract itself: skip, degrade, record, continue.
+    const store = new CanonStore(':memory:')
+    try {
+      const healthy = turn('good-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-healthy',
+        traceId: 'trace-healthy',
+      })
+      const failing = turn('bad-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-bad',
+        traceId: 'trace-bad',
+      })
+      store.upsertMany([healthy, failing])
+      const persisted = store.upsertSession.bind(store)
+      const upsert = vi.spyOn(store, 'upsertSession').mockImplementation((row) => {
+        if (row.sessionId === 'sess-bad') throw new Error('session derivation failed (fixture)')
+        persisted(row)
+      })
+      try {
+        const report = await buildSessions(store)
+
+        expect(report.built).toBe(1)
+        expect(report.skipped).toBe(1)
+        expect(report.derivationDegraded).toBe(1)
+        expect(store.getSessionPayload('sess-healthy')).toBeDefined()
+        expect(store.getSessionPayload('sess-bad')).toBeUndefined()
+        expect(store.getProblems('sess-bad').some((problem) => problem.code === 'derivation_failed')).toBe(true)
+      } finally {
+        upsert.mockRestore()
+      }
+    } finally {
+      store.close()
+    }
+  })
+})

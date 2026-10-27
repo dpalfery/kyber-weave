@@ -12,7 +12,12 @@ export function createAnalyticsMcpServer(options: { client?: AnalyticsClient } =
       description: tool.description,
       inputSchema: tool.inputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, async (args, extra) => client.callTool(tool.name, args, { signal: extra.signal }))
+    }, async (args, extra) => {
+      // Enforce refinements (e.g. dash_inspect mode/target pairing) that the
+      // registered plain shape cannot express; a throw becomes an MCP error.
+      (tool.validationSchema ?? tool.inputSchema).parse(args)
+      return client.callTool(tool.name, args, { signal: extra.signal })
+    })
   }
   return server
 }
