@@ -303,6 +303,198 @@ public sealed class ProjectRootDetectorTests : IDisposable
         Assert.Equal(first.Capped, second.Capped);
     }
 
+    /// <summary>
+    /// The repository root already owns the <c>root</c> slug, so a real directory named <c>root</c>
+    /// takes <c>root-2</c>. Without the suffix the generated gate ids for the two roots collide.
+    /// </summary>
+    [Fact]
+    public void ARootDirectoryNamedRootDoesNotTakeTheRepositoryRootSlug()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "go.mod");
+        Touch(repo, "root/go.mod");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        Assert.Equal([".", "root"], set.Roots.Select(root => root.RootDirectory).ToArray());
+        Assert.Equal(["root", "root-2"], set.Roots.Select(root => root.Slug).ToArray());
+    }
+
+    /// <summary>
+    /// Slugs longer than forty characters are cut, and a cut that lands on a separator trims the
+    /// trailing hyphen so the slug stays a valid id part. Here the full slug is 39 a's, a hyphen
+    /// from the directory separator, then b's, so the 40-character cut ends on that hyphen.
+    /// </summary>
+    [Fact]
+    public void ALongPathSlugIsCappedAtFortyCharactersWithoutATrailingHyphen()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, $"{new string('a', 39)}/{new string('b', 10)}/go.mod");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        ProjectRoot root = Assert.Single(set.Roots);
+        Assert.Equal(new string('a', 39), root.Slug);
+        Assert.True(root.Slug.Length <= 40, $"Slug '{root.Slug}' exceeds forty characters.");
+        Assert.True(ConfigSlug.IsValid(root.Slug), $"Slug '{root.Slug}' is not a valid id part.");
+    }
+
+    /// <summary>
+    /// The fallback only guesses when no marker declared a root. A solution beside a lone
+    /// <c>.csproj</c> means the tree already declared its root, so the fallback stays silent.
+    /// </summary>
+    [Fact]
+    public void AFallbackCsprojIsIgnoredWhenASolutionDeclaresARoot()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "app/app.sln");
+        Touch(repo, "other/Only.csproj");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(
+            repo,
+            SolutionMarkers,
+            ProjectRootNesting.Each,
+            fallback: CsprojFallback);
+
+        ProjectRoot root = Assert.Single(set.Roots);
+        Assert.Equal("app", root.RootDirectory);
+    }
+
+    /// <summary>
+    /// A directory whose natural slug equals a generated <c>-2</c> suffix must not reuse it. The
+    /// second <c>p-q</c> takes <c>p-q-2</c>, so the real <c>p-q-2</c> directory moves on to
+    /// <c>p-q-2-2</c> rather than sharing a gate id with it.
+    /// </summary>
+    [Fact]
+    public void ANaturalSlugThatMatchesAGeneratedSuffixGetsItsOwnSuffix()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "p q/go.mod");
+        Touch(repo, "p-q/go.mod");
+        Touch(repo, "p-q-2/go.mod");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        Assert.Equal(["p q", "p-q", "p-q-2"], set.Roots.Select(root => root.RootDirectory).ToArray());
+        Assert.Equal(["p-q", "p-q-2", "p-q-2-2"], set.Roots.Select(root => root.Slug).ToArray());
+    }
+
+    /// <summary>
+    /// A directory name with no usable characters leaves nothing to slugify, so the root falls back
+    /// to the fixed <c>project</c> word rather than producing an empty or invalid gate id part.
+    /// </summary>
+    [Fact]
+    public void ADirectoryWithNoUsableCharactersFallsBackToProject()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "___/go.mod");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        ProjectRoot root = Assert.Single(set.Roots);
+        Assert.Equal("project", root.Slug);
+    }
+
+    /// <summary>
+    /// A marker reached only through a symlink is not a regular file, so the walk skips it. A gate
+    /// pointed at a link would check whatever the link happens to target rather than the tree.
+    /// </summary>
+    [Fact]
+    public void ASymlinkedMarkerIsNeverARoot()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "real/go.mod");
+        Directory.CreateDirectory(Path.Combine(repo, "linked"));
+        File.CreateSymbolicLink(Path.Combine(repo, "linked", "go.mod"), Path.Combine(repo, "real", "go.mod"));
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        Assert.Equal(["real"], set.Roots.Select(root => root.RootDirectory).ToArray());
+    }
+
+    /// <summary>
+    /// Git still lists a deleted-but-tracked file, so the detector checks the file exists before
+    /// treating it as a marker. Otherwise a removed module keeps its gate until someone commits.
+    /// </summary>
+    [Fact]
+    public void ADeletedButTrackedMarkerIsNeverARoot()
+    {
+        string repo = _fixture.Path;
+        Git(repo, "init", "-q");
+        Touch(repo, "app/go.mod");
+        Git(repo, "add", "-A");
+        Git(
+            repo,
+            "-c", "user.name=kyber-weave-tests",
+            "-c", "user.email=tests@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "fixture");
+        File.Delete(Path.Combine(repo, "app", "go.mod"));
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        Assert.Empty(set.Roots);
+    }
+
+    /// <summary>
+    /// Outside a git work tree the detector walks the file system itself, and that walk never
+    /// enters build-output or environment directories. A real project beside them proves the
+    /// detector is looking, so the test cannot pass by finding nothing.
+    /// </summary>
+    [Fact]
+    public void BuildOutputDirectoriesAreNeverRootsOutsideGit()
+    {
+        string repo = _fixture.Path;
+        Touch(repo, "bin/go.mod");
+        Touch(repo, "obj/go.mod");
+        Touch(repo, "target/go.mod");
+        Touch(repo, "dist/go.mod");
+        Touch(repo, "build/go.mod");
+        Touch(repo, ".venv/go.mod");
+        Touch(repo, "src/go.mod");
+
+        ProjectRootSet set = ProjectRootDetector.Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
+
+        Assert.Equal(["src"], set.Roots.Select(root => root.RootDirectory).ToArray());
+    }
+
+    /// <summary>A repository root that does not exist is a caller error, reported before any scan.</summary>
+    [Fact]
+    public void AMissingRepositoryRootThrows()
+    {
+        string missing = Path.Combine(_fixture.Path, "missing");
+
+        Assert.Throws<DirectoryNotFoundException>(() =>
+        {
+            ProjectRootDetector.Detect(missing, GoModuleMarkers, ProjectRootNesting.Each);
+        });
+    }
+
+    /// <summary>
+    /// The eight-root cap applies under outermost nesting with paired markers too. Nine TypeScript
+    /// projects report <c>Capped</c> so the gate writer comments those gates out for the operator.
+    /// </summary>
+    [Fact]
+    public void NinePairRootsUnderOutermostNestingCapTheFamily()
+    {
+        string repo = _fixture.Path;
+        for (int i = 1; i <= 9; i++)
+        {
+            Touch(repo, $"m{i}/package.json");
+            Touch(repo, $"m{i}/tsconfig.json");
+        }
+
+        ProjectRootSet set = ProjectRootDetector.Detect(
+            repo,
+            PairMarkers,
+            ProjectRootNesting.Outermost,
+            pair: true);
+
+        Assert.True(set.Capped, "More than eight roots must report Capped.");
+        Assert.Equal(9, set.Roots.Count);
+        Assert.Equal("m1/tsconfig.json", set.Roots[0].MarkerPath);
+    }
+
     private static (string RootDirectory, string MarkerPath, string Slug)[] Project(ProjectRootSet set) =>
         set.Roots.Select(root => (root.RootDirectory, root.MarkerPath, root.Slug)).ToArray();
 
