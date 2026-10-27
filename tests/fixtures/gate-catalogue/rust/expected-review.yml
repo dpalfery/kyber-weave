@@ -1,0 +1,35 @@
+review:
+# Gates written by Kyber-Weave 0.1.0+f1fd593576a52d04c679b82a9001a47a0256a4cf 'docs init' from its shipped catalogue.
+# This block is yours: edit, remove or add gates freely; re-running 'docs init' never changes it.
+# 'kyber-weave review catalogue' prints the catalogue for newer releases, to copy in by hand.
+# CI: copy templates/github-actions/kyber-weave-review-gate.yml from
+# https://github.com/dpalfery/kyber-weave into .github/workflows/.
+  gates:
+    # rust, tauri: format (.)
+    - id: rust-fmt
+      run: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all', '--check']
+    # rust, tauri: lint (.)
+    - id: rust-clippy
+      run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--', '-D', 'warnings']
+    # rust, tauri: test (.)
+    - id: rust-test
+      run: ['cargo', 'test', '--manifest-path', 'Cargo.toml']
+  task-gates:
+    rust-dev:
+      # rust, tauri: format (.)
+      - id: rust-fmt
+        include: ['**/*.rs']
+        run: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all', '--check']
+        fix: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all']
+      # rust, tauri: lint (.)
+      - id: rust-clippy
+        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']
+    test-dev:
+      # rust: format (test-dev copy)
+      - id: rust-fmt
+        include: ['**/*.rs']
+        run: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all', '--check']
+        fix: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all']
+      # rust: lint (test-dev copy)
+      - id: rust-clippy
+        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']
