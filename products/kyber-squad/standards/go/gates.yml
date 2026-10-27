@@ -12,6 +12,8 @@ gates:
   - id: fmt
     role: format
     working-directory: "{{root}}"
+    # `gofmt -d` exits 1 when a file needs formatting (`-l` exits 0, which is why it is not used).
+    # The Linux toolchain run proves it against the fmt defect fixture.
     run: [gofmt, -d, .]
   - id: vet
     role: lint
