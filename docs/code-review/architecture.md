@@ -460,6 +460,10 @@ its tests span all three. `go-dev` and `python-dev` declare no task gates, becau
 has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
 only, because a whole-crate test run per task would fail on another worker's concurrent edit.
 
+The shipped Go format gate (`gofmt -d`, council and task) requires Go 1.26 or newer: `gofmt -d` exits 1
+on a diff only from 1.26, and exits 0 on Go 1.25 and older, where the gate cannot fail. `docs init`
+writes that requirement as a comment above the gate.
+
 ### Council gates
 
 `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and,

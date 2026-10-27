@@ -312,6 +312,7 @@ public static class GateCatalogue
         string? workingDirectory = WorkingDirectoryFor(selected, context);
 
         renderer.CouncilLines.Add($"    # {technologies}: {selected.Role} ({context.Label})");
+        AddNoteComment(renderer.CouncilLines, selected, "    ");
         renderer.CouncilLines.AddRange(CouncilGateLines(id, run, include, selected.Os, workingDirectory,
             selected.Blocking, selected.TimeoutSeconds, "    "));
         renderer.Written.Add((served[0], id));
@@ -441,6 +442,7 @@ public static class GateCatalogue
         }
 
         lines.Add($"      # {technologies}: {entry.Role} ({context.Label})");
+        AddNoteComment(lines, entry, "      ");
         lines.AddRange(TaskGateLines(gate, "      "));
         renderer.AgentsWithLive.Add(agent);
         renderer.Written.Add((AgentTechnology[agent], id));
@@ -556,6 +558,7 @@ public static class GateCatalogue
             }
 
             lines.Add($"      # {render.Technology}: {render.Entry.Role} (test-dev copy)");
+            AddNoteComment(lines, render.Entry, "      ");
             lines.AddRange(TaskGateLines(gate, "      "));
             renderer.AgentsWithLive.Add(agent);
             renderer.Written.Add((render.Technology, id));
@@ -655,6 +658,16 @@ public static class GateCatalogue
             lines.Add($"{indent}  working-directory: {Quote(gate.WorkingDirectory)}");
 
         return lines;
+    }
+
+    /// <summary>
+    /// A live gate's note is written as a comment under its label, so a host repository sees a
+    /// requirement such as a minimum toolchain version beside the gate it affects.
+    /// </summary>
+    private static void AddNoteComment(List<string> lines, FamilyGate entry, string indent)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Note))
+            lines.Add($"{indent}# {entry.Note.Trim()}");
     }
 
     private static SubstitutedTaskGate SubstituteTaskGate(FamilyGate entry, string id, RootContext context)

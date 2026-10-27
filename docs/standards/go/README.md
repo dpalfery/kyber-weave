@@ -105,3 +105,11 @@ gofmt -l .        # must print nothing
 go vet ./...
 go test -race ./...
 ```
+
+### Format gate needs Go 1.26 or newer
+
+The shipped catalogue's Go format gate runs `gofmt -d`, because the gate runner judges only the
+exit code and `gofmt -l` exits 0 even when it lists files. `gofmt -d` exits 1 on a formatting
+diff from Go 1.26. On Go 1.25 and older it prints the diff and exits 0, so the gate cannot fail.
+Use Go 1.26 or newer wherever the gate runs. `docs init` writes this requirement as a comment
+above the gate in the host's `review:` block.

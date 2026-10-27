@@ -12,8 +12,10 @@ gates:
   - id: fmt
     role: format
     working-directory: "{{root}}"
-    # `gofmt -d` exits 1 when a file needs formatting (`-l` exits 0, which is why it is not used).
-    # The Linux toolchain run proves it against the fmt defect fixture.
+    # `gofmt -d` exits 1 on a formatting diff only from Go 1.26 (`-l` exits 0 on every version, so it
+    # cannot gate). On Go 1.25 and older `-d` exits 0 and this gate cannot fail. The toolchain
+    # workflow proves both sides of that boundary.
+    note: "requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail"
     run: [gofmt, -d, .]
   - id: vet
     role: lint
@@ -37,6 +39,7 @@ task-gates:
     role: format
     agents: [go-dev, test-dev]
     include: ["{{root-glob}}**/*.go"]
+    note: "requires Go 1.26 or newer: gofmt -d exits 1 on a diff only from 1.26; on Go 1.25 and older it exits 0, so this gate cannot fail"
     run: [gofmt, -d, "{changed}"]
     fix: [gofmt, -w, "{changed}"]
   - id: vet

@@ -595,3 +595,9 @@ ADR waiver: refines existing architecture.
   by the R9.6 Linux run. Any that fail are dropped or changed before release (R1.5).
 - **GAP-3 (non-blocking).** The action SHAs in the workflow template are resolved when that
   task is implemented.
+
+> **Correction, 2026-10-27.** The Go `fmt` rows in section 11 say `gofmt -d` exits 1 when any
+> file differs, and mark that a probe. It does so only from Go 1.26. On Go 1.25 and older `-d`
+> prints the diff and exits 0, so the gate can never fail there. The shipped catalogue now states
+> "requires Go 1.26 or newer" on the gate, and the toolchain workflow proves both sides. The text
+> above is left as originally written.
