@@ -727,3 +727,73 @@ describe('analyzeContext — numeric part text', () => {
     expect(seen).toContain('hello world')
   })
 })
+
+// Kilo review: `partText` sanitized the bucket read, but `observedParts` and
+// the measured-count read still took the raw values. A numeric-text part with
+// no count was recorded as observed while contributing nothing, and a
+// non-finite or non-numeric `tokens` value was trusted into a bucket — where
+// `NaN` poisons every total and a string concatenates instead of adding.
+describe('context analysis — untrusted part measurements', () => {
+  it('does not record a numeric-text part with no count as observed', () => {
+    const numeric = { part: 'system_prompt', text: 28 as unknown as string } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [numeric], inputTokens: 50, freshInput: 50 })], { contextLimit: LIMIT })
+    )
+
+    // Nothing was supplied: empty and never-observed must not look alike.
+    expect(result.observedParts).not.toContain('system_prompt')
+  })
+
+  it('derives a count from the text when the measured value is not finite', () => {
+    const poisoned = { part: 'system_prompt', text: 'hello world', tokens: Number.NaN } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [poisoned], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    const pressure = result.turns[0]!
+    expect(pressure.buckets.system_prompt).toBe(11)
+    expect(Number.isFinite(pressure.residual.tokens)).toBe(true)
+    expect(Number.isFinite(result.residualTotal)).toBe(true)
+    expect(result.derivedCounts).toBe(true)
+  })
+
+  it('never adds a non-numeric measured count to a bucket', () => {
+    const stringy = { part: 'system_prompt', text: 'hello world', tokens: '123' as unknown as number } as ContextPart
+
+    const result = expectMeasurable(
+      analyzeContext([turn({ parts: [stringy], inputTokens: 50, freshInput: 50 })], {
+        contextLimit: LIMIT,
+        countTokens: (text) => text.length,
+      })
+    )
+
+    // '123' would otherwise concatenate: '0123' and a NaN residual.
+    expect(result.turns[0]?.buckets.system_prompt).toBe(11)
+  })
+
+  it('drops a non-finite measured count in reduceContextParts and counts the text instead', () => {
+    const poisoned = { part: 'system_prompt', text: 'hello', tokens: Number.POSITIVE_INFINITY } as ContextPart
+    const countTokens = vi.fn((text: string): number => text.length)
+
+    const [reduced] = reduceContextParts([poisoned], { countTokens })
+
+    expect(reduced?.tokens).toBe(5)
+    expect(reduced?.derived).toBe(true)
+    expect(countTokens).toHaveBeenCalledWith('hello')
+  })
+
+  it('does not read a non-finite count as structure in reduceContextParts', () => {
+    const poisoned = { part: 'system_prompt', text: 28 as unknown as string, tokens: Number.NaN } as ContextPart
+    const countTokens = vi.fn((text: string): number => text.length)
+
+    const [reduced] = reduceContextParts([poisoned], { countTokens })
+
+    expect('tokens' in (reduced as object)).toBe(false)
+    expect(countTokens).not.toHaveBeenCalled()
+  })
+})

@@ -1773,6 +1773,45 @@ describe('buildSessionRow — numeric part text is dropped, never counted', () =
     expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
     expect(context.turns?.[0]?.buckets?.conversation_history ?? 0).toBe(0)
   })
+
+  it('keeps the measured count of a numeric-text part', () => {
+    // Kilo review: dropping the whole part discarded a count the harness did
+    // measure, so direct `analyzeContext` read 123 while `buildSessionRow` read
+    // 0 for the same payload. The text is dropped; the measurement is not.
+    const row = buildSessionRow(
+      'sess-numeric-measured',
+      [
+        turn('num-3', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: 123 },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions).toBe(123)
+    expect(context.observedParts).toContain('tool_definitions')
+  })
+
+  it('does not keep a numeric-text part whose measured count is not finite', () => {
+    const row = buildSessionRow(
+      'sess-numeric-nonfinite',
+      [
+        turn('num-4', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: Number.NaN },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    expect(context.observedParts ?? []).not.toContain('tool_definitions')
+  })
 })
 
 // T4 — one bad session must not fail the refresh (numeric-part-text crash):

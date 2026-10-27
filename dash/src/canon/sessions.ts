@@ -21,6 +21,7 @@ import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
+import { measuredCount } from './measured.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { formatSessionTitle } from './naming.js'
 import { buildFindingsYielding } from './findings.js'
@@ -443,14 +444,17 @@ function partsOf(
 ): ContextPart[] {
   if (parts !== undefined && parts.length > 0) {
     // WHY: parts arrive from untrusted payloads, so a part can carry a
-    // non-string text (e.g. a number) despite the type. Drop it rather than
-    // coerce it, mirroring the flat-path filter below.
+    // non-string text (e.g. a number) despite the type. Drop the text rather
+    // than coerce it, mirroring the flat-path filter below — but keep the part
+    // when it carries a usable measured count, because dropping it would
+    // discard a number the harness did measure and make this path disagree
+    // with a direct `analyzeContext` over the same payload.
     return parts
-      .filter((part) => typeof part.text === 'string')
+      .filter((part) => typeof part.text === 'string' || measuredCount(part.tokens) !== undefined)
       .map((part) => ({
         part: part.part,
-        text: part.text,
-        ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
+        text: typeof part.text === 'string' ? part.text : '',
+        ...(measuredCount(part.tokens) !== undefined ? { tokens: part.tokens } : {}),
         ...(part.server !== undefined ? { server: part.server } : {}),
         // Residency survives the mapping: analyzeContext reads the flag to keep
         // an offered-but-unloaded definition out of the composition (D7).

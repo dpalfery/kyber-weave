@@ -45,6 +45,7 @@
 
 import { contextCompositionAvailability } from '../canon/measurability.js'
 import type { ContextLimitSource } from '../canon/context-window.js'
+import { measuredCount } from '../canon/measured.js'
 import { CANONICAL_CONTENT_KEYS, type CanonicalContentKey, type Measurability } from '../canon/types.js'
 import { approximateO200kBase } from '../canon/tokens.js'
 import {
@@ -430,15 +431,17 @@ export function reduceContextParts(
         ...(part.resident === false ? { resident: false } : {}),
       }
     }
-    // A part with no text and no measured count contributes nothing and
+    // A part with no text and no usable measured count contributes nothing and
     // carries no structure: its count stays absent, so the composition reads
-    // it exactly as it read the part.
-    const structure = text !== '' || part.tokens !== undefined
+    // it exactly as it read the part. A non-finite or non-numeric count is not
+    // usable, so it is derived from the text instead of poisoning a total.
+    const measured = measuredCount(part.tokens)
+    const structure = text !== '' || measured !== undefined
     return {
       part: part.part,
       text: '',
-      ...(structure ? { tokens: part.tokens ?? countTokens(text) } : {}),
-      ...(part.tokens === undefined ? { derived: true } : {}),
+      ...(structure ? { tokens: measured ?? countTokens(text) } : {}),
+      ...(measured === undefined ? { derived: true } : {}),
       ...(part.server !== undefined ? { server: part.server } : {}),
       // Reduction keeps residency: dropping the flag here would make a
       // non-resident definition count again once the text is released (D7).
@@ -486,6 +489,10 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   // happened to arrive this run (R7.6, R10.1).
   const availability = contextCompositionAvailability(options.measurability)
   const declared = typeof availability === 'object' && availability.availability === 'not_measurable'
+  // A numeric-text part is still a part that arrived: the session can chart a
+  // composition (with the unreadable part as residual) even though nothing in
+  // it was countable. Declaring the source structureless here would hide the
+  // turn's own measured input behind a false "no message structure" answer.
   const hasStructure = turns.some((turn) =>
     turn.parts.some((part) => part.text !== '' || part.tokens !== undefined)
   )
@@ -522,8 +529,12 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         nonResidentToolDefinitions += 1
         continue
       }
-      if (part.text !== '' || part.tokens !== undefined) observed.add(part.part)
       const text = partText(part)
+      // Observed means "supplied something countable". A non-string text that
+      // carries no usable count supplied nothing, so it must not read as
+      // observed-empty any more than an absent part does (D8).
+      const measured = measuredCount(part.tokens)
+      if (text !== '' || measured !== undefined) observed.add(part.part)
       // Instruction fences ride inside history and tool results; stripping
       // them anywhere else would miscount a system prompt that happens to
       // quote a fence, so the strip applies to the carrier buckets only.
@@ -551,8 +562,8 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         }
         tokens = partTokens
       } else {
-        tokens = part.tokens ?? countTokens(text)
-        if (part.tokens === undefined || part.derived === true) derivedThisTurn = true
+        tokens = measured ?? countTokens(text)
+        if (measured === undefined || part.derived === true) derivedThisTurn = true
         buckets[part.part] += tokens
         // A REDUCED part carries the instruction blocks that were stripped out
         // of its text, already counted: the carrier bucket keeps the
