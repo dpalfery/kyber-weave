@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-27
 ---
 
 # Rule reference
@@ -175,10 +175,12 @@ number, and a missing report is the same class of signal rather than a failed ga
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
-| `KW-REVIEW-026` | Info | A task gate was skipped: its `os` does not match the host, or no changed file matches its `include` (`--agent`) |
+| `KW-REVIEW-026` | Info | A gate was skipped: its `os` does not match the host, or no changed file matches its `include` |
 | `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
-| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran (`--agent`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
+| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, or its working directory does not exist. Error when blocking, warning otherwise. |
+| `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 
 ### Duplicates — `review duplicates`
 
@@ -194,6 +196,7 @@ number, and a missing report is the same class of signal rather than a failed ga
 |---|---|---|
 | `KW-PARSE-000` | Error | An artifact could not be parsed |
 | `KW-CONFIG-001` | Error | `kyber-weave.yml` invalid or unreadable |
+| `KW-CONFIG-002` | Warning | A `review.gates` or `review.task-gates` entry carries an unknown key. The key is ignored and the configuration still loads. |
 
 ## Related
 

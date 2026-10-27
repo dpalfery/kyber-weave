@@ -321,6 +321,12 @@ flowchart LR
   deployment is not failed. One file is kept per distinct version and snapshots are never
   pruned.
 
+- **Task gates come from `docs init`, not from Squad.** Squad writes no configuration: a
+  project-scope `squad install` or `squad update` that finds no `review.task-gates` in the
+  project's host config prints one hint — run `kyber-weave docs init` to write the gates
+  for the declared technologies — instead of writing them. The hint never changes the
+  verb's exit code, and global scope never prints it, because there is no project.
+
 ### Cross-Process Mutex Lease
 
 - **Named OS Mutex**: Every mutating operation acquires an exclusive OS-named mutex (`kyber-weave-squad-<root-key>`).
