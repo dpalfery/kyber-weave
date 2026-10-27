@@ -128,5 +128,7 @@ npm --prefix dash/tray/ui run test
 ```
 
 The same three Rust commands run from `dash/tray/src-tauri`, as the Rust standard gives them.
+The council declares them as `review.gates` entries `cargo-fmt`, `cargo-clippy` and `cargo-test`,
+and `tauri-dev` declares `cargo-fmt` and `cargo-clippy` as task gates.
 The bundled application is built by the release automation owned by `github-devops`, not by a
 command in this standard.

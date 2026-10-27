@@ -441,7 +441,28 @@ whose target lies outside the repository, and a `--task` that is not a slug, ref
 (`KW-REVIEW-028`) before any process starts.
 
 A YAML anchor is the way to share a gate between agents: define it on the first agent and alias
-it under the others. This repository does so for the .NET format gates and the build.
+it under the others. This repository does so for:
+
+- .NET: `format-whitespace`, `format-style`, `format-analyzers` and `dotnet-build`, anchored under `csharp-dev`.
+- TypeScript: `dash-typecheck` and `dash-lint`, anchored under `react-dev`; `tray-ui-typecheck` is anchored there too.
+- Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under `tauri-dev`.
+
+`typescript-dev` aliases the dash gates and `rust-dev` the cargo format and lint gates. `test-dev`
+runs the .NET format and build gates, the dash gates and the cargo format and lint gates, because
+its tests span all three. `go-dev` and `python-dev` declare no task gates, because this repository
+has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
+only, because a whole-crate test run per task would fail on another worker's concurrent edit.
+
+Council `review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds`, and no `include`.
+`GateRunner` runs every council gate on every review. The reader ignores unknown keys, so an
+`include` written on a council gate is silently dropped and the gate still runs. The `cargo-clippy`
+and `cargo-test` council gates set `timeout-seconds: 1800`, against the 900-second default: a cold
+Tauri build compiles several hundred crates, and clippy and the tests each build them. A machine
+running the council needs `cargo` on the `PATH`; see the [Rust standard](../standards/rust/README.md).
+
+Per-task gates take `include`, `os`, `fix`, `blocking` and `timeout`, as the table above describes.
+Their timeout key is `timeout`, in seconds, with a default of 900. `timeout-seconds` is the council
+key: written on a task gate it is ignored, the same silent drop as an `include` on a council gate.
 
 ## Modes
 
