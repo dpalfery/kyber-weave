@@ -15,7 +15,7 @@ gates:
     run: [cargo, fmt, --manifest-path, "{{marker}}", --all, --check]
   - id: clippy
     role: lint
-    run: [cargo, clippy, --manifest-path, "{{marker}}", --, -D, warnings]
+    run: [cargo, clippy, --manifest-path, "{{marker}}", --all-targets, --, -D, warnings]
   - id: test
     role: test
     run: [cargo, test, --manifest-path, "{{marker}}"]
@@ -29,7 +29,7 @@ task-gates:
   - id: clippy
     role: lint
     agents: [rust-dev, tauri-dev, test-dev]
-    run: [cargo, clippy, --manifest-path, "{{marker}}", --target-dir, ".agent_scratchpad/{task}/target", --, -D, warnings]
+    run: [cargo, clippy, --manifest-path, "{{marker}}", --all-targets, --target-dir, ".agent_scratchpad/{task}/target", --, -D, warnings]
 sources:
   fmt: https://raw.githubusercontent.com/rust-lang/rustfmt/master/README.md
   clippy: https://doc.rust-lang.org/clippy/usage.html

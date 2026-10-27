@@ -371,6 +371,38 @@ public sealed class GateCatalogueRenderTests
         Assert.Contains("2", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>A <c>when: file:</c> path must stay relative and under the project root.</summary>
+    /// <remarks>
+    /// The condition is a file-existence probe; an absolute or <c>..</c> path would turn the catalogue into an
+    /// oracle for the host filesystem, so the family file is refused at load time.
+    /// </remarks>
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("../secret")]
+    [InlineData("a/../../secret")]
+    [InlineData("C:\\secret")]
+    public void AWhenFilePathThatEscapesTheRootIsRefused(string path)
+    {
+        string yaml = $$"""
+            schema: 1
+            family: probe
+            technologies: [probe]
+            roots:
+              markers: ["probe.toml"]
+              nesting: each
+            gates:
+              - id: check
+                role: lint
+                when: { file: '{{path}}' }
+                run: [probe, check]
+            task-gates: {}
+            sources: {}
+            """;
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => GateCatalogue.ParseFamily(yaml));
+        Assert.Contains("file", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static GateCatalogueFamily Family(string name)
     {
         return GateCatalogue.LoadEmbedded().Single(family => family.Family == name);

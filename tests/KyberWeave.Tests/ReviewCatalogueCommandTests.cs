@@ -114,6 +114,38 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         Assert.Equal(1, execution.Result);
     }
 
+    /// <summary>
+    /// A PATH the platform cannot resolve returns the config-load diagnostic and exits 1 instead of crashing.
+    /// </summary>
+    [Fact]
+    public void UnresolvablePathExitsOneWithTheConfigDiagnostic()
+    {
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CatalogueApp().Run(["review", "catalogue", "bad\0path"]));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("KW-CONFIG-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Technology slugs are validated case-insensitively, so they are rendered the same way: <c>Go</c> emits
+    /// the block <c>go</c> does rather than silently nothing.
+    /// </summary>
+    [Fact]
+    public void TechnologySlugCaseDoesNotChangeTheRenderedBlock()
+    {
+        string repo = NewFixtureRepo("go", ["go"]);
+
+        CapturedConsoleExecution<int> lower = ProcessConsoleCapture.Run(
+            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "go"]));
+        CapturedConsoleExecution<int> mixed = ProcessConsoleCapture.Run(
+            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "Go"]));
+
+        Assert.Equal(0, mixed.Result);
+        Assert.False(string.IsNullOrWhiteSpace(lower.Output));
+        Assert.Equal(lower.Output, mixed.Output);
+    }
+
     private static CommandApp CatalogueApp()
     {
         CommandApp app = new();

@@ -52,6 +52,21 @@ public sealed class ReviewGateWorkflowTemplateTests
     }
 
     [Fact]
+    public void RuntimeVersionsArePinnedNotFloating()
+    {
+        YamlMappingNode template = LoadTemplate();
+
+        string[] versions = ValuesOfKey(template, "node-version").Concat(ValuesOfKey(template, "python-version"))
+            .Select(ScalarValue).ToArray();
+        string[] floating = versions.Where(value => !Regex.IsMatch(value, @"^\d+(\.\d+)*$")).ToArray();
+
+        Assert.NotEmpty(versions);
+        Assert.True(
+            floating.Length == 0,
+            $"node-version and python-version must name a specific version; floating: {string.Join(", ", floating)}.");
+    }
+
+    [Fact]
     public void TopLevelAndEveryJobGrantOnlyContentsRead()
     {
         YamlMappingNode template = LoadTemplate();

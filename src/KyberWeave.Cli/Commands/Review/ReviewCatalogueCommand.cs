@@ -26,7 +26,23 @@ public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(settings.Path);
+        string root;
+        try
+        {
+            root = Path.GetFullPath(settings.Path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                $"Cannot resolve path '{settings.Path}': {ex.Message}",
+                "kyber-weave.yml",
+                settings.Path));
+            CommandHelpers.Finish(report, settings, "review catalogue", "Gate");
+            return 1;
+        }
 
         if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
         {
@@ -34,9 +50,10 @@ public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
             return 1;
         }
 
-        IReadOnlyList<string> technologies = settings.Technology.Length > 0
+        // Validation is case-insensitive, so slugs map to their canonical spelling before the case-sensitive family match.
+        IReadOnlyList<string> technologies = (settings.Technology.Length > 0
             ? settings.Technology
-            : config.Ontology.Technologies;
+            : config.Ontology.Technologies).Select(CanonicalSlug).ToList();
 
         foreach (string technology in technologies)
         {
@@ -69,6 +86,13 @@ public sealed class ReviewCatalogueCommand : Command<ReviewCatalogueSettings>
         }
 
         return 0;
+    }
+
+    /// <summary>The canonical spelling of a known slug, so any casing the validator accepts renders.</summary>
+    private static string CanonicalSlug(string technology)
+    {
+        return KyberStandardsTemplates.All.FirstOrDefault(
+            slug => string.Equals(slug, technology, StringComparison.OrdinalIgnoreCase)) ?? technology;
     }
 
     /// <summary>

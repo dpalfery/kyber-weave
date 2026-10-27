@@ -10,7 +10,7 @@ review:
       run: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all', '--check']
     # rust, tauri: lint (.)
     - id: rust-clippy
-      run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--', '-D', 'warnings']
+      run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--all-targets', '--', '-D', 'warnings']
     # rust, tauri: test (.)
     - id: rust-test
       run: ['cargo', 'test', '--manifest-path', 'Cargo.toml']
@@ -23,7 +23,7 @@ review:
         fix: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all']
       # rust, tauri: lint (.)
       - id: rust-clippy
-        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']
+        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--all-targets', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']
     test-dev:
       # rust: format (test-dev copy)
       - id: rust-fmt
@@ -32,4 +32,4 @@ review:
         fix: ['cargo', 'fmt', '--manifest-path', 'Cargo.toml', '--all']
       # rust: lint (test-dev copy)
       - id: rust-clippy
-        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']
+        run: ['cargo', 'clippy', '--manifest-path', 'Cargo.toml', '--all-targets', '--target-dir', '.agent_scratchpad/{task}/target', '--', '-D', 'warnings']

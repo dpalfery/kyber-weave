@@ -71,7 +71,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(0, run);
         AssertDiagnostic(run.Output, GateSkipped, "INFO");
         using JsonDocument report = ReadReport();
-        AssertNotReportedPassed(report, "markdown-lint");
+        AssertSkipped(run, report, "markdown-lint");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         AssertExitCode(0, run);
         AssertDiagnostic(run.Output, GateSkipped, "INFO");
         using JsonDocument report = ReadReport();
-        AssertNotReportedPassed(report, "other-os-probe");
+        AssertSkipped(run, report, "other-os-probe");
     }
 
     // -----------------------------------------------------------------------------------------
@@ -335,9 +335,13 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
             .GetProperty("passed").GetBoolean();
     }
 
-    /// <summary>A skipped gate may be absent from the report; if it is present it must not read as passed.</summary>
-    private static void AssertNotReportedPassed(JsonDocument report, string id)
+    /// <summary>
+    /// The gate must be explicitly reported skipped (a KW-REVIEW-026 diagnostic naming it), so a gate that
+    /// vanished from the plan cannot pass as skipped; it must also never read as passed.
+    /// </summary>
+    private static void AssertSkipped(CliRun run, JsonDocument report, string id)
     {
+        AssertRendered(run, $"{id}: skipped,");
         if (GateIds(report).Contains(id))
         {
             Assert.False(GatePassed(report, id), $"Gate '{id}' was reported passed, but it should have been skipped.");

@@ -970,6 +970,10 @@ public static class GateCatalogue
         string kind = ScalarText(pair.Key);
         string argument = ScalarText(pair.Value);
 
+        if (kind == "file" && !IsRelativeUnderRoot(argument))
+            throw new InvalidDataException(
+                $"{where} gate '{id}' 'when: file' path '{argument}' must be relative and stay under the project root.");
+
         return kind switch
         {
             "file" when argument.Length > 0 => new FamilyGateCondition(FamilyGateConditionKind.File, argument),
@@ -983,6 +987,17 @@ public static class GateCatalogue
             "optional" when argument is "false" or "False" => null,
             _ => throw new InvalidDataException($"{where} gate '{id}' 'when' condition '{kind}' is not recognised.")
         };
+    }
+
+    private static bool IsRelativeUnderRoot(string path)
+    {
+        if (path.Length == 0)
+            return true;
+
+        if (Path.IsPathRooted(path) || path.StartsWith('/') || path.StartsWith('\\') || path.Contains(':', StringComparison.Ordinal))
+            return false;
+
+        return !path.Split('/', '\\').Contains("..", StringComparer.Ordinal);
     }
 
     private static int? OptionalTimeout(YamlMappingNode mapping, string where, string id)
