@@ -316,7 +316,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];

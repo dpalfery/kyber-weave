@@ -426,6 +426,15 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 mergeReady,
                 mergeReady ? @base : null).Items);
         }
+        catch (InvalidOperationException exception) when (mergeReady && IsArchivedEntryLoadRefusal(exception))
+        {
+            report.Add(new Diagnostic(
+                ArchiveCloseoutValidator.MissingCloseoutEvidence,
+                Severity.Error,
+                exception.Message,
+                "archive",
+                Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate again."));
+        }
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             report.Add(new Diagnostic(
@@ -674,11 +683,28 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         foreach (Diagnostic diagnostic in errors)
         {
             string line = FormatGateFinding(diagnostic) + Environment.NewLine;
-            if (findingsText.Length + line.Length > errorBudget && emitted > 0)
-                break;
-
             if (findingsText.Length + line.Length > errorBudget)
+            {
+                if (emitted > 0)
+                    break;
+
+                int remaining = errorBudget - findingsText.Length;
+                if (remaining > 0)
+                {
+                    string finding = FormatGateFinding(diagnostic);
+                    int maxFindingChars = remaining - Environment.NewLine.Length;
+                    if (maxFindingChars > 0 && finding.Length > maxFindingChars)
+                        finding = finding[..maxFindingChars];
+
+                    if (finding.Length > 0)
+                    {
+                        findingsText.AppendLine(finding);
+                        emitted++;
+                    }
+                }
+
                 break;
+            }
 
             findingsText.Append(line);
             emitted++;
@@ -859,6 +885,14 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         exception is IOException
             or UnauthorizedAccessException
             or InvalidDataException;
+
+    private static bool IsArchivedEntryLoadRefusal(InvalidOperationException exception)
+    {
+        string message = exception.Message;
+        return message.Contains("Archived entry '", StringComparison.Ordinal)
+               && (message.Contains("symbolic link", StringComparison.Ordinal)
+                   || message.Contains("escapes the repository root", StringComparison.Ordinal));
+    }
 
     private static string CapToBudget(string text, int cap) =>
         text.Length <= cap ? text : text[..cap];

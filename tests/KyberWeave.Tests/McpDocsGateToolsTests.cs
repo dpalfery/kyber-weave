@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -263,7 +264,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     }
 
     [Fact]
-    public void SharedArchitectProfileKeepsProcessExecuteAskNotAllow()
+    public void SharedArchitectProfileWithholdsProcessExecuteWithoutAskOrAllow()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadCapabilityProfile architect = source.CapabilityProfiles.Profiles["architect"];
@@ -271,8 +272,106 @@ public sealed class McpDocsGateToolsTests : IDisposable
         Assert.True(
             architect.Permissions.TryGetValue("process.execute", out SquadPermissionDecision decision),
             "The shared architect profile must declare process.execute.");
-        Assert.Equal(SquadPermissionDecision.Ask, decision);
+        Assert.Equal(SquadPermissionDecision.Deny, decision);
+        Assert.NotEqual(SquadPermissionDecision.Ask, decision);
         Assert.NotEqual(SquadPermissionDecision.Allow, decision);
+    }
+
+    [Fact]
+    public void DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
+    {
+        using CloseoutGitRepo repo = new();
+        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        repo.Commit("initial");
+
+        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
+        string response = InvokeValidate(tools, true, gitBase: "HEAD");
+
+        Assert.StartsWith("result: pass", ResultLine(response), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
+    {
+        using CloseoutGitRepo repo = new();
+        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        repo.Commit("initial");
+
+        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
+        string response = InvokeValidate(tools, true, gitBase: "origin/this-ref-is-not-present");
+
+        Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
+        Assert.Contains("scope is unknown (C0)", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DocsValidateMergeReadyFailsClosedWhenArchivedEntryIsSymlink()
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        using CloseoutGitRepo repo = new();
+        using TempDirectory outside = new();
+        DocsScaffolder.Scaffold(repo.Root, owner: "gate-fixture");
+        repo.Commit("initial");
+
+        string target = Path.Combine(outside.Path, "target.md");
+        File.WriteAllText(
+            target,
+            """
+            ---
+            id: archive/linked-target
+            title: Linked target
+            doc-type: plan
+            status: superseded
+            owner: gate-fixture
+            last-reviewed: 2026-10-28
+            ---
+
+            # Linked target
+            """);
+
+        const string linkRelative = "docs/archive/plans/linked-plan.md";
+        string linkPath = Path.Combine(repo.Root, linkRelative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        File.CreateSymbolicLink(linkPath, target);
+
+        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
+        Exception? failure = Record.Exception(() => InvokeValidate(tools, true, gitBase: "HEAD"));
+        Assert.Null(failure);
+        string response = InvokeValidate(tools, true, gitBase: "HEAD");
+
+        Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
+        Assert.Contains("symbolic link", response, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MinimumCharBudgetStillShowsFirstFindingRuleIdAndOmittedCount()
+    {
+        string root = CreateScaffoldedRoot();
+        const string relativePath = "docs/reference/budget-floor.md";
+        string longSymbol = new('M', 900);
+        WriteDriftDocument(root, relativePath, longSymbol, null);
+        WriteDriftDocument(root, "docs/reference/budget-floor-second.md", "SecondMissingSymbol", null);
+
+        DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
+        string response = InvokeDrift(tools, charBudget: 1000);
+
+        ParseProvenance(response);
+        Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
+        Assert.Contains(DocDriftLinter.UnresolvedCodeRef, response, StringComparison.Ordinal);
+        Assert.Matches(OmittedFindingsPattern, response);
+
+        int resultLineIndex = Array.FindIndex(
+            response.Split('\n'),
+            line => line.StartsWith("result:", StringComparison.Ordinal));
+        string[] lines = response.Split('\n');
+        Assert.True(resultLineIndex >= 0);
+        Assert.True(resultLineIndex + 1 < lines.Length);
+        Assert.StartsWith(
+            DocDriftLinter.UnresolvedCodeRef,
+            lines[resultLineIndex + 1].TrimStart(),
+            StringComparison.Ordinal);
     }
 
     private string CreateScaffoldedRoot()
@@ -468,6 +567,28 @@ public sealed class McpDocsGateToolsTests : IDisposable
                 return index;
 
         return -1;
+    }
+
+    private static bool CanCreateSymbolicLinks()
+    {
+        string probeDirectory = Path.Combine(Path.GetTempPath(), "kw-mcp-symlink-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(probeDirectory);
+        try
+        {
+            string target = Path.Combine(probeDirectory, "target.txt");
+            File.WriteAllText(target, "probe");
+            File.CreateSymbolicLink(Path.Combine(probeDirectory, "link.txt"), target);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (Directory.Exists(probeDirectory))
+                Directory.Delete(probeDirectory, true);
+        }
     }
 
     private static CodeGraphNode CodeGraphPortTestsNode(string name, string filePath, int line)

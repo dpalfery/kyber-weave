@@ -313,7 +313,7 @@ public sealed class CursorRendererContractTests
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "architect", expectedReadOnly: false);
 
         // Cursor has no tools allow-list, so the documentation grant reaches the rendered output

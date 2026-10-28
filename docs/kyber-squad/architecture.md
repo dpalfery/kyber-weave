@@ -163,9 +163,9 @@ Grant (allow) > Review (ask) > Deny (deny) > Default (withhold)
 
 ### Architect documentation gates through MCP
 
-The shared `architect` capability profile keeps `process.execute: ask` on every target — not
-`allow`, and not narrowed to `deny`. That grant is not how the architect satisfies its
-`PLAN_READY` documentation checks.
+The shared `architect` capability profile holds `process.execute: deny` on every target — not
+`allow`. `Deny` withholds the shell with no prompt; it is the narrowest execute setting in the
+lattice above. That grant is not how the architect satisfies its `PLAN_READY` documentation checks.
 
 After plan writes, the architect obtains **schema conformance** and **entity drift** by
 calling the read-only MCP tools `docs_validate` and `docs_drift` on the kyber-weave
@@ -180,7 +180,7 @@ While the plan remains in the active plans folder, the architect leaves `mergeRe
 the provenance `root=` to this checkout before trusting a pass. Target-scoped profiles such
 as `architect-devin` and `architect-copilot` are unchanged: Devin still resolves
 `architect-devin` for file creation on that target, and Copilot still resolves
-`architect-copilot` where the shared profile's `ask` would withhold execution.
+`architect-copilot` where the shared profile withholds execution without granting a shell.
 
 ---
 
@@ -741,8 +741,8 @@ and validates.
   requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
   only write path is that tool can edit an artifact but not create one, so `architect` stopped at
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
-  together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
-  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
+  together — on Devin, `ask` narrows to withheld on subagents, and the shared profiles hold
+  `process.execute: deny` (`architect`) or `deny` (`product-planning`). `architect-devin` and
   `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
   carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
   reference, and `product-owner` in its agent body and the skill's spec-authoring reference
