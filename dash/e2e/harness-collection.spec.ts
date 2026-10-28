@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url'
 import {
   HONEST_EMPTY_HARNESS,
   MEASURED_HARNESS,
+  MEASURED_OPENCODE_EXEC_ID,
+  MEASURED_OPENCODE_MODEL,
+  MEASURED_OPENCODE_RUN_ID,
+  MEASURED_OPENCODE_SESSION_ID,
   USER_CANON,
   ZERO_RECORD_HARNESS,
 } from './harness-collection-world.js'
@@ -23,6 +27,33 @@ import {
  *
  * Isolated browser acceptance. Starts its own dashboard against a temp DB from
  * the fixture. Does not use the live 4747 spine host.
+ *
+ * LIVE-TURN GATE (manual procedure only — DO NOT run, DO NOT touch live state,
+ * DO NOT change consent):
+ * 1. In the owner's OpenCode, pick a cheap model (e.g. the pinned
+ *    `opencode-go/muse-spark-1.3-contributor` or another low-cost model the
+ *    owner already consents to) and run exactly one trivial turn (e.g. ask
+ *    "say hi" or read one small file, no edits, no network).
+ * 2. Run `kyberdash refresh` (or `kyber dash refresh`) for the opencode
+ *    harness only, then open the dashboard HarnessDetail for `opencode`,
+ *    drill into the newest run/session for that turn.
+ * 3. The tiles that must show real numbers (never `—`, never `$0.00` for a
+ *    missing rate, never `unknown` for the model):
+ *    - Model shown: the turn/session row names the cheap model used above,
+ *      not `unknown` and not blank.
+ *    - Real token figures: Total Input / Total Output (and the run turns
+ *      Tokens cell) carry non-zero measured counters (e.g. thousands in /
+ *      tens out, like the `18044 in / 71 out / 113 cache-read` fixture
+ *      pattern), not dashes.
+ *    - Tool call listed: Tool Calls counts >= 1 and the tool-schema section
+ *      lists the invoked tool (e.g. `Bash`/`Read`) with its invocation, not
+ *      "invocations not reported".
+ *    - Cost basis resolved: the Cost tile / runs-table Cost cell renders a
+ *      `$` figure with basis `published` (or `harness` where the harness
+ *      reported it), not "no published rate".
+ * 4. This spec never runs that turn; it pins the same contract against the
+ *    `hc-opencode-measured-*` fixture (temp DB + booted dashboard, no live
+ *    host, no real network).
  */
 const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
@@ -167,4 +198,70 @@ test('zero-record harness renders honest-empty and is never complete', async ({ 
   // Nothing measured, so the completeness predicate cannot be satisfied here.
   await expect(page.getByTestId('dimension-value')).toHaveCount(0)
   await expect(page.getByTestId('page-harness')).not.toContainText(/complete/i)
+})
+
+test('measured opencode round trip renders model, tokens, tool call and cost', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.goto(app)
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
+  await page.evaluate(
+    (args) => {
+      const stack = [
+        { level: 'context-doctor' },
+        { level: 'harness', harnessId: args.harnessId },
+      ]
+      window.history.pushState({ stack }, '', `/harness/${args.harnessId}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    },
+    { harnessId: HONEST_EMPTY_HARNESS },
+  )
+  await expect(page.getByTestId('page-harness')).toBeVisible()
+  await expect(page.getByTestId('page-harness')).toContainText(HONEST_EMPTY_HARNESS)
+  await expect(page.getByTestId('harness-runs-table')).toBeVisible()
+  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
+  // Runs-table Cost cell for the measured run resolves a real figure, not a dash.
+  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toContainText('$')
+
+  await page.evaluate(
+    (args) => {
+      const stack = [
+        { level: 'context-doctor' },
+        { level: 'harness', harnessId: args.harnessId },
+        { level: 'run', runId: args.runId, harnessId: args.harnessId },
+      ]
+      window.history.pushState({ stack }, '', `/run/${args.runId}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    },
+    { harnessId: HONEST_EMPTY_HARNESS, runId: MEASURED_OPENCODE_RUN_ID },
+  )
+  await expect(page.getByTestId('page-run')).toBeVisible()
+  await expect(page.getByTestId('turns-panel')).toBeVisible()
+  await expect(page.getByTestId('turn-row-0')).toBeVisible()
+  // Model identity from the adapter survives projection to the turn row.
+  await expect(page.getByTestId('turn-row-0')).toContainText('muse-spark')
+  // Real token figures: input + output renders as a measured figure.
+  await expect(page.getByTestId('turn-row-0')).toContainText('18.1K')
+
+  // Sessions tab: the same fixture session lists its tool call, token
+  // figures and cost basis through the session dashboard.
+  await page.getByTestId('nav-tab-sessions').click()
+  await expect(page.getByTestId('page-sessions')).toBeVisible()
+  await expect(page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`)).toBeVisible()
+  await page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`).click()
+  await expect(page.getByTestId('metric-tool-calls')).toBeVisible()
+  await expect(page.getByTestId('metric-tool-calls')).toContainText('1')
+  await expect(page.getByTestId('tool-schema-section')).toContainText('Bash')
+  await expect(page.getByTestId('metric-cost')).toContainText('$')
+  await expect(page.getByTestId('metric-cost')).toContainText(/published|reported/i)
+  // Token figures are real measured counters (18.0K in / 71 out pattern).
+  await expect(page.getByTestId('page-sessions')).toContainText('18.0K')
+  await expect(page.getByTestId('page-sessions')).toContainText(/\b71\b/)
+  // Session identity survives alongside the measured figures (label + model
+  // where the dashboard renders it: the run turn row already pinned the model
+  // above, here the session row pins the measured session).
+  await expect(page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`)).toContainText(
+    'harness-collection measured opencode session',
+  )
+  void MEASURED_OPENCODE_EXEC_ID
+  void MEASURED_OPENCODE_MODEL
 })

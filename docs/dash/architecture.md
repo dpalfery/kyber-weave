@@ -459,9 +459,25 @@ unchartable turns are counted (`unmeasuredTurns`), each with a reason (see
 [The shared canonical projection](#the-shared-canonical-projection)). Operator steps
 (enable, restart matrix, green-enable≠capture) are in the
 [runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
-T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
-verification on Desktop and CLI v2 (owner enablement, plugin install, live turn) is still
-open — [NOT LIVE-VERIFIED]: nothing here is live-verified on this checkout.
+T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). E2e proof is
+GREEN 4/4 including the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts:14-44`
+spec header); the manual live-turn gate is the one-turn procedure in runbook §1b — referenced,
+not run. The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens`
+(`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output
+(`bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only
+(`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044). Token capture via
+response/generate hooks remains unverified.
+
+### OpenCode native-first collection flow and model-id bridging
+
+Collection is native-first per the [harness collection standard](../rules/kyberdash-harness-collection.md):
+native OpenCode spans are the PRIMARY measurement; the plugin and file import are complementary, never
+billed as primary over native. Model identity bridges from `llm.model_name` (preferred) or envelope
+`opencode.model.id` onto `gen_ai.request.model`; the downstream cost basis prices the bridged model;
+absent/empty stays absent with cost unknown/no_rate. Usage counters ride native OTLP only — tool-span
+counters are dropped by the double-count guard. Current-shape `opencode.db`/JSON session files yield
+measured calls through refresh; shifted schemas yield honest `not_measurable` errors, never zeros.
+Per-source outcomes and consent boundaries live in the [telemetry inventory](telemetry-inventory.md).
 
 ## Local harness-source refresh
 

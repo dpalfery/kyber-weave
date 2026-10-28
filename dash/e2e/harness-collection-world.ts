@@ -14,6 +14,17 @@ export const MEASURED_HARNESS = 'claude-code'
 export const HONEST_EMPTY_HARNESS = 'opencode'
 export const ZERO_RECORD_HARNESS = 'droid'
 
+// C1 measured-opencode round trip: same harness id as the honest-empty plugin
+// row (`opencode`), second session/run pair carrying model identity, token
+// usage and a tool invocation through the T8 direct-upsert projection seam.
+// The honest-empty session stays byte-identical; the harness now holds both,
+// so HarnessDetail still reports unmeasurable dimensions (skill/continuity)
+// while the measured run drills into model/tokens/tools/cost.
+export const MEASURED_OPENCODE_SESSION_ID = 'hc-opencode-measured-session-1'
+export const MEASURED_OPENCODE_RUN_ID = 'hc-opencode-measured-run-1'
+export const MEASURED_OPENCODE_EXEC_ID = 'hc-opencode-measured-exec-1'
+export const MEASURED_OPENCODE_MODEL = 'opencode-go/muse-spark-1.3-contributor'
+
 export type CollectedWorld = {
   root: string
   dbPath: string
@@ -122,6 +133,76 @@ export async function refreshTempCanon(root = createTempRoot()): Promise<Collect
     isRoot: true,
     started: '2026-09-06T11:00:00.000Z',
     ended: '2026-09-06T11:02:00.000Z',
+    parentLinkage: 'measured',
+  })
+
+  // C1 measured-opencode: adapter-shaped session (model identity + token
+  // usage + tool invocation) projected through the same direct-upsert seam.
+  // Tokens mirror the A2 current-shape opencode numbers (18044 in / 71 out /
+  // 113 cache-read) so the figures are real measured counters, never zeros.
+  // Cost carries an explicit published basis with a real value so the
+  // dashboard resolves a basis instead of "no published rate".
+  store.upsertSession({
+    sessionId: MEASURED_OPENCODE_SESSION_ID,
+    harness: HONEST_EMPTY_HARNESS,
+    label: 'harness-collection measured opencode session',
+    started: '2026-09-06T12:00:00.000Z',
+    ended: '2026-09-06T12:05:00.000Z',
+    payload: {
+      id: MEASURED_OPENCODE_SESSION_ID,
+      session_id: MEASURED_OPENCODE_SESSION_ID,
+      harness: HONEST_EMPTY_HARNESS,
+      context: {
+        measurable: true,
+        contextLimit: 200000,
+        contextLimitSource: 'reported',
+        turns: [{ pressure: 0.38, headroom: 124000 }],
+      },
+      summary: {
+        turn_count: 1,
+        total_input: 18044,
+        total_output: 71,
+        total_cache_read: 113,
+        total_cache_creation: 0,
+        models: [MEASURED_OPENCODE_MODEL],
+        cost: { status: 'priced', value: 0.012, basis: 'published', currency: 'USD' },
+        tool_calls: 1,
+        tools_invoked: ['Bash'],
+      },
+      turns: [
+        {
+          index: 0,
+          spanId: 'hc-opencode-measured-turn-0',
+          timestamp: '2026-09-06T12:05:00.000Z',
+          model: MEASURED_OPENCODE_MODEL,
+          input: 18044,
+          output: 71,
+          cache_read: 113,
+          cache_creation: 0,
+        },
+      ],
+      tools: [{ name: 'Bash', schema_tokens: 0, invocations: 1, turns_resident: 1, errors: 0 }],
+    },
+  })
+
+  store.upsertRun({
+    runId: MEASURED_OPENCODE_RUN_ID,
+    harness: HONEST_EMPTY_HARNESS,
+    label: 'harness-collection measured opencode run',
+    groupingBasis: 'explicit',
+    started: '2026-09-06T12:00:00.000Z',
+    ended: '2026-09-06T12:05:00.000Z',
+    executionCount: 1,
+  })
+
+  store.upsertExecution({
+    executionId: MEASURED_OPENCODE_EXEC_ID,
+    runId: MEASURED_OPENCODE_RUN_ID,
+    sessionId: MEASURED_OPENCODE_SESSION_ID,
+    harness: HONEST_EMPTY_HARNESS,
+    isRoot: true,
+    started: '2026-09-06T12:00:00.000Z',
+    ended: '2026-09-06T12:05:00.000Z',
     parentLinkage: 'measured',
   })
 

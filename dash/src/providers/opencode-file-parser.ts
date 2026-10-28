@@ -23,6 +23,20 @@ type FileMessageData = MessageData & {
   time?: { created?: number }
 }
 
+// Current-shape assistant messages carry modelID alongside a separate
+// providerID (e.g. providerID 'opencode-go' + modelID 'muse-spark'). The
+// shared builder keys pricing off a single model string, so qualify the pair
+// here: without it the call still yields but prices against a bare model that
+// never matches the rate table and falls back to the stored cost.
+function withQualifiedModel(data: FileMessageData): FileMessageData {
+  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
+  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
+  const providerID = carrier.providerID.trim()
+  const modelID = carrier.modelID.trim()
+  if (!providerID || !modelID || modelID.includes('/')) return data
+  return { ...data, modelID: `${providerID}/${modelID}` }
+}
+
 async function readJson<T>(path: string): Promise<T | null> {
   try {
     return JSON.parse(await readFile(path, 'utf8')) as T
@@ -53,24 +67,41 @@ export async function discoverOpenCodeFileSessions(
   providerName: string,
 ): Promise<SessionSource[]> {
   const sessionRoot = join(dataDir, 'storage', 'session')
-  let projectDirs: string[]
+  let entries: string[]
   try {
-    projectDirs = await readdir(sessionRoot)
+    entries = await readdir(sessionRoot)
   } catch {
     return []
   }
 
   const sources: SessionSource[] = []
-  for (const project of projectDirs) {
+  for (const entry of entries) {
+    // Current-shape stores may place session JSON directly under
+    // storage/session/*.json (flat) as well as the nested
+    // storage/session/<project>/*.json layout. A flat file that parses as a
+    // session is a session; only a directory read failure that is also not a
+    // session file is skipped, so neither shape reads as a silent zero.
+    if (entry.endsWith('.json')) {
+      const flatPath = join(sessionRoot, entry)
+      const flatMeta = await readJson<SessionMeta>(flatPath)
+      if (flatMeta?.id) {
+        sources.push({
+          path: flatPath,
+          project: sanitize(flatMeta.directory || flatMeta.title || ''),
+          provider: providerName,
+        })
+        continue
+      }
+    }
     let files: string[]
     try {
-      files = await readdir(join(sessionRoot, project))
+      files = await readdir(join(sessionRoot, entry))
     } catch {
       continue
     }
     for (const f of files) {
       if (!f.endsWith('.json')) continue
-      const path = join(sessionRoot, project, f)
+      const path = join(sessionRoot, entry, f)
       const meta = await readJson<SessionMeta>(path)
       if (!meta?.id) continue
       sources.push({
@@ -91,8 +122,32 @@ export function createOpenCodeFileSessionParser(
 ): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
-      const meta = await readJson<SessionMeta>(source.path)
-      if (!meta?.id) return
+      // A discovered session file that is gone by parse time is absence
+      // (R1.2): stay silent. A file that exists but no longer parses as a
+      // session is a present-but-unreadable store (R1.3): throw with its
+      // reason rather than masquerading the shift as an empty provider.
+      let raw: string
+      try {
+        raw = await readFile(source.path, 'utf8')
+      } catch (err) {
+        if ((err as { code?: unknown }).code === 'ENOENT') return
+        throw new Error(
+          `cannot read OpenCode session file ${source.path}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+      let meta: SessionMeta | null = null
+      try {
+        meta = JSON.parse(raw) as SessionMeta
+      } catch (err) {
+        throw new Error(
+          `cannot parse OpenCode session file ${source.path}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+      if (!meta?.id) {
+        throw new Error(
+          `OpenCode session file ${source.path} has an unrecognized schema (missing session id)`,
+        )
+      }
       const sessionId = meta.id
 
       const messageDir = join(dataDir, 'storage', 'message', sessionId)
@@ -139,7 +194,7 @@ export function createOpenCodeFileSessionParser(
           providerName,
           dedupKey,
           sessionId,
-          data,
+          data: withQualifiedModel(data),
           parts,
           timeCreatedMs: data.time?.created ?? meta.time?.created ?? 0,
           userMessage: currentUserMessage,

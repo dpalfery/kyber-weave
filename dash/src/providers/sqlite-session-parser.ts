@@ -50,17 +50,42 @@ type SessionTokenRow = {
 }
 
 function parseSessionModel(value: Uint8Array | string | undefined): string | undefined {
+  const text = blobToText(value).trim()
+  if (!text) return undefined
   try {
-    const parsed: unknown = JSON.parse(blobToText(value))
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const parsed: unknown = JSON.parse(text)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      // A JSON scalar (e.g. a quoted model string) still names the model;
+      // anything else is not a model the fallback can price.
+      return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined
+    }
 
     const model = parsed as Record<string, unknown>
     const id = typeof model['id'] === 'string' ? model['id'].trim() : ''
     const providerID = typeof model['providerID'] === 'string' ? model['providerID'].trim() : ''
-    return id && providerID ? `${providerID}/${id}` : undefined
-  } catch {
+    if (id && providerID) return `${providerID}/${id}`
+    if (id) return id
     return undefined
+  } catch {
+    // Current-shape rows may store the model as a plain string rather than a
+    // JSON {id,providerID} object. A non-empty string still identifies the
+    // model for the session-level fallback; only an empty/unparseable value
+    // stays unknown, never a fabricated zero.
+    return text
   }
+}
+
+// Current-shape assistant messages carry modelID alongside a separate
+// providerID (e.g. providerID 'opencode-go' + modelID 'muse-spark'). Qualify
+// the pair before the shared builder so pricing keys off the full identity
+// instead of a bare model that never matches the rate table.
+function withQualifiedModel(data: MessageData): MessageData {
+  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
+  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
+  const providerID = carrier.providerID.trim()
+  const modelID = carrier.modelID.trim()
+  if (!providerID || !modelID || modelID.includes('/')) return data
+  return { ...data, modelID: `${providerID}/${modelID}` }
 }
 
 function tryQuerySessionTokens(db: SqliteDatabase, sessionId: string): {
@@ -316,7 +341,7 @@ export function createSqliteSessionParser(
             providerName: config.providerName,
             dedupKey,
             sessionId,
-            data,
+            data: withQualifiedModel(data),
             parts: partsByMsg.get(msg.id) ?? [],
             timeCreatedMs: msg.time_created,
             userMessage: currentUserMessageBySession.get(msg.session_id) ?? '',

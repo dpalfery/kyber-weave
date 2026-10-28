@@ -282,3 +282,75 @@ describe('opencode file-based provider - env override discovery', () => {
     expect(calls[0]!.deduplicationKey).toBe('opencode:ses_mimo:msg_a')
   })
 })
+
+describe('opencode file-based provider - A2 current-shape restoration', () => {
+  it('discovers a flat storage/session/*.json session (current-shape) and yields a measured call', async () => {
+    // Current-shape file stores may place session JSON directly under
+    // storage/session/*.json (flat) rather than storage/session/<project>/*.json
+    // (nested). A flat session carrying real tokens must yield a measured call,
+    // never a silent zero.
+    const storage = join(tmpDir, 'opencode', 'storage')
+    const sessionId = 'ses_flat_current'
+    await mkdir(join(storage, 'session'), { recursive: true })
+    await writeFile(join(storage, 'session', `${sessionId}.json`), JSON.stringify({
+      id: sessionId,
+      directory: '/Users/test/flatproject',
+      title: 'Flat session',
+      time: { created: 1781886356809, updated: 1781886683506 },
+    }))
+    const messageDir = join(storage, 'message', sessionId)
+    await mkdir(messageDir, { recursive: true })
+    await writeFile(join(messageDir, 'msg_a.json'), JSON.stringify({
+      id: 'msg_a',
+      sessionID: sessionId,
+      role: 'assistant',
+      modelID: 'muse-spark-1.3-contributor',
+      providerID: 'opencode-go',
+      cost: 0.0018,
+      tokens: { input: 18044, output: 71, reasoning: 9, cache: { read: 113, write: 0 } },
+      time: { created: 1793045491882 },
+    }))
+    const partDir = join(storage, 'part', 'msg_a')
+    await mkdir(partDir, { recursive: true })
+    await writeFile(join(partDir, 'prt_msg_a_000.json'), JSON.stringify({ type: 'text', text: 'flat output' }))
+
+    const calls = await parseAll()
+    expect(calls).toHaveLength(1)
+    const c = calls[0]!
+    expect(c.sessionId).toBe(sessionId)
+    expect(c.inputTokens).toBe(18044)
+    expect(c.outputTokens).toBe(71)
+    expect(c.model).toBe('opencode-go/muse-spark-1.3-contributor')
+    expect(c.costUSD).toBeGreaterThan(0)
+  })
+
+  it('yields an honest failure (never a silent zero) when a discovered session file shifts to an unrecognized schema', async () => {
+    // A present store that can no longer be parsed must surface its reason
+    // instead of reading as an empty provider.
+    await writeSession({
+      sessionId: 'ses_shifted',
+      messages: [{
+        id: 'msg_a',
+        data: {
+          role: 'assistant', modelID: 'gpt-5.3-codex-spark', cost: 0,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1 },
+        },
+        parts: [{ type: 'text', text: 'x' }],
+      }],
+    })
+    const provider = createOpenCodeProvider(tmpDir)
+    const sources = await provider.discoverSessions()
+    expect(sources).toHaveLength(1)
+    const source = sources[0]!
+    // Shift the schema after discovery: the file exists but no longer parses
+    // as a session (unrecognized shape, never a measured zero).
+    await writeFile(source.path, 'this is not session json {]')
+    const consume = async (): Promise<ParsedProviderCall[]> => {
+      const out: ParsedProviderCall[] = []
+      for await (const call of provider.createSessionParser(source, new Set()).parse()) out.push(call)
+      return out
+    }
+    await expect(consume()).rejects.toThrow(/opencode.*session|unrecognized|unexpected|parse/i)
+  })
+})
