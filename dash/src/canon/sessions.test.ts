@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { opencodeAdapter } from './adapters/opencode.js'
+import { rawSpan } from './adapters/testing.js'
 import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability, measurabilityFor } from './measurability.js'
 import { CanonStore } from './store.js'
@@ -1014,6 +1016,108 @@ describe('what counts as a session', () => {
     ])
 
     expect((await buildSessions(store)).built).toBe(1)
+    store.close()
+  })
+
+  it('builds a session from a counter-less, content-less opencode model call rather than skipping it', async () => {
+    // The dash-managed opencode plugin observes request assembly, not
+    // completion usage: its `llm.invoke` spans name a session and a model but
+    // carry no token counters, and with consent off no content either. 1,390
+    // such records were ingested on the live store and none projected, so the
+    // dashboard showed no opencode data at all. A recognized model call is a
+    // session; what the record cannot say is published as not measurable,
+    // never as a silent skip.
+    // Normalize through the adapter, not a hand-built record: the absence of
+    // a counter is a fact the adapter reads from the span's vocabulary, and
+    // the projection must consume that declaration rather than the stored 0.
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'oc-1',
+        source: 'opencode',
+        attributes: {
+          'opencode.contract_version': '2',
+          'opencode.model.id': 'claude-opus-4-6',
+          'opencode.session.id': 'ses_t0_opencode',
+        },
+      }),
+    )
+    const store = new CanonStore(':memory:')
+    store.upsertMany([record])
+
+    const report = await buildSessions(store)
+
+    // Before the projection fix the evidence clause skipped the whole group.
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    const payload = sessionPayload({ payload: store.getSessionPayload('ses_t0_opencode') })
+    expect(payload.harness).toBe('opencode')
+    // No measured context: the record carried no parts or counters, so the
+    // analysis says so and states the one turn it could not chart.
+    expect(payload.context.measurable).toBe(false)
+    expect(payload.context.reason).toBe('no_message_structure')
+    expect(payload.context.unmeasuredTurns).toBe(1)
+    // The absent content is published as not measurable with a reason, not as
+    // an empty or zero-filled composition.
+    const firstBuckets = payload.context.first.buckets as Record<
+      string,
+      { availability?: string; reason?: string } | number
+    >
+    expect(firstBuckets.system_prompt).toMatchObject({ availability: 'not_measurable' })
+    expect((firstBuckets.system_prompt as { reason?: string }).reason).toContain(
+      'did not capture system_prompt',
+    )
+    // The absent counters are published the same way: every token dimension
+    // this span could not report is `not_measurable` with a reason, never the
+    // stored zero. The per-turn identity keeps its 0s; only the aggregate
+    // claims a measurement.
+    const tokenDimensions = [
+      payload.summary.total_input,
+      payload.summary.total_output,
+      payload.summary.total_cache_read,
+      payload.summary.total_cache_creation,
+      payload.context.first.reported_input,
+    ]
+    for (const value of tokenDimensions) {
+      expect(value).toMatchObject({ availability: 'not_measurable' })
+      expect((value as { reason?: unknown }).reason).toEqual(expect.any(String))
+      expect((value as { reason: string }).reason.length).toBeGreaterThan(0)
+    }
+    const serialized = JSON.stringify(payload)
+    for (const key of [
+      'total_input',
+      'total_output',
+      'total_cache_read',
+      'total_cache_creation',
+      'reported_input',
+    ]) {
+      expect(serialized, `${key} must not be published as a measured zero`).not.toContain(
+        `"${key}":0`,
+      )
+    }
+    store.close()
+  })
+
+  it('still builds an unattributed legacy turn that carries measured counters', async () => {
+    // The legacy collector stamped `llm.invoke` on spans no adapter claimed
+    // and labelled the group `unattributed`. Those with real counters are a
+    // session and must not disappear with the bare ambient spans.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('legacy-1', [], {
+        sessionId: 'sess-legacy',
+        harness: 'unattributed',
+        tokens: tokens({
+          freshInput: 1200,
+          output: 80,
+          reportedInput: 1200,
+          reportedOutput: 80,
+        }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    expect(store.getSessionPayload('sess-legacy')).toBeDefined()
     store.close()
   })
 })

@@ -38,7 +38,12 @@ import {
   readUsageCounters,
   validateRecordTokens,
 } from './copilot.js'
-import { contentFromParts, notMeasurable, type ContentPart } from '../types.js'
+import {
+  contentFromParts,
+  notMeasurable,
+  type ContentPart,
+  type Measurability,
+} from '../types.js'
 import {
   isOpencodeEnvelopeModel,
   isOpencodeEnvelopeSpan,
@@ -296,6 +301,28 @@ function cacheClass(
 }
 
 /**
+ * Whether the span reported the counters a dimension is built from. A value
+ * is only absent when the vocabulary carries no such key: a reported `0` is
+ * a measured zero and must stay one.
+ *
+ * The plugin observes request assembly, not completion, so an envelope span
+ * names a model and carries no usage at all. The token identity still stores
+ * 0 for that shape, so the absence has to travel as its own declaration —
+ * the session projection reads it to publish the totals as `not_measurable`
+ * instead of a fabricated zero.
+ */
+function counterAvailability(inputReported: boolean, outputReported: boolean): Measurability {
+  return {
+    token_usage: inputReported
+      ? 'measured'
+      : notMeasurable('OpenCode telemetry did not report input token usage for this span.'),
+    output: outputReported
+      ? 'measured'
+      : notMeasurable('OpenCode telemetry did not report output token usage for this span.'),
+  }
+}
+
+/**
  * Counters from the vocabulary the span actually speaks: OpenInference
  * `llm.token_count.*`, or the AI SDK's `ai.usage.*` / `gen_ai.usage.*`. Cache
  * classes stay `not_measurable` unless the span actually carries them: a
@@ -312,6 +339,11 @@ function applyUsage(record: ReturnType<typeof baseRecord>, attributes: Record<st
   const legacyOutput = readOptionalCounter(attributes, LEGACY_OUTPUT_KEYS)
   const genOutputPresent = OUTPUT_TOKEN_KEYS.some((key) => key in attributes)
   const inputPresent = gen.inputPresent || legacyInput !== undefined
+  // Cache classes are input: a span that reported only a cache counter still
+  // measured the input it reads.
+  const cacheReadPresent = readOptionalCounter(attributes, CACHE_READ_KEYS) !== undefined
+  const cacheCreationPresent = readOptionalCounter(attributes, CACHE_CREATION_KEYS) !== undefined
+  const outputPresent = genOutputPresent || legacyOutput !== undefined
 
   record.tokens = convertInclusiveCounts({
     input: gen.inputPresent ? gen.input : (legacyInput ?? 0),
@@ -323,6 +355,7 @@ function applyUsage(record: ReturnType<typeof baseRecord>, attributes: Record<st
   })
   record.measurability = {
     ...record.measurability,
+    ...counterAvailability(inputPresent || cacheReadPresent || cacheCreationPresent, outputPresent),
     cache_read: cacheClass(attributes, CACHE_READ_KEYS, 'OpenCode did not export a cache read counter.'),
     cache_creation: cacheClass(
       attributes,
@@ -364,6 +397,10 @@ function applyOpenInferenceUsage(
   })
   record.measurability = {
     ...record.measurability,
+    ...counterAvailability(
+      input !== undefined || cacheRead !== undefined || cacheCreation !== undefined,
+      output !== undefined,
+    ),
     cache_read: cacheClass(
       attributes,
       OPENINFERENCE_CACHE_READ_KEYS,

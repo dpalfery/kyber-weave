@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-27
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -439,8 +439,15 @@ The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
   when unspooled). Either way the never-fail-host contract holds, and one codebase serves
   both Desktop and CLI v2 targets.
 
-Content follows the sender-opt-in rule: counters always flow; prompt text flows only
-under sender opt-in, and assembled text honors the 14-day content purge. Operator steps
+Counters do not flow on this path today. The plugin observes request assembly, not completion
+usage: `OpencodeHookPayload` has no `tokens` field and `stampMapperPayload` never sets one
+(`dash/src/capture/harnesses/opencode-plugin/plugin.ts`), so the plugin emits no token usage.
+The mapper still converts OpenInference counters when a span carries them, so usage is supplied
+only by a native OpenInference span, which this plugin never emits. Prompt text flows only under
+sender opt-in, and assembled text honors the 14-day content purge. A counter-less, content-less
+plugin turn still projects as a visible session whose content is `not_measurable` and whose
+unchartable turns are counted (`unmeasuredTurns`), each with a reason (see
+[The shared canonical projection](#the-shared-canonical-projection)). Operator steps
 (enable, restart matrix, green-enable≠capture) are in the
 [runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
 T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). Live
@@ -647,6 +654,32 @@ carries, never `payload` (see [Materialized session summary columns and the sess
 Raw `records` are never synthesized into sessions for reporting: until the
 projection has turned accepted spans into derived rows, a record-only group is not a session
 and appears on no report surface or selector inventory.
+
+A record group with no model-call turn is not a session, but a **recognized model call is a
+session even when it carries no counters and no content**. Recognition is the adapter's
+attribution, not the presence of a measurable field: `buildSessions` treats an `llm.invoke`
+non-roll-up record as a turn (`turnsOf`), so a group holding one is projected as a visible
+session whose absent dimensions are stated rather than fabricated. `analyzeContext` answers
+`measurable: false` with a reason — `no_message_structure` when no *measured* turn supplied
+parts — each content bucket the records cannot supply is `not_measurable` with a reason, and
+`buildSessionRow` counts the turns it could not chart as `unmeasuredTurns`. No recognized
+model call is skipped silently: an unattributed-only group with no evidence still increments
+`skipped`, and a markerless boundary or context span quarantines with no session diagnostic. The dash-managed
+OpenCode plugin is the live case: its turn and `session.context` spans carry a session id and
+model identity but no usage, and such a turn now projects instead of being dropped. A turn
+whose harness normalizes to `unattributed` keeps the older evidence test: the legacy collector
+stamped `llm.invoke` on spans no adapter claimed, so a bare unattributed turn with no counters
+and no content is still ambient telemetry, while an unattributed turn that carries counters
+still builds. `turnsOf` is unchanged, so HTTP and other structural spans still cannot become
+turns and the ambient-telemetry protection holds.
+
+A counter-less turn's captured content is not charted today. `buildSessionRow` passes only
+turns with a measured input to `analyzeContext`, because a content-bearing turn with no input
+counter would produce a negative residual and a pressure figure computed from the absent
+counter rather than from the model's context. Projecting that content needs an analysis-layer
+contract that separates the buckets from the missing counter; until then a consent-on
+OpenCode-plugin session is visible but still shows no prompt content. This is a known
+limitation recorded with the [OpenCode capture follow-up](../todo/opencode-plugin-token-usage-capture.md).
 
 ## Normalization layer
 

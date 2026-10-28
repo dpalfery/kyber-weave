@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-27
 ---
 
 # Todos
@@ -52,6 +52,7 @@ last-reviewed: YYYY-MM-DD
 | [kyberdash-job-problem-reconciliation.md](kyberdash-job-problem-reconciliation.md) | KyberDash | draft | A `harness:<id>:job` `PROVIDER_PARSE_ERROR` row persists after the store heals because `reconcileSourceProblems` owns source-keyed rows only; deferred from the Kilo collection plan with three candidate repairs. |
 | [kyberdash-wipe-audit-retention-decision.md](kyberdash-wipe-audit-retention-decision.md) | KyberDash | draft | A wipe-all keeps `refresh_run`, `metadata`, `ingest_log`, `token_cache` and the window catalog by design; decide whether to supersede ADR 0032 decision 8 or add an opt-in hard reset. Reclamation itself is done. |
 | [kyberdash-quarantine-harness-index.md](kyberdash-quarantine-harness-index.md) | KyberDash | draft | `quarantine` by `harness` is the one read that scans; measure the wipe path before adding an index that taxes the busiest insert path, and consider payload retention instead. |
+| [opencode-plugin-token-usage-capture.md](opencode-plugin-token-usage-capture.md) | KyberDash | draft | Capture real token usage for the OpenCode plugin from a completion/session.generate hook (unverified against a live hook), project captured content on a counter-less turn without fabricating counter-derived residual or pressure, and add a per-source "last emitted" signal so a silently stopped exporter is visible. |
 | [pi-emitter-tool-spans.md](pi-emitter-tool-spans.md) | KyberDash | draft | Pi's external emitter sends one span per turn and no tool spans, and caps the conversation at 262144 characters, so derived tool counts are a lower bound; decide whether the emitter comes in-repo. |
 | [kyberdash-copilot-env-override-decision.md](kyberdash-copilot-env-override-decision.md) | KyberDash | draft | `enable` writes Copilot's settings but not its `COPILOT_OTEL_ENABLED` override, and the status route cannot see the editor's environment; decide whether to manage it, surface it, or leave the CLI as the diagnostic. |
 | [squad-pack-single-target-render.md](squad-pack-single-target-render.md) | KyberSquad | draft | `kyber-weave squad pack` cannot render a single target to a directory, so the Copilot render total was verified only by invoking `CopilotRenderer` directly from a throwaway program; add single-target render support to `squad pack`. |

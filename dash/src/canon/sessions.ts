@@ -870,19 +870,35 @@ function hasEvidence(
   // tokens and no content, which grouped by trace into 44 rows that looked
   // like sessions and were not. Requiring a turn is what distinguishes an
   // agent session from ambient telemetry that happened to share a trace.
-  const turns = turnsOf(records)
-  if (turns.length === 0) return false
-
-  return turns.some(
-    (record) =>
+  //
+  // A turn an adapter attributed is the whole test. Such a model call is a
+  // session even when it carries no counters and no content — the dash-managed
+  // opencode plugin observes request assembly, not completion usage — and its
+  // absent dimensions are published as not_measurable downstream by
+  // analyzeContext and buildSessionRow. Requiring measurable counters or
+  // content here skipped those sessions outright, so 1,390 ingested opencode
+  // records projected no session at all.
+  //
+  // Recognition is the adapter's attribution. The legacy collector stamped
+  // `llm.invoke` on every span it received, including ones no adapter claimed,
+  // and those arrive under the `unattributed` harness. A lone unattributed
+  // `llm.invoke` with no counters and no content is ambient telemetry however
+  // it was stamped, so it keeps the old evidence requirement; an unattributed
+  // turn that does carry counters is a legacy collector record and still
+  // builds.
+  return turnsOf(records).some((record) => {
+    if (normalizeHarnessName(record.harness) !== 'unattributed') return true
+    const view = viewOf(views, record)
+    return (
       measuredInput(record.tokens) > 0 ||
       record.tokens.output > 0 ||
-      viewOf(views, record).hasParts ||
+      view.hasParts ||
       // A record WITHOUT parts: its flat content is the only evidence left,
       // and the store read it eagerly for such a row, so asking for it here
       // costs nothing. A record WITH parts is already counted above.
-      (!viewOf(views, record).hasParts && Object.keys(record.content).length > 0),
-  )
+      (!view.hasParts && Object.keys(record.content).length > 0)
+    )
+  })
 }
 
 export type BuildSessionsReport = {
@@ -1439,6 +1455,10 @@ export function buildSessionRow(
   // window (G1-Q2 = (b)).
   const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
+  // Token totals are summed over the turns, so their availability is the
+  // turns' availability too. A declaration on a non-turn span (a tool call,
+  // an app span) must not make the session's turn totals look measured.
+  const turnMeasurability = mergeMeasurability(turnRecords)
   const carriedBuckets = carriedBucketsOf(records, views)
   const context = analyzeContext(contextTurns, {
     contextLimit: analysisLimit,
@@ -1581,7 +1601,7 @@ export function buildSessionRow(
       : Object.keys(unavailableContextBuckets).length > 0
         ? unavailableContextBuckets
         : {},
-    reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
+    reported_input: unavailableFor(turnMeasurability, 'token_usage') ?? reportedInput,
   })
   const serialized = serializeContext(context)
   // Drop the analysis placeholder. A stored 200K limit, or a pressure figure
@@ -1687,7 +1707,20 @@ export function buildSessionRow(
   // is undeclared, or the harness's vocabulary holds no such counter (Cursor
   // exports totals but no cache counters), both keys stay absent so the tiles
   // cannot print a 0% ratio or "on 0 turns" beside stored zeros.
-  const summaryTotalInput = unavailableFor(measurability, 'token_usage') ?? totals.input
+  // Each token dimension is mapped to the declaration the records made for
+  // it, not to the token identity's stored 0. A source that reported no
+  // counter is not measurable in that dimension; a source that reported a
+  // counter — including a genuine 0 — stays measured. Mapping every total
+  // from `token_usage` would hide a measured output behind an absent input.
+  const summaryTotalInput = unavailableFor(turnMeasurability, 'token_usage') ?? totals.input
+  const summaryTotalOutput =
+    unavailableFor(turnMeasurability, 'output') ??
+    unavailableFor(turnMeasurability, 'output_tokens') ??
+    totals.output
+  const summaryTotalCacheRead =
+    unavailableFor(turnMeasurability, 'cache_read') ?? totals.cacheRead
+  const summaryTotalCacheCreation =
+    unavailableFor(turnMeasurability, 'cache_creation') ?? totals.cacheCreation
   const cacheHitRatio =
     typeof summaryTotalInput === 'number' &&
     summaryTotalInput > 0 &&
@@ -1747,9 +1780,9 @@ export function buildSessionRow(
       turn_count: turnRecords.length,
       request_count: records.filter((r) => r.parentSpanId === null).length,
       total_input: summaryTotalInput,
-      total_output: totals.output,
-      total_cache_read: totals.cacheRead,
-      total_cache_creation: totals.cacheCreation,
+      total_output: summaryTotalOutput,
+      total_cache_read: summaryTotalCacheRead,
+      total_cache_creation: summaryTotalCacheCreation,
       ...(cacheHitRatio !== undefined ? { cache_hit_ratio: cacheHitRatio } : {}),
       ...(cacheCreationCoverage !== undefined
         ? { cache_creation_coverage: cacheCreationCoverage }
