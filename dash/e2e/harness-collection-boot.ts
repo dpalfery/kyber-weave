@@ -6,8 +6,13 @@ import { fileURLToPath } from 'node:url'
 import { runWebDashboard } from '../src/cli/web.js'
 import { refreshTempCanon, USER_CANON } from './harness-collection-world.js'
 
-const dashDist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dash', 'dist')
-process.env.CODEBURN_DASH_DIR ??= dashDist
+// `build:web` writes the built SPA to `<dash>/dist/dash`, and `web.ts` reads
+// the override from `KYBERDASH_DASH_DIR` (see `resolveStaticSource`). An
+// earlier spelling pointed at `dash/dash/dist` and set a dead `CODEBURN_*`
+// name, so the server silently fell back to the embedded asset and this
+// override was never exercised.
+const dashDist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'dash')
+process.env.KYBERDASH_DASH_DIR ??= dashDist
 
 const world = await refreshTempCanon()
 if (world.dbPath === USER_CANON) {

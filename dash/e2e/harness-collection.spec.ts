@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,6 +75,13 @@ test.beforeAll(async () => {
     child!.on('exit', (code) => {
       if (!app) reject(new Error(`harness-collection boot exited ${code}: ${stdout}`))
     })
+    // Without this, a spawn failure (no `npx` on PATH, EACCES) arrives as an
+    // unhandled 'error' event on the child and crashes the worker instead of
+    // failing this hook with the reason.
+    child!.on('error', (error) => {
+      clearTimeout(timer)
+      reject(new Error(`harness-collection boot could not start: ${String(error)}`))
+    })
   })
 
   expect(dbPath).not.toBe(USER_CANON)
@@ -81,7 +89,27 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  child?.kill('SIGTERM')
+  // SIGTERM is a request, not a completion: wait for the exit the boot script
+  // owes us before deleting the store it was serving from.
+  if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((resolve) => {
+      child!.once('exit', () => resolve())
+    })
+    child.kill('SIGTERM')
+    const bounded = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 5_000)
+      timer.unref?.()
+    })
+    await Promise.race([exited, bounded])
+  }
+  // The boot script seeds a `mkdtemp` canon store; nothing else removes it, so
+  // a run would otherwise leave one temp root per invocation behind.
+  if (dbPath !== '') {
+    const root = dirname(dbPath)
+    if (root.startsWith(tmpdir()) && !root.includes('.kyberdash')) {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
 })
 
 test('measured harness renders measured dimensions and no lying zero', async ({ page }) => {
