@@ -12,6 +12,7 @@ decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0024-squad-global-receipt-layout-marker
+  - adr/0045-conductor-operator-channel-opt-in
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
@@ -680,12 +681,30 @@ and validates.
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  The conductor has no MCP tools by default. Its only exception is the opt-in operator channel
+  overlay, described in the next bullet.
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
   because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
   generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
   server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
+- **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:
+  `CopilotRenderer` appends the `<name>/*` tool entry and the overlay text
+  (`agents/conductor/overlays/operator-channel.md`) to the conductor only when the gate holds. The gate
+  is `KYBER_SQUAD_OPERATOR_CHANNEL` exactly `true`, read by `SquadOperatorChannel` when install, update,
+  or doctor renders; status never renders. The server name comes from `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`
+  and must match `^[A-Za-z0-9._-]{1,64}$` (1 to 64 ASCII letters, digits, '.', '_' or '-'). The overlay takes the validated name in place of
+  the placeholder `{{operator-channel-server}}`. The target must be Copilot CLI at global scope, and
+  `CopilotMcpServerProbe` must find that name under `mcpServers` in `$COPILOT_HOME/mcp-config.json`. The
+  probe resolves symlinks to their target, refuses a zero-length target before opening it (an approximation,
+  since .NET cannot type-check a file without opening it), requires a regular file, caps the read at 1 MiB,
+  skips a leading UTF-8 BOM, and returns absent on I/O, authorisation, or JSON errors. On Copilot CLI global
+  scope with the gate on, failures record `operator-channel-server-name-missing`,
+  `operator-channel-server-name-invalid` (the raw value is never written), or `operator-channel-server-absent`.
+  Every other target or scope records only `operator-channel-not-rendered` on the conductor, with no name
+  warning. Otherwise the output is byte-identical. The overlay is appended after the authored body, so the
+  tool entry is last in the list.
 - **`devin` withholds delegation from subagents.** Devin Local dispatches a named profile
   through `run_subagent`, and a profile reaches further subagents only through its
   `max-nesting` setting. Devin has no `allowed_subagents` equivalent, so granting nested
@@ -933,8 +952,11 @@ When the breaker trips — or a worker returns `STATUS: ESCALATION` — the cond
 immediately halts rework for that task, does not dispatch further workers for that
 cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
 prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
-cannot complete while an unresolved circuit-breaker finding exists. At queue drain,
+cannot complete while an unresolved circuit-breaker finding exists in supervised mode. At queue drain,
 `architect` investigates the cluster and authors an intake recommendation or Draft plan.
+In autonomous mode the breaker is not a run stop. Its halt on rework is unchanged, and an
+unresolved finding is listed in the draft pull request as an open finding while delivery
+continues ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
@@ -1008,6 +1030,17 @@ register and runs the documentation validation and drift checks. The closeout di
 reports `MAPPED:`, `IMPACT:`, and `DOCS_REVIEW:` rows; a plan or specification closeout
 ends in `STATUS: CLOSEOUT_COMPLETE`, or `STATUS: BLOCKED` naming what stopped the
 archive.
+
+### Delivery: draft first, ready on CI
+
+Delivery is the same in both modes. The conductor commits to a feature branch, pushes it, and opens
+a draft pull request before the whole-change council runs, so the council reviews a pull request that
+already exists. `github-devops` then waits for required CI, for at most 60 minutes, and marks the pull
+request ready once every required check passes. The council verdict is written into the pull request
+description and does not gate readiness. Review that follows is ordinary post-ready pull request review,
+not a conductor gate. The conductor never merges. Autonomous `NEEDS_HUMAN` verdicts and unresolved
+circuit-breakers are listed as pending human review, not held back
+([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 ### Host documentation side
 

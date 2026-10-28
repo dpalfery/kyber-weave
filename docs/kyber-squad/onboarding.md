@@ -15,6 +15,7 @@ decided-by:
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
+  - adr/0045-conductor-operator-channel-opt-in
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -940,6 +941,54 @@ one re-review or continued rounds until clean. The skill preserves that authoriz
 Its linked `code-review-loop.md` procedure is included in packages and harness deployments.
 
 Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
+
+---
+
+## Operator channel (opt-in, Copilot CLI global scope)
+
+The conductor can reach you during an unattended (autonomous) run through an MCP server you
+run yourself. You choose its name. It is off by default, and the default output does not
+change. Squad does not ship that server. Turn it on in three steps:
+
+1. Declare your server in `$COPILOT_HOME/mcp-config.json` (`~/.copilot/mcp-config.json` when
+   `COPILOT_HOME` is unset), under the `mcpServers` object, using the name you chose. It must
+   offer one send tool and one blocking receive tool, and return only replies you have authorised.
+2. Set both environment variables in the environment that runs Squad:
+   - `KYBER_SQUAD_OPERATOR_CHANNEL=true`. Only the exact value `true` turns it on.
+   - `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER=<your server name>`. Use letters, digits, `.`, `_`, or
+     `-`, at most 64 characters.
+3. Run `kyber-weave squad install --global` or `kyber-weave squad update --global`. The
+   conductor is rendered with the channel only when steps 1 and 2 both hold.
+
+With the gate on and Copilot CLI at global scope, install or update prints a warning and renders the
+conductor without the channel when:
+
+- `operator-channel-server-name-missing`: the server name variable is unset or empty.
+- `operator-channel-server-name-invalid`: the name breaks the rule above. The raw value is not written
+  into any file.
+- `operator-channel-server-absent`: the name is valid but is not declared under `mcpServers`.
+
+Limits:
+
+- Copilot CLI at global scope is the only target that carries the channel. Other targets and
+  project scope get only the `operator-channel-not-rendered` record against the conductor, and no name
+  warning, whatever the name variable holds. Their conductor is unchanged.
+- The install reads only `$COPILOT_HOME/mcp-config.json`. A config passed with
+  `--additional-mcp-config` is not seen, so the channel stays off.
+- The config file is followed through a symlink to its target. A zero-length target is refused before
+  it is opened, and so is any target that is not a regular file. The file is capped at 1 MiB, and a
+  leading byte order mark is skipped. Any I/O, permission, or JSON error counts as the server being
+  absent. The zero-length test is an approximation: .NET cannot report a file's type without opening it,
+  so a special file that reports a non-zero length is not caught by it.
+- The gate is read when Squad renders, not when the conductor runs. To turn it off, unset the
+  variable and run `update --global` again.
+- A reply answers one hard-block question. It never authorises merge, publish, delete, or spend,
+  and it never approves a gate or widens scope.
+- The per-call wait of the receive tool is up to five minutes. The MCP client's own timeout is not
+  documented, so confirm it in your sandbox before relying on the full wait.
+
+Design and trust model: [ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md) and
+[architecture §8](architecture.md#8-rendering).
 
 ---
 

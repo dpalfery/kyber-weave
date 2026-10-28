@@ -96,7 +96,8 @@ flowchart TD
 
     VE --> Out["APPROVE · REQUEST_CHANGES · NEEDS_HUMAN<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
-    Out -->|"NEEDS_HUMAN · stop"| Human["terminal human handoff"]
+    Out -->|"NEEDS_HUMAN · supervised: stop"| Human["terminal human handoff"]
+    Out -->|"NEEDS_HUMAN · autonomous: report"| PendingReview["listed in draft PR as pending human review<br/>delivery continues"]
     Out -->|"APPROVE"| RunComplete["run complete"]
     Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
