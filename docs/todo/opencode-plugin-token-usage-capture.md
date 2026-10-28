@@ -27,7 +27,9 @@ visible session whose content is `not_measurable` and whose unchartable turns ar
 (`unmeasuredTurns`), each with a reason. The session is honest but unmeasured for tokens, so the
 dashboard cannot show usage for an OpenCode-plugin session.
 
-Content remains gated by `KYBERDASH_OPENCODE_CONTEXT=1`; this todo does not change that gate.
+Content remains gated by the consent file `~/.kyberdash/opencode-plugin.json`
+(`{ "version": 1, "content": true }`), with `KYBERDASH_OPENCODE_CONTEXT=1` / `0`
+as an optional override; this todo does not change that gate.
 
 **Captured content on a counter-less turn is not charted.** `buildSessionRow` passes only
 turns with a measured input to `analyzeContext`, because a content-bearing turn with no input

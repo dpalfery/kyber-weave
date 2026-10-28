@@ -79,7 +79,7 @@ where a missing stage sits, and whether a record becomes a dashboard-visible ses
 |---|---|---|---|---|---|
 | `claude-code` | yes — counters and content (opt-in env) | none (reference) | yes | yes | yes, measured |
 | opencode — native Effect (`service.name=opencode`) | Effect app spans only; AI-SDK recording off upstream | by-design quarantine (no model operation) | no | no | no — documented, not a defect |
-| opencode — plugin (`kyberdash-opencode`) | `llm.invoke` turn/context spans, no counters, content only with consent | projection (counter-less turn) | yes | yes, as a `not_measurable` session | yes, unmeasured for tokens |
+| opencode — plugin (`kyberdash-opencode`) | `llm.invoke` turn/context spans, no counters, content only with consent | capture (envelope carries no token counters) | yes | yes, as a `not_measurable` session | yes, unmeasured for tokens |
 | pi | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | copilot (chat) | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
 | antigravity | stopped (last emitted Oct 22–25) | capture / environment | when emitting: yes | yes | yes, while emitting |
