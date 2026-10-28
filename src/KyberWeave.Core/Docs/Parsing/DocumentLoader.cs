@@ -153,7 +153,10 @@ public sealed partial class DocumentLoader
     /// entry through this narrow entry point instead: one named file, no directory walk,
     /// no exclusion bypass beyond that file. The named file is held to the same
     /// containment rule as the walk: an absolute path, a <c>..</c> escape, or any
-    /// symlink on the path fails closed rather than following the link.
+    /// symlink on the path fails closed rather than following the link. The refusal is
+    /// an <see cref="ArchivedEntryRefusalException"/> so the closeout gate can record a
+    /// finding from the type. Matching the message would let a reword escape as an
+    /// unhandled error.
     /// </remarks>
     internal DocumentModel LoadArchivedDocument(string relativePath)
     {
@@ -166,13 +169,15 @@ public sealed partial class DocumentLoader
         if (!absolute.Equals(_repoRoot, comparison)
             && !absolute.StartsWith(_repoRoot + Path.DirectorySeparatorChar, comparison))
         {
-            throw new InvalidOperationException(
+            throw new ArchivedEntryRefusalException(
+                ArchivedEntryRefusalReason.EscapesRepositoryRoot,
                 $"Archived entry '{relativePath}' escapes the repository root.");
         }
 
         if (!DocsRootPath.IsContainedFile(_repoRoot, normalized, _docsRoots))
         {
-            throw new InvalidOperationException(
+            throw new ArchivedEntryRefusalException(
+                ArchivedEntryRefusalReason.CrossesSymbolicLink,
                 $"Archived entry '{relativePath}' is not reachable without crossing a symbolic link.");
         }
 

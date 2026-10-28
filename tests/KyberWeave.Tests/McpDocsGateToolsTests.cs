@@ -342,6 +342,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
         string response = InvokeValidate(tools, true, gitBase: "HEAD");
 
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
+        Assert.Contains(ArchiveCloseoutValidator.MissingCloseoutEvidence, response, StringComparison.Ordinal);
         Assert.Contains("symbolic link", response, StringComparison.OrdinalIgnoreCase);
     }
 

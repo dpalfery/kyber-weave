@@ -90,7 +90,24 @@ public sealed partial class ArchiveCloseoutValidator
         DocumentLoader archivedLoader = _loaderFactory();
         foreach (string entry in SelectEntries(changes))
         {
-            DocumentModel archived = archivedLoader.LoadArchivedDocument(entry);
+            // The type is the classifier. A message match would miss a reword, and the
+            // refusal would then leave this gate as an unhandled error: a protocol error
+            // from the MCP tool, and a crash from the CLI.
+            DocumentModel archived;
+            try
+            {
+                archived = archivedLoader.LoadArchivedDocument(entry);
+            }
+            catch (ArchivedEntryRefusalException exception)
+            {
+                report.Add(new Diagnostic(
+                    MissingCloseoutEvidence,
+                    Severity.Error,
+                    exception.Message,
+                    "archive",
+                    Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate again."));
+                continue;
+            }
             List<string> failures = CheckCloseout(archived, live, byPath, todoFolder);
             if (failures.Count == 0)
                 continue;

@@ -426,15 +426,6 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 mergeReady,
                 mergeReady ? @base : null).Items);
         }
-        catch (InvalidOperationException exception) when (mergeReady && IsArchivedEntryLoadRefusal(exception))
-        {
-            report.Add(new Diagnostic(
-                ArchiveCloseoutValidator.MissingCloseoutEvidence,
-                Severity.Error,
-                exception.Message,
-                "archive",
-                Hint: "Fix the archived entry path so it is a regular file inside the repository, then call docs_validate again."));
-        }
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
             report.Add(new Diagnostic(
@@ -885,14 +876,6 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         exception is IOException
             or UnauthorizedAccessException
             or InvalidDataException;
-
-    private static bool IsArchivedEntryLoadRefusal(InvalidOperationException exception)
-    {
-        string message = exception.Message;
-        return message.Contains("Archived entry '", StringComparison.Ordinal)
-               && (message.Contains("symbolic link", StringComparison.Ordinal)
-                   || message.Contains("escapes the repository root", StringComparison.Ordinal));
-    }
 
     private static string CapToBudget(string text, int cap) =>
         text.Length <= cap ? text : text[..cap];
