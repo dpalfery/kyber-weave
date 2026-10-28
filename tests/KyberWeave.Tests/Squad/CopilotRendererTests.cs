@@ -68,6 +68,10 @@ public sealed class CopilotRendererTests
             CopilotToolCatalog.OrderedTools);
     }
 
+    /// <summary>
+    /// <c>architect-copilot</c> may allow execute on Copilot only. That envelope must not
+    /// widen the shared <c>architect</c> profile, which withholds the shell (<c>deny</c>).
+    /// </summary>
     [Theory]
     [InlineData("architect")]
     public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
@@ -81,7 +85,7 @@ public sealed class CopilotRendererTests
             SquadPermissionDecision.Allow,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
         Assert.Equal(
-            SquadPermissionDecision.Ask,
+            SquadPermissionDecision.Deny,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["process.execute"]);
         Assert.Equal(
             SquadPermissionDecision.Allow,
