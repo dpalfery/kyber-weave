@@ -183,6 +183,36 @@ public sealed class CopilotRenderer : ISquadRenderer
         List<SquadDegradationRecord> degradations = [];
         List<SquadRenderWarning> warnings = [];
 
+        // The operator channel attaches only at global scope, and only when the user's Copilot config
+        // declares the server it calls. Without the server the conductor must stay exactly as it is,
+        // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
+        SquadOperatorChannel.Overlay? operatorChannelOverlay = null;
+        if (globalAgentsRoot is not null && request.GlobalRoots is not null && SquadOperatorChannel.IsGateOn())
+        {
+            SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName();
+            if (server.Warning is { } nameWarning)
+            {
+                warnings.Add(nameWarning);
+            }
+            else if (server.Name is { } serverName)
+            {
+                string copilotRoot = request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
+                if (CopilotMcpServerProbe.HasServer(copilotRoot, serverName))
+                {
+                    operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(request.SourceDirectory, serverName);
+                }
+                else
+                {
+                    warnings.Add(new SquadRenderWarning(
+                        SquadOperatorChannel.ServerAbsentCode,
+                        $"The operator channel is enabled, but no '{serverName}' server is declared " +
+                        $"under mcpServers in {CopilotMcpServerProbe.McpConfigFileName} in '{copilotRoot}'. " +
+                        "The conductor was rendered without the operator channel.",
+                        "copilot"));
+                }
+            }
+        }
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile principal = RenderAgent(
@@ -191,7 +221,8 @@ public sealed class CopilotRenderer : ISquadRenderer
                 warnings,
                 request.Scope,
                 globalAgentsRoot,
-                degradations);
+                degradations,
+                agent.Name == SquadOperatorChannel.ConductorAgentName ? operatorChannelOverlay : null);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -227,7 +258,8 @@ public sealed class CopilotRenderer : ISquadRenderer
         List<SquadRenderWarning> warnings,
         SquadDeploymentScope scope,
         string? globalAgentsRoot,
-        List<SquadDegradationRecord> degradations)
+        List<SquadDegradationRecord> degradations,
+        SquadOperatorChannel.Overlay? operatorChannelOverlay)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -241,7 +273,15 @@ public sealed class CopilotRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        frontmatter["tools"] = new CopilotToolsFlowSequence(CopilotToolCatalog.Normalize(agent.CopilotTools));
+        // The overlay's tool entry is added after normalisation, so the catalog order stays canonical
+        // and the entry sits at the end of the list. It is present only when the overlay is.
+        List<string> tools = [.. CopilotToolCatalog.Normalize(agent.CopilotTools)];
+        if (operatorChannelOverlay is not null)
+        {
+            tools.Add(operatorChannelOverlay.ToolEntry);
+        }
+
+        frontmatter["tools"] = new CopilotToolsFlowSequence(tools);
 
         // Every agent that delegates names its permitted roster in frontmatter:
         // the "agent" tool grants the mechanism, "agents" names who it may reach.
@@ -297,6 +337,12 @@ public sealed class CopilotRenderer : ISquadRenderer
             ? agent.InstructionBody
             : RewriteResourceLinks(agent, globalAgentsRoot, degradations);
         string normalizedBody = authoredBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (operatorChannelOverlay is not null)
+        {
+            // The overlay closes the conductor body, after every authored section.
+            normalizedBody = $"{normalizedBody.TrimEnd('\n')}\n\n{operatorChannelOverlay.Body}";
+        }
+
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {

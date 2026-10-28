@@ -123,4 +123,43 @@ public sealed class SquadAutonomousGatesInventoryTests
     {
         AssertInventoryContains(ReadInventory(), "Removed by #424");
     }
+
+    /// <summary>
+    /// Section 9 lists hard stops that stop an autonomous run. The reserved-path escalation
+    /// (<c>KW-REVIEW-008</c>) no longer stops the run: its finding is reported in the draft pull
+    /// request, so the always-human bullet must not remain in the hard-stop list.
+    /// </summary>
+    [Fact]
+    public void HardStopsSectionDropsTheAlwaysHumanReservedPathBullet()
+    {
+        string text = ReadInventory();
+        int start = text.IndexOf("## 9. Hard stops", StringComparison.Ordinal);
+        int end = text.IndexOf("## 10. Always-human paths", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "Section 9 (Hard stops) and section 10 must both be present.");
+        string hardStops = text[start..end];
+
+        Assert.DoesNotContain("**Always-human paths**", hardStops, StringComparison.Ordinal);
+        Assert.DoesNotContain("**`KW-REVIEW-008`**", hardStops, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The protected-path list is a fixed policy surface. Removing the section 9 bullet must not
+    /// change any path it guards, so each path and the always-human rule itself stay pinned.
+    /// </summary>
+    [Fact]
+    public void AlwaysHumanPathListIsUnchanged()
+    {
+        string text = ReadInventory();
+        int start = text.IndexOf("## 10. Always-human paths", StringComparison.Ordinal);
+        int end = text.IndexOf("## 11.", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "Section 10 (Always-human paths) must be present.");
+        string section = text[start..end];
+
+        AssertInventoryContains(section, "- `products/kyber-squad/profiles/capabilities.yml`");
+        AssertInventoryContains(section, "- `products/kyber-squad/agents/**`");
+        AssertInventoryContains(section, "- `.kyber-weave/kyber-weave.yml`");
+        AssertInventoryContains(section, "- `**/*secret*`");
+        AssertInventoryContains(section, "- `**/*credential*`");
+        AssertInventoryContains(section, "`KW-REVIEW-008` itself always stays human.");
+    }
 }
