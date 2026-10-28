@@ -76,6 +76,8 @@ public class McpPackagingTests
     [InlineData("docs_analysis_candidates")]
     [InlineData("docs_glossary")]
     [InlineData("docs_status")]
+    [InlineData("docs_validate")]
+    [InlineData("docs_drift")]
     [InlineData("agent_coding_standards")]
     public void McpToolDescriptionsScoreAsRoutingMetadata(string toolName)
     {
@@ -119,7 +121,7 @@ public class McpPackagingTests
 
         Assert.Contains("docs_explore", text, StringComparison.Ordinal);
         Assert.Contains("before grepping", text, StringComparison.Ordinal);
-        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status", "agent_coding_standards" })
+        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status", "docs_validate", "docs_drift", "agent_coding_standards" })
         {
             Assert.Contains(tool, text, StringComparison.Ordinal);
         }
@@ -155,6 +157,8 @@ public class McpPackagingTests
         Assert.Equal(0, Boundary("docs_analysis_candidates"));
         Assert.Equal(0, Boundary("docs_glossary"));
         Assert.Equal(0, Boundary("docs_status"));
+        Assert.Equal(0, Boundary("docs_validate"));
+        Assert.Equal(0, Boundary("docs_drift"));
         Assert.Equal(0, Boundary("agent_coding_standards"));
     }
 
@@ -169,6 +173,8 @@ public class McpPackagingTests
     [InlineData("docs_analysis_candidates")]
     [InlineData("docs_glossary")]
     [InlineData("docs_status")]
+    [InlineData("docs_validate")]
+    [InlineData("docs_drift")]
     [InlineData("agent_coding_standards")]
     public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string toolName)
     {

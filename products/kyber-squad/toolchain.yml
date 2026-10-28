@@ -27,8 +27,10 @@ required-mcp-tools:
   kyber-weave:
     - agent_coding_standards
     - docs_analysis_candidates
+    - docs_drift
     - docs_explore
     - docs_for_symbol
     - docs_glossary
     - docs_status
+    - docs_validate
 validated-release: null

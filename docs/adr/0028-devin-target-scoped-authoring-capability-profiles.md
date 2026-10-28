@@ -4,7 +4,7 @@ title: Devin Target-Scoped Capability Profiles for Headless Authoring Roles, wit
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-28
 component: KyberSquad
 ---
 
@@ -26,6 +26,15 @@ exactly one consumer, `docs-dev`, pinned by a test. On Copilot the grant renders
 `execute/*` tools in `docs-dev`'s tool list, which the source validator requires to match the
 profile. `task-reviewer` is unchanged.
 
+Amended 2026-10-28, in place: the architect's two documentation gates (`docs validate` and
+`docs drift`) no longer depend on `process.execute`. The shared `architect` profile stays
+`process.execute: ask`; the architect satisfies both checks through the read-only MCP tools
+`docs_validate` and `docs_drift` on the kyber-weave documentation server ([MCP
+runbook](../docgraph/mcp-runbook.md)). That is not a new execute grant — any client of that
+server may call the tools. `architect-devin` and `product-planning-devin` still grant
+`process.execute: allow` on Devin so those roles can initialise a missing destination before
+editing; `architect-copilot` is unchanged.
+
 ## Context
 
 `architect` and `product-owner` persist governed artifacts as *new* files — a plan under
@@ -36,9 +45,12 @@ until a human created the file by hand.
 
 The cause is the composition of three things, each already established elsewhere:
 
-- **The shared profile does not grant execution to `architect`.** `architect` holds
-  `process.execute: ask` — the grant is `docs validate` and `docs drift`, not a shell — and
-  `product-planning` holds `process.execute: deny`.
+- **The shared profile does not grant execution to `architect` for documentation gates.**
+  `architect` holds `process.execute: ask` on every target. Its `PLAN_READY` schema and
+  drift checks are satisfied by the read-only MCP tools `docs_validate` and `docs_drift` on
+  the kyber-weave documentation server, not by a shell (amended 2026-10-28). On Devin,
+  `product-planning` still holds `process.execute: deny` on the shared profile; file creation
+  there uses `architect-devin` / `product-planning-devin`, not the MCP tools.
 - **`ask` narrows on Devin.** [ADR 0025](0025-devin-native-agents-and-skill-lowering.md) decision 3
   withholds the tool and records `safety-narrowed`: a subagent profile has no key that forces the
   prompt, and Devin prompts a subagent only in the foreground. A background subagent never prompts,
@@ -49,9 +61,11 @@ The cause is the composition of three things, each already established elsewhere
   Devin's `edit` fails when the target file does not exist. Naming a tool in `allowed-tools` is not
   the same as the harness having one.
 
-So the roles could write a document and could not create one. `architect`'s `PLAN_READY` contract
-adds a second loss: it requires running `docs validate` and `docs drift` before the plan is declared
-ready, and both were unreachable on this target for the same reason.
+So the roles could write a document and could not create one. `architect`'s `PLAN_READY`
+contract also required schema and drift checks before the plan was declared ready; on Devin,
+those were unreachable through `process.execute: ask` until the 2026-10-28 amendment routed
+them through read-only MCP tools on every target. The Devin-scoped profiles below remain for
+**creating** a new governed file, not for the gates.
 
 ## Decision
 
@@ -65,13 +79,16 @@ ready, and both were unreachable on this target for the same reason.
 
 2. **`architect` and `product-owner` are the only roles that name one.** `architect-devin` and
    `product-planning-devin` mirror their shared profiles exactly except for
-   `process.execute: allow`, which the shared profiles hold as `ask` and `deny`. `docs-dev` needs no
-   Devin-scoped profile: its shared `documentation` profile grants `process.execute: allow` on every
-   target (amended 2026-10-26). That profile has one consumer, `docs-dev`, pinned by a test, and the
-   grant is instruction-scoped in the `docs-dev` body to archival `git mv`, `docs validate` and
-   `docs drift`, and doc-pinning tests. `task-reviewer` remains deliberately unchanged, as it is
-   read-only apart from its findings artifact. Widen to a role when that role is observed failing the
-   same way, not before.
+   `process.execute: allow`, which the shared profiles hold as `ask` and `deny`. That Devin
+   grant is for initialising a missing file before edit, not for the documentation gates —
+   those are the MCP tools `docs_validate` and `docs_drift` (amended 2026-10-28). `docs-dev`
+   needs no Devin-scoped profile: its shared `documentation` profile grants
+   `process.execute: allow` on every target (amended 2026-10-26). That profile has one
+   consumer, `docs-dev`, pinned by a test, and the grant is instruction-scoped in the
+   `docs-dev` body to archival `git mv`, `docs validate` and `docs drift`, and doc-pinning
+   tests. `task-reviewer` remains deliberately unchanged, as it is read-only apart from its
+   findings artifact. Widen to a role when that role is observed failing the same way, not
+   before.
 
 3. **Validation keeps the envelope target-scoped in both directions.** A `target: devin` profile is
    rejected as an agent's shared `capability-profile` — the shared-profile diagnostic now names the
@@ -103,9 +120,10 @@ ready, and both were unreachable on this target for the same reason.
 - **Granting `process.execute: allow` on the shared `architect` and `product-planning` profiles.**
   Fixes Devin and widens every other target with it, including the ones where the grant is
   deliberately not a shell. `architect-copilot` already exists to avoid exactly this.
-- **Keeping the roles write-only and relying on the conductor alone.** Leaves `architect` unable to
-  run `docs validate` and `docs drift`, so its `PLAN_READY` contract still cannot be met
-  autonomously on Devin. The pre-creation protocol is kept as the fallback, not as the mechanism.
+- **Keeping the roles write-only and relying on the conductor alone.** Leaves `architect`
+  unable to run its documentation gates autonomously on Devin before the MCP tools existed.
+  The pre-creation protocol is kept as the fallback, not as the mechanism. The gates
+  themselves are now MCP tools on every target (amended 2026-10-28).
 - **Widening `task-reviewer` too; or dropping the `docs-dev` half.** `task-reviewer` was not observed
   failing, and a Devin-scoped profile for a role that needs no shell is a grant with no reader.
   Dropping the `docs-dev` half was rejected on 2026-10-26: `docs-dev` was observed unable to archive,
@@ -119,18 +137,22 @@ ready, and both were unreachable on this target for the same reason.
 
 ## Consequences
 
-- `architect` and `product-owner` receive `exec` and its three companions on Devin, and no longer
-  record `safety-narrowed` for `process.execute` there. `docs-dev` also receives them, through its
-  shared `documentation` profile (amended 2026-10-26); `task-reviewer` still records `safety-narrowed`.
+- `architect` and `product-owner` receive `exec` and its three companions on Devin for file
+  creation and editing setup, and no longer record `safety-narrowed` for `process.execute`
+  there. The architect's schema and drift gates are MCP tools, not shell commands
+  (amended 2026-10-28). `docs-dev` also receives them through its shared `documentation`
+  profile (amended 2026-10-26); `task-reviewer` still records `safety-narrowed`.
 - `capability-not-isolable` does not arise for these three roles (`architect`, `product-owner`, `docs-dev`) on Devin: with
   `filesystem.write: allow` alongside `process.execute: allow`, there is no withheld write-tool name
   to name. The record is still emitted for Devin roles that grant execution while withholding writes.
 - Devin authoring roles hold a shell. That is a real widening of what the deployed subagent can do,
   accepted because the alternative is a harness that cannot create the artifact the role exists to
   write. `architect` and `product-owner` use the shell to initialise a missing destination before
-  editing and to run their documentation checks; `docs-dev` uses it to archive and run its checks. The conductor pre-creation protocol stays as the fallback if a write
-  still fails on a nonexistent file. The shared profile's narrower intent — a grant scoped to two
-  commands rather than a shell — is preserved everywhere else.
+  editing; `docs-dev` uses it to archive and run its checks. The conductor pre-creation protocol stays as the fallback if a write
+  still fails on a nonexistent file. The shared profile's narrower intent — `process.execute: ask`
+  on `architect` everywhere except Devin file-creation via `architect-devin`, and documentation
+  gates through MCP rather than a shell — is preserved on non-Devin targets and in the lattice
+  record.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
   contract. It is the one claim here to re-check against a real install if Devin's tool surface
   changes; ADR 0025's real-install confirmations are still open on the same build.

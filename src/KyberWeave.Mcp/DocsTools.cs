@@ -2,8 +2,11 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Claims;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Model;
@@ -380,6 +383,103 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
+    [McpServerTool(Name = "docs_validate", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Use when you need the same schema conformance gate as kyber-weave docs validate after
+        editing governed documentation — especially after writing or revising a plan under
+        docs/plans — and before claiming PLAN_READY or PLAN_FINALIZED. There is no
+        repository-path argument: compare the provenance root to your checkout before trusting
+        the verdict. Default mergeReady false is the planning gate while a plan stays in the
+        active plans folder. Returns provenance, pass or fail with counts, then findings.
+        """)]
+    public string DocsValidate(
+        [Description("""
+            When true, runs merge-ready checks including open-work rules such as
+            KW-DOC-LIFECYCLE-003 and archive closeout. Default false for active plan work.
+            """)]
+        bool mergeReady = false,
+        [Description("""
+            Git ref for archive-closeout scope when mergeReady is true. Defaults to
+            origin/HEAD, matching the CLI.
+            """)]
+        string @base = "origin/HEAD",
+        [Description("""
+            Total characters of finding text after the verdict line (1000-120000). Defaults
+            to 12000. The provenance and verdict lines are always emitted whole.
+            """)]
+        int charBudget = DocumentIndex.DefaultCharBudget)
+    {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        DiagnosticReport report = new();
+        if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
+            return FormatGateResponse(provenance, report, charBudget);
+
+        try
+        {
+            DocumentSet set = _host.LoadDocumentSet();
+            report.AddRange(DocsSchemaGate.Validate(
+                _host.RepositoryRoot,
+                config,
+                set,
+                () => new DocumentLoader(_host.RepositoryRoot, config.Ontology),
+                mergeReady,
+                mergeReady ? @base : null).Items);
+        }
+        catch (Exception exception) when (IsExpectedReadFailure(exception))
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                exception.Message,
+                "docs validate",
+                Hint: "Fix the repository configuration or corpus access, then call docs_validate again."));
+        }
+
+        return FormatGateResponse(provenance, report, charBudget);
+    }
+
+    [McpServerTool(Name = "docs_drift", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Use when you need the same entity-drift gate as kyber-weave docs drift after
+        documentation edits that cite code symbols or API routes, alongside docs_validate
+        before PLAN_READY or PLAN_FINALIZED. There is no repository-path argument: compare
+        the provenance root to your checkout. A missing CodeGraph index fails rather than
+        passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
+        appear. Returns provenance, pass or fail with counts, then findings.
+        """)]
+    public string DocsDrift(
+        [Description("""
+            Total characters of finding text after the verdict line (1000-120000). Defaults
+            to 12000. The provenance and verdict lines are always emitted whole.
+            """)]
+        int charBudget = DocumentIndex.DefaultCharBudget)
+    {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        DiagnosticReport report = new();
+        if (!TryLoadHostConfiguration(report, out KyberWeaveConfig _))
+            return FormatGateResponse(provenance, report, charBudget);
+
+        try
+        {
+            DocumentSet set = _host.LoadDocumentSet();
+            report.AddRange(
+                new DocDriftLinter(_host.CreateCodeGraphResolver()).Validate(set).Items);
+        }
+        catch (Exception exception) when (IsExpectedReadFailure(exception))
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                exception.Message,
+                "docs drift",
+                Hint: "Fix the repository configuration or corpus access, then call docs_drift again."));
+        }
+
+        return FormatGateResponse(provenance, report, charBudget);
+    }
+
     /// <summary>
     /// Reports the provenance of the corpus this server answers from, with no query. This is
     /// the cheap session-start check an agent calls before trusting any other docs tool.
@@ -506,6 +606,128 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     /// </summary>
     private static string Lead(string provenance, string body) =>
         provenance + "\n" + body;
+
+    private bool TryLoadHostConfiguration(DiagnosticReport report, out KyberWeaveConfig config)
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_host.RepositoryRoot, null);
+        if (!result.Success)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                result.Error ?? "Failed to load kyber-weave.yml.",
+                "kyber-weave.yml",
+                result.ConfigPath));
+            config = KyberWeaveConfig.ProductDefaults;
+            return false;
+        }
+
+        config = result.Config!;
+        foreach (string warning in config.Review.Warnings)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigWarningCode,
+                Severity.Warning,
+                warning,
+                "kyber-weave.yml",
+                result.ConfigPath,
+                Hint: "Check the spelling against the gate keys, or remove the key."));
+        }
+
+        return true;
+    }
+
+    private static string FormatGateResponse(string provenance, DiagnosticReport report, int charBudget)
+    {
+        int effectiveBudget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
+        string verdict = report.HasErrors ? "fail" : "pass";
+        string resultLine = string.Create(
+            CultureInfo.InvariantCulture,
+            $"result: {verdict} ({report.Errors} errors, {report.Warnings} warnings)");
+
+        List<Diagnostic> errors =
+        [
+            .. report.Items
+                .Where(item => item.Severity >= Severity.Error)
+                .OrderByDescending(item => item.Severity)
+                .ThenBy(item => item.Code, StringComparer.Ordinal)
+                .ThenBy(item => item.FilePath ?? string.Empty, StringComparer.Ordinal)
+        ];
+        List<Diagnostic> warnings =
+        [
+            .. report.Items
+                .Where(item => item.Severity == Severity.Warning)
+                .OrderBy(item => item.Code, StringComparer.Ordinal)
+                .ThenBy(item => item.FilePath ?? string.Empty, StringComparer.Ordinal)
+        ];
+
+        int reserveForWarning = 0;
+        if (warnings.Count > 0)
+            reserveForWarning = Math.Min(
+                effectiveBudget / 3,
+                FormatGateFinding(warnings[0]).Length + Environment.NewLine.Length);
+
+        StringBuilder findingsText = new();
+        int emitted = 0;
+        int errorBudget = Math.Max(0, effectiveBudget - reserveForWarning);
+
+        foreach (Diagnostic diagnostic in errors)
+        {
+            string line = FormatGateFinding(diagnostic) + Environment.NewLine;
+            if (findingsText.Length + line.Length > errorBudget && emitted > 0)
+                break;
+
+            if (findingsText.Length + line.Length > errorBudget)
+                break;
+
+            findingsText.Append(line);
+            emitted++;
+        }
+
+        foreach (Diagnostic diagnostic in warnings)
+        {
+            string line = FormatGateFinding(diagnostic) + Environment.NewLine;
+            if (findingsText.Length + line.Length > effectiveBudget)
+                break;
+
+            findingsText.Append(line);
+            emitted++;
+        }
+
+        int totalFindings = errors.Count + warnings.Count;
+        int omitted = totalFindings - emitted;
+        if (omitted > 0)
+        {
+            findingsText.Append(CultureInfo.InvariantCulture, $"{omitted} findings omitted.");
+            findingsText.AppendLine();
+        }
+
+        string body = findingsText.Length == 0
+            ? resultLine
+            : resultLine + "\n" + findingsText.ToString().TrimEnd('\r', '\n');
+
+        return Lead(provenance, body);
+    }
+
+    private static string FormatGateFinding(Diagnostic diagnostic)
+    {
+        StringBuilder sb = new();
+        sb.Append(diagnostic.Code)
+          .Append(" [")
+          .Append(diagnostic.Severity.ToString().ToUpperInvariant())
+          .Append("] ");
+        if (!string.IsNullOrEmpty(diagnostic.FilePath))
+        {
+            sb.Append(diagnostic.FilePath.Replace('\\', '/'));
+            sb.Append(": ");
+        }
+
+        sb.Append(diagnostic.Message.ReplaceLineEndings(" "));
+        if (!string.IsNullOrWhiteSpace(diagnostic.Hint))
+            sb.Append(CultureInfo.InvariantCulture, $" hint: {diagnostic.Hint.ReplaceLineEndings(" ")}");
+
+        return sb.ToString();
+    }
 
     private static bool TryParseKind(string? kind, out AnalysisRuleKind? parsedKind)
     {

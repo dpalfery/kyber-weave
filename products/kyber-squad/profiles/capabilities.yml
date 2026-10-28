@@ -21,10 +21,9 @@ profiles:
       # allow rather than ask because ask narrowed to deny on Claude, Pi, and ZCode, which
       # left this headless planner unable to save the plan it exists to write.
       filesystem.write: allow
-      # docs validate and docs drift are the only commands this role runs: writing a plan
-      # under docs/ is a corpus edit, and a corpus edit that is not re-validated leaves the
-      # zero-findings claim false. ask rather than allow because the grant is those two
-      # commands, not a shell.
+      # docs validate and docs drift are the MCP tools docs_validate and docs_drift on the
+      # kyber-weave documentation server — not a general shell. ask rather than allow because
+      # the grant is those two gates, not a shell.
       process.execute: ask
       network.read: allow
       network.publish: deny
@@ -56,7 +55,7 @@ profiles:
   # capabilities, so process.execute: ask narrows to withheld. Devin CLI also has no
   # standalone file creation tool (edit fails when the file does not exist, and apply_patch
   # requires agent.codex_tools). Granting process.execute: allow lets architect initialize
-  # nonexistent plan files (via exec/touch) before editing and run docs validate/drift checks.
+  # nonexistent plan files (via exec/touch) before editing and run docs_validate/docs_drift.
   # Validation rejects assigning it as a shared capability-profile.
   architect-devin:
     target: devin
