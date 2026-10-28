@@ -470,6 +470,162 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
 
         Assert.Contains("Supervised mode never uses it", overlay, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// An overlay the process cannot read must fail the render as <see cref="SquadRenderValidationException"/> that names
+    /// the overlay path and the cause. A raw <see cref="UnauthorizedAccessException"/> escaping the renderer reaches the
+    /// operator as a stack trace instead of a render error with a path to fix. Unix-only: file modes are not enforced
+    /// on Windows, and a root process reads a mode-000 file, so both skip with a reason.
+    /// </summary>
+    [Fact]
+    public async Task OperatorChannelOverlay_UnreadableOverlay_FailsTheRenderWithAValidationErrorNamingThePathAndCause()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes are not enforced on Windows, so an unreadable overlay cannot be simulated.");
+            return;
+        }
+
+        string sourceCopy = Path.Combine(_temp.Path, "source-copy");
+        CopyTree(SquadOperatorChannelFixture.ProductRoot, sourceCopy);
+        string overlay = Path.Combine(sourceCopy, "agents", "conductor", "overlays", "operator-channel.md");
+        (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
+
+        File.SetUnixFileMode(overlay, UnixFileMode.None);
+        try
+        {
+            string deniedMessage = DeniedReadMessage(overlay);
+
+            SquadRenderValidationException failure = await Assert.ThrowsAsync<SquadRenderValidationException>(
+                () => SquadOperatorChannelFixture.RunWithGateAsync("true", copilot, async () =>
+                {
+                    ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+                    return await renderer.RenderAsync(new SquadRenderRequest(
+                        SourceDirectory: sourceCopy,
+                        Targets: [SquadTarget.Copilot],
+                        Scope: SquadDeploymentScope.Global,
+                        GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(copilot, home)));
+                }));
+
+            Assert.Contains(overlay, failure.Message, StringComparison.Ordinal);
+            Assert.Contains(deniedMessage, failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.SetUnixFileMode(overlay, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    /// <summary>
+    /// The Copilot root is resolved from COPILOT_HOME, and the probe must read the server from that directory. A server
+    /// declared only in the default home (<c>~/.copilot</c>) must not count. Passes today; it guards against the probe
+    /// reading a fixed location.
+    /// </summary>
+    [Fact]
+    public async Task CopilotRoot_ProbeReadsTheResolvedCopilotHomeNotTheDefaultHome()
+    {
+        (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerConfig("other-relay"));
+        string defaultHome = Path.Combine(home, ".copilot");
+        Directory.CreateDirectory(defaultHome);
+        await File.WriteAllTextAsync(
+            Path.Combine(defaultHome, "mcp-config.json"),
+            SquadOperatorChannelFixture.ServerPresentConfig,
+            Encoding.UTF8);
+
+        SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+
+        Assert.DoesNotContain(
+            SquadOperatorChannelFixture.ToolEntry,
+            SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(on)));
+        Assert.Single(on.Warnings, w => w.Code == SquadOperatorChannelFixture.ServerAbsentWarning);
+    }
+
+    /// <summary>
+    /// The Copilot root decides where the probe looks, so it must be resolved once per render and that one answer must
+    /// serve the probe. This resolver answers the first Copilot query with COPILOT_HOME and every later one with a
+    /// directory that lacks the server. A renderer that resolves the root again for the probe loses the overlay, so this
+    /// fails until the root is resolved once.
+    /// </summary>
+    [Fact]
+    public async Task CopilotRoot_IsResolvedOncePerRender_SoTheProbeUsesTheSameRootAsTheLinks()
+    {
+        (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
+        string laterRoot = Path.Combine(home, "later-copilot-home");
+        Directory.CreateDirectory(laterRoot);
+        ISquadGlobalRootResolver roots = new SecondCopilotAnswerResolver(
+            copilot,
+            laterRoot,
+            SquadOperatorChannelFixture.GlobalRoots(copilot, home));
+
+        SquadRenderResult on = await SquadOperatorChannelFixture.RunWithGateAsync("true", copilot, async () =>
+        {
+            ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+            return await renderer.RenderAsync(new SquadRenderRequest(
+                SourceDirectory: SquadOperatorChannelFixture.ProductRoot,
+                Targets: [SquadTarget.Copilot],
+                Scope: SquadDeploymentScope.Global,
+                GlobalRoots: roots));
+        });
+
+        Assert.Contains(
+            SquadOperatorChannelFixture.ToolEntry,
+            SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(on)));
+    }
+
+    /// <summary>Answers the first Copilot root query with one directory and every later one with another.</summary>
+    private sealed class SecondCopilotAnswerResolver(
+        string firstCopilotRoot,
+        string laterCopilotRoot,
+        ISquadGlobalRootResolver others) : ISquadGlobalRootResolver
+    {
+        private int _copilotAnswers;
+
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            if (target != SquadTarget.Copilot)
+            {
+                return others.ResolveGlobalRoot(target);
+            }
+
+            _copilotAnswers++;
+            return _copilotAnswers == 1 ? firstCopilotRoot : laterCopilotRoot;
+        }
+    }
+
+    /// <summary>Returns the denial message the process gets reading <paramref name="path"/>, or skips when it can read it.</summary>
+    private static string DeniedReadMessage(string path)
+    {
+        try
+        {
+            _ = File.ReadAllText(path, Encoding.UTF8);
+        }
+        catch (UnauthorizedAccessException denied)
+        {
+            return denied.Message;
+        }
+
+        Assert.Skip("The process can read a file with mode 000 (running as root?), so an unreadable overlay cannot be simulated.");
+        throw new InvalidOperationException("Unreachable: Assert.Skip always throws.");
+    }
+
+    private static void CopyTree(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
+        foreach (FileSystemInfo entry in new DirectoryInfo(source).EnumerateFileSystemInfos("*", options))
+        {
+            string target = Path.Combine(destination, entry.Name);
+            if (entry is DirectoryInfo directory)
+            {
+                CopyTree(directory.FullName, target);
+            }
+            else
+            {
+                File.Copy(entry.FullName, target);
+            }
+        }
+    }
 }
 
 /// <summary>Non-parallel collection for every test that mutates the operator-channel gate, its server name, or COPILOT_HOME.</summary>

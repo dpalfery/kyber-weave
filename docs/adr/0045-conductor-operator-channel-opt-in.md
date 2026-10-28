@@ -57,7 +57,7 @@ definition and not through a separate profile. Two environment variables, both r
 - `KYBER_SQUAD_OPERATOR_CHANNEL` must be exactly `true`. Any other value, including unset, renders
   the default output.
 - `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER` names the MCP server, and it is not fixed in the product. The
-  name must match `[A-Za-z0-9._-]` and be at most 64 characters.
+  name must match `^[A-Za-z0-9._-]{1,64}$` (1 to 64 ASCII letters, digits, '.', '_' or '-').
 
 The overlay applies only when all of these hold:
 

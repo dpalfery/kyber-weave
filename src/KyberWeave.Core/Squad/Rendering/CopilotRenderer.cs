@@ -47,6 +47,9 @@ public sealed class CopilotRenderer : ISquadRenderer
     private const string SkillsDirectory = ".github/skills";
     private const int MaxAgentBodyCharacters = 30_000;
 
+    /// <summary>The warning code for an agent body over the Copilot cap. Install and update show it only when the operator channel overlay was applied.</summary>
+    internal const string AgentBodyTooLongCode = "agent-body-too-long";
+
     private static readonly ISerializer YamlSerializer = new SerializerBuilder()
         .WithTypeConverter(new CopilotToolsFlowSequenceConverter())
         .WithTypeConverter(new CopilotAgentsFlowSequenceConverter())
@@ -80,7 +83,29 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// Global scope without <see cref="SquadRenderRequest.GlobalRoots"/>: rendering relative
     /// links anyway would ship the defect this rewrite exists to fix.
     /// </exception>
-    private static string? ResolveGlobalAgentsRoot(SquadRenderRequest request)
+    private static string? ResolveGlobalAgentsRoot(string? copilotGlobalRoot)
+    {
+        if (copilotGlobalRoot is null)
+        {
+            return null;
+        }
+
+        string root = copilotGlobalRoot
+            .Replace('\\', '/')
+            .TrimEnd('/');
+        return $"{root}/{ResolvePrefixedDirectory(AgentsDirectory, SquadDeploymentScope.Global)}";
+    }
+
+    /// <summary>
+    /// Resolves the Copilot global root for this render, once. Every consumer, the agents root, the resource links,
+    /// and the operator channel probe, derives from this one answer, so they cannot disagree about where Copilot lives.
+    /// </summary>
+    /// <returns>The root at global scope, or null at project scope.</returns>
+    /// <exception cref="SquadRenderValidationException">
+    /// Global scope without <see cref="SquadRenderRequest.GlobalRoots"/>: rendering relative
+    /// links anyway would ship the defect this rewrite exists to fix.
+    /// </exception>
+    private static string? ResolveCopilotGlobalRoot(SquadRenderRequest request)
     {
         if (request.Scope != SquadDeploymentScope.Global)
         {
@@ -96,10 +121,7 @@ public sealed class CopilotRenderer : ISquadRenderer
                 "fail to resolve from a foreign working directory.");
         }
 
-        string root = request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot)
-            .Replace('\\', '/')
-            .TrimEnd('/');
-        return $"{root}/{ResolvePrefixedDirectory(AgentsDirectory, SquadDeploymentScope.Global)}";
+        return request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
     }
 
     /// <summary>
@@ -177,7 +199,8 @@ public sealed class CopilotRenderer : ISquadRenderer
         HashSet<string> suppressedSkillIdentities =
             SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
 
-        string? globalAgentsRoot = ResolveGlobalAgentsRoot(request);
+        string? copilotGlobalRoot = ResolveCopilotGlobalRoot(request);
+        string? globalAgentsRoot = ResolveGlobalAgentsRoot(copilotGlobalRoot);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -187,7 +210,7 @@ public sealed class CopilotRenderer : ISquadRenderer
         // declares the server it calls. Without the server the conductor must stay exactly as it is,
         // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
         SquadOperatorChannel.Overlay? operatorChannelOverlay = null;
-        if (globalAgentsRoot is not null && request.GlobalRoots is not null && SquadOperatorChannel.IsGateOn())
+        if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn())
         {
             SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName();
             if (server.Warning is { } nameWarning)
@@ -196,17 +219,17 @@ public sealed class CopilotRenderer : ISquadRenderer
             }
             else if (server.Name is { } serverName)
             {
-                string copilotRoot = request.GlobalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
-                if (CopilotMcpServerProbe.HasServer(copilotRoot, serverName))
+                if (CopilotMcpServerProbe.HasServer(copilotGlobalRoot, serverName))
                 {
                     operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(request.SourceDirectory, serverName);
+                    warnings.Add(SquadOperatorChannel.OverlayApplied());
                 }
                 else
                 {
                     warnings.Add(new SquadRenderWarning(
                         SquadOperatorChannel.ServerAbsentCode,
                         $"The operator channel is enabled, but no '{serverName}' server is declared " +
-                        $"under mcpServers in {CopilotMcpServerProbe.McpConfigFileName} in '{copilotRoot}'. " +
+                        $"under mcpServers in {CopilotMcpServerProbe.McpConfigFileName} in '{copilotGlobalRoot}'. " +
                         "The conductor was rendered without the operator channel.",
                         "copilot"));
                 }
@@ -353,7 +376,7 @@ public sealed class CopilotRenderer : ISquadRenderer
         if (content.Length > MaxAgentBodyCharacters)
         {
             warnings.Add(new SquadRenderWarning(
-                "agent-body-too-long",
+                AgentBodyTooLongCode,
                 $"Agent '{agent.Name}' is {content.Length} characters; Copilot caps custom agent files at {MaxAgentBodyCharacters}.",
                 "copilot"));
         }

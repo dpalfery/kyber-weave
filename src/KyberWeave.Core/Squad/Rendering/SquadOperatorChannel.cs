@@ -34,6 +34,9 @@ internal static class SquadOperatorChannel
     internal const string ServerAbsentCode = "operator-channel-server-absent";
     internal const string ServerNameMissingCode = "operator-channel-server-name-missing";
     internal const string ServerNameInvalidCode = "operator-channel-server-name-invalid";
+
+    /// <summary>Internal marker: the overlay was inlined. Never shown on the CLI.</summary>
+    internal const string OverlayAppliedCode = "operator-channel-overlay-applied";
     internal const string NotRenderedCode = "operator-channel-not-rendered";
 
     internal const string NotRenderedDetails =
@@ -116,18 +119,40 @@ internal static class SquadOperatorChannel
         string path = Path.Combine(
             sourceDirectory,
             OverlayRelativePath.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(path))
+
+        // The read itself is the check. An exists-then-read pair would race the file system, so the failure
+        // is taken from the read and translated into a render error that names the path and the cause.
+        string raw;
+        try
+        {
+            raw = File.ReadAllText(path, Encoding.UTF8);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             throw new SquadRenderValidationException(
-                $"The operator channel overlay is missing from the Squad source at '{path}'.");
+                $"The operator channel overlay is missing from the Squad source at '{path}'.", ex);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new SquadRenderValidationException(
+                $"The operator channel overlay at '{path}' could not be read: {ex.Message}", ex);
         }
 
-        string text = File.ReadAllText(path, Encoding.UTF8)
+        string text = raw
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace(ServerPlaceholder, serverName, StringComparison.Ordinal)
             .TrimEnd();
         return new Overlay($"{serverName}/*", text);
     }
+
+    /// <summary>
+    /// The marker the renderer adds when the overlay was inlined. It is not a CLI warning. The lifecycle reads it to
+    /// decide whether the conductor's body-length warning belongs to the operator channel, and it never reaches output.
+    /// </summary>
+    internal static SquadRenderWarning OverlayApplied() =>
+        Warning(
+            OverlayAppliedCode,
+            "The operator channel overlay was inlined into the Copilot conductor.");
 
     private static SquadRenderWarning Warning(string code, string message) =>
         new(code, message, "copilot");

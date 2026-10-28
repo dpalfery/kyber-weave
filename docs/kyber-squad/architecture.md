@@ -694,7 +694,7 @@ and validates.
   (`agents/conductor/overlays/operator-channel.md`) to the conductor only when the gate holds. The gate
   is `KYBER_SQUAD_OPERATOR_CHANNEL` exactly `true`, read by `SquadOperatorChannel` when install, update,
   or doctor renders; status never renders. The server name comes from `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`
-  and must match `[A-Za-z0-9._-]`, at most 64 characters. The overlay takes the validated name in place of
+  and must match `^[A-Za-z0-9._-]{1,64}$` (1 to 64 ASCII letters, digits, '.', '_' or '-'). The overlay takes the validated name in place of
   the placeholder `{{operator-channel-server}}`. The target must be Copilot CLI at global scope, and
   `CopilotMcpServerProbe` must find that name under `mcpServers` in `$COPILOT_HOME/mcp-config.json`. The
   probe resolves symlinks to their target, refuses a zero-length target before opening it (an approximation,

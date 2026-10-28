@@ -252,11 +252,13 @@ public sealed class SquadLifecycleService
     /// </summary>
     private static List<string> RenderWarningMessages(IReadOnlyList<SquadRenderWarning> warnings)
     {
-        // Only the operator channel's warnings reach the CLI. Every other renderer warning, such as
-        // agent-body-too-long, stays off the install and update output, so a default install prints
-        // exactly what it printed before.
+        // Only the operator channel's warnings reach the CLI. A default install prints exactly what it printed
+        // before. The one exception is agent-body-too-long, which reaches the CLI only when the operator channel
+        // overlay was inlined, because then the overlay is what pushed the conductor over the cap.
+        bool overlayApplied = warnings.Any(warning => warning.Code == SquadOperatorChannel.OverlayAppliedCode);
         return warnings
-            .Where(warning => SquadOperatorChannel.IsOperatorChannelWarning(warning.Code))
+            .Where(warning => SquadOperatorChannel.IsOperatorChannelWarning(warning.Code)
+                              || (overlayApplied && warning.Code == CopilotRenderer.AgentBodyTooLongCode))
             .Select(warning => $"{warning.Code}: {warning.Message}")
             .ToList();
     }
