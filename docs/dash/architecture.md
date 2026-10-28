@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -197,6 +197,15 @@ the table above is the whole layout.
 | `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. The session key is read from `session_id`, falling back to `session.id` (the key Claude Code sends), in both the JSON and protobuf decoders. |
 | `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
 | `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
+
+### Collection-mechanism hierarchy and completeness contract
+
+PRIMARY collection is OpenTelemetry (OTel), plugin hooks, and direct database reads;
+file ingest (`dash refresh` synth and `dash import-history`) is backup and fallback
+only — a fallback-derived value is never billed as a primary measurement. Completeness
+is decided by the [harness collection standard](../rules/kyberdash-harness-collection.md):
+every standard-named dimension measured where the source supplies it, otherwise
+`not_measurable`/dash with a stated reason, never complete on a missing or empty dimension.
 
 ### Tool extraction and child-record contracts (issue #180)
 

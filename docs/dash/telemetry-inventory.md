@@ -4,10 +4,15 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 ---
 
 # Telemetry inventory — verified harness signal and content availability
+
+Collection follows the [harness collection standard](../rules/kyberdash-harness-collection.md):
+PRIMARY mechanisms are OpenTelemetry (OTel), plugin hooks, and direct database reads;
+file ingest is backup and fallback only, never billed as primary. Completeness is decided
+there — measured where the source supplies it, otherwise `not_measurable`/dash with reason.
 
 This inventory records implemented collection behavior and the remaining runtime gates.
 It does not treat an absent source as a zero: unavailable dimensions are

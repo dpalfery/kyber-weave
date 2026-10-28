@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-28
 ---
 
 # Wiring Kyber-Weave into CI
@@ -160,6 +160,30 @@ Add `--no-info` everywhere in CI; informational findings are noise in a log.
 Commands read [`.kyber-weave/kyber-weave.yml`](../configuration.md) from the target path
 automatically. Pass `--config` only for a non-standard location. A malformed file fails as
 `KW-CONFIG-001`, not a stack trace.
+
+## Dash harness-collection e2e (`dash-e2e`)
+
+This repository's own `ci.yml` runs a `dash-e2e` job (after `ts-gates`) that
+enforces the per-harness completeness predicate continuously:
+
+- **Purpose:** deterministic per-harness completeness enforcement — a measured
+  harness renders measured dimensions with no lying zero, an honest-empty
+  harness renders a visible session as unmeasurable with a reason, and a
+  zero-record harness stays honest-empty and is never claimable as complete.
+- **Scope:** Playwright-only on `ubuntu-latest`. No macOS runner, no funded
+  model call, no new secret. The spec boots its own isolated dashboard from a
+  self-seeded temp `canon.db` and never touches the live `4747` host.
+- **Steps:** install dash deps (`npm ci`), `npx playwright install
+  --with-deps`, then the conformance spec. The spec runs from the repository
+  root with the pinned `dash` Playwright (`npx --prefix dash playwright test
+  dash/e2e/harness-collection.spec.ts`) so `dash/playwright.config.ts` —
+  whose `webServer` targets the live host — stays unloaded.
+
+Local equivalent (must stay GREEN 3/3):
+
+```bash
+npx --prefix dash playwright test dash/e2e/harness-collection.spec.ts
+```
 
 ## Related
 
