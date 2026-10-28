@@ -732,7 +732,8 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("2-cycle cap", skill, StringComparison.Ordinal);
         Assert.Contains("ITERATION_CAP_EXCEEDED", skill, StringComparison.Ordinal);
         Assert.Contains("task-gate/<gate-id>", skill, StringComparison.Ordinal);
-        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill,
+            StringComparison.Ordinal);
         Assert.Contains("every declared gate was skipped", skill, StringComparison.Ordinal);
         AssertClosedCircuitBreakerTriggerSet(skill);
     }
@@ -792,8 +793,10 @@ public sealed class SquadCanonicalContentTests
             "The architect plan-authoring reference must not name the retired task-reviewer.");
     }
 
-    private static string RelativeSourcePath(string path) =>
-        Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+    private static string RelativeSourcePath(string path)
+    {
+        return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+    }
 
     [Fact]
     public void LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest()
@@ -872,6 +875,43 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
         Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Review-council and conductor instructions must not keep the retired delivery wording that
+    /// held a pushed change back until the council returned, or parked it unpushed. The scan covers
+    /// every surface that carried the wording, so a copy left behind in one file fails the build.
+    /// </summary>
+    [Fact]
+    public void ReviewInstructionsDropTheHoldUntilCouncilAndParkWording()
+    {
+        string[] reviewSurfaces =
+        [
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
+            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
+            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "reference", "autonomous-gates.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "code-review", "architecture.md")
+        ];
+        string[] retiredPhrases =
+        [
+            "Do not commit, push, publish, or open a pull request until the council returns",
+            "leave it unpushed",
+            "Do not mark the pull request ready",
+            "Park that change or task",
+            "parked NEEDS_HUMAN",
+            "at least one review"
+        ];
+
+        string[] offenders = reviewSurfaces
+            .SelectMany(path => retiredPhrases
+                .Where(phrase => File.ReadAllText(path).Contains(phrase, StringComparison.Ordinal))
+                .Select(phrase => $"{Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, path)}: \"{phrase}\""))
+            .ToArray();
+
+        Assert.Empty(offenders);
     }
 
     private static string ProductRoot =>
