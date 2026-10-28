@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 ---
 
 # Kyber-Weave Plan Inventory
@@ -14,6 +14,10 @@ This inventory tracks architectural and implementation plans across their lifecy
 Every plan document under `docs/plans/` must be reachable from this inventory, directly or through a plan it links. `docs validate` reports one that is not as `KW-DOC-LIFECYCLE-001`.
 
 A plan is open only while it is built. The pull request that finishes it archives it: CI runs `docs validate --merge-ready`, which fails on any plan still in this folder (`KW-DOC-LIFECYCLE-003`).
+
+**Maintaining this inventory.** Register a new plan by adding a row to **Active Plans** when execution starts. On closeout, `git mv` the plan file to `docs/archive/plans/`, move its row to **Archived Plans** with harvest destinations and evidence, and leave **Active Plans** in the empty state when nothing remains open. Reconcile the plan file, frontmatter, body status, and index row in the same change.
+
+A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; trying to work around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 
 ### Plan Decisions and Closeout Policy
 
@@ -33,14 +37,13 @@ Closeout explicitly distinguishes between two waiver categories:
 |---|---|---|---|
 No plan is active.
 
-The last archived plan, the conductor operator channel and delivery rules plan, was archived on 2026-10-27 (see Archived Plans below). Before it, the council gate gaps plan for Rust and TypeScript and the Rust, Tauri and Go standards plan were archived the same day.
-
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-10-28-architect-docs-gates-mcp.md](../archive/plans/2026-10-28-architect-docs-gates-mcp.md) | Archived — complete 2026-10-28 (T1–T3 test-first; T4 closeout; council `NEEDS_HUMAN` under KW-REVIEW-008 as expected, 27/27 declared gates passed, owner review before merge) | 2026-10-28 | 2026-10-28 | [docgraph/mcp-runbook.md](../docgraph/mcp-runbook.md) (H1: `docs_validate` and `docs_drift` contracts); [docgraph/governance.md](../docgraph/governance.md) (H2: MCP gate surface, no new rule id); [kyber-squad/architecture.md](../kyber-squad/architecture.md) §2 (H3: architect checks via MCP; shared `architect` profile ships `process.execute: deny`); [adr/0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) amended in place (H4: gates independent of execute; Devin file-creation allow); no ADR — ADR waiver: read-only MCP tools on the existing server, lattice unchanged; full D1–D8, AP1 and H1–H4 mapping in the archived plan's Closeout section | Give the architect `docs_validate` and `docs_drift` on the kyber-weave docs MCP server, in-process with the CLI gates, without granting `process.execute: allow`. |
 | [2026-10-27-conductor-operator-channel-and-delivery-rules.md](../archive/plans/2026-10-27-conductor-operator-channel-and-delivery-rules.md) | Archived — complete 2026-10-27 (revision 5; test-first; council `NEEDS_HUMAN` under KW-REVIEW-008 as expected, no Critical or Major finding; owner review before merge; Linux not exercised; sandbox facts G2, G5, G6, G7 unverified) | 2026-10-27 | 2026-10-27 | [kyber-squad architecture §8, §9, §10](../kyber-squad/architecture.md), [onboarding, operator channel](../kyber-squad/onboarding.md#operator-channel-opt-in-copilot-cli-global-scope), [requirements](../kyber-squad/requirements.md), [autonomous gates](../reference/autonomous-gates.md), [code-review architecture](../code-review/architecture.md); [ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md) (operator channel and delivery rules); full Q1–Q10, U1, D1–D14, M1–M2, AP1–AP2 and H1–H5 mapping in the archived plan's Closeout section | Opt-in operator channel for unattended Copilot CLI conductor runs, with the server named by the operator; delivery rules: draft PR before the council, ready on required CI, autonomous `NEEDS_HUMAN` reported not stopping. |
 | [2026-10-27-close-rust-ts-gate-gaps.md](../archive/plans/2026-10-27-close-rust-ts-gate-gaps.md) | Archived — complete 2026-10-27 (T1–T3 test-first; council `NEEDS_HUMAN` under KW-REVIEW-008 as expected, 27/27 declared gates passed, owner review before merge; Linux not exercised) | 2026-10-27 | 2026-10-27 | [code-review/architecture.md](../code-review/architecture.md#task-gates) (Task gates: anchors, council gate timeouts, no `include` on council gates, per-task timeout key); [rust](../standards/rust/README.md) and [tauri](../standards/tauri/README.md) coding standards (Commands and Gates); no ADR — ADR waiver: adds gate entries through the existing `review.gates` and `review.task-gates` mechanisms with no new boundary, dependency or schema; full D1–D12, AP0–AP1 and H1–H3 mapping in the archived plan's Closeout section | Add the tray's `cargo fmt`, `cargo clippy` and `cargo test` to the council's `review.gates`, give `typescript-dev` and `rust-dev` task gates from the existing anchors (and `test-dev` the cargo format and lint gates), and pin it in `ReviewTaskGatesConfigTests`. This repository's config only; the shipped gate catalogue and conditional council gates are a separate specification. |
 | [2026-10-27-declare-rust-tauri-go-standards.md](../archive/plans/2026-10-27-declare-rust-tauri-go-standards.md) | Archived — complete 2026-10-27 (T1–T4 test-first; `ReviewGuidanceCouncilContractTests` 26/26; `docs validate --merge-ready` and `docs drift` clean after archive; council `NEEDS_HUMAN` under KW-REVIEW-008 expected, owner review before merge) | 2026-10-27 | 2026-10-27 | [coding standards index](../standards/README.md) (declared list, grounding rule, REVIEW.md boundary); [rust](../standards/rust/README.md), [tauri](../standards/tauri/README.md) and [go](../standards/go/README.md) coding standards; [code-review/architecture.md](../code-review/architecture.md#review-guidance) (Technology checklists); no ADR — ADR waiver: declares standards through the existing `ontology.technologies` mechanism with no new boundary, dependency or schema; full Q1–Q4, D1–D11, AP0–AP1 and H1–H3 mapping in the archived plan's Closeout section | Declare `rust`, `tauri` and `go` in `ontology.technologies`, back each with a grounded `current` standard under `docs/standards/`, point the review checklists at them, and pin it in `ReviewGuidanceCouncilContractTests`. |

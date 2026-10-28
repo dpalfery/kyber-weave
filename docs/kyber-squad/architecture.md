@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -161,6 +161,27 @@ Grant (allow) > Review (ask) > Deny (deny) > Default (withhold)
 1. **Capability Taxonomy**: Maps high-level operations (`filesystem.read`, `filesystem.write`, `process.execute`, `network.fetch`, `network.publish`) to platform-specific tools.
 2. **Non-Broadening Guarantee**: Target-specific renderers may restrict or narrow permissions, but must **never** grant capabilities beyond what the canonical agent specification authorizes.
 3. **Structured Degradations**: Where target platforms lack granular permissions or cannot enforce delegation boundaries, Squad emits explicit degradation records in the deployment receipt rather than guessing or silently granting ambient privileges.
+
+### Architect documentation gates through MCP
+
+The shared `architect` capability profile holds `process.execute: deny` on every target — not
+`allow`. `Deny` withholds the shell with no prompt; it is the narrowest execute setting in the
+lattice above. That grant is not how the architect satisfies its `PLAN_READY` documentation checks.
+
+After plan writes, the architect obtains **schema conformance** and **entity drift** by
+calling the read-only MCP tools `docs_validate` and `docs_drift` on the kyber-weave
+documentation server bound to this checkout ([MCP runbook](../docgraph/mcp-runbook.md)). The
+tools run the same gates as `kyber-weave docs validate` and `kyber-weave docs drift` against
+the server's resolved root; they are not a shell grant, a new capability in the lattice, an
+argv allow-list, or a Cursor read-only exception. Any client of that server may call them;
+using them does not widen `process.execute`.
+
+While the plan remains in the active plans folder, the architect leaves `mergeReady` false on
+`docs_validate` so open-work rules such as `KW-DOC-LIFECYCLE-003` do not fire. It compares
+the provenance `root=` to this checkout before trusting a pass. Target-scoped profiles such
+as `architect-devin` and `architect-copilot` are unchanged: Devin still resolves
+`architect-devin` for file creation on that target, and Copilot still resolves
+`architect-copilot` where the shared profile withholds execution without granting a shell.
 
 ---
 
@@ -739,16 +760,17 @@ and validates.
   requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
   only write path is that tool can edit an artifact but not create one, so `architect` stopped at
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
-  together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
-  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
+  together — on Devin, `ask` narrows to withheld on subagents, and the shared profiles hold
+  `process.execute: deny` (`architect`) or `deny` (`product-planning`). `architect-devin` and
   `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
   carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
   reference, and `product-owner` in its agent body and the skill's spec-authoring reference
   (it cannot own an agent sidecar: a same-named skill already occupies the ZCode skills
   directory that sidecar would need). Each tells the role to initialise a destination that
   does not exist before editing. `architect`'s `PLAN_READY`
-  contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
-  `docs drift` to pass. `docs-dev` needs no Devin profile: its shared `documentation` profile
+  contract and `product-owner`'s `SPEC_FINALIZED` contract require the read-only MCP tools
+  `docs_validate` and `docs_drift` on the kyber-weave documentation server (with `mergeReady`
+  false while the artifact remains in its active folder). `docs-dev` needs no Devin profile: its shared `documentation` profile
   grants `process.execute: allow` on every target, for archival `git mv` and the two docs checks
   (ADR 0028, amended 2026-10-26), so on Devin it receives `exec` and its companions and records no
   `safety-narrowed`. On Antigravity it receives `run_command` beside `write_to_file` and records no
