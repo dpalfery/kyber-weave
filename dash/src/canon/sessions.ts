@@ -892,7 +892,10 @@ function hasEvidence(
     return (
       measuredInput(record.tokens) > 0 ||
       record.tokens.output > 0 ||
-      view.hasParts ||
+      // A parts ARRAY is not content: `hasParts` admits a record whose parts
+      // all carry empty text, which is ambient telemetry like any other. Only a
+      // bucket with non-empty text is evidence of a conversation.
+      view.carriedBuckets.size > 0 ||
       // A record WITHOUT parts: its flat content is the only evidence left,
       // and the store read it eagerly for such a row, so asking for it here
       // costs nothing. A record WITH parts is already counted above.
@@ -1712,6 +1715,12 @@ export function buildSessionRow(
   // counter is not measurable in that dimension; a source that reported a
   // counter — including a genuine 0 — stays measured. Mapping every total
   // from `token_usage` would hide a measured output behind an absent input.
+  // The cache figures additionally require the DECLARED value, not the stored
+  // one (review: Kilo 2/K3): the harness vocabulary says a counter can be
+  // exported, while the record's declaration says this turn did export it, and
+  // `totals.cacheRead` is 0 either way. Reading the stored 0 behind only the
+  // vocabulary check printed a 0% ratio / "on 0 turns" for a turn that
+  // declared the counter unmeasurable.
   const summaryTotalInput = unavailableFor(turnMeasurability, 'token_usage') ?? totals.input
   const summaryTotalOutput =
     unavailableFor(turnMeasurability, 'output') ??
@@ -1724,14 +1733,16 @@ export function buildSessionRow(
   const cacheHitRatio =
     typeof summaryTotalInput === 'number' &&
     summaryTotalInput > 0 &&
+    typeof summaryTotalCacheRead === 'number' &&
     harnessExportsCacheCounter(harness, 'read')
-      ? totals.cacheRead / summaryTotalInput
+      ? summaryTotalCacheRead / summaryTotalInput
       : undefined
   // Review re-review (Kilo 2): the ratio beside this already requires input
   // > 0 — a measured zero input emits neither key.
   const cacheCreationCoverage =
     typeof summaryTotalInput === 'number' &&
     summaryTotalInput > 0 &&
+    typeof summaryTotalCacheCreation === 'number' &&
     turnRecords.length > 0 &&
     harnessExportsCacheCounter(harness, 'creation')
       ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
