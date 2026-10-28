@@ -221,12 +221,13 @@ public sealed class SquadLifecycleService
                     plan.Lock,
                     plan.Receipt.Degradations,
                     DryRun: true,
-                    ModelChanges: modelChanges);
+                    ModelChanges: modelChanges,
+                    Warnings: RenderWarningMessages(renderResult.Warnings));
 
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);
 
-            List<string> warnings = new(transaction.Warnings);
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings), .. transaction.Warnings];
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
 
             return new SquadLifecycleResult(
@@ -242,6 +243,24 @@ public sealed class SquadLifecycleService
         {
             CleanupTempDirectory(tempExtractDir);
         }
+    }
+
+    /// <summary>
+    ///     Carries the renderer's warnings onto the lifecycle result, prefixed with their code, so the CLI
+    ///     shows them. Without this a render warning, such as the operator channel's missing-server notice,
+    ///     reaches no operator.
+    /// </summary>
+    private static List<string> RenderWarningMessages(IReadOnlyList<SquadRenderWarning> warnings)
+    {
+        // Only the operator channel's warnings reach the CLI. A default install prints exactly what it printed
+        // before. The one exception is agent-body-too-long, which reaches the CLI only when the operator channel
+        // overlay was inlined, because then the overlay is what pushed the conductor over the cap.
+        bool overlayApplied = warnings.Any(warning => warning.Code == SquadOperatorChannel.OverlayAppliedCode);
+        return warnings
+            .Where(warning => SquadOperatorChannel.IsOperatorChannelWarning(warning.Code)
+                              || (overlayApplied && warning.Code == CopilotRenderer.AgentBodyTooLongCode))
+            .Select(warning => $"{warning.Code}: {warning.Message}")
+            .ToList();
     }
 
     /// <summary>
@@ -391,12 +410,13 @@ public sealed class SquadLifecycleService
                     plan.Lock,
                     plan.Receipt.Degradations,
                     DryRun: true,
-                    ModelChanges: modelChanges);
+                    ModelChanges: modelChanges,
+                    Warnings: RenderWarningMessages(renderResult.Warnings));
 
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);
 
-            List<string> warnings = new(transaction.Warnings);
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings), .. transaction.Warnings];
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
 
             return new SquadLifecycleResult(

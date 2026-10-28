@@ -21,15 +21,15 @@ public sealed class ReviewGatesSettings : AnalysisSettings
 
     [CommandOption("--paths <PATH>")]
     [Description("Changed file to gate, relative to the repository root. Repeat for several. " +
-                 "Defaults to the diff against --base plus untracked files. Requires --agent.")]
+                 "Defaults to the diff against --base plus untracked files.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
     public string[] Paths { get; set; } = [];
 
     [CommandOption("--base <REF>")]
-    [Description("Git ref the working tree is diffed against when --paths is not given. Defaults to HEAD. " +
-                 "Requires --agent.")]
+    [Description("Git ref the working tree is diffed against when --paths is not given. Defaults to origin/HEAD " +
+                 "for repository gates and to HEAD with --agent.")]
     public string? BaseRef { get; set; }
 
     [CommandOption("--task <SLUG>")]
@@ -40,9 +40,11 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
     public bool Fix { get; set; }
 
-    /// <summary>Whether any option that only makes sense for one agent was given.</summary>
-    public bool HasAgentOnlyOptions =>
-        Paths is { Length: > 0 } || BaseRef is not null || TaskSlug is not null || Fix;
+    /// <summary>
+    /// Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
+    /// scope the repository-wide council gates, so they are not agent-only.
+    /// </summary>
+    public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
 }
 
 /// <summary>Settings for <c>review duplicates</c>.</summary>

@@ -12,11 +12,18 @@ public static class KyberWeaveConfigLoader
     /// <summary>Stable rule code for invalid or unreadable <c>kyber-weave.yml</c>.</summary>
     public const string ConfigLoadErrorCode = "KW-CONFIG-001";
 
+    /// <summary>Stable rule code for a non-fatal problem in <c>kyber-weave.yml</c>, such as an unknown key.</summary>
+    public const string ConfigWarningCode = "KW-CONFIG-002";
+
+    /// <summary>
+    /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
+    /// <c>working-directory</c> is refused; use <see cref="Load(string, string?)"/> for that.
+    /// </summary>
     public static KyberWeaveConfig LoadFromYaml(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
-        return FromDocument(document);
+        return FromDocument(document, yaml, repositoryRoot: null);
     }
 
     public static KyberWeaveConfig Load(string repoRoot, string? configPath = null)
@@ -28,8 +35,7 @@ public static class KyberWeaveConfigLoader
         if (path is null)
             return KyberWeaveConfig.ProductDefaults;
 
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(path);
-        return FromDocument(document);
+        return FromFile(path);
     }
 
     /// <summary>
@@ -49,8 +55,7 @@ public static class KyberWeaveConfigLoader
             if (path is null)
                 return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, null);
 
-            KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(path);
-            return KyberWeaveConfigLoadResult.Ok(FromDocument(document), path);
+            return KyberWeaveConfigLoadResult.Ok(FromFile(path), path);
         }
         catch (YamlException ex)
         {
@@ -105,7 +110,22 @@ public static class KyberWeaveConfigLoader
         return explicitPath;
     }
 
-    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document)
+    /// <summary>
+    /// Reads a config file. Its repository root is the parent of the <c>.kyber-weave/</c> directory that
+    /// holds it; a legacy root-level file, or one outside such a directory, uses its own directory.
+    /// </summary>
+    private static KyberWeaveConfig FromFile(string path)
+    {
+        string yaml = File.ReadAllText(path);
+        string directory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Path.GetFullPath(path);
+        string root = Path.GetFileName(directory) == KyberWeaveYamlParser.DefaultDirectoryName
+            ? Path.GetDirectoryName(directory) ?? directory
+            : directory;
+
+        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, root);
+    }
+
+    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot)
     {
         OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
         return new KyberWeaveConfig
@@ -118,7 +138,11 @@ public static class KyberWeaveConfigLoader
                 ontology),
             Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
             ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg, document.Autonomy),
-            Review = ReviewConfigLoader.Merge(ReviewConfig.ProductDefaults, document.Review)
+            Review = ReviewConfigLoader.Merge(
+                ReviewConfig.ProductDefaults,
+                document.Review,
+                repositoryRoot,
+                ReviewConfigLoader.UnknownKeyWarnings(yaml))
         };
     }
 }

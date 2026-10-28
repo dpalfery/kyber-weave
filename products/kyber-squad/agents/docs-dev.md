@@ -65,7 +65,7 @@ When assigned a plan closeout:
 4. Establish and record explicit waivers where an item is not migrated:
    - **ADR waiver**: State `no ADR — ADR waiver: <reason>` when a decision refines existing architecture, applies established patterns, or represents implementation detail that does not warrant a new ADR.
    - **Documentation waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
-5. Update canonical documentation to describe the verified behavior, then update the plan index with the implementation reference, canonical doc destinations, and archive date.
+5. Update canonical documentation to describe the verified behavior, then update the plan index with the implementation reference, canonical doc destinations, and archive date. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` with `git mv`, only when the verification, closeout mapping table, and documentation updates are complete.
 7. If any criterion, durable decision harvest, or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
 

@@ -5,7 +5,7 @@ The plan file is durable state. A live agent instance is disposable.
 ## Start or resume
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
-2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.
+2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. A note or excuse for why the process was not followed is not a resolution. The process exists to ensure quality; going around it signals bad quality. Do not put such a note in **Active Plans**. A pull request that does will not be approved.
 3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
@@ -35,6 +35,10 @@ The `## Decisions` section is permanent state, preserved intact across all lifec
 Record all decisions in a structured table:
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+
+## Documentation gates after plan writes
+
+After every plan save, obtain the two checks by calling `docs_validate` and `docs_drift` on the kyber-weave documentation server. Leave `mergeReady` false while the plan is in the active plans folder. Compare the provenance `root=` on each response to this checkout. If either tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap. A shell is not a substitute for these tools and is not permission to implement.
 
 Persist each question with a stable id (for example, D1, D2 or Q1, Q2), the question or architectural choice, the selected answer or decision, mitigating and supporting context (alternatives considered, trade-offs, constraints), and status/approval provenance.
 

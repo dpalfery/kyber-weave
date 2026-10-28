@@ -90,6 +90,12 @@ public sealed class DocumentIndexHost
     /// <summary>How many times the code joins have been resolved. For diagnostics and tests.</summary>
     public int JoinBuilds { get; private set; }
 
+    /// <summary>Loads the document set the host was constructed to serve.</summary>
+    public DocumentSet LoadDocumentSet() => _documentSetFactory();
+
+    /// <summary>Resolves the CodeGraph port for this repository using the host's factory.</summary>
+    public ICodeGraphResolver CreateCodeGraphResolver() => _resolverFactory();
+
     /// <summary>The current index, rebuilding whichever half has gone stale.</summary>
     public DocumentIndex Current()
     {

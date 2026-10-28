@@ -5,13 +5,14 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0024-squad-global-receipt-layout-marker
+  - adr/0045-conductor-operator-channel-opt-in
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
@@ -160,6 +161,27 @@ Grant (allow) > Review (ask) > Deny (deny) > Default (withhold)
 1. **Capability Taxonomy**: Maps high-level operations (`filesystem.read`, `filesystem.write`, `process.execute`, `network.fetch`, `network.publish`) to platform-specific tools.
 2. **Non-Broadening Guarantee**: Target-specific renderers may restrict or narrow permissions, but must **never** grant capabilities beyond what the canonical agent specification authorizes.
 3. **Structured Degradations**: Where target platforms lack granular permissions or cannot enforce delegation boundaries, Squad emits explicit degradation records in the deployment receipt rather than guessing or silently granting ambient privileges.
+
+### Architect documentation gates through MCP
+
+The shared `architect` capability profile holds `process.execute: deny` on every target — not
+`allow`. `Deny` withholds the shell with no prompt; it is the narrowest execute setting in the
+lattice above. That grant is not how the architect satisfies its `PLAN_READY` documentation checks.
+
+After plan writes, the architect obtains **schema conformance** and **entity drift** by
+calling the read-only MCP tools `docs_validate` and `docs_drift` on the kyber-weave
+documentation server bound to this checkout ([MCP runbook](../docgraph/mcp-runbook.md)). The
+tools run the same gates as `kyber-weave docs validate` and `kyber-weave docs drift` against
+the server's resolved root; they are not a shell grant, a new capability in the lattice, an
+argv allow-list, or a Cursor read-only exception. Any client of that server may call them;
+using them does not widen `process.execute`.
+
+While the plan remains in the active plans folder, the architect leaves `mergeReady` false on
+`docs_validate` so open-work rules such as `KW-DOC-LIFECYCLE-003` do not fire. It compares
+the provenance `root=` to this checkout before trusting a pass. Target-scoped profiles such
+as `architect-devin` and `architect-copilot` are unchanged: Devin still resolves
+`architect-devin` for file creation on that target, and Copilot still resolves
+`architect-copilot` where the shared profile withholds execution without granting a shell.
 
 ---
 
@@ -320,6 +342,12 @@ flowchart LR
   transaction has committed produces a warning naming the remedy (rerun `squad update`); the
   deployment is not failed. One file is kept per distinct version and snapshots are never
   pruned.
+
+- **Task gates come from `docs init`, not from Squad.** Squad writes no configuration: a
+  project-scope `squad install` or `squad update` that finds no `review.task-gates` in the
+  project's host config prints one hint — run `kyber-weave docs init` to write the gates
+  for the declared technologies — instead of writing them. The hint never changes the
+  verb's exit code, and global scope never prints it, because there is no project.
 
 ### Cross-Process Mutex Lease
 
@@ -674,12 +702,30 @@ and validates.
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  The conductor has no MCP tools by default. Its only exception is the opt-in operator channel
+  overlay, described in the next bullet.
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
   because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
   generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
   server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
+- **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:
+  `CopilotRenderer` appends the `<name>/*` tool entry and the overlay text
+  (`agents/conductor/overlays/operator-channel.md`) to the conductor only when the gate holds. The gate
+  is `KYBER_SQUAD_OPERATOR_CHANNEL` exactly `true`, read by `SquadOperatorChannel` when install, update,
+  or doctor renders; status never renders. The server name comes from `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`
+  and must match `^[A-Za-z0-9._-]{1,64}$` (1 to 64 ASCII letters, digits, '.', '_' or '-'). The overlay takes the validated name in place of
+  the placeholder `{{operator-channel-server}}`. The target must be Copilot CLI at global scope, and
+  `CopilotMcpServerProbe` must find that name under `mcpServers` in `$COPILOT_HOME/mcp-config.json`. The
+  probe resolves symlinks to their target, refuses a zero-length target before opening it (an approximation,
+  since .NET cannot type-check a file without opening it), requires a regular file, caps the read at 1 MiB,
+  skips a leading UTF-8 BOM, and returns absent on I/O, authorisation, or JSON errors. On Copilot CLI global
+  scope with the gate on, failures record `operator-channel-server-name-missing`,
+  `operator-channel-server-name-invalid` (the raw value is never written), or `operator-channel-server-absent`.
+  Every other target or scope records only `operator-channel-not-rendered` on the conductor, with no name
+  warning. Otherwise the output is byte-identical. The overlay is appended after the authored body, so the
+  tool entry is last in the list.
 - **`devin` withholds delegation from subagents.** Devin Local dispatches a named profile
   through `run_subagent`, and a profile reaches further subagents only through its
   `max-nesting` setting. Devin has no `allowed_subagents` equivalent, so granting nested
@@ -714,16 +760,17 @@ and validates.
   requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
   only write path is that tool can edit an artifact but not create one, so `architect` stopped at
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
-  together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
-  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
+  together — on Devin, `ask` narrows to withheld on subagents, and the shared profiles hold
+  `process.execute: deny` (`architect`) or `deny` (`product-planning`). `architect-devin` and
   `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
   carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
   reference, and `product-owner` in its agent body and the skill's spec-authoring reference
   (it cannot own an agent sidecar: a same-named skill already occupies the ZCode skills
   directory that sidecar would need). Each tells the role to initialise a destination that
   does not exist before editing. `architect`'s `PLAN_READY`
-  contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
-  `docs drift` to pass. `docs-dev` needs no Devin profile: its shared `documentation` profile
+  contract and `product-owner`'s `SPEC_FINALIZED` contract require the read-only MCP tools
+  `docs_validate` and `docs_drift` on the kyber-weave documentation server (with `mergeReady`
+  false while the artifact remains in its active folder). `docs-dev` needs no Devin profile: its shared `documentation` profile
   grants `process.execute: allow` on every target, for archival `git mv` and the two docs checks
   (ADR 0028, amended 2026-10-26), so on Devin it receives `exec` and its companions and records no
   `safety-narrowed`. On Antigravity it receives `run_command` beside `write_to_file` and records no
@@ -927,8 +974,11 @@ When the breaker trips — or a worker returns `STATUS: ESCALATION` — the cond
 immediately halts rework for that task, does not dispatch further workers for that
 cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
 prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
-cannot complete while an unresolved circuit-breaker finding exists. At queue drain,
+cannot complete while an unresolved circuit-breaker finding exists in supervised mode. At queue drain,
 `architect` investigates the cluster and authors an intake recommendation or Draft plan.
+In autonomous mode the breaker is not a run stop. Its halt on rework is unchanged, and an
+unresolved finding is listed in the draft pull request as an open finding while delivery
+continues ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
@@ -1002,6 +1052,17 @@ register and runs the documentation validation and drift checks. The closeout di
 reports `MAPPED:`, `IMPACT:`, and `DOCS_REVIEW:` rows; a plan or specification closeout
 ends in `STATUS: CLOSEOUT_COMPLETE`, or `STATUS: BLOCKED` naming what stopped the
 archive.
+
+### Delivery: draft first, ready on CI
+
+Delivery is the same in both modes. The conductor commits to a feature branch, pushes it, and opens
+a draft pull request before the whole-change council runs, so the council reviews a pull request that
+already exists. `github-devops` then waits for required CI, for at most 60 minutes, and marks the pull
+request ready once every required check passes. The council verdict is written into the pull request
+description and does not gate readiness. Review that follows is ordinary post-ready pull request review,
+not a conductor gate. The conductor never merges. Autonomous `NEEDS_HUMAN` verdicts and unresolved
+circuit-breakers are listed as pending human review, not held back
+([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
 
 ### Host documentation side
 

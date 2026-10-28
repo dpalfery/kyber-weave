@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-10-27
 ---
 
 # Adopting DocGraph in an existing repository
@@ -50,6 +50,31 @@ Passing `--kyber-standards` scaffolds the 11 rich Kyber Squad coding standards t
 under `<docs-root>/standards/`, merges their technologies into `ontology.technologies`
 in `.kyber-weave/kyber-weave.yml`, and registers all 11 `<{tech}-coding-standard>` properties
 in Config Reg.
+
+### Review gates
+
+`docs init` also writes a `review:` section into `.kyber-weave/kyber-weave.yml` for the
+declared technologies that ship gates — format, lint, typecheck, build and test commands
+rendered from the product's embedded gate catalogue (see [Review council
+architecture](../code-review/architecture.md#the-shipped-gate-catalogue)). A new host
+config carries the block at creation; an existing config without one gains it with every
+other byte untouched. Each gate carries a comment naming its technology, so a stack's
+gates can be found and removed.
+
+```bash
+kyber-weave docs init . --no-review-gates   # write no gates
+```
+
+`--no-review-gates` opts out: no `review:` section is written and the output says so.
+Re-running never edits an existing `review:` section, even with `--force` — the block is
+host-owned from the moment it is written. A second run instead lists catalogue gate ids
+missing from the host's section, as information only; the exit code is unchanged. A
+declared technology with no catalogue entry reports `no gates shipped for <tech>` and
+writes nothing. Upgrading Kyber-Weave never changes the gates a host runs; `kyber-weave
+review catalogue` prints the catalogue for newer releases to copy in by hand.
+
+Wire the gates into CI with the [review-gate
+template](../ci-pipelines/workflows-runbook.md#the-review-gate-template).
 
 The same conservative rule applies to `.kyber-weave/.gitignore`: an effective `cache/`
 entry is preserved, a missing one is appended without disturbing other patterns, and a

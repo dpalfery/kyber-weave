@@ -373,11 +373,15 @@ public sealed class ReviewTaskGatesConfigTests
             "test-dev",
             "pulumi-dev",
             "sql-database-architect",
-            "github-devops"
+            "github-devops",
+            "typescript-dev",
+            "rust-dev"
         ];
 
         Assert.Equal(developers.Order(StringComparer.Ordinal), taskGates.Keys.Order(StringComparer.Ordinal));
         Assert.All(developers, agent => Assert.NotEmpty(taskGates[agent]));
+        Assert.Equal(["dash-typecheck", "dash-lint"], taskGates["typescript-dev"].Select(gate => gate.Id));
+        Assert.Equal(["cargo-fmt", "cargo-clippy"], taskGates["rust-dev"].Select(gate => gate.Id));
     }
 
     /// <summary>
@@ -401,6 +405,138 @@ public sealed class ReviewTaskGatesConfigTests
         ];
 
         Assert.All(notDevelopers, agent => Assert.DoesNotContain(agent, taskGates.Keys));
+    }
+
+    /// <summary>
+    /// The Go developer runs no task gate of its own; python-dev is pinned in the test above. A Go
+    /// gate added without its own review would run the dash or tray suites on a change that never
+    /// touched them.
+    /// </summary>
+    [Fact]
+    public void GoDeveloperDeclaresNoTaskGates()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        string[] agents =
+        [
+            "go-dev"
+        ];
+
+        Assert.All(agents, agent => Assert.DoesNotContain(agent, taskGates.Keys));
+    }
+
+    /// <summary>
+    /// TypeScript and Rust developers reuse the same gates their react-dev and tauri-dev siblings
+    /// run. A copy that drifted (a different include list or command) would let the two roles
+    /// check different things against the same dash and tray code.
+    /// </summary>
+    [Fact]
+    public void TypeScriptAndRustDevelopersReuseTheSharedDashAndTrayGates()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        IReadOnlyList<ReviewTaskGate> react = taskGates["react-dev"];
+        IReadOnlyList<ReviewTaskGate> typescript = taskGates["typescript-dev"];
+        string[] dashIds =
+        [
+            "dash-typecheck",
+            "dash-lint"
+        ];
+        foreach (string id in dashIds)
+        {
+            ReviewTaskGate expected = Assert.Single(react, gate => gate.Id == id);
+            ReviewTaskGate actual = Assert.Single(typescript, gate => gate.Id == id);
+
+            Assert.Equal(expected.Include, actual.Include);
+            Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
+        }
+
+        IReadOnlyList<ReviewTaskGate> tauri = taskGates["tauri-dev"];
+        IReadOnlyList<ReviewTaskGate> rust = taskGates["rust-dev"];
+        string[] cargoIds =
+        [
+            "cargo-fmt",
+            "cargo-clippy"
+        ];
+        foreach (string id in cargoIds)
+        {
+            ReviewTaskGate expected = Assert.Single(tauri, gate => gate.Id == id);
+            ReviewTaskGate actual = Assert.Single(rust, gate => gate.Id == id);
+
+            Assert.Equal(expected.Include, actual.Include);
+            Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
+        }
+    }
+
+    /// <summary>
+    /// The test developer changes the tray's Rust tests as well as the .NET and dash ones, so it
+    /// runs the tray's format and lint gates alongside its existing set. Without them a Rust
+    /// formatting or clippy failure in a test-only change reaches the reviewer unchecked.
+    /// </summary>
+    [Fact]
+    public void TestDevRunsTheTrayRustFormatAndLintGates()
+    {
+        IReadOnlyList<ReviewTaskGate> gates = RepositoryTaskGates()["test-dev"];
+
+        IReadOnlyList<ReviewTaskGate> rust = RepositoryTaskGates()["rust-dev"];
+        foreach (string id in new[] { "cargo-fmt", "cargo-clippy" })
+        {
+            ReviewTaskGate expected = Assert.Single(rust, gate => gate.Id == id);
+            ReviewTaskGate actual = Assert.Single(gates, gate => gate.Id == id);
+
+            Assert.Equal(expected.Include, actual.Include);
+            Assert.Equal(expected.Run, actual.Run);
+            Assert.Equal(expected.Fix, actual.Fix);
+        }
+
+        Assert.Contains(gates, gate => gate.Id == "dash-typecheck");
+        Assert.Contains(gates, gate => gate.Id == "dotnet-build");
+    }
+
+    /// <summary>
+    /// The review council runs the tray's Rust suite the same way CI does: format check, clippy
+    /// with warnings denied, then tests, all after the TypeScript gates and all blocking. Clippy
+    /// and tests carry a 1800-second limit, so a slow Cargo build is not cut off at the default.
+    /// </summary>
+    [Fact]
+    public void ReviewGatesRunTheTrayRustSuiteThatCiRuns()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        List<string> ids = gates.Select(gate => gate.Id).ToList();
+
+        int tsReachable = ids.IndexOf("ts-reachable");
+        Assert.True(tsReachable >= 0, "Expected the review gates to end with ts-reachable.");
+        Assert.Equal(["cargo-fmt", "cargo-clippy", "cargo-test"], ids.Skip(tsReachable + 1).Take(3));
+
+        ReviewGate fmt = gates[tsReachable + 1];
+        ReviewGate clippy = gates[tsReachable + 2];
+        ReviewGate test = gates[tsReachable + 3];
+
+        Assert.True(fmt.Blocking, "cargo-fmt must block.");
+        Assert.Equal(900, fmt.TimeoutSeconds);
+        Assert.Equal(
+            ["cargo", "fmt", "--manifest-path", "dash/tray/src-tauri/Cargo.toml", "--check"],
+            fmt.Run);
+
+        Assert.True(clippy.Blocking, "cargo-clippy must block.");
+        Assert.Equal(1800, clippy.TimeoutSeconds);
+        Assert.Equal(
+            ["cargo", "clippy", "--manifest-path", "dash/tray/src-tauri/Cargo.toml", "--", "-D", "warnings"],
+            clippy.Run);
+
+        Assert.True(test.Blocking, "cargo-test must block.");
+        Assert.Equal(1800, test.TimeoutSeconds);
+        Assert.Equal(
+            ["cargo", "test", "--manifest-path", "dash/tray/src-tauri/Cargo.toml"],
+            test.Run);
+
+        // The council gate and the per-task gate run the same argv, so a task that passes
+        // its gate passes the council's.
+        IReadOnlyList<ReviewTaskGate> rustTaskGates = RepositoryTaskGates()["rust-dev"];
+        Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-fmt").Run, fmt.Run);
+        Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-clippy").Run, clippy.Run);
     }
 
     /// <summary>
@@ -622,5 +758,13 @@ public sealed class ReviewTaskGatesConfigTests
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TaskGates;
+    }
+
+    private static IReadOnlyList<ReviewGate> RepositoryReviewGates()
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+
+        Assert.True(result.Success, result.Error);
+        return result.Config!.Review.Gates;
     }
 }

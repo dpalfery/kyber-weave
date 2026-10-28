@@ -566,12 +566,12 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
-    // Client input: the agent-scoped flags without --agent are refused with exit 2.
+    // Client input: the agent-only flags without --agent are refused with exit 2.
+    // --paths and --base are no longer agent-only: they scope the repository-wide council gates too.
+    // That change is intentional (task decision T3), so they are covered in ReviewGatesCouncilCommandTests.
     // -----------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData("--paths=src/a.cs")]
-    [InlineData("--base=HEAD")]
     [InlineData("--task=t2r")]
     [InlineData("--fix")]
     public void AnAgentOnlyFlagWithoutAgentIsAClientInputError(string flag)

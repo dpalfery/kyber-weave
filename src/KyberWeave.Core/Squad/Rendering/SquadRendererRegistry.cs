@@ -103,9 +103,48 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         // doesn't leak a pre-parsed model through every implementation, including the
         // test fake that never touches disk at all.
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        if (SquadOperatorChannel.IsGateOn())
+        {
+            RecordOperatorChannelNotRendered(source, request, degradations);
+        }
+
         ValidateRenderResult(source, request.Targets, files, degradations);
 
         return new SquadRenderResult(true, files, degradations, warnings, []);
+    }
+
+    /// <summary>
+    /// Records that the operator channel overlay did not render for each requested target that cannot
+    /// carry it. Only Copilot at global scope carries it, so every other target gets an honest record
+    /// instead of a silent omission.
+    /// </summary>
+    private static void RecordOperatorChannelNotRendered(
+        SquadSource source,
+        SquadRenderRequest request,
+        List<SquadDegradationRecord> degradations)
+    {
+        SquadAgent? conductor = source.Agents.FirstOrDefault(agent =>
+            string.Equals(agent.Name, SquadOperatorChannel.ConductorAgentName, StringComparison.Ordinal));
+        if (conductor is null)
+        {
+            return;
+        }
+
+        foreach (SquadTarget target in request.Targets)
+        {
+            if (target == SquadTarget.Copilot && request.Scope == SquadDeploymentScope.Global)
+            {
+                continue;
+            }
+
+            degradations.Add(new SquadDegradationRecord(
+                SquadTargetCatalog.GetToken(target),
+                conductor.Name,
+                conductor.Name,
+                SquadOperatorChannel.NotRenderedCode,
+                conductor.BodyDigest,
+                SquadOperatorChannel.NotRenderedDetails));
+        }
     }
 
     private static void ValidateRenderResult(

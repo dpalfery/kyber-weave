@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change (the gate is named pre-push; a draft push never waits for it). Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
 ---
 
@@ -195,7 +195,7 @@ The two escalation rules run **before** any finding is weighed, because a reserv
 an unreviewable diff both say the same thing: this change is not the engine's to settle,
 however clean or filthy the council's report was.
 
-**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids. Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
+**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids (stop reworking each and list the ids in the PR; park never holds back delivery). Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
@@ -209,21 +209,25 @@ say so alongside it with the finding that should have changed it.
 
 ## Pre-push self-review gate
 
-Run this gate on your own finished change before pushing. It works the same in any
+"Pre-push" is the name of this gate, kept for its heading and its references. It does not mean the gate runs before the push: the draft pull request is pushed first, and a draft push never waits for this gate. Required CI decides readiness.
+
+Run this gate on your own finished change. Its verdict is evidence for the pull request description; it does not block the push or the ready step. It works the same in any
 harness — Claude, Pi, OpenCode, Antigravity, or others — because it uses only the
 Procedure above and the host's declared gates.
 
-1. **Sync.** Refresh the remote head and the base branch before pushing. If another
+1. **Sync.** Refresh the remote head and the base branch before the draft push. If another
    actor advanced either, reconcile their changes into your branch and revalidate the
    affected work. Merge, never rebase, never force-push. Confirm the refreshed remote
-   head and base branch are reachable from your local `HEAD` before pushing.
-2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
-   accumulated diff against its base, not just the last files touched. Fix every
-   major-or-worse finding before pushing — Minor/Info findings never block the push gate; only major-or-worse block — then re-run steps 1–5 over the updated
-   diff and use that second verdict. A verdict computed before a fix is void. If the
-   re-run still returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or
-   report the blocker.
-3. **Defect-class checklist.** Walk each class explicitly before pushing:
+   head and base branch are reachable from your local `HEAD` before the draft push.
+2. **Council over the whole change.** Push first: the change goes up as a draft pull
+   request before the council runs, so the council reviews a pull request that already
+   exists. Then run full Procedure steps 1–5 over the whole accumulated diff against its
+   base, not just the last files touched. Fix major-or-worse findings where a bounded fix
+   exists, re-run steps 1–5 over the updated diff, and use that second verdict in the pull
+   request description. A verdict computed before a fix is void. List any major-or-worse
+   finding still open by id in the pull request description. Minor/Info findings never
+   block. Required CI decides readiness; the verdict does not gate the push or the ready step.
+3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
    c. Parity: guard added in one place not every caller/branch (store vs direct-DB, harness vs run scope, API vs UI, producer vs consumer).
