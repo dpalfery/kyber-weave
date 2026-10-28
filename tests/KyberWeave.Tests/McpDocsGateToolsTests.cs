@@ -337,9 +337,11 @@ public sealed class McpDocsGateToolsTests : IDisposable
         File.CreateSymbolicLink(linkPath, target);
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        Exception? failure = Record.Exception(() => InvokeValidate(tools, true, gitBase: "HEAD"));
+        string? captured = null;
+        Exception? failure = Record.Exception(() => captured = InvokeValidate(tools, true, gitBase: "HEAD"));
         Assert.Null(failure);
-        string response = InvokeValidate(tools, true, gitBase: "HEAD");
+        Assert.NotNull(captured);
+        string response = captured;
 
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
         Assert.Contains(ArchiveCloseoutValidator.MissingCloseoutEvidence, response, StringComparison.Ordinal);
