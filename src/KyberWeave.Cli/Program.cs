@@ -258,6 +258,11 @@ app.Configure(config =>
             .WithExample("review", "gates", ".")
             .WithExample("review", "gates", ".", "--out", "gates.json");
 
+        review.AddCommand<ReviewCatalogueCommand>("catalogue")
+            .WithDescription("Print the catalogue review: block for the declared technologies without writing any file.")
+            .WithExample("review", "catalogue", ".")
+            .WithExample("review", "catalogue", ".", "--technology", "go");
+
         review.AddCommand<ReviewDuplicatesCommand>("duplicates")
             .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
             .WithExample("review", "duplicates", ".")

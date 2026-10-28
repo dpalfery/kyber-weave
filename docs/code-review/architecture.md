@@ -19,6 +19,11 @@ code-refs:
   - ReviewConfigLoader
   - ReviewTaskGate
   - TaskGateSelection
+  - GateCatalogue
+  - ProjectRootDetector
+  - ReviewBlockWriter
+  - CouncilGateSelection
+  - ReviewCatalogueCommand
 ---
 
 # Review council architecture
@@ -367,6 +372,7 @@ review:
   gates:
     - id: test
       run: [dotnet, test, -c, Release]     # argv, never a command line
+      include: ["src/**/*.cs"]            # only changes touching these paths run this gate
       blocking: true
   coverage:
     file-line-percent: 85
@@ -427,6 +433,8 @@ review:
 | `fix` | no | none | The command `--fix` runs before `run`; when written it must not be empty |
 | `blocking` | no | `true` | Whether a failure fails the run |
 | `timeout` | no | `900` seconds | After this the runner kills the process tree; must be positive |
+| `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
+| `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 Both `run` and `fix` are argv for the same reason `review.gates` is. Two tokens expand, and only
 in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
@@ -441,7 +449,108 @@ whose target lies outside the repository, and a `--task` that is not a slug, ref
 (`KW-REVIEW-028`) before any process starts.
 
 A YAML anchor is the way to share a gate between agents: define it on the first agent and alias
-it under the others. This repository does so for the .NET format gates and the build.
+it under the others. This repository does so for:
+
+- .NET: `format-whitespace`, `format-style`, `format-analyzers` and `dotnet-build`, anchored under `csharp-dev`.
+- TypeScript: `dash-typecheck` and `dash-lint`, anchored under `react-dev`; `tray-ui-typecheck` is anchored there too.
+- Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under `tauri-dev`.
+
+`typescript-dev` aliases the dash gates and `rust-dev` the cargo format and lint gates. `test-dev`
+runs the .NET format and build gates, the dash gates and the cargo format and lint gates, because
+its tests span all three. `go-dev` and `python-dev` declare no task gates, because this repository
+has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
+only, because a whole-crate test run per task would fail on another worker's concurrent edit.
+
+The shipped Go format gate (`gofmt -l`, council and task) sets `fail-on-output: true`. `gofmt -l` exits 0
+on every Go version even when it lists files, and `gofmt -d` exits 1 on a diff only from Go 1.26, so a
+gate that judged the exit code alone could not fail on older toolchains; any listed file fails this one
+on all of them.
+
+### Council gates
+
+`review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds` — and,
+since the shipped catalogue, `include`, `os`, `working-directory` and `fail-on-output`:
+
+| Key | Required | Default | Meaning |
+|---|---|---|---|
+| `id` | yes | none | Lookup-name slug, unique across `review.gates` |
+| `run` | yes | none | The verifying command, argv; never a shell line |
+| `blocking` | no | `true` | Whether a failure fails the run |
+| `timeout-seconds` | no | `900` | After this the runner kills the process tree; must be positive |
+| `include` | no | `[]`, which matches every change | Globs selecting the changed files the gate applies to; a gate with no `include` runs on every change |
+| `os` | no | every platform | `windows` or `unix`; a gate on another platform is skipped (`KW-REVIEW-026`) |
+| `working-directory` | no | the repository root | Repository-relative directory the gate starts in; must exist and stay inside the root |
+| `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
+
+`CouncilGateSelection` plans the run against the changed set and the host OS: a gate
+whose `os` does not match is skipped, a gate whose `include` matches no changed file is
+skipped (`KW-REVIEW-026`), and a gate with no `include` runs on every change.
+
+The changed set is `--paths` when given, else the diff from the merge base of `--base`
+to the working tree. `--base` and `--paths` scope the council gates too — they are
+accepted without `--agent` (the default ref is `origin/HEAD`). The set is only computed
+when at least one gate declares `include`. When git cannot list the changes, every gate
+runs unscoped and the report says why (`KW-REVIEW-034`, Info): fetch the full history,
+or name a base that exists with `--base`.
+
+Unknown keys are not silently dropped: any key outside the tables above loads anyway but
+is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate
+id, a non-slug id, a missing or empty `run`, a non-positive timeout, or an unrecognised
+`os` is refused where the operator wrote it.
+
+### The shipped gate catalogue
+
+`kyber-weave docs init` does not invent per-technology gates. It renders them
+(`ReviewBlockWriter`, planned from `GateCatalogue`) from five embedded families, one per
+version-1 technology set:
+
+| Family | Technologies | Root marker | Nesting | Notes |
+|---|---|---|---|---|
+| `csharp` | `csharp` | `*.slnx`, `*.sln` (fallback `*.csproj`) | each solution | The test form follows the repository `global.json` (`vstest` or `mtp`) |
+| `typescript` | `typescript`, `react` | `tsconfig.json` + `package.json` (pair) | each root | Every gate declares `os: unix`: `npm` and `npx` are `.cmd` shims on Windows |
+| `rust` | `rust`, `tauri` | `Cargo.toml` | outermost | A root under `src-tauri` belongs to `tauri-dev` when `tauri` is declared, else to `rust-dev`; every other root belongs to `rust-dev` |
+| `go` | `go` | `go.mod` | each module | Council gates run with `working-directory` at the module root. `golangci-lint` is third-party: it ships commented out (`when: optional`), to be enabled by hand |
+| `python` | `python` | `pyproject.toml` | outermost | `pytest` exit 5 (no tests collected) fails the gate on purpose |
+
+Each family entry carries a `role` (`format`, `lint`, `typecheck`, `build` or `test`), an
+argv `run` (plus an optional argv `fix` for task gates), `include` globs for the task
+gates, and an optional `when` condition: a required `package.json` script, the absence
+of one, a file under the root, the test runner, or `optional` (always commented out,
+with its note as the reason). Conditions are evaluated per root, because two roots of
+one repository can differ — one `package.json` may define a `lint` script while another
+does not. Entries sharing an id pick one form per root. Every command is argv, and every
+gate id has a source URL in its family file.
+
+Root detection (`ProjectRootDetector`) skips dependency, build-output and ignored
+directories, orders roots by ordinal path so the same tree always yields the same
+output, and writes one copy of each root-bound gate per root: the id is the family
+prefix plus the entry id plus a suffix derived from the root's path (empty for a single
+root), and a written task gate's `include` globs are limited to files under that root.
+Placeholders render per root: `{{root}}` is the repository-relative root directory
+(`.` at the repository root), `{{root-glob}}` is that directory plus a trailing slash
+for glob prefixes (empty at the root), and `{{marker}}` is the marker path the root was
+found by.
+
+With no root, every gate stays commented with the marker the host should point at;
+with more than eight roots in one family, every gate of that family stays commented
+with the root list to pick from. Either way the render names the reason per gate, and
+`docs init` prints the written ids per technology, the commented-out ids with their
+reasons, and the technologies with no gates shipped for them.
+
+Developer task gates are written per agent slug: `csharp-dev`, `dal-dev`, `maui-dev`
+and `pulumi-dev` from the csharp family; `typescript-dev` and `react-dev` from
+typescript; `rust-dev` and `tauri-dev` from rust; `go-dev` from go; `python-dev` from
+python. `test-dev` gets a copy of every written format and lint gate. The written block
+is host-owned from then on: re-running `docs init` never edits an existing `review:`
+section, even with `--force` — it only lists catalogue ids missing from the host's
+section, as information. `ReviewConfig.ProductDefaults` stays empty, so upgrading
+Kyber-Weave never changes which gates a host runs. `kyber-weave review catalogue`
+(`ReviewCatalogueCommand`) prints the same block to stdout without writing any file, so
+gates shipped in a newer release can be copied in by hand.
+
+Per-task gates take `include`, `os`, `fix`, `blocking` and `timeout`, as the table above describes.
+Their timeout key is `timeout`, in seconds, with a default of 900. `timeout-seconds` is the council
+key: written on a task gate it is an unknown key (`KW-CONFIG-002`), not a silent drop.
 
 ## Modes
 

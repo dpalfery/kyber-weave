@@ -182,6 +182,22 @@ review:
       run: [npm, run, --prefix, dash, "check:reachable"]
       blocking: true
 
+    # The tray's Rust suite, run the way CI runs it (.github/workflows/ci.yml, working-directory
+    # dash/tray/src-tauri): format check, clippy with warnings denied, then tests. --manifest-path
+    # sets the crate root without a shell `cd`. Clippy and the tests compile the whole Tauri
+    # dependency tree, so they get 1800 seconds rather than the default.
+    - id: cargo-fmt
+      run: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml, --check]
+      blocking: true
+    - id: cargo-clippy
+      run: [cargo, clippy, --manifest-path, dash/tray/src-tauri/Cargo.toml, --, -D, warnings]
+      timeout-seconds: 1800
+      blocking: true
+    - id: cargo-test
+      run: [cargo, test, --manifest-path, dash/tray/src-tauri/Cargo.toml]
+      timeout-seconds: 1800
+      blocking: true
+
   # Developer task gates. `kyber-weave review gates . --agent <name> --paths ... --task <slug>`
   # runs one developer agent's list against the change that agent just made, so the agent finds a
   # broken gate before a reviewer does. Keyed by agent slug; gates run in declaration order.
@@ -288,7 +304,19 @@ review:
       - *dash-lint
       - *tray-ui-typecheck
 
-    # Tests are .NET (tests/) and TypeScript (dash/tests, dash/web), so test-dev runs both sets.
+    # TypeScript and Rust developers run the same gates as their siblings, aliased so the include
+    # lists and commands cannot drift: typescript-dev runs react-dev's dash gates, rust-dev runs
+    # tauri-dev's cargo gates. There is no cargo-test task gate; the full Rust suite runs in
+    # review.gates and CI. Go and Python developers declare no task gates.
+    typescript-dev:
+      - *dash-typecheck
+      - *dash-lint
+    rust-dev:
+      - *cargo-fmt
+      - *cargo-clippy
+
+    # Tests are .NET (tests/), TypeScript (dash/tests, dash/web), and the tray's Rust, so test-dev
+    # runs all three sets' format and lint checks.
     test-dev:
       - *fmt-whitespace
       - *fmt-style
@@ -296,6 +324,8 @@ review:
       - *dotnet-build
       - *dash-typecheck
       - *dash-lint
+      - *cargo-fmt
+      - *cargo-clippy
 
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —

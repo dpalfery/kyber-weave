@@ -133,7 +133,7 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 
 Parallel code review: a council of specialist lenses over the diff, the host's deterministic
 gate suite, and a rule-based verdict engine that decides from both.
-Start at the [Review council overview](code-review/README.md) for the idea and the three commands.
+Start at the [Review council overview](code-review/README.md) for the idea and the four commands.
 
 | Page | Covers |
 |---|---|

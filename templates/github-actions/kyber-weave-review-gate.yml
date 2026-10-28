@@ -1,0 +1,129 @@
+# Sample: Kyber-Weave review gates (deterministic per-technology checks)
+#
+# Copy to .github/workflows/ and adapt. No Kyber-Weave command writes
+# .github/workflows/: this file is copied by the host, never generated.
+#
+# Which gates run comes from the `review:` section of .kyber-weave/kyber-weave.yml,
+# written by `kyber-weave docs init`. This workflow only supplies the toolchains
+# and the base to compare against.
+#
+# Every toolchain step below is disabled (`if: false`). Set it to `true` for the
+# technologies your repository uses, so the gates can run their formatters,
+# linters, builds and tests. The install script tracks the latest release; add
+# `--version <x.y.z>` to the install step where a job must be reproducible.
+
+name: Kyber-Weave Review Gate
+
+"on":
+  pull_request:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: kyber-weave-review-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  review-gates:
+    name: Review gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history: --base resolves through git merge-base, which a
+          # single-commit checkout cannot answer.
+          fetch-depth: 0
+
+      - name: Install Kyber-Weave
+        run: |
+          set -euo pipefail
+          # Download then execute (not curl|sh) so SAST tools can verify the step.
+          # Binaries the script installs are still SHA-256 verified against the Release.
+          curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+            https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+          sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Toolchain: C# (csharp). Set `if: true` for a .NET repository.
+      - name: Set up .NET
+        if: false
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # Toolchain: TypeScript and React (typescript, react). Set `if: true` for a
+      # Node repository, and add one `npm ci` per package root.
+      - name: Set up Node
+        if: false
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # Toolchain: TypeScript and React (typescript, react). Install dependencies
+      # in each package root. `.` only suits a single-package repository: in a
+      # monorepo, set `working-directory` to each root that holds a package-lock.json
+      # (the roots `kyber-weave review catalogue` renders gates for) and repeat this
+      # step once per root.
+      - name: Install Node dependencies
+        if: false
+        working-directory: .
+        run: npm ci
+
+      # Toolchain: Rust and Tauri (rust, tauri). Set `if: true` for a Rust
+      # repository; rustfmt and clippy are what the gates run.
+      - name: Set up Rust
+        if: false
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      # Toolchain: Go (go). Set `if: true` for a Go repository.
+      - name: Set up Go
+        if: false
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Toolchain: Python (python). Set `if: true` for a Python repository.
+      - name: Set up Python
+        if: false
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # Toolchain: Python (python). Tools the gates call.
+      - name: Install Python tools
+        if: false
+        run: pip install ruff mypy pytest
+
+      # Pull request: compare against the PR target. Push: compare against the
+      # pushed range. Anything else (dispatch): the remote default branch.
+      # A blocking gate failure exits 1, which fails this job.
+      - name: Run review gates
+        env:
+          # Event values travel through env, never interpolated into run:, so a
+          # hostile ref cannot reach the shell.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            BASE="origin/${BASE_REF}"
+          elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${EVENT_BEFORE}"
+          else
+            BASE="origin/HEAD"
+          fi
+          mkdir -p artifacts
+          kyber-weave review gates . --base "$BASE" \
+            --out artifacts/review-gates.json --format table
