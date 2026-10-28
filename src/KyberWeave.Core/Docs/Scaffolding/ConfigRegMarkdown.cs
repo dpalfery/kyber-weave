@@ -35,7 +35,11 @@ internal static class ConfigRegMarkdown
     }
 
     /// <summary>The generated region, markers included, with <c>\n</c> line endings.</summary>
-    /// <param name="entries">Path properties, rendered in order.</param>
+    /// <param name="entries">
+    /// Registry properties, rendered in order. A mode entry is written the same way as a path
+    /// entry: the property line is what a skill resolves, and <c>`enabled`</c> reads as a
+    /// setting in that position without needing a syntax of its own.
+    /// </param>
     /// <param name="autonomy">The autonomy setting, rendered as a final property line only when set.</param>
     public static string Render(IReadOnlyList<ConfigRegEntry> entries, string? autonomy = null)
     {

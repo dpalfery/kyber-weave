@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-28
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 code-refs:
@@ -14,6 +14,11 @@ code-refs:
   - DocumentCorpus
   - DocumentIndex
   - DocumentIndexHost
+  - ConfigRegValidator
+  - ConfigRegConfig
+  - ConfigRegEntry
+  - ConfigRegEntryKind
+  - ConfigRegMarkdown
 ---
 
 # DocGraph architecture
@@ -139,6 +144,41 @@ of process launches is one.
 The connection is deliberately **not** opened `-readonly`: the CodeGraph daemon leaves the
 index in WAL mode, and a WAL database needs a shared-memory file that `-readonly` forbids
 creating.
+
+## Mode properties are not paths
+
+The configuration registry publishes repository paths under stable names, so a portable skill
+resolves `<docs-root>` instead of embedding a relative link out of its own directory.
+`ConfigRegConfig` resolves the entries, `ConfigRegMarkdown` renders them into the generated
+block of the repository root `AGENTS.md`, and `ConfigRegValidator` checks that block against
+the configuration that produced it.
+
+Every entry used to be a path, and the registry's promise was that every value resolves on
+disk. That promise cannot cover a setting: `enabled` is not a file, and a validator that went
+looking for it would fail a repository for adopting the feature it names. So a registry entry
+carries its kind — `ConfigRegEntry` with `ConfigRegEntryKind.Path` or `ConfigRegEntryKind.Mode`
+— and the **kind**, not the property name, decides how an entry is checked.
+
+- **`ConfigRegEntryKind.Path`**: the value is a repository-relative path. `KW-CONFIG-REG-001`
+  fires when it resolves to nothing on disk.
+- **`ConfigRegEntryKind.Mode`**: the value is a mode word describing configuration state. The
+  path-existence check is skipped for it, because there is nothing on disk to find. No other
+  check is relaxed with it: path entries are still checked, without exception.
+- **Both kinds are covered by `KW-CONFIG-REG-002`**: the rendered block must match what the
+  configuration produces, whichever kind an entry carries. A mode property the configuration no
+  longer publishes, or one published with the wrong value, is as stale as a moved path.
+
+`<intake-assessment>` is the first instance. A repository that sets `ontology: intake: true`
+in `.kyber-weave/kyber-weave.yml` gets the property published with the value `enabled`;
+absent or false, nothing is published, and the property's absence is the off state. What the
+property means is the consumer's, not the engine's — the conductor reads it to decide whether
+to run an intake assessment. See the
+[Kyber-Squad requirements](../kyber-squad/requirements.md#intake-assessment) and the
+[adoption guide](../kyber-squad/onboarding.md#intake-assessment-opt-in-per-repository).
+
+Because the kind travels on the entry, a mode property is also reserved: a host may not
+declare one under `config-reg:`, because that would replace a setting with a path and break
+the promise the registry makes.
 
 ## Related
 

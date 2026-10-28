@@ -138,6 +138,24 @@ public sealed class SquadStateStore
     }
 
     /// <summary>
+    ///     The root a global receipt's home-owned files are relative to,
+    ///     <c>&lt;HomeDirectory&gt;/.kyber-weave</c>: the parent of the <c>squad/</c> state
+    ///     directory, and the directory an operator opens to read or edit one of those files.
+    /// </summary>
+    /// <remarks>
+    ///     Derived from <see cref="ResolveHomeStateDirectory" /> rather than spelled out again, so a
+    ///     move of the state directory takes the home-owned files with it. Internal because it is a
+    ///     layout detail behind <see cref="SquadReceipt.HomeFiles" />: a host asks the receipt what
+    ///     Squad owns, not where the home happens to put it.
+    /// </remarks>
+    internal string ResolveHomeOwnedFilesRoot()
+    {
+        return Path.GetDirectoryName(ResolveHomeStateDirectory())
+               ?? throw new InvalidOperationException(
+                   "The Squad home state directory has no parent to anchor home-owned files on.");
+    }
+
+    /// <summary>
     ///     Lists every project in the home-level registry, with a stale flag and reason for each entry
     ///     that no longer matches the state on disk. A project whose receipt sits under
     ///     <c>projects/&lt;key&gt;</c> but has no registry entry is rebuilt from that receipt, and the
@@ -456,6 +474,12 @@ public sealed class SquadStateStore
             JsonSerializer.Serialize(writer, receipt.Degradations, JsonOptions);
             writer.WritePropertyName("files");
             JsonSerializer.Serialize(writer, receipt.Files, JsonOptions);
+            if (isGlobal && receipt.HomeFiles.Count > 0)
+            {
+                writer.WritePropertyName("homeFiles");
+                JsonSerializer.Serialize(writer, receipt.HomeFiles, JsonOptions);
+            }
+
             writer.WriteEndObject();
         }
 
@@ -526,6 +550,13 @@ public sealed class SquadStateStore
             root.GetProperty("files").Deserialize<IReadOnlyList<SquadOwnedFile>>(JsonOptions)
             ?? [];
 
+        // Absent on every receipt written before the user-home response guidance existed, which is
+        // why it is read defensively rather than required by the shape check.
+        IReadOnlyList<SquadHomeFile> homeFiles =
+            root.TryGetProperty("homeFiles", out JsonElement homeFilesElement)
+                ? homeFilesElement.Deserialize<IReadOnlyList<SquadHomeFile>>(JsonOptions) ?? []
+                : [];
+
         SquadReceiptLayout layout;
         if (isV2)
         {
@@ -569,7 +600,8 @@ public sealed class SquadStateStore
 
         return new SquadReceipt(schema, scope, targetRoot, installedAtUtc, degradations, files)
         {
-            Layout = layout
+            Layout = layout,
+            HomeFiles = homeFiles
         };
     }
 
@@ -1209,6 +1241,49 @@ public sealed class SquadStateStore
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
                     "is not a unique portable deployment path.");
         }
+
+        // Home-owned files live under one root for every harness, so their paths are unique on the
+        // path alone — there is no target to scope the identity by, and only a global receipt has a
+        // home to own anything in.
+        if (receipt.HomeFiles is null)
+            throw new InvalidDataException("Squad receipt home files are required.");
+        if (receipt.HomeFiles.Count > 0 && receipt.Scope != SquadDeploymentScope.Global)
+            throw new InvalidDataException(
+                "Squad receipt home files are recorded only on a global receipt, because only global " +
+                "state lives in the user's home.");
+
+        HashSet<string> homeIdentities = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadHomeFile? homeFile in receipt.HomeFiles)
+        {
+            if (homeFile is null)
+                throw new InvalidDataException("Squad receipt contains an empty home file entry.");
+
+            string normalizedPath;
+            string portableIdentity;
+            try
+            {
+                normalizedPath = SquadPathPolicy.NormalizeRelativePath(homeFile.RelativePath);
+                portableIdentity = SquadPathPolicy.GetPortableIdentity(normalizedPath);
+            }
+            catch (Exception exception) when (
+                exception is SquadPathContainmentException or SquadDeploymentConflictException)
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not portable.",
+                    exception);
+            }
+
+            if (!string.Equals(normalizedPath, homeFile.RelativePath, StringComparison.Ordinal) ||
+                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not a portable canonical path.");
+
+            ValidateDigest(homeFile.Sha256, "home file digest");
+
+            if (!homeIdentities.Add(portableIdentity))
+                throw new InvalidDataException(
+                    $"Squad receipt home file path '{homeFile.RelativePath}' is not a unique portable path.");
+        }
     }
 
     private static void ValidateCanonicalTarget(string? value, string fieldName)
@@ -1358,6 +1433,20 @@ public sealed class SquadStateStore
                 file,
                 ["relativePath", "sha256", "target", "adopted"],
                 "receipt file");
+
+        // Only a v2 (global) receipt carries home-owned files; a v1 receipt with the field is a
+        // hand-edit of state this schema never wrote, so the shape check refuses it outright
+        // rather than silently ignoring an ownership claim.
+        if (root.TryGetProperty("homeFiles", out JsonElement homeFiles))
+        {
+            if (homeFiles.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad receipt homeFiles must be an array.");
+            foreach (JsonElement homeFile in homeFiles.EnumerateArray())
+                RequireExactJsonFields(
+                    homeFile,
+                    ["relativePath", "sha256"],
+                    "receipt home file");
+        }
     }
 
     private static void ValidateReceiptJsonShapeV1(JsonElement root)
@@ -1375,7 +1464,7 @@ public sealed class SquadStateStore
             root,
             ["schema", "layout", "targetRoot", "installedAtUtc", "degradations", "files"],
             "receipt",
-            ["scope"]);
+            ["scope", "homeFiles"]);
 
         JsonElement layout = root.GetProperty("layout");
         string? layoutToken = layout.ValueKind == JsonValueKind.String ? layout.GetString() : null;

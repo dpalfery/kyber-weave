@@ -6,7 +6,7 @@ selected-baseline: .github/agents/conductor.agent.md
 sources:
   .github/agents/conductor.agent.md: fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
   .github/agents/conductor-v3.agent.md: 0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-final-body-sha256: c26912afb500d1c449b4f59fdba4841ff82aced7b793d6dacf942f02443ba8cd
+final-body-sha256: 4fd47cbf4c45b1f4c22b520dbbcc501c4e479ebb67cf25e7e2c04d5f721db029
 ---
 # conductor migration
 
@@ -22,3 +22,7 @@ consolidated with `.github/agents/conductor-v3.agent.md` from Hotshot commit
 Target-neutral `invocation`, `model-profile`, `capability-profile`, `delegates-to`, `fallback`,
 and `aliases` remain canonical lifecycle fields. The `copilot-tools` field preserves exact golden
 membership; Copilot rendering applies only the approved deterministic ordering.
+
+The canonical body evolved after that reconciliation — the `response-format` binding and the
+`<intake-assessment>` resolution — so `final-body-sha256` was recomputed over the evolved body
+rather than carried forward.

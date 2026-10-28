@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -35,6 +35,7 @@ keywords:
   - model-presets
   - instances
   - link-sync
+  - response-format
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -61,6 +62,7 @@ code-refs:
   - SquadModelDiff
   - SquadCanonicalProfileStore
   - SquadCanonicalProfiles
+  - SquadResponseGuidanceDeployer
   - SquadInstanceCatalog
   - SquadInstanceLinkPlanner
   - SquadInstanceLinkSync
@@ -83,7 +85,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["24 Canonical Agents\n(agents/*.md)"]
-        Skills["28 Canonical Skills\n(skills/*)"]
+        Skills["29 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
     end
 
@@ -139,8 +141,8 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
-  identities. The canonical tree separately retains 82 supplemental files, giving 110 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 29 top-level `SKILL.md`
+  identities. The canonical tree separately retains 87 supplemental files, giving 116 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 - **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
   domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
@@ -378,6 +380,49 @@ root. The in-repo copies of earlier releases are read by migration and retained 
 - **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
 - **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
 - **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
+
+#### Home-owned files and the user-home response guidance
+
+A global receipt also records the files Squad owns in the user's home rather than in a harness's
+root, in an additive `homeFiles` array. Each entry carries a `relativePath` and the lowercase
+SHA-256 `sha256` of the bytes Squad wrote. The field is written only on a global receipt and
+only when it is non-empty, so a receipt written by an earlier CLI still parses and an
+existing global deployment is not disturbed by the field's arrival.
+
+The first such file is the user-home response guidance, `<home>/.kyber-weave/response-guidance.md`.
+It belongs to no harness: every agent reaches the one path through the `response-format` skill,
+which is why it is owned as a home file rather than deployed beneath a target's global root.
+`SquadResponseGuidanceDeployer` decides what a run does with it, and the refresh rules follow
+the staging shape the canonical model-profile snapshot in `SquadCanonicalProfileStore` already
+uses — a file whose bytes still match a recorded digest is Squad's own copy of what it shipped,
+and anything else belongs to the operator:
+
+- **Absent → deployed**: no file at the path means nothing is at risk, so the shipped default is
+  written and read back, and its digest recorded.
+- **Bytes already equal the shipped default → adopted**: nothing is written and nothing is
+  reported; the digest is recorded, so the file becomes Squad's own copy from then on. Recording
+  it cannot lose operator wording, because the bytes are already identical to what this release
+  ships. This rule is also the self-repair path for a run that wrote the guidance and then failed
+  before its receipt was committed.
+- **Digest matches the recorded default → replaced**: a file whose bytes still hash to what the
+  receipt recorded is Squad's own copy of the shipped default. A newer release replaces it and
+  the receipt records the new digest.
+- **Edited, or present with no ownership record → preserved and reported**: anything else is the
+  operator's own wording. The run reports that it kept the file and why, and does not adopt it:
+  overwriting it would discard the one customization the file exists to hold. A file that exists
+  with no ownership record was written by the operator or by a release older than the receipt,
+  so it is never claimed. Deleting the file is how an operator takes the shipped default back.
+
+Ownership is recorded only from a digest this run read back from the deployed path. The write
+therefore happens before the deployment plan is built and before the transaction commits: a
+digest copied from the copy this run intended to write would claim ownership of a file the run
+never verified, and every later run would then read the operator's untouched file as an edit.
+The cost of that ordering is the mirror case — a deployment that fails after the guidance write
+leaves the new default in place and the run failing loudly — and the next run repairs it by
+adopting bytes that already equal the shipped default. A guidance file that cannot be read or
+written degrades the run's report with a warning naming the remedy — rerun
+`squad update --global` — and never fails the deployment. Nothing is ever written outside the
+home root.
 
 #### Lock version and preset contract
 
@@ -778,20 +823,20 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 147 files — 24 agents, 28 skills, plus projected
+  the principal. A fresh Copilot render is 149 files — 24 agents, 29 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the render requirement). The
   earlier 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill canonical bytes and retained resources**: `code-review-loop` and
-  `kilo-review-loop` are authored in Kyber-Squad.
+- **Skill canonical bytes and retained resources**: `code-review-loop`, `kilo-review-loop`, and
+  `response-format` are authored in Kyber-Squad.
   Every imported canonical raw `SKILL.md` except the
   five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 82 skill resources (110 files under
+  recursive package formats retain all 87 skill resources (116 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -829,6 +874,45 @@ execution without mutating canonical release profiles or writing intermediate fi
   `SquadModelResolution.ResolveToken` resolves concrete model tokens for each category and harness,
   treating `inherit` as null. `SquadModelDiff.Compute` calculates changed model resolutions across all
   canonical agents between base and preset profiles, powering `--dry-run` and status diffs.
+
+### The response format and its skill carrier
+
+Every user-facing reply carries one shape. The standard itself lives in a single canonical skill,
+`response-format`, and not in each agent body: a second copy of the wording in two bodies would
+drift from the first, and that drift is exactly what the standard exists to prevent.
+
+- **The ordered shape**: a title line naming the work, then a bottom line of at most three
+  sentences written for an experienced reader with no prior involvement in the work, then the
+  open decisions whenever a decision is open. The order is the contract, not a preference — the
+  bottom line is what a reader running several agents at once reads first, and the decisions are
+  what they have to act on. No context is assumed: every name, id, and acronym is explained the
+  first time it appears, or left out.
+- **The no-labels rule**: a response never labels, names, mentions, or refers to the format it
+  follows — no tags, no structural headers, no meta-commentary about how the answer is arranged.
+  The shape is for the reader; naming it spends the reader's attention on the format instead of
+  on the work.
+- **Who is bound**: `conductor` and `bug-crusher`, the primary conversational agents, load the
+  skill by name for every user-facing response. `product-owner` is the third primary shared
+  identity and is exempt: it is a headless specification specialist whose output is a persisted
+  artifact and a structured digest for the conductor, never a conversational reply.
+- **The conductor relays**: every specialist digest the conductor surfaces to the human is
+  relayed in the same shape. The digest schemas themselves stay machine-consumed and are
+  unchanged — the format governs how a digest is presented, never which fields it carries.
+
+**Why a name and not a link.** The body resource-closure rule governs local path links: a
+Markdown link in an agent or skill body resolves only to a file inside that owner's own
+directory, and the closure those links form is what a renderer projects beside the principal. A
+skill invoked by name is not reached by a link at all, so binding the standard by name asks
+nothing of the conductor's body — and one canonical skill can carry the standard for every agent
+instead of each body restating it. The `response-format` skill links its own default wording,
+`user-guidance.md`, so that file travels with the skill and stays inside that one closure.
+
+**The user-home override.** The shipped wording has a default and an override. The default
+lives in the skill's `user-guidance.md`; the override is the user's own file at
+`<home>/.kyber-weave/response-guidance.md`, deployed and refreshed as described under
+[home-owned files](#home-owned-files-and-the-user-home-response-guidance). Where that file
+exists it replaces the skill's default wording — one file the operator edits, rather than a
+deployed skill the next update would replace.
 
 ---
 

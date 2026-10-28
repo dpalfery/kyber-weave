@@ -8,7 +8,7 @@ Before any assessment, read the user's intent from the request. The assessment e
 
 - **Defect first:** if the request reports a concrete failure that has not been diagnosed, use **Defect diagnosis** below, including when the request also names a plan/spec choice or an existing artifact. Preserve both for the handoff; run no plan-versus-spec assessment before diagnosis.
 - With no undiagnosed concrete failure, an explicit plan or spec request is the user's choice. Skip the assessment and go to Promotion with that choice.
-- With no undiagnosed concrete failure and neither choice, or both choices ("plan or spec?"), run the assessment.
+- With no undiagnosed concrete failure and neither choice, or both choices ("plan or spec?"), run the assessment when the repository publishes **<intake-assessment>**; when that property is absent, skip the assessment and go to Promotion with the plan choice.
 
 Do not call a stated choice an inference; do not treat a missing choice as one.
 
@@ -22,6 +22,8 @@ Read this contract before dispatching `bug-crusher-investigator`. Pass the concr
 Never discard an explicit plan/spec choice because diagnosis ran first. For an existing Draft or partial artifact, resume its author with the diagnosis and preserved choice; do not execute it.
 
 ## Assessment
+
+The assessment is default-off. It runs only when the repository publishes **<intake-assessment>** in the Config Reg of its root `AGENTS.md`; when that property is absent, the assessment is skipped and the path continues to Promotion with the plan choice.
 
 Only when intent is unstated, send `architect` the request or exact todo path for a read-only intake assessment. It returns:
 

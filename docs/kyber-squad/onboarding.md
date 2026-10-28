@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -28,7 +28,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**28 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+**29 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -1019,6 +1019,85 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 
 ---
 
+## User-home response guidance
+
+Every user-facing reply from the deployed `conductor` and `bug-crusher` agents follows one shape:
+a title line, a bottom line of at most three sentences, and the open decisions. The standard
+lives in the canonical `response-format` skill, and the operator can replace its wording with a
+file of their own.
+
+**Where it lands.** `squad update --global` deploys the shipped default guidance to
+`~/.kyber-weave/response-guidance.md`, beside the `squad/` state directory under the user's
+home. The file belongs to no harness: every agent reaches the one path through the
+`response-format` skill, which reads the user's file in place of its own default wording when
+the file exists.
+
+**How it is installed and refreshed.** `squad update --global` decides what to do with the file
+and writes it before it builds the deployment plan, so the digest it records in the receipt is
+one it read back from the file on disk. The consequence to know about: a run that fails while
+deploying the harness files after the guidance was written leaves the new default in place. The
+next `squad update --global` adopts that file without rewriting it and records the ownership it
+was missing.
+
+| State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
+|---|---|
+| Absent | Installs the shipped default and records it in the receipt. |
+| Present, and its bytes already equal the shipped default | Records it in the receipt without writing anything, and reports nothing. This covers a file left by a run that failed before its receipt was committed. |
+| Present, and its bytes still match the default the receipt recorded | Replaces it with the current default, and records the new digest. |
+| Present, and edited by you | Preserves it and reports that it was kept. Your wording is never overwritten. |
+| Present, with no record that Squad wrote it and bytes of your own | Preserves it and reports that it was kept. Delete the file if you want the shipped default back. |
+
+The receipt that records this is the global `squad.receipt.json` under
+`~/.kyber-weave/squad/global/`, in an additive `homeFiles` array: one `relativePath` and the
+SHA-256 of the bytes Squad wrote. A file that cannot be read or written produces a warning
+naming the remedy — rerun `squad update --global` — and does not fail the deployment.
+
+**What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
+Squad agent answers; you do not edit a deployed skill, which the next update would replace.
+Delete the file to return to the shipped default. The default wording is the canonical
+`products/kyber-squad/skills/response-format/user-guidance.md`.
+
+---
+
+## Intake assessment (opt-in, per repository)
+
+The intake assessment is the routing question the conductor asks when a request names neither a
+plan nor a specification. It is **off by default** and a repository opts in.
+
+**How to enable it.** In the repository's `.kyber-weave/kyber-weave.yml`, set the flag under
+`ontology`:
+
+```yaml
+ontology:
+  intake: true
+```
+
+Then run `kyber-weave docs init .` in that repository. The flag publishes an
+`<intake-assessment>` property into the generated Config Reg block of the repository root
+`AGENTS.md`, with the value `enabled`:
+
+```markdown
+- **<intake-assessment>**: `enabled`
+```
+
+The property is a *mode* entry rather than a path entry: `docs validate` does not try to resolve
+`enabled` as a file on disk, but it still fails the build when the rendered block no longer
+matches the configuration. See
+[mode properties](../docgraph/architecture.md#mode-properties-are-not-paths).
+
+**What changes when it is on.** The conductor reads the property from the repository root
+`AGENTS.md`. Present → for a request whose intent is unstated, the conductor asks `architect` for
+a read-only intake recommendation and takes the plan or specification path from it. Absent →
+the assessment is skipped and the path continues directly to the plan choice. A concrete failure
+that has not been diagnosed still outranks the artifact-choice question: the diagnosis runs
+first either way.
+
+**How to turn it off.** Remove `intake: true` from `.kyber-weave/kyber-weave.yml` and re-run
+`kyber-weave docs init .`; the property leaves the block and the assessment stops running. A
+repository that never set the flag never publishes the property, so nothing to undo.
+
+---
+
 ## Packaging (`squad pack`)
 
 `kyber-weave squad pack` is a maintainer-only command for building release archives. It requires execution from the root of the Kyber-Weave repository containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`:
@@ -1036,12 +1115,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 28 canonical
-`SKILL.md` files plus the 86 retained supplemental resources, and retained local skill references
+Both archive formats recurse through each skill directory. They contain all 29 canonical
+`SKILL.md` files plus the 87 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 147 files on Copilot today — with authored relative links resolving inside
+beside its principal — 149 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

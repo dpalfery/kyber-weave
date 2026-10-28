@@ -113,6 +113,21 @@ public sealed record SquadOwnedFile(
     string Target,
     bool Adopted);
 
+/// <summary>A deployed path and the digest of the default Squad shipped there, for a file in the home.</summary>
+/// <remarks>
+///     <see cref="SquadOwnedFile" /> cannot describe these files: its target token selects a harness's
+///     global root, and a home-level file such as the response guidance belongs to no harness — every
+///     one of them reads it through the same path. <see cref="RelativePath" /> is therefore taken from
+///     the home state root, <c>&lt;home&gt;/.kyber-weave</c>, rather than from a target root.
+///     <para>
+///         <see cref="Sha256" /> is the digest of the default this run ships, not a record of what the
+///         operator left on disk. That is what makes an edit detectable: the deployed file no longer
+///         matching the recorded digest is exactly the "the user changed this" question a refresh has
+///         to answer before it writes.
+///     </para>
+/// </remarks>
+public sealed record SquadHomeFile(string RelativePath, string Sha256);
+
 /// <summary>How a Global receipt's owned files map onto physical roots.</summary>
 public enum SquadReceiptLayout
 {
@@ -141,6 +156,17 @@ public sealed record SquadReceipt(
     ///     overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt" />.
     /// </summary>
     public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
+
+    /// <summary>
+    ///     The files this receipt owns in the Kyber-Weave home state root,
+    ///     <c>&lt;home&gt;/.kyber-weave</c>, rather than beneath a harness root.
+    /// </summary>
+    /// <remarks>
+    ///     Additive and optional on the persisted schema: every global receipt written before the
+    ///     user-home response guidance existed carries no <c>homeFiles</c> field, and reads with this
+    ///     empty. A project or instance receipt never carries one.
+    /// </remarks>
+    public IReadOnlyList<SquadHomeFile> HomeFiles { get; init; } = [];
 }
 
 /// <summary>A harness-native file produced by the upstream renderer.</summary>

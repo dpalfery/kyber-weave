@@ -41,7 +41,39 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\gates.yml" LogicalName="Gates.rust.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\go\gates.yml" LogicalName="Gates.go.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\python\gates.yml" LogicalName="Gates.python.yml" />
+    <!--
+      The user-home response guidance a global `squad update` deploys to
+      ~/.kyber-weave/response-guidance.md. The default text ships as a resource so an installed
+      tool needs no checkout beside it to know its own default; the copy is byte-identical to the
+      canonical skill file, and the VerifyResponseGuidanceDefault target below fails the build if
+      the two ever diverge. It is deliberately not an EmbeddedResource of the product path: the
+      release-artifact rule keeps the Squad corpus out of these assemblies, and a Core-owned
+      resource is the shape that rule permits.
+    -->
+    <EmbeddedResource Include="Squad\Deployment\Resources\response-guidance.default.md" LogicalName="Squad.response-guidance.md" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Byte-for-byte drift guard for the response-guidance default above. The copy exists because a
+      deployed tool cannot read the product tree it was built from, and this is what keeps the copy
+      honest: editing either file alone fails the build instead of shipping two different defaults.
+    -->
+    <CanonicalResponseGuidance Include="$(MSBuildThisFileDirectory)..\..\products\kyber-squad\skills\response-format\user-guidance.md" />
+    <ShippedResponseGuidance Include="$(MSBuildThisFileDirectory)Squad\Deployment\Resources\response-guidance.default.md" />
+  </ItemGroup>
+
+  <Target Name="VerifyResponseGuidanceDefault" BeforeTargets="PrepareForBuild">
+    <GetFileHash Files="@(CanonicalResponseGuidance)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_CanonicalResponseGuidanceHash" />
+    </GetFileHash>
+    <GetFileHash Files="@(ShippedResponseGuidance)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_ShippedResponseGuidanceHash" />
+    </GetFileHash>
+    <Error
+      Condition="'$(_CanonicalResponseGuidanceHash)' != '$(_ShippedResponseGuidanceHash)'"
+      Text="The response-guidance default shipped in KyberWeave.Core (src/KyberWeave.Core/Squad/Deployment/Resources/response-guidance.default.md) has drifted from its canonical source (products/kyber-squad/skills/response-format/user-guidance.md). Update the copy so the deployed default is the one the response-format skill documents." />
+  </Target>
 
   <ItemGroup>
     <!--

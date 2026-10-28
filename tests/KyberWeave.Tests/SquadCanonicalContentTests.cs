@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -36,6 +37,72 @@ public sealed class SquadCanonicalContentTests
     private static readonly Regex CircuitBreakerTriggerToken = new(
         @"[A-Z][A-Z0-9_]*",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// A response never announces the format it follows. The rule is prose rather than a fixed
+    /// sentence, so it is matched as a negation about labelling, naming, or referring to the
+    /// format — not as one exact wording an author must copy.
+    /// </summary>
+    private static readonly Regex NoFormatLabelRule = new(
+        @"\b(?:never|must not|do not|does not)\b[^.]{0,200}\b(?:label|name|mention|tag|announce|refer)\w*\b[^.]{0,160}\bformat\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>A user-home guidance file overrides the skill's default wording.</summary>
+    private static readonly Regex OverrideRule = new(
+        @"\boverrid(?:e|es|den|ing)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex SessionTitleRule = new(
+        @"\bsession[-\s]?title\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The one claim the session-title matrix makes about <c>factory</c>: whatever sets a session
+    /// title, it is not the agent. Either wording — "not agent-settable" or "agents cannot set" —
+    /// states it.
+    /// </summary>
+    private static readonly Regex NotAgentSettableRule = new(
+        @"\b(?:not\s+agent[-\s]?settable|agents?\s+(?:can\s*not|cannot|can't|do\s+not)\s+set)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>A surface invokes the skill rather than merely mentioning it.</summary>
+    private static readonly Regex LoadVerbRule = new(
+        @"\b(?:load|read|invoke|apply|follow)\w*\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// A one-line invocation of the <c>response-format</c> skill: a load verb and the skill name on
+    /// the same line, so a reader can follow it rather than infer it from prose.
+    /// </summary>
+    private static readonly Regex InvocationLineRule = new(
+        @"\b(?:load|read|invoke|apply|follow)\w*\b[^.\n]{0,160}\bresponse-format\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// A specialist digest relayed to the human is presented in the response format. Either order
+    /// of the two clauses in a sentence satisfies it.
+    /// </summary>
+    private static readonly Regex RelayRule = new(
+        @"(?:\brelay\w*\b[^.]{0,240}\bresponse[-\s]format\b)|(?:\bresponse[-\s]format\b[^.]{0,240}\brelay\w*\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>An absent intake property skips the assessment and takes the plan path directly.</summary>
+    private static readonly Regex IntakeAbsentRule = new(
+        @"\b(?:absent|not present|missing|omitted)\b[^.]{0,240}\b(?:skip|no assessment|without an assessment|plan path)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>A present intake property runs the assessment.</summary>
+    private static readonly Regex IntakePresentRule = new(
+        @"\b(?:present|enabled|published)\b[^.]{0,240}\b(?:run|perform|apply|execute|conduct)\w*\b[^.]{0,80}\bassessment\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The assessment is off by default: it runs only when the resolved registry publishes the
+    /// property, so a repository that never set the flag keeps the behaviour it had.
+    /// </summary>
+    private static readonly Regex DefaultOffRule = new(
+        @"(?:\bdefault[-\s]off\b)|(?:\bskipped\s+unless\b)|(?:\babsent\b[^.]{0,160}\bskip\w*\b)|(?:\bunless\b[^.]{0,160}\bpresent\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -128,6 +195,7 @@ public sealed class SquadCanonicalContentTests
         "product-owner",
         "python-dev",
         "resharper-clt",
+        "response-format",
         "rust-dev",
         "security-review",
         "setup-dev-environment",
@@ -237,7 +305,7 @@ public sealed class SquadCanonicalContentTests
     /// <summary>
     /// The product README is the human-readable skill roster. It must not list the retired
     /// skill in its tree or its canonical-skill counts once the source no longer ships it, and
-    /// it must state the count the tree actually holds — 28 once <c>kilo-review-loop</c> lands.
+    /// it must state the count the tree actually holds — 29 once <c>response-format</c> lands.
     /// </summary>
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
@@ -245,7 +313,249 @@ public sealed class SquadCanonicalContentTests
         string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
-        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The canonical <c>response-format</c> skill is the one place the shape of a user-facing
+    /// Squad response is defined. Agents and skills bind it by name, so the roster, the bundle,
+    /// and the skill directory itself have to agree — a skill present in one and absent from
+    /// another deploys to nothing.
+    /// </summary>
+    [Fact]
+    public void ResponseFormatSkillShipsInTheCanonicalTreeAndBundle()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string skillRoot = Path.Combine(ProductRoot, "skills", "response-format");
+
+        Assert.Contains("response-format", source.Skills.Select(skill => skill.Name));
+        Assert.Contains("response-format", source.Bundle.SkillNames);
+        Assert.True(
+            File.Exists(Path.Combine(skillRoot, "SKILL.md")),
+            $"The canonical 'response-format' skill must ship '{Path.Combine(skillRoot, "SKILL.md")}'.");
+        Assert.True(
+            File.Exists(Path.Combine(skillRoot, "user-guidance.md")),
+            "The canonical 'response-format' skill must ship 'user-guidance.md' beside its SKILL.md: " +
+            "that file is the default a global install deploys to '~/.kyber-weave/response-guidance.md'.");
+    }
+
+    /// <summary>
+    /// The order of the three markers is the format. A response that opens with a bottom line, or
+    /// ends without its open decisions, is a different contract, so the sequence is pinned rather
+    /// than the presence of three headings anywhere in the file.
+    /// </summary>
+    /// <remarks>
+    /// Every marker is asserted inside the body, after the YAML frontmatter is removed, and as the
+    /// bold list item the skill actually states. Both restrictions are load-bearing: the skill's own
+    /// frontmatter description names the title line, the bottom line, and the open decisions in
+    /// order, so a whole-file search for the words is satisfied by the description alone and stays
+    /// green when the body's ordered list is reordered or deleted outright. Verified by mutation —
+    /// swapping the first and third body items fails this test, and so does removing them.
+    /// </remarks>
+    [Fact]
+    public void ResponseFormatSkillOrdersTitleThenBottomLineThenOpenDecisions()
+    {
+        string body = ReadResponseFormatSkillBody("SKILL.md");
+
+        const string TitleMarker = "**A title line**";
+        const string BottomLineMarker = "**A bottom line**";
+        const string OpenDecisionsMarker = "**The open decisions**";
+        int title = body.IndexOf(TitleMarker, StringComparison.Ordinal);
+        int bottomLine = body.IndexOf(BottomLineMarker, StringComparison.Ordinal);
+        int openDecisions = body.IndexOf(OpenDecisionsMarker, StringComparison.Ordinal);
+        int sentenceCap = body.IndexOf("3 sentences", StringComparison.Ordinal);
+
+        Assert.True(
+            title >= 0,
+            $"The body of the 'response-format' skill must open its ordered list with '{TitleMarker}'. " +
+            "A description that mentions the title line does not carry the step.");
+        Assert.True(
+            bottomLine >= 0,
+            $"The body of the 'response-format' skill must carry the '{BottomLineMarker}' step.");
+        Assert.True(
+            openDecisions >= 0,
+            $"The body of the 'response-format' skill must end its ordered list with '{OpenDecisionsMarker}'.");
+        Assert.True(
+            bottomLine > title,
+            $"The 'response-format' body must order '{BottomLineMarker}' after '{TitleMarker}'.");
+        Assert.True(
+            openDecisions > bottomLine,
+            $"The 'response-format' body must order '{OpenDecisionsMarker}' after '{BottomLineMarker}'.");
+
+        // The cap is what keeps the bottom line a summary rather than a report, so it belongs to
+        // that step and not merely somewhere in the file.
+        Assert.True(
+            sentenceCap > bottomLine && sentenceCap < openDecisions,
+            "The 'response-format' skill must cap the bottom line at 3 sentences inside the " +
+            "'**A bottom line**' step; a longer summary is the report the format exists to replace.");
+    }
+
+    /// <summary>
+    /// The format is invisible: a reader should see a well-shaped answer, never an agent telling
+    /// them which format it is using. This is the rule that keeps the skill from leaking into the
+    /// responses it shapes.
+    /// </summary>
+    [Fact]
+    public void ResponseFormatSkillForbidsLabellingAResponseWithItsFormat()
+    {
+        string skill = ReadResponseFormatSkill("SKILL.md");
+
+        Assert.True(
+            NoFormatLabelRule.IsMatch(skill),
+            "The 'response-format' skill must state that a response never labels, names, or refers " +
+            "to the format it is following.");
+    }
+
+    /// <summary>
+    /// One file in the user's home overrides the shipped default, so an operator changes every
+    /// Squad response without editing a deployed skill that the next update would replace.
+    /// </summary>
+    [Fact]
+    public void ResponseFormatSkillDefersToTheUserHomeGuidanceOverride()
+    {
+        string skill = ReadResponseFormatSkill("SKILL.md");
+
+        Assert.True(
+            skill.Contains("~/.kyber-weave/response-guidance.md", StringComparison.Ordinal),
+            "The 'response-format' skill must name its user-home override at " +
+            "'~/.kyber-weave/response-guidance.md'.");
+        Assert.True(
+            OverrideRule.IsMatch(skill),
+            "The 'response-format' skill must state that where '~/.kyber-weave/response-guidance.md' " +
+            "exists it overrides the skill's default wording.");
+    }
+
+    /// <summary>
+    /// A session title is a harness capability, not a response rule. The matrix records the one
+    /// target whose title no agent can set, so the skill never instructs an agent to claim a
+    /// capability the harness does not expose.
+    /// </summary>
+    [Fact]
+    public void ResponseFormatSkillRecordsTheSessionTitleMatrix()
+    {
+        string skill = ReadResponseFormatSkill("SKILL.md");
+
+        Assert.True(
+            SessionTitleRule.IsMatch(skill),
+            "The 'response-format' skill must carry a session-title matrix.");
+        Assert.True(
+            skill.Contains("factory", StringComparison.OrdinalIgnoreCase),
+            "The session-title matrix in 'response-format' must name the 'factory' target.");
+        Assert.True(
+            NotAgentSettableRule.IsMatch(skill),
+            "The session-title matrix in 'response-format' must record that the session title is " +
+            "not agent-settable on factory.");
+    }
+
+    /// <summary>
+    /// The response format is bound by name rather than copied into each agent, so the conductor
+    /// loads it instead of restating it. One file then governs the shape of every answer.
+    /// </summary>
+    [Fact]
+    public void ConductorLoadsResponseFormatForEveryUserFacingResponse()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string loadLine = conductor
+                              .Split('\n')
+                              .FirstOrDefault(line => line.Contains("response-format", StringComparison.Ordinal) &&
+                                                      line.Contains("user-facing",
+                                                          StringComparison.OrdinalIgnoreCase)) ??
+                          string.Empty;
+
+        Assert.True(
+            loadLine.Length > 0,
+            "'agents/conductor.md' must carry an instruction line that binds the 'response-format' " +
+            "skill for every user-facing response.");
+        Assert.True(
+            LoadVerbRule.IsMatch(loadLine),
+            "The 'response-format' instruction in 'agents/conductor.md' must load the skill, not merely " +
+            "mention it.");
+    }
+
+    /// <summary>
+    /// A specialist answers the conductor, and the conductor answers the human. Relay is the
+    /// boundary where a worker's digest becomes a response, so it is where the format applies.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsInTheResponseFormat()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.True(
+            RelayRule.IsMatch(contract),
+            "The conductor contract must state that a specialist digest surfaced to the human is " +
+            "presented in the 'response-format' shape.");
+    }
+
+    /// <summary>
+    /// The intake assessment is opt-in. It runs when configuration publishes the
+    /// <c>&lt;intake-assessment&gt;</c> property; a repository that never set the flag keeps the plan
+    /// path it always had. Defect-first precedence is unchanged, because a concrete failure still
+    /// outranks the question of which artifact to write.
+    /// </summary>
+    [Fact]
+    public void ConductorResolvesTheIntakeAssessmentOnlyWhenConfigPublishesIt()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int intake = conductor.IndexOf("<intake-assessment>", StringComparison.Ordinal);
+        int defectFirst = conductor.IndexOf("**Defect first**", StringComparison.Ordinal);
+
+        Assert.True(
+            intake >= 0,
+            "'agents/conductor.md' must carry an '<intake-assessment>' resolution order.");
+        Assert.True(
+            defectFirst >= 0 && defectFirst < intake,
+            "'agents/conductor.md' must keep defect-first precedence ahead of the " +
+            "'<intake-assessment>' resolution.");
+        Assert.True(
+            IntakeAbsentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that an absent " +
+            "property skips the assessment and takes the plan path directly.");
+        Assert.True(
+            IntakePresentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that a present " +
+            "property runs the assessment.");
+    }
+
+    /// <summary>
+    /// The default is recorded where the intake path is defined, so a reader cannot conclude the
+    /// assessment is something the conductor always performs.
+    /// </summary>
+    [Fact]
+    public void IntakePathRecordsThatTheAssessmentIsOffByDefault()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+
+        Assert.True(
+            intakePath.Contains("<intake-assessment>", StringComparison.Ordinal),
+            "'agents/conductor/references/intake-path.md' must record the '<intake-assessment>' gate " +
+            "the plan path depends on.");
+        Assert.True(
+            DefaultOffRule.IsMatch(intakePath),
+            "'agents/conductor/references/intake-path.md' must record the default-off semantics: the " +
+            "assessment is skipped unless the '<intake-assessment>' property is present.");
+    }
+
+    /// <summary>
+    /// Bug-crusher answers a human directly from a triage session, so it binds the format at both
+    /// surfaces that can produce such an answer.
+    /// </summary>
+    [Theory]
+    [InlineData("agents/bug-crusher.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void BugCrusherSurfacesLoadTheResponseFormatSkill(string relativePath)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.True(File.Exists(path), $"Expected the canonical bug-crusher source at '{path}'.");
+        string body = File.ReadAllText(path);
+
+        Assert.True(
+            InvocationLineRule.IsMatch(body),
+            $"'{relativePath}' must load the 'response-format' skill on one instruction line, so a " +
+            "bug-crusher answer is presented in the canonical shape.");
     }
 
     [Fact]
@@ -1020,6 +1330,40 @@ public sealed class SquadCanonicalContentTests
             Directory.EnumerateFiles(skillRoot, "*.md", SearchOption.AllDirectories)
                 .Order(StringComparer.Ordinal)
                 .Select(File.ReadAllText));
+    }
+
+    /// <summary>
+    /// Reads one file of the canonical <c>response-format</c> skill, asserting the artifact's
+    /// absence before reading it so a missing file reports the missing artifact rather than an
+    /// I/O exception.
+    /// </summary>
+    private static string ReadResponseFormatSkill(string fileName)
+    {
+        string path = Path.Combine(ProductRoot, "skills", "response-format", fileName);
+        Assert.True(
+            File.Exists(path),
+            $"The canonical 'response-format' skill must ship '{fileName}'. Expected it at '{path}'.");
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>
+    /// The body of a canonical <c>response-format</c> file, with its YAML frontmatter removed by
+    /// the repository's frontmatter reader. A pin on what the skill instructs must read the body:
+    /// the skill's own description restates the format, so a search that includes it cannot tell an
+    /// instruction from an advertisement.
+    /// </summary>
+    private static string ReadResponseFormatSkillBody(string fileName)
+    {
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(ReadResponseFormatSkill(fileName));
+
+        Assert.True(
+            read.HasFrontmatter,
+            $"'{fileName}' in the canonical 'response-format' skill must carry YAML frontmatter, so its " +
+            "description can be read separately from the instructions it ships.");
+        Assert.False(
+            string.IsNullOrWhiteSpace(read.Body),
+            $"'{fileName}' in the canonical 'response-format' skill has no body beneath its frontmatter.");
+        return read.Body;
     }
 
     private static RoleSkillProfile ReadRoleSkillProfile()

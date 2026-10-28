@@ -81,6 +81,55 @@ public class ConfigRegResolutionTests
 
         Assert.Equal("docs/reference/auth-design.md", PathOf(config.Resolve(Ontology()), "auth-design"));
     }
+
+    /// <summary>
+    /// A mode property is a registry entry whose value is a setting rather than a path. The intake
+    /// assessment is one: a portable skill asks the registry whether this repository opted in, and
+    /// the rendered value <c>enabled</c> is the only thing that distinguishes an opted-in repository
+    /// from one that never set the flag.
+    /// </summary>
+    [Fact]
+    public void AnEnabledIntakeSettingPublishesTheIntakeAssessmentModeProperty()
+    {
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  intake: true\n");
+        IReadOnlyList<ConfigRegEntry> entries = config.ConfigReg.Resolve(config.Ontology);
+
+        Assert.Contains("intake-assessment", entries.Select(entry => entry.Name));
+        Assert.Contains(
+            "- **<intake-assessment>**: `enabled`",
+            ConfigRegMarkdown.Render(entries),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Adopting the intake assessment is opt-in, so a repository that never set the flag — or set it
+    /// to false — publishes no mode property at all. Rendering one anyway would claim a behaviour the
+    /// repository did not ask for, and the skills reading it would run an assessment nobody wanted.
+    /// </summary>
+    [Fact]
+    public void TheIntakeAssessmentPropertyIsAbsentWhenTheSettingIsOff()
+    {
+        Assert.DoesNotContain(
+            "intake-assessment",
+            KyberWeaveConfig.ProductDefaults.ConfigReg
+                .Resolve(KyberWeaveConfig.ProductDefaults.Ontology)
+                .Select(entry => entry.Name));
+        Assert.DoesNotContain("intake-assessment", Names(Resolved("ontology:\n  intake: false\n")));
+        Assert.DoesNotContain("intake-assessment", Names(Resolved("ontology:\n  docs-root: docs\n")));
+    }
+
+    /// <summary>
+    /// The registry as the operator's YAML resolves it. Loading configuration is the only path to
+    /// the setting, so every assertion here starts from the file the operator writes.
+    /// </summary>
+    private static IReadOnlyList<ConfigRegEntry> Resolved(string yaml)
+    {
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        return config.ConfigReg.Resolve(config.Ontology);
+    }
+
+    private static IEnumerable<string> Names(IReadOnlyList<ConfigRegEntry> entries) =>
+        entries.Select(entry => entry.Name);
 }
 
 /// <summary>
@@ -321,4 +370,71 @@ public sealed class ConfigRegValidatorTests : IDisposable
             i.Code == ConfigRegValidator.StaleRendering && i.Message.Contains("never closes", StringComparison.Ordinal));
         Assert.Contains("Keep me.", File.ReadAllText(agents), StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A mode property carries a value, not a path, so it must not be path-checked: there is no
+    /// <c>enabled</c> file for <c>KW-CONFIG-REG-001</c> to find, and reporting one would make an
+    /// opted-in repository fail its own gate for adopting the feature.
+    /// </summary>
+    [Fact]
+    public void AnEnabledIntakeSettingRendersAModePropertyThatIsNotPathChecked()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = IntakeEnabled();
+        Write("AGENTS.md", ConfigRegMarkdown.Splice(
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+        Assert.Contains(
+            "- **<intake-assessment>**: `enabled`",
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rendered block is generated output, so a repository that enabled the intake assessment
+    /// after scaffolding carries a block that no longer matches configuration. The next
+    /// <c>docs init</c> fixes it, which is what <c>KW-CONFIG-REG-002</c> asks for.
+    /// </summary>
+    [Fact]
+    public void AnEnabledIntakeSettingMakesTheScaffoldedBlockStale()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        DiagnosticReport report = Validate(IntakeEnabled());
+
+        Assert.Contains(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+    }
+
+    /// <summary>
+    /// Adding a mode property is not a licence to stop checking paths: a registry that published
+    /// <c>&lt;intake-assessment&gt;</c> and nothing else would pass while every path property
+    /// pointed at nothing.
+    /// </summary>
+    [Fact]
+    public void PathValuedRegistryEntriesAreStillPathCheckedWhenIntakeIsEnabled()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        Directory.Delete(Path.Combine(_temp.Path, "docs", "adr"), recursive: true);
+
+        DiagnosticReport report = Validate(IntakeEnabled());
+
+        Assert.Contains(report.Items, i =>
+            i.Code == ConfigRegValidator.UnresolvedPath &&
+            i.Message.Contains("adr-index", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A configured repository with the intake assessment enabled. Loaded from YAML because that is
+    /// the setting's only surface: the point of the contract is that an operator's
+    /// <c>kyber-weave.yml</c> reaches the rendered registry and the validator, not that a test can
+    /// set a property on a type.
+    /// </summary>
+    private static KyberWeaveConfig IntakeEnabled() =>
+        KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n  intake: true\n");
 }

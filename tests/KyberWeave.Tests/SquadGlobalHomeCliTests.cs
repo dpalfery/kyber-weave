@@ -651,6 +651,220 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => new HomeUserPaths(h.ApplicationData, "/Users/not-a-temp-home"));
     }
 
+    #region Response guidance
+
+    /// <summary>
+    ///     The response guidance is the one file a <c>--global</c> run deploys into the Kyber-Weave home
+    ///     rather than into a harness directory, so an operator changes the shape of every Squad response
+    ///     from one place that no harness update can overwrite.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalDeploysTheDefaultResponseGuidanceIntoTheKyberWeaveHome()
+    {
+        using Harness h = NewHarness("guidance-deploy");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        string path = GuidancePath(h);
+
+        CommandExecution update = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        Assert.StartsWith(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())),
+            Path.GetFullPath(path),
+            StringComparison.Ordinal);
+        AssertExit(update, 0);
+        Assert.True(
+            File.Exists(path),
+            $"squad update --global must deploy the default response guidance to '{path}'.");
+        Assert.False(
+            string.IsNullOrWhiteSpace(File.ReadAllText(path)),
+            $"'{path}' must carry the default response guidance, not an empty file.");
+    }
+
+    /// <summary>
+    ///     A deployed file Squad does not own is a file the next run may overwrite by accident. Recording
+    ///     the guidance in the global receipt with its digest is what makes "the user edited this" a
+    ///     question Squad can answer before it writes.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalRecordsTheDeployedResponseGuidanceInTheGlobalReceipt()
+    {
+        using Harness h = NewHarness("guidance-receipt");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        AssertExit(
+            Capture(() => UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(anchor))),
+            0);
+        string guidancePath = GuidancePath(h);
+        Assert.True(
+            File.Exists(guidancePath),
+            $"squad update --global must deploy the default response guidance to '{guidancePath}' " +
+            "before the run can record that it owns it.");
+        string digest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(guidancePath)));
+        string receipt = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
+
+        Assert.True(
+            receipt.Contains("response-guidance.md", StringComparison.Ordinal),
+            "The global receipt must record the deployed response guidance, so a later run knows it owns that file.");
+        Assert.True(
+            receipt.Contains(digest, StringComparison.OrdinalIgnoreCase),
+            "The global receipt must record the SHA-256 of the deployed response guidance, so a user edit is " +
+            $"detected instead of overwritten. Expected digest: {digest}.");
+    }
+
+    /// <summary>
+    ///     An unmodified, digest-matching file is Squad's own copy, so a run that ships newer default
+    ///     guidance replaces it. Preserving it would leave the operator on wording the release replaced.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalReplacesDigestMatchingResponseGuidanceWithTheCurrentDefault()
+    {
+        using Harness h = NewHarness("guidance-refresh");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+        string path = GuidancePath(h);
+        Assert.True(
+            File.Exists(path),
+            $"squad update --global must deploy the default response guidance to '{path}'.");
+        byte[] current = File.ReadAllBytes(path);
+        byte[] superseded = Encoding.UTF8.GetBytes(
+            "Response guidance from an earlier Kyber-Weave release, which the current release supersedes.\n");
+
+        // The state records the superseded bytes as what it deployed, and nobody has edited them since:
+        // exactly the file an update is allowed to replace.
+        RewriteRecordedDigest(h, current, superseded);
+        File.WriteAllBytes(path, superseded);
+
+        CommandExecution second = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(second, 0);
+        Assert.True(
+            current.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
+            "squad update --global must replace an unmodified, digest-matching " +
+            $"'response-guidance.md' at '{path}' with the current default.");
+    }
+
+    /// <summary>
+    ///     The operator's own wording wins. A run that silently reinstated the shipped default would
+    ///     discard the one customization the file exists to hold, so the edit survives and the run says so.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalPreservesAndReportsAUserModifiedResponseGuidance()
+    {
+        using Harness h = NewHarness("guidance-user-edit");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+        string path = GuidancePath(h);
+        Assert.True(
+            File.Exists(path),
+            $"squad update --global must deploy the default response guidance to '{path}'.");
+        string userWording = "Keep every answer to three sentences and never open with a heading.\n";
+        File.WriteAllText(path, userWording, Encoding.UTF8);
+
+        CommandExecution second = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(second, 0);
+        Assert.Equal(userWording, File.ReadAllText(path, Encoding.UTF8));
+        Assert.Contains("response-guidance.md", second.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     A receipt may only record bytes that are on disk. A write that fails must therefore leave no
+    ///     ownership record behind: a digest recorded ahead of its write describes a file the run never
+    ///     wrote, and the next run reads the operator's untouched file as an edit — preserved forever, and
+    ///     reported as an edit they never made.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalThatCannotWriteTheResponseGuidanceRecordsNoOwnershipAndRetriesCleanly()
+    {
+        using Harness h = NewHarness("guidance-write-failure");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        string path = GuidancePath(h);
+
+        // A directory at the destination makes the write fail the way a permission error or a full
+        // disk does — through the same File.Move the deployer uses — without a seam in production code.
+        Directory.CreateDirectory(path);
+
+        CommandExecution failed = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(failed, 0);
+        Assert.Contains("response-guidance.md", failed.Output, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(path), $"The failed write must not remove '{path}'.");
+        string failedReceipt = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
+        Assert.False(
+            failedReceipt.Contains("response-guidance.md", StringComparison.Ordinal),
+            "A run that could not write the guidance must record no ownership of it: a digest recorded " +
+            "ahead of its write makes the next run read the operator's untouched file as an edit.");
+
+        Directory.Delete(path, recursive: true);
+
+        CommandExecution recovered = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(recovered, 0);
+        Assert.True(
+            File.Exists(path),
+            $"squad update --global must deploy the default response guidance to '{path}' on retry.");
+        string digest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+
+        // The retry wrote the default, so nothing was preserved and nothing may claim an operator edit.
+        Assert.DoesNotContain("Kept the edited", recovered.Output, StringComparison.Ordinal);
+        Assert.True(
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h))).Contains(digest, StringComparison.OrdinalIgnoreCase),
+            "A successful retry must record the digest it deployed, so the next run can tell its own " +
+            $"file from an operator edit. Expected digest: {digest}.");
+    }
+
+    /// <summary>
+    /// Rewrites the recorded SHA-256 of the deployed guidance across the home state, so the superseded
+    /// bytes look like a default this release replaced rather than a user edit. The receipt is the whole
+    /// ownership record, so replacing the digest there is the same state an older release leaves behind.
+    /// </summary>
+    private static void RewriteRecordedDigest(Harness h, byte[] deployed, byte[] superseded)
+    {
+        string before = Convert.ToHexStringLower(SHA256.HashData(deployed));
+        string after = Convert.ToHexStringLower(SHA256.HashData(superseded));
+        string stateRoot = Path.Combine(h.Home, ".kyber-weave");
+        bool rewritten = false;
+        foreach (string file in Directory.EnumerateFiles(stateRoot, "*", SearchOption.AllDirectories))
+        {
+            string text = File.ReadAllText(file);
+            if (!text.Contains(before, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            File.WriteAllText(file, text.Replace(before, after, StringComparison.OrdinalIgnoreCase), Encoding.UTF8);
+            rewritten = true;
+        }
+
+        Assert.True(
+            rewritten,
+            $"Expected the home state to record the SHA-256 of the deployed response guidance ('{before}').");
+    }
+
+    /// <summary>The user-home guidance file, resolved from the fake home the harness owns.</summary>
+    private static string GuidancePath(Harness h)
+    {
+        return Path.Combine(h.Home, ".kyber-weave", "response-guidance.md");
+    }
+
+    #endregion
+
     #region Fixtures
 
     private Harness NewHarness(string name) => new(Path.Combine(_temp.Path, name));

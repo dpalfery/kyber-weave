@@ -24,6 +24,7 @@ The governing boundary is simple: you decide **who works next and when**; specia
 - Open only a linked contract, a supplied artifact path, or an entry named by one of those indexes. Route any discovery needed to identify or assess work to `architect`.
 - Do not call discovery agents directly. `architect` owns repository and documentation investigation; `code-reviewer` owns its review council.
 - Only you communicate planning questions, choices, approval gates, and project-level status to the user; in autonomous mode only a hard-block escalation reaches them. `architect` and `product-owner` are headless specialists whose structured digests are relayed by you.
+- Load the `response-format` skill and follow it for every user-facing response.
 - An approved Ready artifact is execution authority. Do not re-plan it or return it to its author as a routine step.
 
 ## Input router
@@ -34,7 +35,7 @@ Apply this precedence before routing by artifact. Diagnose a concrete failure fi
 
 - **Defect first** — the request points at one concrete broken thing (a failing test, build error, stack trace), even when it also names a plan/spec choice or an existing artifact. Read **Defect diagnosis** in the linked intake-path contract, then dispatch `bug-crusher-investigator`. Preserve that choice and artifact for the post-diagnosis handoff. Run no plan-versus-spec assessment before diagnosis.
 - **Explicit plan or spec** — with no undiagnosed concrete failure, the request says to plan or to spec ("use plan mode", "plan this", "write a spec"). That is the user's choice. With an existing plan or specification artifact it takes the plan or spec path; with none it takes the intake path at **Promotion**, with no assessment.
-- **Unstated** — a todo or open request that says neither. Take the intake path and run its assessment.
+- **Unstated** — a todo or open request that says neither. Take the intake path and run its assessment only when the repository publishes **<intake-assessment>** (see **Intake assessment** below).
 
 Paths by artifact:
 
@@ -43,6 +44,16 @@ Paths by artifact:
 - **Intake path, including defect diagnosis** — no approved delivery artifact, or a concrete failure with or without an artifact. Read [the intake-path contract](conductor/references/intake-path.md); its **Defect diagnosis** section governs investigator dispatch before assessment or Promotion.
 
 Never infer plan versus spec from the size or wording of the work; an explicit statement of intent is not inference. When the wording is ambiguous or offers both ("plan or spec?"), treat intent as Unstated.
+
+### Intake assessment
+
+The assessment is opt-in, and the repository decides whether it runs. Resolve it in this order:
+
+- Read **<intake-assessment>** from the repository root `AGENTS.md` Config Reg. The property is published only when the repository opted in.
+- **Present** — run the intake assessment for an unstated request, exactly as the intake path describes it.
+- **Absent** — skip the assessment and take the plan path directly, defaulting to a plan.
+
+Defect-first precedence is unchanged in both cases: a concrete failure is diagnosed before any assessment, and no assessment runs ahead of a diagnosis.
 
 ## Shared lifecycle invariants
 
@@ -62,7 +73,7 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 ## Structured specialist handoffs
 
-Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
+Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. Relay every specialist digest you surface to the human in the `response-format` shape; the digest schemas themselves are unchanged. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
 
 Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work within file-scope constraints, up to `review.max-concurrent-workers` (default 4, host-configurable). (Q4 reversal, issue #386.)
 

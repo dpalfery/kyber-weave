@@ -390,6 +390,19 @@ public sealed class SquadLifecycleService
                 ? effectiveGlobalRoots
                 : _globalRoots;
 
+            // Written before the plan so the digest the receipt records is one this run has already
+            // read back from the deployed path; recording it any earlier would claim ownership of a
+            // file the run never wrote, and every later run would read the operator's untouched file
+            // as an edit. The cost of the ordering is the mirror case: a deployment that fails after
+            // this write leaves the guidance updated and the run failing loudly, which the next run
+            // repairs by adopting bytes that already equal the shipped default.
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            SquadResponseGuidanceDeployer? guidanceDeployer =
+                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
+                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    : null;
+            SquadHomeFile? guidance = guidanceDeployer?.Deploy(previousReceipt.HomeFiles, warnings);
+
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
                 targetRoot,
                 request.Scope,
@@ -400,7 +413,8 @@ public sealed class SquadLifecycleService
                 request.ReplaceManaged,
                 _timeProvider,
                 planGlobalRoots,
-                []);
+                [],
+                guidance is null ? null : ReplaceHomeFile(previousReceipt.HomeFiles, guidance));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -416,7 +430,7 @@ public sealed class SquadLifecycleService
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);
 
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings), .. transaction.Warnings];
+            warnings.AddRange(transaction.Warnings);
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
 
             return new SquadLifecycleResult(
@@ -599,6 +613,31 @@ public sealed class SquadLifecycleService
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Returns the home-owned files to record, with <paramref name="replacement" /> taking the place
+    ///     of any record for the same path. A null replacement means this run changed nothing, so the
+    ///     previous records stand as they are.
+    /// </summary>
+    /// <remarks>
+    ///     Matched on the relative path rather than appended, because the receipt's validation requires
+    ///     one record per home path: a second entry for the guidance would be an ownership claim the
+    ///     store rejects on the next read.
+    /// </remarks>
+    private static IReadOnlyList<SquadHomeFile> ReplaceHomeFile(
+        IReadOnlyList<SquadHomeFile> previous,
+        SquadHomeFile? replacement)
+    {
+        if (replacement is null)
+            return previous;
+
+        return
+        [
+            .. previous.Where(file =>
+                !string.Equals(file.RelativePath, replacement.RelativePath, StringComparison.Ordinal)),
+            replacement
+        ];
     }
 
     /// <summary>

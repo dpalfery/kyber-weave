@@ -379,6 +379,10 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>Preflights an update while preserving locally edited receipt-owned files by default.</summary>
+    /// <remarks>
+    ///     <c>homeFiles</c> replaces the home-owned files <c>previousReceipt</c> records. Null keeps
+    ///     those records, which is what every caller that deploys no home-level file wants.
+    /// </remarks>
     public static SquadDeploymentPlan CreateUpdate(
         string targetRoot,
         SquadDeploymentScope scope,
@@ -389,7 +393,8 @@ public sealed class SquadDeploymentPlan
         bool replaceManaged,
         TimeProvider timeProvider,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        IReadOnlyList<SquadHomeFile>? homeFiles = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         ArgumentNullException.ThrowIfNull(previousReceipt);
@@ -539,7 +544,11 @@ public sealed class SquadDeploymentPlan
 
         SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, nextOwnedFiles) with
         {
-            Layout = nextLayout
+            // Carried forward unless the caller replaced it: an update that does not re-decide the
+            // home files (a preset verb, say) must not silently drop the ownership record and leave
+            // the next refresh unable to tell a shipped default from an operator edit.
+            Layout = nextLayout,
+            HomeFiles = homeFiles ?? previousReceipt.HomeFiles
         };
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
