@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
@@ -9,13 +10,15 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the ownership boundary for Squad deployment. A receipt grants authority over only the
-/// byte-identical paths it records; it is never a general overwrite or delete permission.
+///     Pins the ownership boundary for Squad deployment. A receipt grants authority over only the
+///     byte-identical paths it records; it is never a general overwrite or delete permission.
 /// </summary>
 public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 {
@@ -23,6 +26,69 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
+
+    public static TheoryData<string, string, string> MalformedHomeFilesJson
+    {
+        get
+        {
+            string digest = Digest("guidance");
+            return new TheoryData<string, string, string>
+            {
+                { "object-instead-of-array", "{}", "homeFiles must be an array" },
+                { "string-instead-of-array", "\"response-guidance.md\"", "homeFiles must be an array" },
+                { "number-instead-of-array", "7", "homeFiles must be an array" },
+                { "null-instead-of-array", "null", "field 'homeFiles' cannot be null" },
+                { "null-entry", "[null]", "home file must be an object" },
+                { "string-entry", "[\"response-guidance.md\"]", "home file must be an object" },
+                { "array-entry", "[[]]", "home file must be an object" },
+                {
+                    "missing-digest",
+                    """[{"relativePath":"response-guidance.md"}]""",
+                    "Missing: sha256"
+                },
+                {
+                    "missing-path",
+                    $$"""[{"sha256":"{{digest}}"}]""",
+                    "Missing: relativePath"
+                },
+                {
+                    "unknown-field",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}","target":"claude"}]""",
+                    "unknown: target"
+                },
+                {
+                    "duplicate-field",
+                    $$"""[{"relativePath":"response-guidance.md","relativePath":"other.md","sha256":"{{digest}}"}]""",
+                    "duplicate field 'relativePath'"
+                },
+                {
+                    "null-digest",
+                    """[{"relativePath":"response-guidance.md","sha256":null}]""",
+                    "field 'sha256' cannot be null"
+                },
+                {
+                    "numeric-path",
+                    $$"""[{"relativePath":5,"sha256":"{{digest}}"}]""",
+                    "JSON is invalid"
+                },
+                {
+                    "escaping-path",
+                    $$"""[{"relativePath":"../response-guidance.md","sha256":"{{digest}}"}]""",
+                    "is not portable"
+                },
+                {
+                    "invalid-digest",
+                    """[{"relativePath":"response-guidance.md","sha256":"not-a-digest"}]""",
+                    "home file digest"
+                },
+                {
+                    "duplicate-path",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}"},{"relativePath":"Response-Guidance.md","sha256":"{{digest}}"}]""",
+                    "not a unique portable path"
+                }
+            };
+        }
+    }
 
     [Fact]
     public void ExecuteWithDurableWritesEnabledDeploysWhatItWrote()
@@ -33,7 +99,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadTransaction.SyncToDisk = true;
         try
         {
-            using TempDirectory fixture = new TempDirectory();
+            using TempDirectory fixture = new();
             string targetRoot = Path.Combine(fixture.Path, "target");
             Directory.CreateDirectory(targetRoot);
             SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
@@ -43,7 +109,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(".codex/agents/durable.toml", "durable")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt));
 
             new SquadTransaction(store).Execute(plan);
@@ -61,11 +127,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeProjectStateIsStablePortableSecretFreeAndRoundTrips()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string secretApplicationData = Path.Combine(fixture.Path, "TOP-SECRET-USER-PATH");
         SquadStateStore store = Store(secretApplicationData);
         SquadLock squadLock = Lock();
-        SquadReceipt receipt = new SquadReceipt(
+        SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Project,
             ".",
@@ -89,57 +155,57 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Assert.Equal(
             $$"""
-            schema: kyber-squad.lock/v1
-            squad-version: 1.2.3
-            cli-version: 1.2.3
-            mcp-version: 1.2.3
-            bundle: full
-            targets:
-              - codex
-              - warp
-            exclusions:
-              - cursor
-            translation: best-effort
-            bundle-digest: {{Digest("bundle")}}
-            asset-digest: {{Digest("asset")}}
-            apm:
-              version: 1.2.3
-              tag-commit: 0123456789abcdef
-              asset-sha256: {{Digest("apm")}}
+                  schema: kyber-squad.lock/v1
+                  squad-version: 1.2.3
+                  cli-version: 1.2.3
+                  mcp-version: 1.2.3
+                  bundle: full
+                  targets:
+                    - codex
+                    - warp
+                  exclusions:
+                    - cursor
+                  translation: best-effort
+                  bundle-digest: {{Digest("bundle")}}
+                  asset-digest: {{Digest("asset")}}
+                  apm:
+                    version: 1.2.3
+                    tag-commit: 0123456789abcdef
+                    asset-sha256: {{Digest("apm")}}
 
-            """.Replace("\r\n", "\n", StringComparison.Ordinal),
+                  """.Replace("\r\n", "\n", StringComparison.Ordinal),
             lockYaml.Replace("\r\n", "\n", StringComparison.Ordinal));
         Assert.Equal(
             $$"""
-            {
-              "schema": "kyber-squad.receipt/v1",
-              "scope": "project",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [
-                {
-                  "target": "warp",
-                  "subject": "conductor",
-                  "code": "role-skill-fallback"
-                }
-              ],
-              "files": [
-                {
-                  "relativePath": ".codex/agents/conductor.toml",
-                  "sha256": "{{Digest("conductor")}}",
-                  "target": "codex",
-                  "adopted": false
-                },
-                {
-                  "relativePath": ".warp/skills/conductor/SKILL.md",
-                  "sha256": "{{Digest("role skill")}}",
-                  "target": "warp",
-                  "adopted": true
-                }
-              ]
-            }
+                  {
+                    "schema": "kyber-squad.receipt/v1",
+                    "scope": "project",
+                    "targetRoot": ".",
+                    "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                    "degradations": [
+                      {
+                        "target": "warp",
+                        "subject": "conductor",
+                        "code": "role-skill-fallback"
+                      }
+                    ],
+                    "files": [
+                      {
+                        "relativePath": ".codex/agents/conductor.toml",
+                        "sha256": "{{Digest("conductor")}}",
+                        "target": "codex",
+                        "adopted": false
+                      },
+                      {
+                        "relativePath": ".warp/skills/conductor/SKILL.md",
+                        "sha256": "{{Digest("role skill")}}",
+                        "target": "warp",
+                        "adopted": true
+                      }
+                    ]
+                  }
 
-            """.Replace("\r\n", "\n", StringComparison.Ordinal),
+                  """.Replace("\r\n", "\n", StringComparison.Ordinal),
             receiptJson.Replace("\r\n", "\n", StringComparison.Ordinal));
         Assert.DoesNotContain(fixture.Path, lockYaml, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Path, receiptJson, StringComparison.Ordinal);
@@ -156,7 +222,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("apm-digest")]
     public void SerializeLockInvalidSchemaOrDigestIsRejected(string invalidField)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadLock valid = Lock();
         SquadLock invalid = invalidField switch
@@ -183,7 +249,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("apm-digest")]
     public void DeserializeLockInvalidSchemaOrDigestIsRejected(string invalidField)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string yaml = store.SerializeLock(Lock());
         string invalidYaml = invalidField switch
@@ -213,16 +279,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A receipt records the canonical physical root it was written against, so an absolute root is the
-    /// normal form and must survive a round trip. It was once rejected, which predates recording roots.
+    ///     A receipt records the canonical physical root it was written against, so an absolute root is the
+    ///     normal form and must survive a round trip. It was once rejected, which predates recording roots.
     /// </summary>
     [Fact]
     public void ReceiptRecordsAbsolutePhysicalRootAndRoundTrips()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string physicalRoot = Path.Combine(fixture.Path, "physical-root");
-        SquadOwnedFile validFile = new SquadOwnedFile(
+        SquadOwnedFile validFile = new(
             ".codex/agents/conductor.toml",
             Digest("conductor"),
             "codex",
@@ -235,21 +301,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Only an absolute physical root or the legacy <c>.</c> marker is a valid target root. A relative root
-    /// is not a location and would be resolved against whatever directory later reads it.
+    ///     Only an absolute physical root or the legacy <c>.</c> marker is a valid target root. A relative root
+    ///     is not a location and would be resolved against whatever directory later reads it.
     /// </summary>
     [Theory]
     [InlineData("relative/root")]
     [InlineData("../escape")]
     public void ReceiptRejectsRelativeTargetRootOtherThanTheLegacyMarker(string targetRoot)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadReceipt invalid = Receipt(new SquadOwnedFile(
-            ".codex/agents/conductor.toml",
-            Digest("conductor"),
-            "codex",
-            false)) with
+                ".codex/agents/conductor.toml",
+                Digest("conductor"),
+                "codex",
+                false)) with
         {
             TargetRoot = targetRoot
         };
@@ -261,9 +327,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Digest("conductor"),
             "codex",
             false)));
-        string invalidJson = json.Replace("\"targetRoot\": \".\"", $"\"targetRoot\": \"{targetRoot}\"", StringComparison.Ordinal);
+        string invalidJson = json.Replace("\"targetRoot\": \".\"", $"\"targetRoot\": \"{targetRoot}\"",
+            StringComparison.Ordinal);
 
-        InvalidDataException deserialized = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
+        InvalidDataException deserialized =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
         Assert.Contains("target root", deserialized.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -273,9 +341,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("file-digest")]
     public void SerializeReceiptInvalidSchemaRootPathOrDigestIsRejected(string invalidField)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadOwnedFile validFile = new SquadOwnedFile(
+        SquadOwnedFile validFile = new(
             ".codex/agents/conductor.toml",
             Digest("conductor"),
             "codex",
@@ -306,7 +374,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("file-digest")]
     public void DeserializeReceiptInvalidSchemaRootPathOrDigestIsRejected(string invalidField)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string json = store.SerializeReceipt(Receipt(new SquadOwnedFile(
             ".codex/agents/conductor.toml",
@@ -330,20 +398,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             _ => throw new ArgumentOutOfRangeException(nameof(invalidField), invalidField, null)
         };
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
+        InvalidDataException exception =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
 
         Assert.Contains(invalidField.Split('-')[^1], exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// A global receipt records the files Squad owns in the user's home beside the files it owns in each
-    /// harness root. The record has to survive a write and a read: a receipt that lost it would make the
-    /// next update treat Squad's own guidance file as unowned and stop refreshing it.
+    ///     A global receipt records the files Squad owns in the user's home beside the files it owns in each
+    ///     harness root. The record has to survive a write and a read: a receipt that lost it would make the
+    ///     next update treat Squad's own guidance file as unowned and stop refreshing it.
     /// </summary>
     [Fact]
     public void GlobalReceiptHomeFilesRoundTrip()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadReceipt receipt = GlobalReceiptWithHomeFiles(GuidanceHomeFile());
 
@@ -354,14 +423,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The field is additive. A receipt written before home-owned files existed has none, and a receipt
-    /// that owns none writes none, so neither an earlier CLI's receipts nor an existing deployment is
-    /// disturbed by the field's arrival.
+    ///     The field is additive. A receipt written before home-owned files existed has none, and a receipt
+    ///     that owns none writes none, so neither an earlier CLI's receipts nor an existing deployment is
+    ///     disturbed by the field's arrival.
     /// </summary>
     [Fact]
     public void GlobalReceiptHomeFilesAreOmittedWhenThereAreNoneAndReadAsEmpty()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
 
         string json = store.SerializeReceipt(GlobalReceiptWithHomeFiles());
@@ -371,10 +440,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A home-file record is an ownership claim over a path beneath the user's home, so it is held to the
-    /// standard a harness file is: a global receipt to carry it, a portable path that stays inside the
-    /// root, a lowercase SHA-256 digest, and a path that appears once. Each case is refused on its own
-    /// ground, which the message names, so a check that stops running cannot hide behind another.
+    ///     A home-file record is an ownership claim over a path beneath the user's home, so it is held to the
+    ///     standard a harness file is: a global receipt to carry it, a portable path that stays inside the
+    ///     root, a lowercase SHA-256 digest, and a path that appears once. Each case is refused on its own
+    ///     ground, which the message names, so a check that stops running cannot hide behind another.
     /// </summary>
     [Theory]
     [InlineData("project-scope", "only on a global receipt")]
@@ -392,7 +461,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("case-variant-duplicate", "not a unique portable path")]
     public void SerializeReceiptHomeFilesThatBreakTheReceiptContractAreRejected(string invalidCase, string reason)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadReceipt invalid = ReceiptWithInvalidHomeFiles(invalidCase);
 
@@ -403,73 +472,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             $"'{invalidCase}' was refused, but with '{exception.Message}' rather than a message naming '{reason}'.");
     }
 
-    public static TheoryData<string, string, string> MalformedHomeFilesJson
-    {
-        get
-        {
-            string digest = Digest("guidance");
-            return new TheoryData<string, string, string>
-            {
-                { "object-instead-of-array", "{}", "homeFiles must be an array" },
-                { "string-instead-of-array", "\"response-guidance.md\"", "homeFiles must be an array" },
-                { "number-instead-of-array", "7", "homeFiles must be an array" },
-                { "null-instead-of-array", "null", "field 'homeFiles' cannot be null" },
-                { "null-entry", "[null]", "home file must be an object" },
-                { "string-entry", "[\"response-guidance.md\"]", "home file must be an object" },
-                { "array-entry", "[[]]", "home file must be an object" },
-                {
-                    "missing-digest",
-                    $$"""[{"relativePath":"response-guidance.md"}]""",
-                    "Missing: sha256"
-                },
-                {
-                    "missing-path",
-                    $$"""[{"sha256":"{{digest}}"}]""",
-                    "Missing: relativePath"
-                },
-                {
-                    "unknown-field",
-                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}","target":"claude"}]""",
-                    "unknown: target"
-                },
-                {
-                    "duplicate-field",
-                    $$"""[{"relativePath":"response-guidance.md","relativePath":"other.md","sha256":"{{digest}}"}]""",
-                    "duplicate field 'relativePath'"
-                },
-                {
-                    "null-digest",
-                    $$"""[{"relativePath":"response-guidance.md","sha256":null}]""",
-                    "field 'sha256' cannot be null"
-                },
-                {
-                    "numeric-path",
-                    $$"""[{"relativePath":5,"sha256":"{{digest}}"}]""",
-                    "JSON is invalid"
-                },
-                {
-                    "escaping-path",
-                    $$"""[{"relativePath":"../response-guidance.md","sha256":"{{digest}}"}]""",
-                    "is not portable"
-                },
-                {
-                    "invalid-digest",
-                    $$"""[{"relativePath":"response-guidance.md","sha256":"not-a-digest"}]""",
-                    "home file digest"
-                },
-                {
-                    "duplicate-path",
-                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}"},{"relativePath":"Response-Guidance.md","sha256":"{{digest}}"}]""",
-                    "not a unique portable path"
-                }
-            };
-        }
-    }
-
     /// <summary>
-    /// The raw JSON is checked before any object is bound, so a shape the binder would quietly coerce
-    /// (a missing digest read as null, an unknown field ignored, a repeated field resolved to one value)
-    /// is refused instead of becoming an ownership record nobody wrote.
+    ///     The raw JSON is checked before any object is bound, so a shape the binder would quietly coerce
+    ///     (a missing digest read as null, an unknown field ignored, a repeated field resolved to one value)
+    ///     is refused instead of becoming an ownership record nobody wrote.
     /// </summary>
     [Theory]
     [MemberData(nameof(MalformedHomeFilesJson))]
@@ -478,7 +484,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string homeFilesJson,
         string reason)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string json = ReplaceHomeFiles(
             store.SerializeReceipt(GlobalReceiptWithHomeFiles(GuidanceHomeFile())),
@@ -492,13 +498,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The control for the theory above: swapping in a well-formed value leaves the document valid, so
-    /// each rejection there comes from the value it injects and not from the way the document is rebuilt.
+    ///     The control for the theory above: swapping in a well-formed value leaves the document valid, so
+    ///     each rejection there comes from the value it injects and not from the way the document is rebuilt.
     /// </summary>
     [Fact]
     public void ReceiptHomeFilesReplacementLeavesAWellFormedDocumentValid()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadReceipt receipt = GlobalReceiptWithHomeFiles(GuidanceHomeFile());
         string rewritten = ReplaceHomeFiles(
@@ -509,13 +515,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A property declared twice would be read as whichever occurrence the reader reaches, so an
-    /// ownership claim could hide behind an empty list. The reader refuses the repeat outright.
+    ///     A property declared twice would be read as whichever occurrence the reader reaches, so an
+    ///     ownership claim could hide behind an empty list. The reader refuses the repeat outright.
     /// </summary>
     [Fact]
     public void DeserializeReceiptHomeFilesDeclaredTwiceAreRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string twice = InsertBeforeRootClose(
             store.SerializeReceipt(GlobalReceiptWithHomeFiles(GuidanceHomeFile())),
@@ -527,9 +533,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Only a global receipt, written on the v2 schema, can own files in the home. A receipt on the v1
-    /// schema, or one that names another scope, was never written by this code with that field, so
-    /// reading it as ownership would let a hand edit give Squad authority it never recorded.
+    ///     Only a global receipt, written on the v2 schema, can own files in the home. A receipt on the v1
+    ///     schema, or one that names another scope, was never written by this code with that field, so
+    ///     reading it as ownership would let a hand edit give Squad authority it never recorded.
     /// </summary>
     [Theory]
     [InlineData("project-receipt-on-v1", "unknown: homeFiles")]
@@ -537,7 +543,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("project-scope-on-v2", "global scope only")]
     public void DeserializeReceiptHomeFilesOutsideAGlobalV2ReceiptAreRejected(string carrier, string reason)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string homeFiles = $"  \"homeFiles\": [{HomeFileJson(GuidanceFile, Digest("guidance"))}]";
         string json = carrier switch
@@ -560,13 +566,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Global state lives beneath the injected home at <c>.kyber-weave/squad/global</c>, not beneath
-    /// the platform application data directory, and the receipt names the home as its anchor.
+    ///     Global state lives beneath the injected home at <c>.kyber-weave/squad/global</c>, not beneath
+    ///     the platform application data directory, and the receipt names the home as its anchor.
     /// </summary>
     [Fact]
     public void ResolveStateGlobalScopeLivesUnderHomeAnchoredSquadState()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(home);
@@ -577,7 +583,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "body")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         string physicalHome = SquadPhysicalRootIdentity.Resolve(home).PhysicalPath;
 
@@ -600,14 +606,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Global state is one machine-wide record anchored on the home, so two unrelated target roots
-    /// address the same lock and receipt rather than each keeping a private binding and a sibling
-    /// receipt. The sibling-ownership check that used to read those siblings is retired with it.
+    ///     Global state is one machine-wide record anchored on the home, so two unrelated target roots
+    ///     address the same lock and receipt rather than each keeping a private binding and a sibling
+    ///     receipt. The sibling-ownership check that used to read those siblings is retired with it.
     /// </summary>
     [Fact]
     public void GlobalStateForUnrelatedTargetRootsSharesOneHomeAnchoredReceipt()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(home);
@@ -627,7 +633,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered("agents/first.toml", "first")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
 
         new SquadTransaction(store).Execute(firstPlan);
@@ -666,21 +672,23 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Assert.DoesNotContain("customer-alpha", relativePath, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("customer-beta", relativePath, StringComparison.OrdinalIgnoreCase);
         });
-        Assert.DoesNotContain(firstRoot, Store(applicationData).SerializeReceipt(firstReceipt), StringComparison.Ordinal);
-        Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(sharedReceipt), StringComparison.Ordinal);
+        Assert.DoesNotContain(firstRoot, Store(applicationData).SerializeReceipt(firstReceipt),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(sharedReceipt),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Global renderers strip the target directory prefix because each target deploys beneath
-    /// its own root, so one relative path legitimately appears once per target. State store
-    /// validation must key uniqueness on (target, path), not on the path alone.
+    ///     Global renderers strip the target directory prefix because each target deploys beneath
+    ///     its own root, so one relative path legitimately appears once per target. State store
+    ///     validation must key uniqueness on (target, path), not on the path alone.
     /// </summary>
     [Fact]
     public void GlobalReceiptSharingOnePathAcrossTargetsRoundTrips()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadReceipt receipt = new SquadReceipt(
+        SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Global,
             ".",
@@ -704,9 +712,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeReceiptDuplicatePathForOneTargetIsRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadReceipt duplicate = new SquadReceipt(
+        SquadReceipt duplicate = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Global,
             ".",
@@ -717,23 +725,22 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 new SquadOwnedFile("agents/conductor.md", Digest("second"), "claude", false)
             ]);
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.SerializeReceipt(duplicate));
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.SerializeReceipt(duplicate));
 
         Assert.Contains("unique", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("claude", exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Project scope writes every target beneath the one deployment root, so two targets
-    /// claiming one relative path would claim one physical file; the receipt must refuse it.
+    ///     Project scope writes every target beneath the one deployment root, so two targets
+    ///     claiming one relative path would claim one physical file; the receipt must refuse it.
     /// </summary>
     [Fact]
     public void SerializeReceiptProjectScopeSharedPathAcrossTargetsIsRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        SquadReceipt collision = new SquadReceipt(
+        SquadReceipt collision = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Project,
             ".",
@@ -744,21 +751,20 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 new SquadOwnedFile("agents/conductor.md", Digest("codex conductor"), "codex", false)
             ]);
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.SerializeReceipt(collision));
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.SerializeReceipt(collision));
 
         Assert.Contains("unique", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// A global install across two targets that render the same relative path must deploy to
-    /// each target's own root, and status must verify the bytes there — not against the
-    /// deployment root, which holds none of the files.
+    ///     A global install across two targets that render the same relative path must deploy to
+    ///     each target's own root, and status must verify the bytes there — not against the
+    ///     deployment root, which holds none of the files.
     /// </summary>
     [Fact]
     public void ExecuteGlobalInstallSharingPathsAcrossTargetsDeploysAndStatusVerifiesPerTargetRoots()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         string claudeRoot = Path.Combine(fixture.Path, "claude-home", ".claude");
         string codexRoot = Path.Combine(fixture.Path, "codex-home", ".codex");
@@ -779,7 +785,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Rendered("agents/conductor.md", "codex conductor")
             ],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt),
             globalRoots);
 
@@ -821,13 +827,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// An uninstall plan's receipt carries only retained files; the dry-run report must list
-    /// the planned removals with their target, and remove nothing.
+    ///     An uninstall plan's receipt carries only retained files; the dry-run report must list
+    ///     the planned removals with their target, and remove nothing.
     /// </summary>
     [Fact]
     public void UninstallDryRunListsPlannedRemovalsWithTargetsAndRemovesNothing()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
             relativePath,
@@ -859,23 +865,25 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecuteGlobalScopeKeepsIntentStagesAndBackupsInHomeJournalNotBesideTargetOrInState()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(Path.Combine(applicationData, "home"));
         string targetRoot = Path.Combine(fixture.Path, "global-target");
         Directory.CreateDirectory(targetRoot);
         Write(targetRoot, ".codex/agents/conductor.toml", "installed body");
-        SquadReceipt receipt = new SquadReceipt(
+        SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Global,
             ".",
             InstalledAt,
             [],
-            [new SquadOwnedFile(
-                ".codex/agents/conductor.toml",
-                Digest("installed body"),
-                "codex",
-                false)]);
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("installed body"),
+                    "codex",
+                    false)
+            ]);
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
@@ -883,10 +891,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(".codex/agents/conductor.toml", "updated body")],
             receipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         SquadStateStore store = Store(applicationData);
-        GlobalTransactionLocationObserver observer = new GlobalTransactionLocationObserver(
+        GlobalTransactionLocationObserver observer = new(
             targetRoot,
             store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global));
@@ -904,7 +912,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateInstallIdenticalUnmanagedFileWithAdoptRecordsOwnershipWithoutRewriting()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         Write(fixture.Path, ".codex/agents/conductor.toml", "same bytes");
         DateTime before = File.GetLastWriteTimeUtc(
             Path.Combine(fixture.Path, ".codex/agents/conductor.toml"));
@@ -914,7 +922,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "same bytes")],
             [],
-            adopt: true,
+            true,
             new FixedTimeProvider(InstalledAt));
 
         Transaction(fixture.Path).Execute(plan);
@@ -929,7 +937,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecuteInstallPathCreatedAfterPreflightRefusesToOverwriteRacedUnmanagedFile()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
             fixture.Path,
@@ -937,7 +945,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(relativePath, "generated body")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         Write(fixture.Path, relativePath, "raced unmanaged body");
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
@@ -958,7 +966,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string existingContent,
         bool adopt)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         Write(fixture.Path, ".codex/agents/conductor.toml", existingContent);
         SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
 
@@ -988,7 +996,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string firstPath,
         string aliasPath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
             SquadDeploymentPlan.CreateInstall(
@@ -997,7 +1005,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(firstPath, "first"), Rendered(aliasPath, "second")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt)));
 
         Assert.Contains("portable", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -1014,7 +1022,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string firstPath,
         string aliasPath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadReceipt receipt = Receipt(
             new SquadOwnedFile(firstPath, Digest("first"), "codex", false),
             new SquadOwnedFile(aliasPath, Digest("second"), "codex", false));
@@ -1032,7 +1040,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUpdateLocallyEditedManagedFileWithoutReplacePreservesFileAndReceiptHash()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
@@ -1047,7 +1055,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(".codex/agents/conductor.toml", "updated body")],
             oldReceipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Transaction(fixture.Path).Execute(plan);
@@ -1061,13 +1069,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Progressively disclosed references are ordinary deployment files. Their rendered paths
-    /// must therefore receive the same exact-byte ownership and status guarantees as principals.
+    ///     Progressively disclosed references are ordinary deployment files. Their rendered paths
+    ///     must therefore receive the same exact-byte ownership and status guarantees as principals.
     /// </summary>
     [Fact]
     public void RenderedResourcesAreReceiptOwnedWithExactHashesAndStatusDetectsTheirDrift()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string agentResource = ".codex/agents/conductor/references/plan-path.md";
         const string skillResource = ".codex/skills/product-owner/references/requirements.md";
         const string agentContent = "# Plan path\n";
@@ -1082,7 +1090,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Rendered(skillResource, skillContent)
             ],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
 
         new SquadTransaction(store).Execute(plan);
@@ -1123,13 +1131,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Resource removal cannot broaden update authority: unchanged obsolete resources may be
-    /// deleted, while locally edited current or obsolete resources remain owned at their prior hash.
+    ///     Resource removal cannot broaden update authority: unchanged obsolete resources may be
+    ///     deleted, while locally edited current or obsolete resources remain owned at their prior hash.
     /// </summary>
     [Fact]
     public void ResourceUpdateAndRemovalPreserveLocallyEditedReceiptOwnedFiles()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string currentResource = ".codex/agents/conductor/references/plan-path.md";
         const string editedObsoleteResource = ".codex/agents/conductor/references/legacy.md";
         const string unchangedObsoleteResource = ".codex/skills/product-owner/references/legacy.md";
@@ -1156,7 +1164,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(currentResource, "updated plan\n")],
             receipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Transaction(fixture.Path).Execute(plan);
@@ -1173,38 +1181,43 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// When updating an existing deployment from Antigravity's fallback role-skill lowering
-    /// shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
-    /// receipt-diff logic in <see cref="SquadDeploymentPlan.CreateUpdate"/> plans a Delete mutation
-    /// for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
-    /// and retains orphaned skill files whose bytes were locally edited by an operator.
+    ///     When updating an existing deployment from Antigravity's fallback role-skill lowering
+    ///     shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
+    ///     receipt-diff logic in <see cref="SquadDeploymentPlan.CreateUpdate" /> plans a Delete mutation
+    ///     for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
+    ///     and retains orphaned skill files whose bytes were locally edited by an operator.
     /// </summary>
     [Fact]
     public void CreateUpdateReceiptDiffRetiresFallbackSkillPathsOnNativeAntigravityUpdateAndRetainsLocallyEdited()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string target = "antigravity";
         const string retiredSkillPath = ".agents/skills/worker/SKILL.md";
         const string editedSkillPath = ".agents/skills/reviewer/SKILL.md";
-        const string installedWorkerContent = "---\nname: worker\ndescription: fallback worker skill\n---\nFallback worker instructions\n";
-        const string installedReviewerContent = "---\nname: reviewer\ndescription: fallback reviewer skill\n---\nFallback reviewer instructions\n";
-        const string locallyEditedReviewerContent = "---\nname: reviewer\ndescription: operator edited reviewer\n---\nCustom operator instructions\n";
+        const string installedWorkerContent =
+            "---\nname: worker\ndescription: fallback worker skill\n---\nFallback worker instructions\n";
+        const string installedReviewerContent =
+            "---\nname: reviewer\ndescription: fallback reviewer skill\n---\nFallback reviewer instructions\n";
+        const string locallyEditedReviewerContent =
+            "---\nname: reviewer\ndescription: operator edited reviewer\n---\nCustom operator instructions\n";
 
         const string nativeWorkerAgentPath = ".agents/agents/worker/agent.md";
         const string nativeReviewerAgentPath = ".agents/agents/reviewer/agent.md";
-        const string nativeWorkerAgentContent = "---\nname: worker\ndescription: native worker agent\nenable_write_tools: true\n---\nNative worker instructions\n";
-        const string nativeReviewerAgentContent = "---\nname: reviewer\ndescription: native reviewer agent\nenable_write_tools: true\n---\nNative reviewer instructions\n";
+        const string nativeWorkerAgentContent =
+            "---\nname: worker\ndescription: native worker agent\nenable_write_tools: true\n---\nNative worker instructions\n";
+        const string nativeReviewerAgentContent =
+            "---\nname: reviewer\ndescription: native reviewer agent\nenable_write_tools: true\n---\nNative reviewer instructions\n";
 
         SquadOwnedFile retiredSkillOwned = new(
             retiredSkillPath,
             Digest(installedWorkerContent),
             target,
-            Adopted: false);
+            false);
         SquadOwnedFile editedSkillOwned = new(
             editedSkillPath,
             Digest(installedReviewerContent),
             target,
-            Adopted: false);
+            false);
         SquadReceipt previousReceipt = Receipt(retiredSkillOwned, editedSkillOwned);
 
         Write(fixture.Path, retiredSkillPath, installedWorkerContent);
@@ -1229,7 +1242,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             ],
             previousReceipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         // Verify planned changes: unmodified fallback path is planned for Delete; native paths are planned for Write; locally edited path is not touched
@@ -1342,11 +1355,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Prevents a host that deployed <c>create-pull-request-github</c> before it was retired
-    /// into <c>create-pull-request</c> from keeping the retired skill forever after
-    /// <c>squad update</c>, or from losing an operator's edited copy of it. The rendered set is
-    /// the real canonical Claude render, so the test fails while the retired skill is still
-    /// canonical.
+    ///     Prevents a host that deployed <c>create-pull-request-github</c> before it was retired
+    ///     into <c>create-pull-request</c> from keeping the retired skill forever after
+    ///     <c>squad update</c>, or from losing an operator's edited copy of it. The rendered set is
+    ///     the real canonical Claude render, so the test fails while the retired skill is still
+    ///     canonical.
     /// </summary>
     [Fact]
     public async Task CreateUpdateRetiresCreatePullRequestGithubFromAPriorReleaseUnlessLocallyEdited()
@@ -1360,15 +1373,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             new SquadRenderRequest(
                 Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
                 [SquadTarget.Claude],
-                SquadDeploymentScope.Project));
+                SquadDeploymentScope.Project,
+                PreloadedSource: TestSquadCorpus.CanonicalSource));
         Assert.True(render.Success, string.Join("; ", render.Errors));
         SquadReceipt previousReceipt = Receipt(new SquadOwnedFile(
             retiredSkillPath,
             Digest(installedContent),
             "claude",
-            Adopted: false));
+            false));
 
-        using (TempDirectory fixture = new TempDirectory())
+        using (TempDirectory fixture = new())
         {
             Write(fixture.Path, retiredSkillPath, installedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
@@ -1380,7 +1394,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 render.Files,
                 previousReceipt,
                 [],
-                replaceManaged: false,
+                false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
 
             Assert.Contains(
@@ -1398,7 +1412,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         foreach (bool replaceManaged in new[] { false, true })
         {
-            using TempDirectory fixture = new TempDirectory();
+            using TempDirectory fixture = new();
             Write(fixture.Path, retiredSkillPath, editedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
@@ -1424,13 +1438,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A failed resource update must restore the exact prior bytes and ownership receipt, even
-    /// when the failure happens after the new resource after-image has been published.
+    ///     A failed resource update must restore the exact prior bytes and ownership receipt, even
+    ///     when the failure happens after the new resource after-image has been published.
     /// </summary>
     [Fact]
     public void ResourceUpdateFailureRollsBackPriorBytesAndReceipt()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string resourcePath = ".codex/agents/conductor/references/plan-path.md";
         const string installedContent = "installed plan reference\n";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
@@ -1447,7 +1461,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(resourcePath, "updated plan reference\n")],
             receipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         LifecycleStepFailingObserver failure = new(
             fixture.Path,
@@ -1466,7 +1480,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUpdateLocallyEditedManagedFileWithReplaceReplacesOnlyReceiptOwnedPath()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
@@ -1481,7 +1495,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(".codex/agents/conductor.toml", "updated body")],
             oldReceipt,
             [],
-            replaceManaged: true,
+            true,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Transaction(fixture.Path).Execute(plan);
@@ -1496,7 +1510,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecuteUpdateFileChangedAfterExactHashPreflightRefusesToOverwriteRacedEdit()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
             relativePath,
@@ -1512,7 +1526,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(relativePath, "updated body")],
             receipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         Write(fixture.Path, relativePath, "raced operator edit");
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
@@ -1528,7 +1542,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUpdateReplaceManagedDoesNotAuthorizeUnmanagedCollision()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadReceipt oldReceipt = Receipt(
             new SquadOwnedFile(
                 ".codex/agents/conductor.toml",
@@ -1550,7 +1564,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ],
                 oldReceipt,
                 [],
-                replaceManaged: true,
+                true,
                 new FixedTimeProvider(InstalledAt.AddDays(1))));
 
         Assert.Contains(
@@ -1563,13 +1577,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUninstallUnchangedOwnedFileIsRemovedAndEditedOwnedFileIsRetained()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadOwnedFile unchanged = new SquadOwnedFile(
+        using TempDirectory fixture = new();
+        SquadOwnedFile unchanged = new(
             ".codex/agents/conductor.toml",
             Digest("installed conductor"),
             "codex",
             false);
-        SquadOwnedFile edited = new SquadOwnedFile(
+        SquadOwnedFile edited = new(
             ".codex/agents/reviewer.toml",
             Digest("installed reviewer"),
             "codex",
@@ -1597,7 +1611,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecuteUninstallFileChangedAfterExactHashPreflightRefusesToDeleteRacedEdit()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadReceipt receipt = Receipt(new SquadOwnedFile(
             relativePath,
@@ -1626,7 +1640,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData(".codex/../../outside.md")]
     public void CreateInstallLexicalPathEscapeIsRejectedBeforeWrites(string relativePath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
             SquadDeploymentPlan.CreateInstall(
@@ -1635,7 +1649,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(relativePath, "escape")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt)));
 
         Assert.Contains(relativePath, exception.Message, StringComparison.Ordinal);
@@ -1645,8 +1659,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateInstallPathThatResolvesThroughSymlinkOutsideRootIsRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
-        using TempDirectory outside = new TempDirectory();
+        using TempDirectory fixture = new();
+        using TempDirectory outside = new();
         string codex = Path.Combine(fixture.Path, ".codex");
         Directory.CreateDirectory(codex);
         Directory.CreateSymbolicLink(Path.Combine(codex, "agents"), outside.Path);
@@ -1658,7 +1672,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(".codex/agents/conductor.toml", "escape")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt)));
 
         Assert.Contains(
@@ -1671,8 +1685,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUninstallReceiptPathThatResolvesOutsideRootIsRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
-        using TempDirectory outside = new TempDirectory();
+        using TempDirectory fixture = new();
+        using TempDirectory outside = new();
         string codex = Path.Combine(fixture.Path, ".codex");
         Directory.CreateDirectory(codex);
         Directory.CreateSymbolicLink(Path.Combine(codex, "agents"), outside.Path);
@@ -1699,7 +1713,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public async Task ExecuteActiveTransactionHoldsAtomicExclusiveLease()
     {
         using TransactionFixture fixture = TransactionFixture.Create();
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction transaction = Transaction(fixture.Path, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
         Task execution = Task.Run(() => transaction.Execute(plan));
@@ -1737,7 +1751,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         using TransactionFixture fixture = TransactionFixture.Create();
         string fixturePath = fixture.Path;
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = Transaction(fixturePath, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
         Task execution = Task.Run(() => activeTransaction.Execute(plan));
@@ -1769,7 +1783,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecuteStagesBacksUpAndJournalsBeforeApplyingStateLast()
     {
         using TransactionFixture fixture = TransactionFixture.Create();
-        RecordingObserver observer = new RecordingObserver(fixture.Path);
+        RecordingObserver observer = new(fixture.Path);
         SquadTransaction transaction = Transaction(fixture.Path, observer);
 
         transaction.Execute(fixture.CreateUpdatePlan());
@@ -1798,7 +1812,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecutePlainObserverReceivesOnlyLegacyLifecycleSteps()
     {
         using TransactionFixture fixture = TransactionFixture.Create();
-        RecordingObserver observer = new RecordingObserver(fixture.Path);
+        RecordingObserver observer = new(fixture.Path);
 
         Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
@@ -1822,7 +1836,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecuteCheckpointObserverOptsIntoPreparedAndTransitionEvents()
     {
         using TransactionFixture fixture = TransactionFixture.Create();
-        CheckpointRecordingObserver observer = new CheckpointRecordingObserver();
+        CheckpointRecordingObserver observer = new();
 
         Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
@@ -1897,7 +1911,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecuteFailureAfterEveryFilesystemStepRestoresOriginalTreeAndRecoveryIsIdempotent()
     {
         using TransactionFixture probeFixture = TransactionFixture.Create();
-        RecordingObserver probe = new RecordingObserver(probeFixture.Path);
+        RecordingObserver probe = new(probeFixture.Path);
         Transaction(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
         int stepCount = probe.Steps.Count;
 
@@ -1906,7 +1920,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             using TransactionFixture fixture = TransactionFixture.Create();
             SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
-            FailingObserver failure = new FailingObserver(fixture.Path, failureSequence);
+            FailingObserver failure = new(fixture.Path, failureSequence);
             SquadTransaction transaction = Transaction(
                 fixture.Path,
                 failure);
@@ -1935,7 +1949,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecuteFailureAfterEachFileMutationRestoresFilesDirectoriesSymlinksAndFreshParents()
     {
         using RichTransactionFixture probeFixture = RichTransactionFixture.Create();
-        RecordingObserver probe = new RecordingObserver(probeFixture.Path);
+        RecordingObserver probe = new(probeFixture.Path);
         Transaction(probeFixture.Path, probe).Execute(probeFixture.CreateUpdatePlan());
         int stepCount = probe.Steps.Count;
 
@@ -1944,7 +1958,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             using RichTransactionFixture fixture = RichTransactionFixture.Create();
             SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-            FailingObserver failure = new FailingObserver(fixture.Path, failureSequence);
+            FailingObserver failure = new(fixture.Path, failureSequence);
             SquadTransaction transaction = Transaction(fixture.Path, failure);
 
             InjectedSquadTransactionFailure exception = Assert.Throws<InjectedSquadTransactionFailure>(() =>
@@ -1976,18 +1990,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         using TransactionFixture fixture = TransactionFixture.Create();
         string fixturePath = fixture.Path;
         SquadStateStore store = Store(fixturePath);
-        PostIntentReplacementObserver observer = new PostIntentReplacementObserver(
+        PostIntentReplacementObserver observer = new(
             fixturePath,
             store,
             SquadDeploymentScope.Project,
             fixture.RelativePath,
             replacementCheckpoint);
-        SquadTransaction transaction = new SquadTransaction(store, observer);
+        SquadTransaction transaction = new(store, observer);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
 
         Exception? exception = Record.Exception(() => transaction.Execute(updatePlan));
 
-        SquadDeploymentConflictException conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
+        SquadDeploymentConflictException
+            conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
         Assert.Contains("changed", conflict.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(observer.ExternalBytes, File.ReadAllBytes(observer.ReplacedPath));
         if (replacementCheckpoint != SquadTransactionStepKind.FileApplied)
@@ -2025,7 +2040,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecutePostIntentExternalChildInTransactionCreatedParentPreservesParentAndReportsConflict()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         const string generatedPath = ".warp/roles/reviewer.md";
         const string externalPath = ".warp/roles/operator-note.md";
@@ -2035,9 +2050,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(generatedPath, "generated reviewer", "warp")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
-        ExternalChildObserver observer = new ExternalChildObserver(fixturePath, generatedPath, externalPath);
+        ExternalChildObserver observer = new(fixturePath, generatedPath, externalPath);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
         Exception? exception = Record.Exception(() =>
@@ -2057,7 +2072,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecutePreparedArtifactsAreAtomicAndDurableBeforeFirstTargetMutation()
     {
         using TransactionFixture fixture = TransactionFixture.Create();
-        PreparedArtifactsObserver observer = new PreparedArtifactsObserver(
+        PreparedArtifactsObserver observer = new(
             fixture.Path,
             fixture.RelativePath);
 
@@ -2144,7 +2159,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         bool useSymlinkAlias,
         bool expectContention)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string aliasRoot = Path.Combine(fixture.Path, "target-alias");
         string applicationData = Path.Combine(fixture.Path, "application-data");
@@ -2157,7 +2172,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(AgentRelativePath(activeScope, "active.toml"), "active")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
         string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
@@ -2167,10 +2182,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(contenderFile, "contender")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new SquadTransaction(store, blocker);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
+        SquadTransaction activeTransaction = new(store, blocker);
         Task activeExecution = Task.Run(() =>
             activeTransaction.Execute(activePlan));
         Assert.True(
@@ -2183,13 +2198,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         IReadOnlyDictionary<string, TreeEntry>? afterContention;
         try
         {
-            SquadTransaction storeTransaction = new SquadTransaction(store);
+            SquadTransaction storeTransaction = new(store);
             if (expectContention)
-            {
                 recoveryException = Record.Exception(() => storeTransaction.Recover(
                     contenderRoot,
                     contenderScope));
-            }
 
             executeException = Record.Exception(() =>
                 storeTransaction.Execute(contenderPlan));
@@ -2227,7 +2240,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         for (int failureSequence = 1; failureSequence <= probeStepCount; failureSequence++)
         {
-            using TempDirectory fixture = new TempDirectory();
+            using TempDirectory fixture = new();
             string targetRoot = Path.Combine(fixture.Path, "target");
             string applicationData = Path.Combine(fixture.Path, "application-data");
             Directory.CreateDirectory(targetRoot);
@@ -2241,8 +2254,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadStateStore store = Store(applicationData);
             SquadDeploymentPlan plan = CreateGlobalInstallPlan(targetRoot);
             SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-            FailingObserver failure = new FailingObserver(fixture.Path, failureSequence);
-            SquadTransaction transaction = new SquadTransaction(store, failure);
+            FailingObserver failure = new(fixture.Path, failureSequence);
+            SquadTransaction transaction = new(store, failure);
 
             Assert.Throws<InjectedSquadTransactionFailure>(() => transaction.Execute(plan));
             AssertTreesEqual(before, CaptureTree(fixture.Path));
@@ -2261,14 +2274,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Global state no longer keys on the target root at all. Lexical, symlink and unrelated roots
-    /// all resolve to the one home-anchored lock, receipt and journal, so the alias and binding
-    /// machinery that used to keep them apart has nothing left to decide.
+    ///     Global state no longer keys on the target root at all. Lexical, symlink and unrelated roots
+    ///     all resolve to the one home-anchored lock, receipt and journal, so the alias and binding
+    ///     machinery that used to keep them apart has nothing left to decide.
     /// </summary>
     [Fact]
     public void ResolveGlobalStateIgnoresTargetRootAndAnchorsOnHomeForEveryAlias()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string aliasRoot = Path.Combine(fixture.Path, "target-alias");
         string unrelatedRoot = Path.Combine(fixture.Path, "unrelated");
@@ -2303,14 +2316,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// On a case-insensitive filesystem the two spellings name one directory, so they must resolve to
-    /// the same home-anchored receipt. On a case-sensitive filesystem the probe cannot be built and the
-    /// test returns without asserting; that case is covered by the Windows sibling test.
+    ///     On a case-insensitive filesystem the two spellings name one directory, so they must resolve to
+    ///     the same home-anchored receipt. On a case-sensitive filesystem the probe cannot be built and the
+    ///     test returns without asserting; that case is covered by the Windows sibling test.
     /// </summary>
     [Fact]
     public void ResolveGlobalStateCaseAliasesShareHomeAnchoredReceiptOnCaseInsensitiveFilesystem()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "CaseSensitiveProbe");
         string caseAlias = Path.Combine(fixture.Path, "casesensitiveprobe");
         Directory.CreateDirectory(targetRoot);
@@ -2335,7 +2348,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public async Task ResolvePhysicalRootCaseDistinctSiblingsRemainDistinctWhenSupported()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string upperRoot = Path.Combine(fixture.Path, "Root");
         string lowerRoot = Path.Combine(fixture.Path, "root");
         string symlinkRoot = Path.Combine(fixture.Path, "root-link");
@@ -2363,14 +2376,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             store.ResolveTransactionDirectory(lowerRoot, SquadDeploymentScope.Project));
         Assert.Equal(upperIdentity, symlinkIdentity);
 
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/upper.toml", "upper")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         SquadDeploymentPlan siblingPlan = SquadDeploymentPlan.CreateInstall(
             lowerRoot,
@@ -2378,9 +2391,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".codex/agents/lower.toml", "lower")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new SquadTransaction(store, blocker);
+        SquadTransaction activeTransaction = new(store, blocker);
         Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
         Assert.True(
             blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
@@ -2389,7 +2402,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Exception? siblingException;
         try
         {
-            SquadTransaction siblingTransaction = new SquadTransaction(store);
+            SquadTransaction siblingTransaction = new(store);
             siblingException = Record.Exception(() => siblingTransaction.Execute(siblingPlan));
         }
         finally
@@ -2406,7 +2419,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public async Task ResolvePhysicalRootCaseAliasesConvergeWhenFilesystemIsInsensitive()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string actualRoot = Path.Combine(fixture.Path, "CaseProbe");
         string caseAlias = Path.Combine(fixture.Path, "caseprobe");
         string symlinkAlias = Path.Combine(fixture.Path, "case-probe-link");
@@ -2432,14 +2445,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             store.ResolveReceiptPath(actualRoot, SquadDeploymentScope.Global),
             store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
 
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
             actualRoot,
             SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/actual.toml", "actual")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         // Project scope, not global: the lease of a project is its physical root, so a case alias of that
         // root contends. Global state is leased on the home, which this root is not, so a global alias
@@ -2450,9 +2463,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".warp/roles/alias.md", "alias", "warp")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new SquadTransaction(store, blocker);
+        SquadTransaction activeTransaction = new(store, blocker);
         Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
         Assert.True(
             blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
@@ -2461,7 +2474,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Exception? aliasException;
         try
         {
-            SquadTransaction aliasTransaction = new SquadTransaction(store);
+            SquadTransaction aliasTransaction = new(store);
             aliasException = Record.Exception(() => aliasTransaction.Execute(aliasPlan));
         }
         finally
@@ -2476,7 +2489,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ExecuteRetargetedRootAliasFailsBeforeWrites()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string firstRoot = Path.Combine(fixture.Path, "first");
         string secondRoot = Path.Combine(fixture.Path, "second");
         string aliasRoot = Path.Combine(fixture.Path, "root-alias");
@@ -2490,7 +2503,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "generated")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         Directory.Delete(aliasRoot);
         Directory.CreateSymbolicLink(aliasRoot, secondRoot);
@@ -2499,7 +2512,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Exception? exception = Record.Exception(() =>
             new SquadTransaction(Store(applicationData)).Execute(plan));
 
-        SquadDeploymentConflictException conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
+        SquadDeploymentConflictException
+            conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
         Assert.Contains("root", conflict.Message, StringComparison.OrdinalIgnoreCase);
         AssertTreesEqual(before, CaptureTree(fixture.Path));
     }
@@ -2530,7 +2544,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string documentKind,
         string corruption)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string document = documentKind == "lock"
             ? CorruptLockDocument(store.SerializeLock(Lock()), corruption)
@@ -2594,9 +2608,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void CreateLifecyclePlanWindowsForbiddenDeviceControlAndUnicodeAliasesAreRejected(
         string invalidPath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
-        SquadOwnedFile owned = new SquadOwnedFile(invalidPath, Digest("owned"), "codex", false);
+        SquadOwnedFile owned = new(invalidPath, Digest("owned"), "codex", false);
         SquadReceipt receipt = Receipt(owned);
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
@@ -2606,7 +2620,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(invalidPath, "generated")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
             SquadDeploymentPlan.CreateUpdate(
@@ -2616,7 +2630,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 [Rendered(invalidPath, "updated")],
                 receipt,
                 [],
-                replaceManaged: false,
+                false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
             SquadDeploymentPlan.CreateUninstall(
@@ -2633,7 +2647,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string firstPath,
         string aliasPath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         SquadReceipt receipt = Receipt(
             new SquadOwnedFile(firstPath, Digest("first"), "codex", false),
@@ -2646,7 +2660,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(firstPath, "first"), Rendered(aliasPath, "alias")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
             SquadDeploymentPlan.CreateUpdate(
@@ -2656,7 +2670,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 [Rendered(firstPath, "first"), Rendered(aliasPath, "alias")],
                 receipt,
                 [],
-                replaceManaged: false,
+                false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
             SquadDeploymentPlan.CreateUninstall(
@@ -2672,7 +2686,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("receipt-state")]
     public void ExecuteStagedArtifactChangedAfterPreparedBeforeApplyIsRejected(string artifact)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadStateStore store = Store(fixture.Path);
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
@@ -2681,9 +2695,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(relativePath, "generated conductor")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
-        StagedArtifactTamperingObserver observer = new StagedArtifactTamperingObserver(
+        StagedArtifactTamperingObserver observer = new(
             fixture.Path,
             relativePath,
             artifact);
@@ -2720,7 +2734,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string operation,
         string racedNodeKind)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         const string relativePath = ".codex/agents/conductor.toml";
         SquadDeploymentPlan plan;
@@ -2732,7 +2746,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered(relativePath, "generated")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt));
         }
         else
@@ -2752,7 +2766,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     [Rendered(relativePath, "updated")],
                     receipt,
                     [],
-                    replaceManaged: false,
+                    false,
                     new FixedTimeProvider(InstalledAt.AddDays(1)))
                 : SquadDeploymentPlan.CreateUninstall(
                     fixturePath,
@@ -2760,7 +2774,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     receipt);
         }
 
-        LeafRaceObserver observer = new LeafRaceObserver(fixturePath, relativePath, racedNodeKind);
+        LeafRaceObserver observer = new(fixturePath, relativePath, racedNodeKind);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
         Exception? exception = Record.Exception(() => transaction.Execute(plan));
@@ -2789,7 +2803,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "SquadTransaction.cs");
         string source = File.ReadAllText(sourcePath, Encoding.UTF8);
         int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
-        int restoreStart = source.IndexOf("private static IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
+        int restoreStart =
+            source.IndexOf("private static IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
         Assert.True(applyStart >= 0 && restoreStart > applyStart);
         string liveApplySource = source[applyStart..restoreStart];
 
@@ -2859,7 +2874,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("maximum-count")]
     public void RecoverCorruptCreatedDirectoryAuthorityCannotEscapeBoundRoots(string corruption)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(targetRoot);
@@ -2868,7 +2883,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(fixture.Path, "beside-target/canary.txt", "sibling canary");
         SquadStateStore store = Store(applicationData);
         SquadDeploymentPlan plan = CreateGlobalInstallPlan(targetRoot);
-        CheckpointFailingObserver observer = new CheckpointFailingObserver(
+        CheckpointFailingObserver observer = new(
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
@@ -2905,7 +2920,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void RecoverValidCreatedDirectoryAuthorityRemovesOnlyDeclaredEmptyDirectoriesDeepestFirst()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(targetRoot);
@@ -2913,7 +2928,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Write(applicationData, "shared/canary.txt", "application canary");
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
         SquadStateStore store = Store(applicationData);
-        CheckpointFailingObserver observer = new CheckpointFailingObserver(
+        CheckpointFailingObserver observer = new(
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
@@ -2940,7 +2955,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         using TransactionFixture fixture = TransactionFixture.Create();
         SquadStateStore store = Store(fixture.Path);
-        List<string> failures = new List<string>();
+        List<string> failures = new();
         string receiptJson = store.SerializeReceipt(fixture.Receipt);
         foreach (int numericValue in new[] { 0, 1, int.MaxValue })
         {
@@ -2959,7 +2974,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadTransactionCheckpointKind.Prepared);
         string fixturePath = fixture.Path;
         SquadTransaction transaction = Transaction(fixturePath);
-        Dictionary<string, IReadOnlyList<int>> journalCases = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal)
+        Dictionary<string, IReadOnlyList<int>> journalCases = new(StringComparer.Ordinal)
         {
             ["phase"] = [0, 1, int.MaxValue],
             ["originalKind"] = [0, 1, 2, 3, 4, int.MaxValue],
@@ -2974,7 +2989,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             ["lifecycleState"] = [0, 1, 2, int.MaxValue]
         };
         foreach ((string? property, IReadOnlyList<int>? numericValues) in journalCases)
-        {
             foreach (int numericValue in numericValues)
             {
                 RestoreTree(fixturePath, interrupted);
@@ -3004,7 +3018,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 if (!TreesEqual(beforeRecovery, CaptureTree(fixturePath)))
                     failures.Add($"journal.{property}={numericValue}:filesystem-access");
             }
-        }
 
         Assert.True(
             failures.Count == 0,
@@ -3018,7 +3031,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "The serializer emits scope tokens in lowercase; asserting an "
-            + "uppercased token would assert a format it never writes.")]
+                        + "uppercased token would assert a format it never writes.")]
     public void SerializeAuthorityStrictReaderRoundTripsEverySupportedShape(string journalPhase)
     {
         using TransactionFixture fixture = TransactionFixture.Create();
@@ -3056,7 +3069,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             foreach (SquadReceipt receipt in receipts)
             {
                 string serialized = store.SerializeReceipt(receipt);
-                Assert.Contains($"\"scope\": \"{scope.ToString().ToLowerInvariant()}\"", serialized, StringComparison.Ordinal);
+                Assert.Contains($"\"scope\": \"{scope.ToString().ToLowerInvariant()}\"", serialized,
+                    StringComparison.Ordinal);
 
                 // A Global receipt always serializes on the v2 schema (A3); Project stays on
                 // whatever schema the fixture already carries.
@@ -3108,7 +3122,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         using TransactionFixture fixture = TransactionFixture.Create();
         string fixturePath = fixture.Path;
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
-        PreparedBoundaryCorruptionObserver observer = new PreparedBoundaryCorruptionObserver(
+        PreparedBoundaryCorruptionObserver observer = new(
             fixturePath,
             fixture.RelativePath,
             corruption);
@@ -3159,7 +3173,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         using RichTransactionFixture fixture = RichTransactionFixture.Create();
         string fixturePath = fixture.Path;
-        CheckpointFailingObserver observer = new CheckpointFailingObserver(
+        CheckpointFailingObserver observer = new(
             fixturePath,
             SquadTransactionCheckpointKind.Prepared);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
@@ -3226,17 +3240,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.True(
             Enum.TryParse(crashPoint, out SquadTransactionCheckpointKind checkpoint),
             $"K4q requires the opt-in '{crashPoint}' crash boundary.");
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         ActiveTransitionScenario recoveryScenario = CreateActiveTransitionScenario(
             fixture.Path,
             scenario);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
-        ActiveTransitionCrashObserver observer = new ActiveTransitionCrashObserver(
+        ActiveTransitionCrashObserver observer = new(
             fixture.Path,
             checkpoint,
             recoveryScenario.Subject);
-        SquadTransaction transaction = new SquadTransaction(store, observer);
+        SquadTransaction transaction = new(store, observer);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(recoveryScenario.Plan));
@@ -3256,7 +3270,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ResolvePhysicalRootUsesActualOnDiskSpellingAndDirectoryCaseSemantics()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string actualRoot = Path.Combine(fixture.Path, "ActualSpelling");
         string caseVariant = Path.Combine(fixture.Path, "actualspelling");
         Directory.CreateDirectory(actualRoot);
@@ -3320,7 +3334,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             return;
         }
 
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         string caseSensitiveParent = Path.Combine(fixturePath, "case-sensitive-parent");
         Directory.CreateDirectory(caseSensitiveParent);
@@ -3347,15 +3361,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             store.ResolveReceiptPath(upperRoot, SquadDeploymentScope.Global),
             store.ResolveReceiptPath(lowerRoot, SquadDeploymentScope.Global));
 
-        using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new SquadTransaction(store, blocker);
+        using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
+        SquadTransaction activeTransaction = new(store, blocker);
         SquadDeploymentPlan upperPlan = SquadDeploymentPlan.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/upper.toml", "upper")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         Task active = Task.Run(() => activeTransaction.Execute(upperPlan));
         Assert.True(
@@ -3364,14 +3378,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Exception? siblingFailure;
         try
         {
-            SquadTransaction siblingTransaction = new SquadTransaction(store);
+            SquadTransaction siblingTransaction = new(store);
             SquadDeploymentPlan lowerPlan = SquadDeploymentPlan.CreateInstall(
                 lowerRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
                 [Rendered(".codex/agents/lower.toml", "lower")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt));
             siblingFailure = Record.Exception(() => siblingTransaction.Execute(lowerPlan));
         }
@@ -3419,7 +3433,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string field,
         string blankValue)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadLock invalid = ReplaceRequiredLockValue(Lock(), field, blankValue);
         string? emitted = null;
@@ -3435,13 +3449,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Derives the canonical lowercase token the serializer emits, which "
-            + "is the baseline the non-canonical variants are generated from.")]
+                        + "is the baseline the non-canonical variants are generated from.")]
     public void DeserializeAuthorityNoncanonicalEnumCaseIsRejected()
     {
         using RichTransactionFixture fixture = RichTransactionFixture.Create();
         string fixturePath = fixture.Path;
         SquadStateStore store = Store(fixturePath);
-        List<string> failures = new List<string>();
+        List<string> failures = new();
         foreach (SquadDeploymentScope scope in Enum.GetValues<SquadDeploymentScope>())
         {
             string canonical = store.SerializeReceipt(fixture.Receipt with { Scope = scope });
@@ -3457,7 +3471,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             }
         }
 
-        CheckpointFailingObserver observer = new CheckpointFailingObserver(
+        CheckpointFailingObserver observer = new(
             fixturePath,
             SquadTransactionCheckpointKind.Prepared);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
@@ -3473,10 +3487,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             ".squad-transaction",
             "intent.json");
         JsonObject canonicalIntent = ReadJsonObject(intentPath);
-        (string Property, string Value, int Occurrence)[] enumTokens = EnumerateAuthorityEnumTokens(canonicalIntent).ToArray();
+        (string Property, string Value, int Occurrence)[] enumTokens =
+            EnumerateAuthorityEnumTokens(canonicalIntent).ToArray();
         Assert.NotEmpty(enumTokens);
         foreach ((string Property, string Value, int Occurrence) token in enumTokens)
-        {
             foreach (string variant in NoncanonicalCaseVariants(token.Value))
             {
                 RestoreTree(fixturePath, interrupted);
@@ -3500,7 +3514,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 if (!TreesEqual(beforeRecovery, CaptureTree(fixturePath)))
                     failures.Add($"journal.{token.Property}={variant}:filesystem-access");
             }
-        }
 
         Assert.True(
             failures.Count == 0,
@@ -3511,7 +3524,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void ResolveFileWindowsCaseSensitiveSiblingSymlinkEscapeIsRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         AssertHomeStoreSymlinkEscapesAreRejected(fixture.Path);
 
         string caseSensitiveParent = Path.Combine(fixture.Path, "case-sensitive-parent");
@@ -3552,7 +3565,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Lock(),
                 [Rendered("escape/generated.md", "must remain contained")],
                 [],
-                adopt: false,
+                false,
                 new FixedTimeProvider(InstalledAt)));
 
         Directory.Delete(directAlias);
@@ -3563,7 +3576,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "contained")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
         Directory.Delete(Path.Combine(upperRoot, ".kyber-weave"));
         Directory.CreateSymbolicLink(Path.Combine(upperRoot, ".kyber-weave"), lowerRoot);
@@ -3583,11 +3596,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A symlink planted inside the home store that leads out of the home must stop every home-store
-    /// resolution it sits on. Planted at <c>.kyber-weave</c> it covers the state files and the global
-    /// journal, which lives beside <c>squad</c>. Planted at <c>.kyber-weave/squad</c> it covers the
-    /// state files only, so the journal is not asserted to reject there. Nothing here depends on
-    /// letter case, so it runs on every filesystem.
+    ///     A symlink planted inside the home store that leads out of the home must stop every home-store
+    ///     resolution it sits on. Planted at <c>.kyber-weave</c> it covers the state files and the global
+    ///     journal, which lives beside <c>squad</c>. Planted at <c>.kyber-weave/squad</c> it covers the
+    ///     state files only, so the journal is not asserted to reject there. Nothing here depends on
+    ///     letter case, so it runs on every filesystem.
     /// </summary>
     private static void AssertHomeStoreSymlinkEscapesAreRejected(string workspace)
     {
@@ -3597,7 +3610,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         (string Label, string LinkRelativePath, bool JournalOnPath)[] plants =
         [
             ("kyber-weave", ".kyber-weave", true),
-            ("squad", Path.Combine(".kyber-weave", "squad"), false),
+            ("squad", Path.Combine(".kyber-weave", "squad"), false)
         ];
 
         foreach ((string label, string linkRelativePath, bool journalOnPath) in plants)
@@ -3621,10 +3634,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Assert.Throws<SquadPathContainmentException>(() =>
                 store.ResolveLockPath(project, SquadDeploymentScope.Global));
             if (journalOnPath)
-            {
                 Assert.Throws<SquadPathContainmentException>(() =>
                     store.ResolveTransactionDirectory(project, SquadDeploymentScope.Global));
-            }
 
             AssertTreesEqual(outsideBefore, CaptureTree(outside));
         }
@@ -3647,7 +3658,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             File.Exists(semanticsPath),
             "Containment must be centralized in SquadFileSystemPathSemantics.");
 
-        List<string> offenders = new List<string>();
+        List<string> offenders = new();
         foreach (string sourcePath in Directory.EnumerateFiles(deploymentRoot, "*.cs"))
         {
             if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
@@ -3660,9 +3671,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 source.Contains(
                     "OperatingSystem.IsWindows()\n            ? StringComparison.OrdinalIgnoreCase",
                     StringComparison.Ordinal))
-            {
                 offenders.Add(Path.GetFileName(sourcePath));
-            }
         }
 
         Assert.True(
@@ -3679,10 +3688,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void RestoreIntentBackupChangedAfterObserverBoundaryIsNeverConsumed(
         string artifactRole)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
-        RestoreArtifactTamperingObserver observer = new RestoreArtifactTamperingObserver(
+        RestoreArtifactTamperingObserver observer = new(
             scenario.ArtifactPath,
             scenario.MutationBoundary);
         SquadTransaction transaction = Transaction(fixturePath, observer);
@@ -3722,11 +3731,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void RecoverRestoreArtifactChangedBeforeRehydratedConsumptionIsNonAuthoritative(
         string artifactRole)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
-        LifecycleStepFailingObserver observer = new LifecycleStepFailingObserver(
+        LifecycleStepFailingObserver observer = new(
             fixturePath,
             scenario.MutationBoundary);
         SquadTransaction transaction = Transaction(fixturePath, observer);
@@ -3760,11 +3769,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData("receipt-original")]
     public void RecoverUnchangedRestoreArtifactRestoresExactly(string artifactRole)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         RestoreArtifactScenario scenario = CreateRestoreArtifactScenario(fixturePath, artifactRole);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixturePath);
-        LifecycleStepFailingObserver observer = new LifecycleStepFailingObserver(
+        LifecycleStepFailingObserver observer = new(
             fixturePath,
             scenario.MutationBoundary);
         SquadTransaction transaction = Transaction(fixturePath, observer);
@@ -3803,15 +3812,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeReceiptNullBlankOrNoncanonicalNestedValuesAreRejected()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string canonicalToken = SquadTargetCatalog.GetToken(SquadTarget.Codex);
-        SquadOwnedFile validFile = new SquadOwnedFile(
+        SquadOwnedFile validFile = new(
             ".codex/agents/conductor.toml",
             Digest("conductor"),
             canonicalToken,
             false);
-        SquadDegradation validDegradation = new SquadDegradation(
+        SquadDegradation validDegradation = new(
             canonicalToken,
             "conductor",
             "role-skill-fallback");
@@ -3866,7 +3875,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             }));
         }
 
-        List<string> accepted = new List<string>();
+        List<string> accepted = new();
         foreach ((string? name, SquadReceipt? invalidReceipt) in invalidReceipts)
         {
             string? emitted = null;
@@ -3883,16 +3892,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeReceiptStrictReaderAcceptsEveryWriterOutput()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
             string token = SquadTargetCatalog.GetToken(target);
             SquadReceipt receipt = Receipt(new SquadOwnedFile(
-                $".agents/{token}/conductor.md",
-                Digest(token),
-                token,
-                false)) with
+                    $".agents/{token}/conductor.md",
+                    Digest(token),
+                    token,
+                    false)) with
             {
                 Degradations = [new SquadDegradation(token, "conductor", "fallback")]
             };
@@ -3936,13 +3945,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             _ => throw new ArgumentOutOfRangeException(nameof(subject), subject, null)
         };
         TreeEntry originalLiveEntry = CaptureTree(fixture.Path)[liveRelativePath];
-        OriginalClaimStageTamperingObserver observer = new OriginalClaimStageTamperingObserver(
+        OriginalClaimStageTamperingObserver observer = new(
             fixture.Path,
             fixture.RelativePath,
             subject,
             mutation);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = new SquadTransaction(store, observer);
+        SquadTransaction transaction = new(store, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
@@ -4039,10 +4048,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void RestoreIntentAfterImagePublishedFailureRestoresFilesAndLinksFromVerifiedPayload(
         string artifactRole)
     {
-        using TempDirectory caughtFixture = new TempDirectory();
+        using TempDirectory caughtFixture = new();
         AfterImageRestoreScenario caughtScenario = CreateAfterImageRestoreScenario(caughtFixture.Path, artifactRole);
         SortedDictionary<string, TreeEntry> caughtBefore = CaptureTree(caughtFixture.Path);
-        AfterImageCrashObserver caughtObserver = new AfterImageCrashObserver(
+        AfterImageCrashObserver caughtObserver = new(
             caughtFixture.Path,
             caughtScenario.Subject);
 
@@ -4051,10 +4060,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         AssertTreesEqual(caughtBefore, CaptureTree(caughtFixture.Path));
 
-        using TempDirectory recoveryFixture = new TempDirectory();
-        AfterImageRestoreScenario recoveryScenario = CreateAfterImageRestoreScenario(recoveryFixture.Path, artifactRole);
+        using TempDirectory recoveryFixture = new();
+        AfterImageRestoreScenario recoveryScenario =
+            CreateAfterImageRestoreScenario(recoveryFixture.Path, artifactRole);
         SortedDictionary<string, TreeEntry> recoveryBefore = CaptureTree(recoveryFixture.Path);
-        AfterImageCrashObserver recoveryObserver = new AfterImageCrashObserver(
+        AfterImageCrashObserver recoveryObserver = new(
             recoveryFixture.Path,
             recoveryScenario.Subject);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
@@ -4133,7 +4143,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeReceiptLayout_GlobalInstall_WritesV2WithPerTargetRootsLayout()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         SquadStateStore store = Store(applicationData);
         SquadReceipt receipt = new(
@@ -4155,7 +4165,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void SerializeReceiptLayout_ProjectInstall_StaysV1WithoutLayout()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "application-data");
         SquadStateStore store = Store(applicationData);
         SquadReceipt receipt = new(
@@ -4182,19 +4192,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V2GlobalReceiptRoundTrips()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string validV2Json = """
-            {
-              "schema": "kyber-squad.receipt/v2",
-              "scope": "global",
-              "layout": "per-target-roots",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": []
-            }
-            """;
+                             {
+                               "schema": "kyber-squad.receipt/v2",
+                               "scope": "global",
+                               "layout": "per-target-roots",
+                               "targetRoot": ".",
+                               "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                               "degradations": [],
+                               "files": []
+                             }
+                             """;
 
         SquadReceipt receipt = store.DeserializeReceipt(validV2Json);
 
@@ -4204,22 +4214,22 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V2ProjectReceipt_RejectedWithInvalidDataException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string invalidV2Json = """
-            {
-              "schema": "kyber-squad.receipt/v2",
-              "scope": "project",
-              "layout": "per-target-roots",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": []
-            }
-            """;
+                               {
+                                 "schema": "kyber-squad.receipt/v2",
+                                 "scope": "project",
+                                 "layout": "per-target-roots",
+                                 "targetRoot": ".",
+                                 "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                                 "degradations": [],
+                                 "files": []
+                               }
+                               """;
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.DeserializeReceipt(invalidV2Json));
+        InvalidDataException exception =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidV2Json));
 
         Assert.Contains("v2", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("project", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -4228,20 +4238,20 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V2MissingLayout_RejectedWithInvalidDataException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string invalidJson = """
-            {
-              "schema": "kyber-squad.receipt/v2",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": []
-            }
-            """;
+                             {
+                               "schema": "kyber-squad.receipt/v2",
+                               "targetRoot": ".",
+                               "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                               "degradations": [],
+                               "files": []
+                             }
+                             """;
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.DeserializeReceipt(invalidJson));
+        InvalidDataException exception =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
 
         Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -4249,21 +4259,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V2UnknownLayout_RejectedWithInvalidDataException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string invalidJson = """
-            {
-              "schema": "kyber-squad.receipt/v2",
-              "layout": "unknown-layout",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": []
-            }
-            """;
+                             {
+                               "schema": "kyber-squad.receipt/v2",
+                               "layout": "unknown-layout",
+                               "targetRoot": ".",
+                               "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                               "degradations": [],
+                               "files": []
+                             }
+                             """;
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.DeserializeReceipt(invalidJson));
+        InvalidDataException exception =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
 
         Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("unknown-layout", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -4276,28 +4286,28 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string declaredLayout,
         string relativePath)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string contradictingJson = $$"""
-            {
-              "schema": "kyber-squad.receipt/v2",
-              "layout": "{{declaredLayout}}",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": [
-                {
-                  "relativePath": "{{relativePath}}",
-                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-                  "target": "codex",
-                  "adopted": false
-                }
-              ]
-            }
-            """;
+                                     {
+                                       "schema": "kyber-squad.receipt/v2",
+                                       "layout": "{{declaredLayout}}",
+                                       "targetRoot": ".",
+                                       "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                                       "degradations": [],
+                                       "files": [
+                                         {
+                                           "relativePath": "{{relativePath}}",
+                                           "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                                           "target": "codex",
+                                           "adopted": false
+                                         }
+                                       ]
+                                     }
+                                     """;
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.DeserializeReceipt(contradictingJson));
+        InvalidDataException exception =
+            Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(contradictingJson));
 
         Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(declaredLayout, exception.Message, StringComparison.Ordinal);
@@ -4306,34 +4316,33 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V1LegacyMixedPrefixedAndBarePaths_RejectedWithInvalidDataException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string mixedJson = """
-            {
-              "schema": "kyber-squad.receipt/v1",
-              "scope": "global",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": [
-                {
-                  "relativePath": ".codex/agents/conductor.toml",
-                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-                  "target": "codex",
-                  "adopted": false
-                },
-                {
-                  "relativePath": "agents/copilot.md",
-                  "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
-                  "target": "copilot",
-                  "adopted": false
-                }
-              ]
-            }
-            """;
+                           {
+                             "schema": "kyber-squad.receipt/v1",
+                             "scope": "global",
+                             "targetRoot": ".",
+                             "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                             "degradations": [],
+                             "files": [
+                               {
+                                 "relativePath": ".codex/agents/conductor.toml",
+                                 "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                                 "target": "codex",
+                                 "adopted": false
+                               },
+                               {
+                                 "relativePath": "agents/copilot.md",
+                                 "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
+                                 "target": "copilot",
+                                 "adopted": false
+                               }
+                             ]
+                           }
+                           """;
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => store.DeserializeReceipt(mixedJson));
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(mixedJson));
 
         Assert.Contains("mix", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -4341,25 +4350,25 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V1GlobalWithBarePaths_AcceptedAsPerTargetLayout()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string barePathsJson = """
-            {
-              "schema": "kyber-squad.receipt/v1",
-              "scope": "global",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": [
-                {
-                  "relativePath": "agents/conductor.toml",
-                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-                  "target": "codex",
-                  "adopted": false
-                }
-              ]
-            }
-            """;
+                               {
+                                 "schema": "kyber-squad.receipt/v1",
+                                 "scope": "global",
+                                 "targetRoot": ".",
+                                 "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                                 "degradations": [],
+                                 "files": [
+                                   {
+                                     "relativePath": "agents/conductor.toml",
+                                     "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                                     "target": "codex",
+                                     "adopted": false
+                                   }
+                                 ]
+                               }
+                               """;
 
         SquadReceipt receipt = store.DeserializeReceipt(barePathsJson);
 
@@ -4374,31 +4383,31 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void DeserializeReceiptLayout_V1GlobalWithPrefixedPaths_AcceptedAsSingleRootLayout()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         string prefixedPathsJson = """
-            {
-              "schema": "kyber-squad.receipt/v1",
-              "scope": "global",
-              "targetRoot": ".",
-              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
-              "degradations": [],
-              "files": [
-                {
-                  "relativePath": ".codex/agents/conductor.toml",
-                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
-                  "target": "codex",
-                  "adopted": false
-                },
-                {
-                  "relativePath": ".github/agents/reviewer.agent.md",
-                  "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
-                  "target": "copilot",
-                  "adopted": false
-                }
-              ]
-            }
-            """;
+                                   {
+                                     "schema": "kyber-squad.receipt/v1",
+                                     "scope": "global",
+                                     "targetRoot": ".",
+                                     "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+                                     "degradations": [],
+                                     "files": [
+                                       {
+                                         "relativePath": ".codex/agents/conductor.toml",
+                                         "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                                         "target": "codex",
+                                         "adopted": false
+                                       },
+                                       {
+                                         "relativePath": ".github/agents/reviewer.agent.md",
+                                         "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
+                                         "target": "copilot",
+                                         "adopted": false
+                                       }
+                                     ]
+                                   }
+                                   """;
 
         SquadReceipt receipt = store.DeserializeReceipt(prefixedPathsJson);
 
@@ -4416,7 +4425,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void UninstallReceiptLayout_LegacySingleRootReceipt_DeletesCleanFilesUnderRecordedRoot()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
         Directory.CreateDirectory(recordedRoot);
         string applicationData = Path.Combine(fixture.Path, "app-data");
@@ -4487,7 +4496,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void UninstallReceiptLayout_LegacyReceiptAllClean_DeletesEverythingThenLockAndReceipt()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
         Directory.CreateDirectory(recordedRoot);
         string applicationData = Path.Combine(fixture.Path, "app-data");
@@ -4558,7 +4567,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [InlineData(true)]
     public async Task UpdateReceiptLayout_LegacySingleRootReceipt_ThrowsSquadDeploymentConflictException(bool dryRun)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
         Directory.CreateDirectory(recordedRoot);
         string applicationData = Path.Combine(fixture.Path, "app-data");
@@ -4596,13 +4605,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
         });
-        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore,
+            globalRoots: globalRoots);
 
-        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
-            () => service.UpdateAsync(new SquadUpdateRequest(
-                TargetRoot: recordedRoot,
-                Scope: SquadDeploymentScope.Global,
-                Targets: [SquadTarget.Codex],
+        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(() =>
+            service.UpdateAsync(new SquadUpdateRequest(
+                recordedRoot,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex],
                 DryRun: dryRun)));
 
         Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
@@ -4618,7 +4628,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public async Task InstallReceiptLayout_ExistingLegacySingleRootReceipt_ThrowsSquadDeploymentConflictException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
         Directory.CreateDirectory(recordedRoot);
         string applicationData = Path.Combine(fixture.Path, "app-data");
@@ -4656,13 +4666,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
         });
-        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore,
+            globalRoots: globalRoots);
 
-        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
-            () => service.InstallAsync(new SquadInstallRequest(
-                TargetRoot: recordedRoot,
-                Scope: SquadDeploymentScope.Global,
-                Targets: [SquadTarget.Codex])));
+        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(() =>
+            service.InstallAsync(new SquadInstallRequest(
+                recordedRoot,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex])));
 
         Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
         Assert.Contains("squad install --global", exception.Message, StringComparison.Ordinal);
@@ -4681,7 +4692,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void UpdateReceiptLayout_V1BarePaths_RoundTripsAsV2PerTargetRoots()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string applicationData = Path.Combine(fixture.Path, "app-data");
         string targetRoot = fixture.Path;
         SquadStateStore store = Store(applicationData);
@@ -4709,7 +4720,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered("agents/conductor.toml", "updated content")],
             barePathsReceipt,
             [],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         string receiptJson = store.SerializeReceipt(updatePlan.Receipt);
@@ -4725,9 +4736,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     // ---------------------------------------------------------------------------------------
 
     [Fact]
-    public void CreateUpdateReceiptLayout_NullResolverMixedRetainedAndRenderedPaths_ThrowsSquadDeploymentConflictException()
+    public void
+        CreateUpdateReceiptLayout_NullResolverMixedRetainedAndRenderedPaths_ThrowsSquadDeploymentConflictException()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = fixture.Path;
 
         // The prefixed codex entry is re-rendered under its own old identity and is locally
@@ -4761,9 +4773,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ],
                 previousReceipt,
                 [],
-                replaceManaged: false,
-                new FixedTimeProvider(InstalledAt.AddDays(1)),
-                globalRoots: null));
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1))));
 
         Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
         Assert.Contains("squad install --global", exception.Message, StringComparison.Ordinal);
@@ -4772,7 +4783,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Fact]
     public void CreateUpdateReceiptLayout_NullResolverAllCleanLegacyReceipt_LayoutMatchesClassification()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = fixture.Path;
 
         Write(targetRoot, ".codex/agents/conductor.toml", "conductor content");
@@ -4798,9 +4809,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(".codex/agents/conductor.toml", "updated conductor content")],
             previousReceipt,
             [],
-            replaceManaged: false,
-            new FixedTimeProvider(InstalledAt.AddDays(1)),
-            globalRoots: null);
+            false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Assert.Equal(
             SquadDeploymentPlan.ClassifyGlobalLayout(plan.Receipt.Files),
@@ -4813,14 +4823,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string originalKind,
         string mutation)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         ClaimMutationScenario scenario = CreateClaimMutationScenario(
             fixturePath,
             subject,
             originalKind);
         SortedDictionary<string, TreeEntry> original = CaptureTree(fixturePath);
-        OriginalClaimTamperingObserver observer = new OriginalClaimTamperingObserver(
+        OriginalClaimTamperingObserver observer = new(
             fixturePath,
             scenario.Subject,
             mutation);
@@ -4872,14 +4882,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string originalKind,
         string mutation)
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string fixturePath = fixture.Path;
         ClaimMutationScenario scenario = CreateClaimMutationScenario(
             fixturePath,
             subject,
             originalKind);
         SortedDictionary<string, TreeEntry> original = CaptureTree(fixturePath);
-        OriginalClaimTamperingObserver observer = new OriginalClaimTamperingObserver(
+        OriginalClaimTamperingObserver observer = new(
             fixturePath,
             scenario.Subject,
             mutation);
@@ -4960,7 +4970,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(targetRelativePath, renderedBody)],
             previousReceipt,
             [new SquadDegradation("warp", "conductor", "role-skill-fallback")],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         return new ClaimMutationScenario(
             plan,
@@ -5039,14 +5049,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static void DeleteLeafEntry(string path)
     {
-        DirectoryInfo directory = new DirectoryInfo(path);
+        DirectoryInfo directory = new(path);
         if (directory.LinkTarget is not null)
         {
             Directory.Delete(path);
             return;
         }
 
-        FileInfo file = new FileInfo(path);
+        FileInfo file = new(path);
         if (file.LinkTarget is not null || file.Exists)
         {
             File.Delete(path);
@@ -5054,7 +5064,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         if (directory.Exists)
-            Directory.Delete(path, recursive: true);
+            Directory.Delete(path, true);
     }
 
     private static string ExtractMethodDeclaration(string source, string methodName)
@@ -5129,43 +5139,44 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [Rendered(targetRelativePath, "updated body")],
             previousReceipt,
             [new SquadDegradation("codex", "conductor", "model-profile-narrowed")],
-            replaceManaged: false,
+            false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         string transactionDirectory = Path.Combine(
             root,
             ".kyber-weave",
             ".squad-transaction");
         SquadStateStore store = Store(root);
-        (SquadTransactionStepKind boundary, string artifactPath, string liveRelativePath, byte[] expectedBytes) = artifactRole switch
-        {
-            "target-file" => (
-                SquadTransactionStepKind.FileApplied,
-                ToPlatformPath(
-                    Path.Combine(transactionDirectory, "backups"),
-                    $"codex/{targetRelativePath}"),
-                targetRelativePath,
-                "updated body"u8.ToArray()),
-            "target-link-metadata" => (
-                SquadTransactionStepKind.FileApplied,
-                ToPlatformPath(
-                    Path.Combine(transactionDirectory, "links"),
-                    $"codex/{targetRelativePath}"),
-                targetRelativePath,
-                "updated body"u8.ToArray()),
-            "lock-original" => (
-                SquadTransactionStepKind.LockApplied,
-                Path.Combine(transactionDirectory, "state-originals", "lock"),
-                StateRelativePath(root, store.ResolveLockPath(root, SquadDeploymentScope.Project)),
-                Encoding.UTF8.GetBytes(store.SerializeLock(
-                    plan.Lock ?? throw new InvalidOperationException("The update plan has no lock.")))),
-            "receipt-original" => (
-                SquadTransactionStepKind.ReceiptApplied,
-                Path.Combine(transactionDirectory, "state-originals", "receipt"),
-                StateRelativePath(root, store.ResolveReceiptPath(root, SquadDeploymentScope.Project)),
-                Encoding.UTF8.GetBytes(store.SerializeReceipt(plan.Receipt))),
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(artifactRole), artifactRole, "Unknown restore artifact role.")
-        };
+        (SquadTransactionStepKind boundary, string artifactPath, string liveRelativePath, byte[] expectedBytes) =
+            artifactRole switch
+            {
+                "target-file" => (
+                    SquadTransactionStepKind.FileApplied,
+                    ToPlatformPath(
+                        Path.Combine(transactionDirectory, "backups"),
+                        $"codex/{targetRelativePath}"),
+                    targetRelativePath,
+                    "updated body"u8.ToArray()),
+                "target-link-metadata" => (
+                    SquadTransactionStepKind.FileApplied,
+                    ToPlatformPath(
+                        Path.Combine(transactionDirectory, "links"),
+                        $"codex/{targetRelativePath}"),
+                    targetRelativePath,
+                    "updated body"u8.ToArray()),
+                "lock-original" => (
+                    SquadTransactionStepKind.LockApplied,
+                    Path.Combine(transactionDirectory, "state-originals", "lock"),
+                    StateRelativePath(root, store.ResolveLockPath(root, SquadDeploymentScope.Project)),
+                    Encoding.UTF8.GetBytes(store.SerializeLock(
+                        plan.Lock ?? throw new InvalidOperationException("The update plan has no lock.")))),
+                "receipt-original" => (
+                    SquadTransactionStepKind.ReceiptApplied,
+                    Path.Combine(transactionDirectory, "state-originals", "receipt"),
+                    StateRelativePath(root, store.ResolveReceiptPath(root, SquadDeploymentScope.Project)),
+                    Encoding.UTF8.GetBytes(store.SerializeReceipt(plan.Receipt))),
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(artifactRole), artifactRole, "Unknown restore artifact role.")
+            };
         return new RestoreArtifactScenario(
             plan,
             boundary,
@@ -5204,7 +5215,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                         return source[bodyStart..(index + 1)];
                 }
 
-                throw new Xunit.Sdk.XunitException(
+                throw new XunitException(
                     $"Method '{methodName}' has no complete body.");
             }
 
@@ -5223,9 +5234,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                      path.StartsWith(
                          ".kyber-weave/.squad-transaction/",
                          StringComparison.Ordinal)).ToArray())
-        {
             result.Remove(path);
-        }
 
         return result;
     }
@@ -5296,16 +5305,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static void DeleteArtifactNode(string path)
     {
-        FileInfo file = new FileInfo(path);
+        FileInfo file = new(path);
         if (file.LinkTarget is not null || file.Exists)
         {
             file.Delete();
             return;
         }
 
-        DirectoryInfo directory = new DirectoryInfo(path);
+        DirectoryInfo directory = new(path);
         if (directory.LinkTarget is not null || directory.Exists)
-            directory.Delete(recursive: false);
+            directory.Delete(false);
     }
 
     private static void RemoveEmptyTestArtifactParents(string artifactPath, string root)
@@ -5347,7 +5356,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     rendered,
                     receipt,
                     [],
-                    replaceManaged: false,
+                    false,
                     new FixedTimeProvider(InstalledAt.AddDays(1))),
                 relativePath);
         }
@@ -5380,7 +5389,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     rendered,
                     receipt,
                     [],
-                    replaceManaged: false,
+                    false,
                     new FixedTimeProvider(InstalledAt.AddDays(1))),
                 relativePath);
         }
@@ -5388,7 +5397,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt emptyReceipt = Receipt();
         WriteState(root, Lock(), emptyReceipt);
         if (scenario is "lock-write" or "receipt-write")
-        {
             return new ActiveTransitionScenario(
                 SquadDeploymentPlan.CreateUpdate(
                     root,
@@ -5397,20 +5405,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     [],
                     emptyReceipt,
                     [new SquadDegradation("warp", "conductor", "role-skill-fallback")],
-                    replaceManaged: false,
+                    false,
                     new FixedTimeProvider(InstalledAt.AddDays(1))),
                 scenario.StartsWith("lock", StringComparison.Ordinal) ? "lock" : "receipt");
-        }
 
         if (scenario is "lock-delete" or "receipt-delete")
-        {
             return new ActiveTransitionScenario(
                 SquadDeploymentPlan.CreateUninstall(
                     root,
                     SquadDeploymentScope.Project,
                     emptyReceipt),
                 scenario.StartsWith("lock", StringComparison.Ordinal) ? "lock" : "receipt");
-        }
 
         throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null);
     }
@@ -5427,7 +5432,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         try
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo("fsutil.exe")
+            ProcessStartInfo startInfo = new("fsutil.exe")
             {
                 CreateNoWindow = true,
                 RedirectStandardError = true,
@@ -5456,7 +5461,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             return process.ExitCode == 0;
         }
         catch (Exception exception) when (
-            exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+            exception is InvalidOperationException or Win32Exception)
         {
             diagnostic = exception.Message;
             return false;
@@ -5466,8 +5471,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private static SquadLock ReplaceRequiredLockValue(
         SquadLock value,
         string field,
-        string replacement) =>
-        field switch
+        string replacement)
+    {
+        return field switch
         {
             "schema" => value with { Schema = replacement },
             "squad-version" => value with { SquadVersion = replacement },
@@ -5481,23 +5487,23 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "exclusion" => value with { Exclusions = [replacement] },
             _ => throw new ArgumentOutOfRangeException(nameof(field), field, null)
         };
+    }
 
     private static IEnumerable<(string Property, string Value, int Occurrence)>
         EnumerateAuthorityEnumTokens(JsonNode root)
     {
-        HashSet<string> enumProperties = new HashSet<string>(StringComparer.Ordinal)
+        HashSet<string> enumProperties = new(StringComparer.Ordinal)
         {
             "phase", "originalKind", "afterKind", "lockKind", "lockAfterKind",
             "receiptKind", "receiptAfterKind", "area", "role", "nodeKind",
             "lifecycleState", "allowedState"
         };
-        Dictionary<string, int> occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        Dictionary<string, int> occurrences = new(StringComparer.Ordinal);
         return Enumerate(root);
 
         IEnumerable<(string Property, string Value, int Occurrence)> Enumerate(JsonNode node)
         {
             if (node is JsonObject jsonObject)
-            {
                 foreach ((string? property, JsonNode? child) in jsonObject)
                 {
                     if (child is JsonValue value &&
@@ -5512,14 +5518,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     }
 
                     if (child is not null)
-                    {
                         foreach ((string Property, string Value, int Occurrence) nested in Enumerate(child))
                             yield return nested;
-                    }
                 }
-            }
             else if (node is JsonArray jsonArray)
-            {
                 foreach (JsonNode? child in jsonArray)
                 {
                     if (child is null)
@@ -5527,7 +5529,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     foreach ((string Property, string Value, int Occurrence) nested in Enumerate(child))
                         yield return nested;
                 }
-            }
         }
     }
 
@@ -5544,7 +5545,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         bool Replace(JsonNode node)
         {
             if (node is JsonObject jsonObject)
-            {
                 foreach ((string? property, JsonNode? child) in jsonObject.ToArray())
                 {
                     if (string.Equals(property, propertyName, StringComparison.Ordinal) &&
@@ -5567,15 +5567,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     if (child is not null && Replace(child))
                         return true;
                 }
-            }
             else if (node is JsonArray jsonArray)
-            {
                 foreach (JsonNode? child in jsonArray)
-                {
                     if (child is not null && Replace(child))
                         return true;
-                }
-            }
 
             return false;
         }
@@ -5585,9 +5580,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Case variance is the subject under test. The lowercase variant is "
-            + "one of the inputs being asserted on, not a normalization to be made safe.")]
-    private static IReadOnlyList<string> NoncanonicalCaseVariants(string canonical) =>
-        new[]
+                        + "one of the inputs being asserted on, not a normalization to be made safe.")]
+    private static IReadOnlyList<string> NoncanonicalCaseVariants(string canonical)
+    {
+        return new[]
             {
                 canonical.ToLowerInvariant(),
                 canonical.ToUpperInvariant(),
@@ -5597,15 +5593,20 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             .Where(value => !string.Equals(value, canonical, StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
 
-    private static JsonObject ReadJsonObject(string path) =>
-        Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(path, Encoding.UTF8)));
+    private static JsonObject ReadJsonObject(string path)
+    {
+        return Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(path, Encoding.UTF8)));
+    }
 
-    private static void WriteJsonObject(string path, JsonObject document) =>
+    private static void WriteJsonObject(string path, JsonObject document)
+    {
         File.WriteAllText(
             path,
             document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n",
             new UTF8Encoding(false));
+    }
 
     private static void AssertPreparedArtifactAuthority(JsonArray artifacts)
     {
@@ -5689,7 +5690,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private static void AssertCreatedDirectoryAuthorityIsCanonical(JsonArray createdDirectories)
     {
         int previousDepth = int.MaxValue;
-        HashSet<string> identities = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> identities = new(StringComparer.Ordinal);
         foreach (JsonNode? node in createdDirectories)
         {
             JsonObject authority = Assert.IsType<JsonObject>(node);
@@ -5764,7 +5765,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         out int replacementCount)
     {
         JsonNode root = JsonNode.Parse(json)
-            ?? throw new Xunit.Sdk.XunitException("Expected a JSON authority document.");
+                        ?? throw new XunitException("Expected a JSON authority document.");
         replacementCount = ReplaceJsonStringPropertyWithNumber(
             root,
             propertyName,
@@ -5779,7 +5780,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         int replacements = 0;
         if (node is JsonObject jsonObject)
-        {
             foreach ((string? name, JsonNode? value) in jsonObject.ToArray())
             {
                 if (string.Equals(name, propertyName, StringComparison.Ordinal) &&
@@ -5792,34 +5792,25 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 }
 
                 if (value is not null)
-                {
                     replacements += ReplaceJsonStringPropertyWithNumber(
                         value,
                         propertyName,
                         numericValue);
-                }
             }
-        }
         else if (node is JsonArray jsonArray)
-        {
             foreach (JsonNode? child in jsonArray)
-            {
                 if (child is not null)
-                {
                     replacements += ReplaceJsonStringPropertyWithNumber(
                         child,
                         propertyName,
                         numericValue);
-                }
-            }
-        }
 
         return replacements;
     }
 
     private static void AssertJsonEnumTokensAreStrings(JsonNode node)
     {
-        HashSet<string> enumProperties = new HashSet<string>(StringComparer.Ordinal)
+        HashSet<string> enumProperties = new(StringComparer.Ordinal)
         {
             "phase", "originalKind", "afterKind", "lockKind", "lockAfterKind",
             "receiptKind", "receiptAfterKind", "area", "role", "nodeKind",
@@ -5833,7 +5824,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         IReadOnlySet<string> enumProperties)
     {
         if (node is JsonObject jsonObject)
-        {
             foreach ((string? name, JsonNode? value) in jsonObject)
             {
                 if (enumProperties.Contains(name))
@@ -5845,15 +5835,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 if (value is not null)
                     AssertJsonEnumTokensAreStrings(value, enumProperties);
             }
-        }
         else if (node is JsonArray jsonArray)
-        {
             foreach (JsonNode? child in jsonArray)
-            {
                 if (child is not null)
                     AssertJsonEnumTokensAreStrings(child, enumProperties);
-            }
-        }
     }
 
     private static bool TreesEqual(
@@ -5868,17 +5853,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             TreeEntry actualEntry = actual[path];
             if (expectedEntry.Kind != actualEntry.Kind ||
                 !string.Equals(expectedEntry.LinkTarget, actualEntry.LinkTarget, StringComparison.Ordinal))
-            {
                 return false;
-            }
 
-            if ((expectedEntry.Content is null) != (actualEntry.Content is null))
+            if (expectedEntry.Content is null != actualEntry.Content is null)
                 return false;
             if (expectedEntry.Content is not null &&
                 !expectedEntry.Content.SequenceEqual(Assert.IsType<byte[]>(actualEntry.Content)))
-            {
                 return false;
-            }
         }
 
         return true;
@@ -5904,7 +5885,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Generates a deliberately case-varied path fixture; the lowercasing "
-            + "is the test input, not a normalization.")]
+                        + "is the test input, not a normalization.")]
     public static IEnumerable<object[]> PortableInvalidPaths()
     {
         foreach (char forbidden in "<>:\"|?*")
@@ -5936,19 +5917,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
-    private static string ToggleAsciiCase(string value) =>
-        new(value.Select(character =>
+    private static string ToggleAsciiCase(string value)
+    {
+        return new string(value.Select(character =>
             char.IsAsciiLetterUpper(character)
                 ? char.ToLowerInvariant(character)
                 : char.IsAsciiLetterLower(character)
                     ? char.ToUpperInvariant(character)
                     : character).ToArray());
+    }
 
     private static SortedDictionary<string, TreeEntry> InterruptTransactionAfter(
         TransactionFixture fixture,
         SquadTransactionStepKind checkpoint)
     {
-        LifecycleStepFailingObserver observer = new LifecycleStepFailingObserver(fixture.Path, checkpoint);
+        LifecycleStepFailingObserver observer = new(fixture.Path, checkpoint);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan()));
@@ -5961,7 +5944,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         TransactionFixture fixture,
         SquadTransactionCheckpointKind checkpoint)
     {
-        CheckpointFailingObserver observer = new CheckpointFailingObserver(fixture.Path, checkpoint);
+        CheckpointFailingObserver observer = new(fixture.Path, checkpoint);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan()));
@@ -6031,22 +6014,24 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         File.WriteAllBytes(temporaryPath, bytes[..Math.Max(1, bytes.Length / 2)]);
     }
 
-    private static SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot) =>
-        SquadDeploymentPlan.CreateInstall(
+    private static SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot)
+    {
+        return SquadDeploymentPlan.CreateInstall(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
             [Rendered(".codex/agents/conductor.toml", "global conductor")],
             [],
-            adopt: false,
+            false,
             new FixedTimeProvider(InstalledAt));
+    }
 
     private static int ProbeGlobalInstallStepCount()
     {
-        using TempDirectory fixture = new TempDirectory();
+        using TempDirectory fixture = new();
         string targetRoot = Path.Combine(fixture.Path, "target");
         Directory.CreateDirectory(targetRoot);
-        RecordingObserver observer = new RecordingObserver(targetRoot);
+        RecordingObserver observer = new(targetRoot);
         new SquadTransaction(
             Store(Path.Combine(fixture.Path, "application-data")),
             observer).Execute(CreateGlobalInstallPlan(targetRoot));
@@ -6059,8 +6044,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.Contains("active", conflict.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string CorruptLockDocument(string yaml, string corruption) =>
-        corruption switch
+    private static string CorruptLockDocument(string yaml, string corruption)
+    {
+        return corruption switch
         {
             "unknown" => yaml + "unknown-field: true\n",
             "duplicate" => yaml + "schema: kyber-squad.lock/v1\n",
@@ -6083,16 +6069,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 "schema: &schema kyber-squad.lock/v1",
                 StringComparison.Ordinal),
             "yaml-merge" => "defaults: &defaults\n  schema: kyber-squad.lock/v1\n<<: *defaults\n" +
-                yaml.Replace(
-                    "schema: kyber-squad.lock/v1\n",
-                    string.Empty,
-                    StringComparison.Ordinal),
+                            yaml.Replace(
+                                "schema: kyber-squad.lock/v1\n",
+                                string.Empty,
+                                StringComparison.Ordinal),
             "yaml-tag" => yaml.Replace(
                 "schema: kyber-squad.lock/v1",
                 "schema: !!str kyber-squad.lock/v1",
                 StringComparison.Ordinal),
             _ => throw new ArgumentOutOfRangeException(nameof(corruption), corruption, null)
         };
+    }
 
     private static string CorruptReceiptDocument(string json, string corruption)
     {
@@ -6111,8 +6098,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 StringComparison.Ordinal),
             "misspelled" => json.Replace("\"schema\":", "\"schemma\":", StringComparison.Ordinal),
             "wrong-case" => json.Replace("\"schema\":", "\"Schema\":", StringComparison.Ordinal),
-            "wrong-type" => json.Replace("\"files\": [", "\"files\": 42, \"ignoredFiles\": [", StringComparison.Ordinal),
-            "wrong-enum" => json.Replace("\"scope\": \"project\"", "\"scope\": \"workspace\"", StringComparison.Ordinal),
+            "wrong-type" => json.Replace("\"files\": [", "\"files\": 42, \"ignoredFiles\": [",
+                StringComparison.Ordinal),
+            "wrong-enum" => json.Replace("\"scope\": \"project\"", "\"scope\": \"workspace\"",
+                StringComparison.Ordinal),
             "invalid-timestamp" => json.Replace(
                 "2026-08-14T12:34:56.0000000Z",
                 "not-a-timestamp",
@@ -6155,14 +6144,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         int insertion = json.LastIndexOf("  ]", StringComparison.Ordinal);
         Assert.True(insertion >= 0);
         string newline = json.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        string duplicate = $",{newline}    {{{newline}      \"relativePath\": \".codex/agents/Conductor.toml\",{newline}      \"sha256\": \"{Digest("conductor")}\",{newline}      \"target\": \"codex\",{newline}      \"adopted\": false{newline}    }}";
+        string duplicate =
+            $",{newline}    {{{newline}      \"relativePath\": \".codex/agents/Conductor.toml\",{newline}      \"sha256\": \"{Digest("conductor")}\",{newline}      \"target\": \"codex\",{newline}      \"adopted\": false{newline}    }}";
         return json.Insert(insertion + 3, duplicate);
     }
 
-    private static SquadHomeFile GuidanceHomeFile() => new(GuidanceFile, Digest("guidance"));
+    private static SquadHomeFile GuidanceHomeFile()
+    {
+        return new SquadHomeFile(GuidanceFile, Digest("guidance"));
+    }
 
-    private static SquadReceipt GlobalReceiptWithHomeFiles(params SquadHomeFile[] homeFiles) =>
-        new SquadReceipt(
+    private static SquadReceipt GlobalReceiptWithHomeFiles(params SquadHomeFile[] homeFiles)
+    {
+        return new SquadReceipt(
             SquadStateStore.ReceiptSchemaV2,
             SquadDeploymentScope.Global,
             ".",
@@ -6172,13 +6166,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             HomeFiles = homeFiles
         };
+    }
 
-    private static string HomeFileJson(string relativePath, string sha256) =>
-        $$"""{"relativePath":"{{relativePath}}","sha256":"{{sha256}}"}""";
+    private static string HomeFileJson(string relativePath, string sha256)
+    {
+        return $$"""{"relativePath":"{{relativePath}}","sha256":"{{sha256}}"}""";
+    }
 
     /// <summary>
-    /// A receipt that breaks exactly one rule of the home-file record, built from a valid global receipt
-    /// so the only thing wrong with it is the thing the case names.
+    ///     A receipt that breaks exactly one rule of the home-file record, built from a valid global receipt
+    ///     so the only thing wrong with it is the thing the case names.
     /// </summary>
     private static SquadReceipt ReceiptWithInvalidHomeFiles(string invalidCase)
     {
@@ -6228,8 +6225,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Swaps the value of a serialized global receipt's <c>homeFiles</c> property for raw JSON. The store
-    /// writes it as the last property, so everything from its name to the root's closing brace is its value.
+    ///     Swaps the value of a serialized global receipt's <c>homeFiles</c> property for raw JSON. The store
+    ///     writes it as the last property, so everything from its name to the root's closing brace is its value.
     /// </summary>
     private static string ReplaceHomeFiles(string json, string homeFilesJson)
     {
@@ -6239,19 +6236,23 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         return $"{json[..start]}\"homeFiles\": {homeFilesJson}\n{json[rootClose..]}";
     }
 
-    private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+    private static SquadStateStore Store(string applicationData)
+    {
+        return new SquadStateStore(new FakeSquadUserPaths(applicationData));
+    }
 
     private static SquadTransaction Transaction(
         string applicationData,
-        ISquadTransactionObserver? observer = null) =>
-        new(Store(applicationData), observer);
+        ISquadTransactionObserver? observer = null)
+    {
+        return new SquadTransaction(Store(applicationData), observer);
+    }
 
     private static bool IsHeldWithExclusiveFileShare(string path)
     {
         try
         {
-            using FileStream stream = new FileStream(
+            using FileStream stream = new(
                 path,
                 FileMode.Open,
                 FileAccess.ReadWrite,
@@ -6264,8 +6265,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
-    private static bool HasDirectoryNamed(string root, string name) =>
-        Directory.Exists(root) && Directory.EnumerateDirectories(
+    private static bool HasDirectoryNamed(string root, string name)
+    {
+        return Directory.Exists(root) && Directory.EnumerateDirectories(
                 root,
                 "*",
                 SearchOption.AllDirectories)
@@ -6273,9 +6275,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 Path.GetFileName(path),
                 name,
                 StringComparison.Ordinal));
+    }
 
-    private static SquadLock Lock(string version = "1.2.3") =>
-        new(
+    private static SquadLock Lock(string version = "1.2.3")
+    {
+        return new SquadLock(
             "kyber-squad.lock/v1",
             version,
             version,
@@ -6287,57 +6291,68 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Digest("bundle"),
             Digest("asset"),
             new SquadApmIdentity(version, "0123456789abcdef", Digest("apm")));
+    }
 
-    private static SquadReceipt Receipt(params SquadOwnedFile[] files) =>
-        new(
+    private static SquadReceipt Receipt(params SquadOwnedFile[] files)
+    {
+        return new SquadReceipt(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Project,
             ".",
             InstalledAt,
             [],
             files);
+    }
 
     private static SquadDeploymentFile Rendered(
         string relativePath,
         string content,
-        string target = "codex") =>
-        new(relativePath, Encoding.UTF8.GetBytes(content), target);
+        string target = "codex")
+    {
+        return new SquadDeploymentFile(relativePath, Encoding.UTF8.GetBytes(content), target);
+    }
 
-    private static string Digest(string content) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+    private static string Digest(string content)
+    {
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+    }
 
     /// <summary>
-    /// Serializes <paramref name="receipt"/> as authentic legacy v1 JSON — the shape a genuine
-    /// pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than through
-    /// <see cref="SquadStateStore.SerializeReceipt"/>, which always upgrades a Global receipt
-    /// to v2 regardless of the schema string already on the in-memory object. A directly
-    /// constructed receipt with prefixed paths but an unset (default)
-    /// <see cref="SquadReceipt.Layout"/> would otherwise round-trip through the v2 writer as a
-    /// self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
+    ///     Serializes <paramref name="receipt" /> as authentic legacy v1 JSON — the shape a genuine
+    ///     pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than through
+    ///     <see cref="SquadStateStore.SerializeReceipt" />, which always upgrades a Global receipt
+    ///     to v2 regardless of the schema string already on the in-memory object. A directly
+    ///     constructed receipt with prefixed paths but an unset (default)
+    ///     <see cref="SquadReceipt.Layout" /> would otherwise round-trip through the v2 writer as a
+    ///     self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
     /// </summary>
     private static string SerializeAsLegacyV1Json(SquadReceipt receipt)
     {
-        JsonObject json = new JsonObject
+        JsonObject json = new()
         {
             ["schema"] = "kyber-squad.receipt/v1",
             ["scope"] = receipt.Scope == SquadDeploymentScope.Global ? "global" : "project",
             ["targetRoot"] = receipt.TargetRoot,
             ["installedAtUtc"] = receipt.InstalledAtUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
             ["degradations"] = new JsonArray(
-                [.. receipt.Degradations.Select(degradation => (JsonNode)new JsonObject
+            [
+                .. receipt.Degradations.Select(degradation => (JsonNode)new JsonObject
                 {
                     ["target"] = degradation.Target,
                     ["subject"] = degradation.Subject,
                     ["code"] = degradation.Code
-                })]),
+                })
+            ]),
             ["files"] = new JsonArray(
-                [.. receipt.Files.Select(file => (JsonNode)new JsonObject
+            [
+                .. receipt.Files.Select(file => (JsonNode)new JsonObject
                 {
                     ["relativePath"] = file.RelativePath,
                     ["sha256"] = file.Sha256,
                     ["target"] = file.Target,
                     ["adopted"] = file.Adopted
-                })])
+                })
+            ])
         };
 
         return json.ToJsonString() + "\n";
@@ -6350,14 +6365,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         File.WriteAllText(path, content, new UTF8Encoding(false));
     }
 
-    private static string Read(string root, string relativePath) =>
-        File.ReadAllText(Path.Combine(
+    private static string Read(string root, string relativePath)
+    {
+        return File.ReadAllText(Path.Combine(
             root,
             relativePath.Replace('/', Path.DirectorySeparatorChar)));
+    }
 
     /// <summary>
-    /// Writes a project's committed lock and receipt where the store resolves them, so a fixture
-    /// stays correct when the state layout moves rather than pinning the layout it was born with.
+    ///     Writes a project's committed lock and receipt where the store resolves them, so a fixture
+    ///     stays correct when the state layout moves rather than pinning the layout it was born with.
     /// </summary>
     private static void WriteState(string root, SquadLock squadLock, SquadReceipt receipt)
     {
@@ -6370,20 +6387,24 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Expresses a store-resolved state file as the '/'-separated key <see cref="CaptureTree"/> uses,
-    /// measured from the physical root. Both sides are canonical so a symlinked temp root still matches.
+    ///     Expresses a store-resolved state file as the '/'-separated key <see cref="CaptureTree" /> uses,
+    ///     measured from the physical root. Both sides are canonical so a symlinked temp root still matches.
     /// </summary>
-    private static string StateRelativePath(string root, string statePath) =>
-        Path.GetRelativePath(SquadPhysicalRootIdentity.Resolve(root).PhysicalPath, statePath)
+    private static string StateRelativePath(string root, string statePath)
+    {
+        return Path.GetRelativePath(SquadPhysicalRootIdentity.Resolve(root).PhysicalPath, statePath)
             .Replace(Path.DirectorySeparatorChar, '/');
+    }
 
     /// <summary>
-    /// Compares two locations by where they physically are. A path may legitimately be spelled through
-    /// a symlinked temp root (<c>/tmp</c> resolving to <c>/private/tmp</c>) and still name one place, so
-    /// the comparison is on the canonical form rather than the spelling.
+    ///     Compares two locations by where they physically are. A path may legitimately be spelled through
+    ///     a symlinked temp root (<c>/tmp</c> resolving to <c>/private/tmp</c>) and still name one place, so
+    ///     the comparison is on the canonical form rather than the spelling.
     /// </summary>
-    private static void AssertSameLocation(string expected, string actual) =>
+    private static void AssertSameLocation(string expected, string actual)
+    {
         Assert.Equal(CanonicalLocation(expected), CanonicalLocation(actual));
+    }
 
     private static string CanonicalLocation(string path)
     {
@@ -6401,17 +6422,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The harness-relative path a fixture renders a single agent to. A global install renders relative
-    /// to its target's global root, so it takes a bare path; a project install keeps the target directory.
+    ///     The harness-relative path a fixture renders a single agent to. A global install renders relative
+    ///     to its target's global root, so it takes a bare path; a project install keeps the target directory.
     /// </summary>
-    private static string AgentRelativePath(SquadDeploymentScope scope, string fileName) =>
-        scope == SquadDeploymentScope.Global
+    private static string AgentRelativePath(SquadDeploymentScope scope, string fileName)
+    {
+        return scope == SquadDeploymentScope.Global
             ? $"agents/{fileName}"
             : $".codex/agents/{fileName}";
+    }
 
     private static SortedDictionary<string, byte[]> Snapshot(string root)
     {
-        SortedDictionary<string, byte[]> snapshot = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+        SortedDictionary<string, byte[]> snapshot = new(StringComparer.Ordinal);
         foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             string relativePath = Path.GetRelativePath(root, path)
@@ -6424,7 +6447,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static SortedDictionary<string, TreeEntry> CaptureTree(string root)
     {
-        SortedDictionary<string, TreeEntry> snapshot = new SortedDictionary<string, TreeEntry>(StringComparer.Ordinal);
+        SortedDictionary<string, TreeEntry> snapshot = new(StringComparer.Ordinal);
         CaptureTreeDirectory(new DirectoryInfo(root), root, snapshot);
         return snapshot;
     }
@@ -6485,11 +6508,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         Assert.Equal(expected.Keys, actual.Keys);
         foreach ((string? path, byte[]? expectedBytes) in expected)
-        {
             Assert.True(
                 actual[path].SequenceEqual(expectedBytes),
                 $"File '{path}' changed. Expected {Digest(expectedBytes)}, actual {Digest(actual[path])}.");
-        }
     }
 
     private static void AssertTreesEqual(
@@ -6524,9 +6545,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         foreach ((string? relativePath, TreeEntry _) in snapshot
                      .Where(pair => pair.Value.Kind == TreeEntryKind.Directory)
                      .OrderBy(pair => PathDepth(pair.Key)))
-        {
             Directory.CreateDirectory(ToPlatformPath(root, relativePath));
-        }
 
         foreach ((string? relativePath, TreeEntry? entry) in snapshot
                      .Where(pair => pair.Value.Kind == TreeEntryKind.File))
@@ -6575,27 +6594,26 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
-    private static string ToPlatformPath(string root, string relativePath) =>
-        Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    private static string ToPlatformPath(string root, string relativePath)
+    {
+        return Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    }
 
-    private static int PathDepth(string relativePath) =>
-        relativePath.Count(character => character == '/');
+    private static int PathDepth(string relativePath)
+    {
+        return relativePath.Count(character => character == '/');
+    }
 
     private static void RestoreSnapshot(
         string root,
         IReadOnlyDictionary<string, byte[]> snapshot)
     {
-        foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-        {
-            File.Delete(path);
-        }
+        foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.Delete(path);
 
         foreach (string directory in Directory
                      .EnumerateDirectories(root, "*", SearchOption.AllDirectories)
                      .OrderByDescending(path => path.Length))
-        {
-            Directory.Delete(directory, recursive: false);
-        }
+            Directory.Delete(directory, false);
 
         foreach ((string? relativePath, byte[]? content) in snapshot)
         {
@@ -6607,8 +6625,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
-    private static string Digest(byte[] content) =>
-        Convert.ToHexStringLower(SHA256.HashData(content));
+    private static string Digest(byte[] content)
+    {
+        return Convert.ToHexStringLower(SHA256.HashData(content));
+    }
 
     private static void AssertLockEqual(SquadLock expected, SquadLock actual)
     {
@@ -6671,15 +6691,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private sealed class RecordingReleaseSource : ISquadReleaseSource
     {
-        private int _callCount;
-
-        public int CallCount => _callCount;
+        public int CallCount { get; private set; }
 
         public Task<SquadReleaseResult> DownloadAndExtractAsync(
             SquadReleaseRequest request,
             CancellationToken cancellationToken)
         {
-            _callCount++;
+            CallCount++;
             throw new NotImplementedException();
         }
 
@@ -6698,21 +6716,26 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
         : ISquadGlobalRootResolver
     {
-        public string ResolveGlobalRoot(SquadTarget target) =>
-            roots.TryGetValue(target, out string? root)
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            return roots.TryGetValue(target, out string? root)
                 ? root
                 : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
+        }
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => value;
+        public override DateTimeOffset GetUtcNow()
+        {
+            return value;
+        }
     }
 
     /// <summary>
-    /// Records where the durable intent, the staged bytes and the backups live while a global
-    /// transaction runs. The intent, staging and backups all belong in the home journal, never beside the
-    /// target root and never in the portable global state directory.
+    ///     Records where the durable intent, the staged bytes and the backups live while a global
+    ///     transaction runs. The intent, staging and backups all belong in the home journal, never beside the
+    ///     target root and never in the portable global state directory.
     /// </summary>
     private sealed class GlobalTransactionLocationObserver(
         string targetRoot,
@@ -6732,10 +6755,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         public void AfterStep(SquadTransactionStep step)
         {
             SawDurableIntentInJournal |= Directory.Exists(journalDirectory) &&
-                Directory.EnumerateFiles(
-                    journalDirectory,
-                    "intent.json",
-                    SearchOption.AllDirectories).Any();
+                                         Directory.EnumerateFiles(
+                                             journalDirectory,
+                                             "intent.json",
+                                             SearchOption.AllDirectories).Any();
             if (step.Kind == SquadTransactionStepKind.FileStaged)
             {
                 SawStagingInJournal |= HasDirectoryNamed(journalDirectory, "staging");
@@ -6756,9 +6779,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         ISquadTransactionObserver,
         IDisposable
     {
-        public ManualResetEventSlim Reached { get; } = new(initialState: false);
+        public ManualResetEventSlim Reached { get; } = new(false);
 
-        public ManualResetEventSlim Release { get; } = new(initialState: false);
+        public ManualResetEventSlim Release { get; } = new(false);
+
+        public void Dispose()
+        {
+            Reached.Dispose();
+            Release.Dispose();
+        }
 
         public void AfterStep(SquadTransactionStep step)
         {
@@ -6767,12 +6796,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
             Reached.Set();
             Release.Wait();
-        }
-
-        public void Dispose()
-        {
-            Reached.Dispose();
-            Release.Dispose();
         }
     }
 
@@ -6796,15 +6819,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Steps.Add(step);
             SawIntentJournal |= File.Exists(Path.Combine(_transactionDirectory, "intent.json"));
             SawStagedFile |= Directory.Exists(Path.Combine(_transactionDirectory, "staging")) &&
-                Directory.EnumerateFiles(
-                    Path.Combine(_transactionDirectory, "staging"),
-                    "*",
-                    SearchOption.AllDirectories).Any();
+                             Directory.EnumerateFiles(
+                                 Path.Combine(_transactionDirectory, "staging"),
+                                 "*",
+                                 SearchOption.AllDirectories).Any();
             SawBackupFile |= Directory.Exists(Path.Combine(_transactionDirectory, "backups")) &&
-                Directory.EnumerateFiles(
-                    Path.Combine(_transactionDirectory, "backups"),
-                    "*",
-                    SearchOption.AllDirectories).Any();
+                             Directory.EnumerateFiles(
+                                 Path.Combine(_transactionDirectory, "backups"),
+                                 "*",
+                                 SearchOption.AllDirectories).Any();
         }
     }
 
@@ -6814,10 +6837,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public List<SquadTransactionCheckpoint> Checkpoints { get; } = [];
 
-        public void AfterStep(SquadTransactionStep step) => Steps.Add(step);
+        public void AfterStep(SquadTransactionStep step)
+        {
+            Steps.Add(step);
+        }
 
-        public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint) =>
+        public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
+        {
             Checkpoints.Add(checkpoint);
+        }
     }
 
     private sealed class FailingObserver(string root, int failureSequence) : ISquadTransactionObserver
@@ -6934,9 +6962,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             if (step.Kind != SquadTransactionStepKind.FileApplied ||
                 !string.Equals(step.RelativePath, generatedPath, StringComparison.Ordinal))
-            {
                 return;
-            }
 
             Write(root, externalPath, "external operator note");
             throw new InjectedSquadTransactionFailure(step.Sequence);
@@ -7103,14 +7129,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         private static void DeleteLeaf(string path)
         {
-            FileInfo entry = new FileInfo(path);
+            FileInfo entry = new(path);
             if (entry.LinkTarget is not null)
             {
                 File.Delete(path);
                 return;
             }
 
-            DirectoryInfo directory = new DirectoryInfo(path);
+            DirectoryInfo directory = new(path);
             if (directory.LinkTarget is not null)
             {
                 Directory.Delete(path);
@@ -7120,7 +7146,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             if (File.Exists(path))
                 File.Delete(path);
             else if (Directory.Exists(path))
-                Directory.Delete(path, recursive: true);
+                Directory.Delete(path, true);
         }
     }
 
@@ -7207,9 +7233,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             if (value.Kind != checkpoint ||
                 !string.Equals(value.RelativePath, subject, StringComparison.Ordinal))
-            {
                 return;
-            }
 
             InterruptedTreeSnapshot = CaptureTree(root);
             throw new InjectedSquadTransactionFailure(value.Sequence);
@@ -7256,10 +7280,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SawAffectedPublicApply |= subject switch
             {
                 "target" => step.Kind == SquadTransactionStepKind.FileApplied &&
-                    string.Equals(
-                        step.RelativePath,
-                        targetRelativePath,
-                        StringComparison.Ordinal),
+                            string.Equals(
+                                step.RelativePath,
+                                targetRelativePath,
+                                StringComparison.Ordinal),
                 "lock" => step.Kind == SquadTransactionStepKind.LockApplied,
                 "receipt" => step.Kind == SquadTransactionStepKind.ReceiptApplied,
                 _ => throw new InvalidOperationException(
@@ -7273,17 +7297,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     checkpoint.RelativePath,
                     _checkpointSubject,
                     StringComparison.Ordinal))
-            {
                 return;
-            }
 
             SawAffectedAfterImage |=
                 checkpoint.Kind == SquadTransactionCheckpointKind.AfterImagePublished;
             if (SawOriginalClaimed ||
                 checkpoint.Kind != SquadTransactionCheckpointKind.OriginalClaimed)
-            {
                 return;
-            }
 
             SawOriginalClaimed = true;
             if (string.Equals(mutation, "unchanged", StringComparison.Ordinal))
@@ -7348,7 +7368,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 "lock" => step.Kind == SquadTransactionStepKind.LockApplied,
                 "receipt" => step.Kind == SquadTransactionStepKind.ReceiptApplied,
                 _ => step.Kind == SquadTransactionStepKind.FileApplied &&
-                    string.Equals(step.RelativePath, subject, StringComparison.Ordinal)
+                     string.Equals(step.RelativePath, subject, StringComparison.Ordinal)
             };
         }
 
@@ -7404,7 +7424,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     Directory.CreateDirectory(claimPath);
                     break;
                 case "replace-file":
-                    Directory.Delete(claimPath, recursive: true);
+                    Directory.Delete(claimPath, true);
                     File.WriteAllText(
                         claimPath,
                         $"replacement {subject} claim file",
@@ -7437,16 +7457,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             if (checkpoint.Kind != SquadTransactionCheckpointKind.AfterImagePublished ||
                 !string.Equals(checkpoint.RelativePath, subject, StringComparison.Ordinal))
-            {
                 return;
-            }
 
             InterruptedTreeSnapshot = CaptureTree(root);
             throw new InjectedSquadTransactionFailure(checkpoint.Sequence);
         }
     }
 
-    [SuppressMessage("ReSharper", "UnusedMember.Local", Justification = "Standard exception constructors required by CA1032.")]
+    [SuppressMessage("ReSharper", "UnusedMember.Local",
+        Justification = "Standard exception constructors required by CA1032.")]
     private sealed class InjectedSquadTransactionFailure : Exception
     {
         public InjectedSquadTransactionFailure()
@@ -7489,7 +7508,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 System.IO.Path.Combine(agentDirectory, "conductor.toml"),
                 System.IO.Path.GetRelativePath(agentDirectory, canonicalPath));
             Write(Path, ".cursor/agents/obsolete.md", obsoleteBody);
-            Receipt = SquadDeploymentStateTests.Receipt(
+            Receipt = Receipt(
                 new SquadOwnedFile(
                     ".codex/agents/conductor.toml",
                     Digest(installedBody),
@@ -7507,10 +7526,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public SquadReceipt Receipt { get; }
 
-        public static RichTransactionFixture Create() => new();
+        public void Dispose()
+        {
+            _temp.Dispose();
+        }
 
-        public SquadDeploymentPlan CreateUpdatePlan() =>
-            SquadDeploymentPlan.CreateUpdate(
+        public static RichTransactionFixture Create()
+        {
+            return new RichTransactionFixture();
+        }
+
+        public SquadDeploymentPlan CreateUpdatePlan()
+        {
+            return SquadDeploymentPlan.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -7520,10 +7548,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ],
                 Receipt,
                 [],
-                replaceManaged: false,
+                false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
-
-        public void Dispose() => _temp.Dispose();
+        }
     }
 
     private sealed class TransactionFixture : IDisposable
@@ -7534,7 +7561,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             RelativePath = ".codex/agents/conductor.toml";
             Write(Path, RelativePath, "installed body");
-            Receipt = SquadDeploymentStateTests.Receipt(
+            Receipt = Receipt(
                 new SquadOwnedFile(
                     RelativePath,
                     Digest("installed body"),
@@ -7549,19 +7576,27 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public SquadReceipt Receipt { get; }
 
-        public static TransactionFixture Create() => new();
+        public void Dispose()
+        {
+            _temp.Dispose();
+        }
 
-        public SquadDeploymentPlan CreateUpdatePlan() =>
-            SquadDeploymentPlan.CreateUpdate(
+        public static TransactionFixture Create()
+        {
+            return new TransactionFixture();
+        }
+
+        public SquadDeploymentPlan CreateUpdatePlan()
+        {
+            return SquadDeploymentPlan.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
                 [Rendered(RelativePath, "updated body")],
                 Receipt,
                 [new SquadDegradation("codex", "conductor", "model-profile-narrowed")],
-                replaceManaged: false,
+                false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
-
-        public void Dispose() => _temp.Dispose();
+        }
     }
 }

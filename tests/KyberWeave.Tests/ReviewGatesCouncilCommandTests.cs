@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
 
@@ -35,13 +36,7 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     public ReviewGatesCouncilCommandTests()
     {
         _repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(_repo);
-
-        MustGit("init", "--quiet");
-        WriteRepositoryFile("src/a.cs", "// a\n");
-        WriteRepositoryFile("notes/readme.md", "# readme\n");
-        MustGit("add", "-A");
-        Commit("initial");
+        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
     }
 
     // -----------------------------------------------------------------------------------------

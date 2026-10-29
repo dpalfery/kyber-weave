@@ -11,23 +11,35 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Proves under <c>Scope: Global</c>, every rendered file lands under its target's real
-/// per-user global root with a bare <c>agents/</c>, <c>skills/</c>, or Factory <c>droids/</c>
-/// relative path, honoring an override environment variable before the verified default.
-/// Project scope stays byte-identical to today. <see cref="SquadGlobalRoots"/> rejects a
-/// relative home directory or override so <c>--global</c> cannot resolve against the process
-/// working directory.
+///     Proves under <c>Scope: Global</c>, every rendered file lands under its target's real
+///     per-user global root with a bare <c>agents/</c>, <c>skills/</c>, or Factory <c>droids/</c>
+///     relative path, honoring an override environment variable before the verified default.
+///     Project scope stays byte-identical to today. <see cref="SquadGlobalRoots" /> rejects a
+///     relative home directory or override so <c>--global</c> cannot resolve against the process
+///     working directory.
 /// </summary>
 /// <remarks>
-/// No <c>Fakes/FakeSquadGlobalRoots.cs</c> is added. <c>SquadGlobalRoots</c>'s two constructor
-/// inputs — an environment-lookup delegate and a home-directory string — are already trivially
-/// fakeable inline; a wrapping fake would not earn its keep here and could drift from the real
-/// resolution logic it exists to prove. No test reads the real <c>HOME</c> or
-/// <c>Environment.GetEnvironmentVariable</c>.
+///     No <c>Fakes/FakeSquadGlobalRoots.cs</c> is added. <c>SquadGlobalRoots</c>'s two constructor
+///     inputs — an environment-lookup delegate and a home-directory string — are already trivially
+///     fakeable inline; a wrapping fake would not earn its keep here and could drift from the real
+///     resolution logic it exists to prove. No test reads the real <c>HOME</c> or
+///     <c>Environment.GetEnvironmentVariable</c>.
 /// </remarks>
 public sealed class SquadGlobalRootTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
+
+    public static TheoryData<string, string> UnusableZCodeConfigs => new()
+    {
+        { "empty", "" },
+        { "whitespace", "   " },
+        { "not-json", "not json at all" },
+        { "no-storage", "{}" },
+        { "no-dir", "{\"storage\":{}}" },
+        { "blank-dir", "{\"storage\":{\"dir\":\"\"}}" },
+        { "numeric-dir", "{\"storage\":{\"dir\":42}}" },
+        { "storage-not-object", "{\"storage\":\"not-an-object\"}" }
+    };
 
     public void Dispose()
     {
@@ -248,8 +260,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     // ---------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming CLAUDE_CONFIG_DIR
-    /// and the invalid path when the override points into or under the squad instances directory.
+    ///     Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming CLAUDE_CONFIG_DIR
+    ///     and the invalid path when the override points into or under the squad instances directory.
     /// </summary>
     [Theory]
     [InlineData(".kyber-weave/squad/instances")]
@@ -264,9 +276,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
         string invalidPath = Path.Combine(tempHome, normalizedRelative);
         if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
-        {
             invalidPath += Path.DirectorySeparatorChar;
-        }
 
         SquadGlobalRoots resolver = new(
             name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
@@ -282,8 +292,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
-    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming OPENCODE_CONFIG_DIR
-    /// and the invalid path when the override points into or under the squad instances directory.
+    ///     Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming OPENCODE_CONFIG_DIR
+    ///     and the invalid path when the override points into or under the squad instances directory.
     /// </summary>
     [Theory]
     [InlineData(".kyber-weave/squad/instances")]
@@ -298,9 +308,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
         string invalidPath = Path.Combine(tempHome, normalizedRelative);
         if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
-        {
             invalidPath += Path.DirectorySeparatorChar;
-        }
 
         SquadGlobalRoots resolver = new(
             name => string.Equals(name, "OPENCODE_CONFIG_DIR", StringComparison.Ordinal)
@@ -316,8 +324,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
-    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming ZCODE_STORAGE_DIR
-    /// and the invalid path when the override points into or under the squad instances directory.
+    ///     Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming ZCODE_STORAGE_DIR
+    ///     and the invalid path when the override points into or under the squad instances directory.
     /// </summary>
     [Theory]
     [InlineData(".kyber-weave/squad/instances")]
@@ -332,9 +340,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
         string invalidPath = Path.Combine(tempHome, normalizedRelative);
         if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
-        {
             invalidPath += Path.DirectorySeparatorChar;
-        }
 
         SquadGlobalRoots resolver = new(
             name => string.Equals(name, "ZCODE_STORAGE_DIR", StringComparison.Ordinal)
@@ -350,8 +356,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
-    /// Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming XDG_CONFIG_HOME
-    /// and the invalid path when the override points into or under the squad instances directory.
+    ///     Requirement 7.3, 7.8: SquadGlobalRoots throws ArgumentException naming XDG_CONFIG_HOME
+    ///     and the invalid path when the override points into or under the squad instances directory.
     /// </summary>
     [Theory]
     [InlineData(".kyber-weave/squad/instances")]
@@ -366,9 +372,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         string normalizedRelative = relativeInstancePath.Replace('/', Path.DirectorySeparatorChar);
         string invalidPath = Path.Combine(tempHome, normalizedRelative);
         if (relativeInstancePath.EndsWith('/') && !invalidPath.EndsWith(Path.DirectorySeparatorChar))
-        {
             invalidPath += Path.DirectorySeparatorChar;
-        }
 
         SquadGlobalRoots resolver = new(
             name => string.Equals(name, "XDG_CONFIG_HOME", StringComparison.Ordinal)
@@ -384,8 +388,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
-    /// Requirement 7.3, 7.8: Every harness target with an override environment variable
-    /// throws ArgumentException naming the variable and the invalid path when pointing into instances.
+    ///     Requirement 7.3, 7.8: Every harness target with an override environment variable
+    ///     throws ArgumentException naming the variable and the invalid path when pointing into instances.
     /// </summary>
     [Theory]
     [InlineData(SquadTarget.Claude, "CLAUDE_CONFIG_DIR")]
@@ -577,18 +581,6 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(fromEnvironment, resolver.ResolveGlobalRoot(SquadTarget.ZCode));
     }
 
-    public static TheoryData<string, string> UnusableZCodeConfigs => new()
-    {
-        { "empty", "" },
-        { "whitespace", "   " },
-        { "not-json", "not json at all" },
-        { "no-storage", "{}" },
-        { "no-dir", "{\"storage\":{}}" },
-        { "blank-dir", "{\"storage\":{\"dir\":\"\"}}" },
-        { "numeric-dir", "{\"storage\":{\"dir\":42}}" },
-        { "storage-not-object", "{\"storage\":\"not-an-object\"}" }
-    };
-
     [Theory]
     [MemberData(nameof(UnusableZCodeConfigs))]
     public void ResolveGlobalRoot_ZCode_UnusableConfigFallsBackToTheDefaultRatherThanFailing(
@@ -714,24 +706,18 @@ public sealed class SquadGlobalRootTests : IDisposable
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
             foreach (SquadResource resource in primaryAgent.Resources)
-            {
                 Assert.Single(
                     result.Receipt.Files,
                     f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
-            }
 
             if (target == SquadTarget.Claude)
-            {
                 Assert.Single(
                     result.Receipt.Files,
                     f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
-            }
             else
-            {
                 Assert.DoesNotContain(
                     result.Receipt.Files,
                     f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
-            }
         }
 
         if (target == SquadTarget.Codex)
@@ -748,9 +734,7 @@ public sealed class SquadGlobalRootTests : IDisposable
             ];
             Assert.Equal(1 + primaryAgent.Resources.Count, conductorEntryPointPaths.Length);
             foreach (string path in conductorEntryPointPaths)
-            {
                 Assert.Single(result.Receipt.Files, file => file.RelativePath == path);
-            }
 
             SquadOwnedFile nativeAgent = Assert.Single(
                 result.Receipt.Files,
@@ -758,11 +742,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             Assert.Equal("codex", nativeAgent.Target);
 
             foreach (SquadResource resource in primaryAgent.Resources)
-            {
                 Assert.Single(
                     result.Receipt.Files,
                     file => file.RelativePath == $"agents/{resource.RelativePath}");
-            }
         }
 
         bool sawAgentFile = false;
@@ -778,26 +760,18 @@ public sealed class SquadGlobalRootTests : IDisposable
                 $"Global-scope path '{file.RelativePath}' for {target} must remain relative.");
 
             if (file.RelativePath.StartsWith("agents/", StringComparison.Ordinal))
-            {
                 sawAgentFile = true;
-            }
             else if (file.RelativePath.StartsWith("skills/", StringComparison.Ordinal))
-            {
                 sawSkillFile = true;
-            }
             else if (target == SquadTarget.ZCode &&
                      file.RelativePath.StartsWith("commands/", StringComparison.Ordinal))
-            {
                 // ZCode is the only target with a third primitive: its primary agent lowers to
                 // a slash command rather than to a skill.
                 sawCommandFile = true;
-            }
             else
-            {
                 Assert.Fail(
                     $"Global-scope path '{file.RelativePath}' for {target} is outside that " +
                     "target's declared global subtrees.");
-            }
 
             string physicalPath = result.Plan.ResolvePhysicalPath(file);
             Assert.True(
@@ -807,13 +781,9 @@ public sealed class SquadGlobalRootTests : IDisposable
         }
 
         if (target == SquadTarget.Warp)
-        {
             Assert.False(sawAgentFile, $"{target} has no agent primitive; global scope must emit skills/ only.");
-        }
         else
-        {
             Assert.True(sawAgentFile, $"{target} is native and should emit at least one agents/ file.");
-        }
 
         // Factory uses droids/, not agents/; do not add it to this theory.
 
@@ -838,7 +808,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
-        using CorpusSquadReleaseSource releaseSource = new();
+        using SyntheticValidSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = new(
             releaseSource,
             SquadCommandComposition.ResolveRenderer(),
@@ -994,17 +964,11 @@ public sealed class SquadGlobalRootTests : IDisposable
             Assert.DoesNotContain("agents/", file.RelativePath, StringComparison.Ordinal);
 
             if (file.RelativePath.StartsWith("droids/", StringComparison.Ordinal))
-            {
                 sawDroidFile = true;
-            }
             else if (file.RelativePath.StartsWith("skills/", StringComparison.Ordinal))
-            {
                 sawSkillFile = true;
-            }
             else
-            {
                 Assert.Fail($"Global-scope path '{file.RelativePath}' for Factory is neither droids/ nor skills/.");
-            }
 
             string physicalPath = result.Plan.ResolvePhysicalPath(file);
             Assert.True(
@@ -1033,7 +997,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
-        using CorpusSquadReleaseSource releaseSource = new();
+        using SyntheticValidSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
@@ -1079,7 +1043,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         FakeSquadUserPaths userPaths = new(userData);
         SquadStateStore stateStore = new(userPaths);
-        using CorpusSquadReleaseSource releaseSource = new();
+        using SyntheticValidSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
         SquadLifecycleService service = new(releaseSource, renderer, stateStore);
 
@@ -1100,20 +1064,16 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         // Antigravity (native dual-root) emits files under both .agents/agents/ and .agents/skills/.
         if (target == SquadTarget.Antigravity)
-        {
             Assert.All(
                 result.Receipt.Files,
                 file => Assert.True(
                     file.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) ||
                     file.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal),
                     $"Antigravity file '{file.RelativePath}' is not under .agents/agents/ or .agents/skills/."));
-        }
         else
-        {
             Assert.All(
                 result.Receipt.Files,
                 file => Assert.StartsWith(expectedPrefix, file.RelativePath, StringComparison.Ordinal));
-        }
     }
 
     // ---------------------------------------------------------------------------------------
@@ -1175,24 +1135,18 @@ public sealed class SquadGlobalRootTests : IDisposable
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
             foreach (SquadResource resource in primaryAgent.Resources)
-            {
                 Assert.Single(
                     result.Receipt.Files,
                     f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
-            }
 
             if (target == SquadTarget.Claude)
-            {
                 Assert.Single(
                     result.Receipt.Files,
                     f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
-            }
             else
-            {
                 Assert.DoesNotContain(
                     result.Receipt.Files,
                     f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
-            }
         }
 
         Assert.True(
@@ -1250,22 +1204,18 @@ public sealed class SquadGlobalRootTests : IDisposable
                     GlobalRoots: globalRoots));
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
-            {
                 foreach (SquadDeploymentFile file in result.Files)
-                {
                     Assert.False(
                         file.RelativePath.StartsWith(prefix, StringComparison.Ordinal),
                         $"Renderer for {target} must not emit paths prefixed with '{prefix}' in global scope.");
-                }
-            }
         }
     }
 
     /// <summary>
-    /// The receipt assertions name one primary agent by name. That only says the conductor
-    /// exists; it does not say it is the only non-shared primary. Pin the whole set, so a
-    /// fourth primary agent added later is caught here rather than silently changing what
-    /// the per-target receipt and file-count expectations mean.
+    ///     The receipt assertions name one primary agent by name. That only says the conductor
+    ///     exists; it does not say it is the only non-shared primary. Pin the whole set, so a
+    ///     fourth primary agent added later is caught here rather than silently changing what
+    ///     the per-target receipt and file-count expectations mean.
     /// </summary>
     [Fact]
     public void ThePrimarySetIsExactlyTheThreeDeclaredPrimaryAgents()
@@ -1303,13 +1253,17 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
-    /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
-    /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Claude and Factory keep the primary agent's native principal and
-    /// add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
-    /// precedent (the agent principal plus its refs out, <c>SKILL.md</c> plus its refs in),
-    /// so only the receipt paths differ there. Codex, Claude, and Factory retain the native
-    /// principal and add a skill entry point for the conductor.
+    ///     R17:
+    ///     <c>
+    ///         Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
+    ///         Σ non-suppressed skill resources
+    ///     </c>
+    ///     , read from the loaded corpus rather than a
+    ///     hardcoded literal. Claude and Factory keep the primary agent's native principal and
+    ///     add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
+    ///     precedent (the agent principal plus its refs out, <c>SKILL.md</c> plus its refs in),
+    ///     so only the receipt paths differ there. Codex, Claude, and Factory retain the native
+    ///     principal and add a skill entry point for the conductor.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -1351,10 +1305,8 @@ public sealed class SquadGlobalRootTests : IDisposable
                 string fallbackProfileId = agent.Fallback;
                 SquadFallbackProfile profile = source.FallbackProfiles.Profiles[fallbackProfileId];
                 if (profile.NoPrimaryAgent == "skill")
-                {
                     // Add 1 for the SKILL.md and agent.Resources.Count for the resources
                     entryPointAddition += 1 + agent.Resources.Count;
-                }
             }
 
             return baseCount + entryPointAddition;
@@ -1362,9 +1314,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         if (target is SquadTarget.Cursor or SquadTarget.Pi or SquadTarget.ZCode
             or SquadTarget.Devin or SquadTarget.Warp)
-        {
             return baseCount - sharedPrimaryCount;
-        }
 
         return baseCount;
     }
