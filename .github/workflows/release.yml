@@ -1,8 +1,11 @@
 # Release — self-contained binaries and GitHub Release
 #
 # Kick off from Actions → Release → Run workflow on main. Only dpalfery may
-# start it. Builds run immediately. Publish waits on the `release` environment
-# until David Palfery clicks Review deployments on that same run and approves.
+# start it. The run stops once, at the `approve` job, until David Palfery clicks
+# Review deployments on that run and approves. Every build and publish job
+# runs after that single approval; none of them asks again, provided the `release`
+# environment has no required reviewer (build-tray still names it for the signing
+# secrets, so a reviewer left on it would prompt a second time).
 # Leave "Make production release" unchecked to publish the next RC
 # (0.1.7-rc.9 → 0.1.7-rc.10). Check it to publish the next stable
 # (0.1.7-rc.9 → 0.1.7). scripts/next-release-version.sh picks the number.
@@ -63,6 +66,9 @@ jobs:
   authorize:
     name: Authorize
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Restrict to dpalfery on an allowed ref
         env:
@@ -82,6 +88,56 @@ jobs:
           then
             echo "::error::Run the workflow from main. The release environment rejects any other branch."
             exit 1
+          fi
+
+      # GitHub creates an environment with no protection the first time a job names
+      # one that does not exist, so a deleted or renamed `release-approval` would let
+      # the approve job pass with no human. This runs in a job that names no
+      # environment, so it can stop the run before that happens.
+      - name: Require the release-approval gate to be protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Read the environment, telling "missing" (404) from "cannot read" (403 and
+          # others) so the error names the real cause.
+          if ! env_json="$(gh api "repos/${REPO}/environments/release-approval" 2>gh-err.txt)"; then
+            if grep -q 'HTTP 404' gh-err.txt; then
+              echo "::error::Environment release-approval does not exist. Create it (required reviewer, main-only) before releasing."
+            else
+              echo "::error::Could not read environment release-approval: $(cat gh-err.txt)"
+            fi
+            exit 1
+          fi
+          jq -e '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)' \
+            <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval has no required reviewer, so approve would pass with no approval."
+            exit 1
+          }
+          # The toggle alone is not enough: the allowed branch list must be exactly main.
+          jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval does not use a custom deployment branch list."
+            exit 1
+          }
+          if ! policies="$(gh api "repos/${REPO}/environments/release-approval/deployment-branch-policies" \
+            --jq '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(",")' 2>gh-err.txt)"; then
+            echo "::error::Could not read the deployment branch list of release-approval: $(cat gh-err.txt)"
+            exit 1
+          fi
+          if [ "${policies}" != "branch:main" ]; then
+            echo "::error::Environment release-approval must allow only the branch main (found: ${policies:-none})."
+            exit 1
+          fi
+          # Advisory only. build-tray still names `release` for the signing secrets, so a
+          # reviewer left there is a second prompt, not a missing gate. Never fail the run
+          # on this read.
+          if release_json="$(gh api "repos/${REPO}/environments/release" 2>/dev/null)"; then
+            if jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length > 0' <<<"${release_json}" >/dev/null; then
+              echo "::warning::Environment release still has a required reviewer; build-tray will prompt a second time. Remove it to get one approval."
+            fi
+          else
+            echo "::warning::Could not read environment release to check for a second reviewer prompt."
           fi
 
   version:
@@ -138,10 +194,10 @@ jobs:
               fi
               echo
               echo "### David Palfery — approve here"
-              echo "Builds run first. When they finish, this run waits."
+              echo "This run waits at the **Approve release** job before anything builds."
               echo "On **this same workflow run page**, click **Review deployments**"
-              echo "(top right, yellow banner). Tick \`release\` → **Approve and deploy**."
-              echo "Nobody else can approve. That click publishes \`${TAG}\`."
+              echo "(top right, yellow banner). Tick \`release-approval\` → **Approve and deploy**."
+              echo "Nobody else can approve. That one click builds and publishes \`${TAG}\`."
               echo
               echo "Release notes compare \`${TAG}\` with \`${NOTES_START_TAG:-<no earlier release>}\`."
             } >> "${GITHUB_STEP_SUMMARY}"
@@ -164,9 +220,27 @@ jobs:
           echo "notes_start_tag=${NOTES_START_TAG}" >> "${GITHUB_OUTPUT}"
           echo "Release version=${VERSION} tag=${TAG} create_release=${CREATE_RELEASE} notes_start_tag=${NOTES_START_TAG:-none}"
 
+  # The one human approval for the whole run. It lives on its own environment,
+  # `release-approval` (required reviewer + main-only branch policy), so the
+  # `release` environment, which holds the signing secrets, can have no reviewers
+  # and the later jobs that use it do not prompt again. Do not point any other job
+  # at `release-approval`: each job that names an environment with reviewers is a
+  # separate approval.
+  approve:
+    name: Approve release (David Palfery must approve)
+    needs: version
+    if: needs.version.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    environment: release-approval
+    steps:
+      - name: Approved
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: echo "Release ${VERSION} approved to build and publish."
+
   build:
     name: Publish ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -260,7 +334,7 @@ jobs:
     # docs/plans/2026-09-28-kyberdash-sea-release-integrity.md carries the
     # design; scripts/release-local.sh mirrors these same steps.
     name: Build KyberDash ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -469,7 +543,7 @@ jobs:
 
   pack-squad:
     name: Package Kyber-Squad
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -517,7 +591,7 @@ jobs:
     # closed would publish an unnotarized app, so the presence check below runs
     # first and the assertions after the build check the result independently.
     name: Build tray ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:
@@ -731,7 +805,7 @@ jobs:
     # packages.lock.json files, which under-report .NET because
     # src/KyberWeave.Mcp has no lock file.
     name: Generate SBOM
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -1010,11 +1084,10 @@ jobs:
           sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
 
   release:
-    name: Publish GitHub Release (David Palfery must approve)
+    name: Publish GitHub Release
     needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: write
     steps:
@@ -1312,11 +1385,10 @@ jobs:
           echo "All published archives carry a verified CycloneDX SBOM attestation"
 
   gh-packages:
-    name: Publish GitHub Packages (David Palfery must approve)
+    name: Publish GitHub Packages
     needs: [version, build]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: read
       packages: write
