@@ -407,3 +407,75 @@ describe('opencode envelope context window (T7, D6)', () => {
     store.close()
   })
 })
+
+// Review (Kilo 1/K2): presence of a KEY is not a measurement. `readCounter`
+// folds an unreadable value ('n/a', null, '') to 0, so an `in`-check declared
+// a garbage counter `measured` and published a fabricated zero — the exact
+// absent-vs-zero confusion R2 bans. Only a value the counter reader can parse
+// is a measurement; a genuine reported 0 still is one.
+describe('counter measurability follows the parsed value, not the key', () => {
+  const genAi = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    'opencode.session.id': 'ses_counter_presence',
+    [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+    'opencode.model.id': 'claude-opus-4-6',
+    ...over,
+  })
+
+  it('does not declare output measured when the output counter is unreadable', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'gen-bad-output',
+        attributes: genAi({
+          'gen_ai.usage.input_tokens': 100,
+          'gen_ai.usage.output_tokens': 'n/a',
+        }),
+      }),
+    )
+    expect(record.measurability?.output).toMatchObject({ availability: 'not_measurable' })
+    expect(record.tokens.output).toBe(0)
+  })
+
+  it('does not declare a cache class measured when its counter is unreadable', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'gen-bad-cache',
+        attributes: genAi({
+          'gen_ai.usage.input_tokens': 100,
+          'gen_ai.usage.cache_read.input_tokens': 'n/a',
+        }),
+      }),
+    )
+    expect(record.measurability?.cache_read).toMatchObject({ availability: 'not_measurable' })
+    expect(record.tokens.cacheRead).toBe(0)
+  })
+
+  it('does not declare an OpenInference cache class measured when its counter is unreadable', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'oi-bad-cache',
+        attributes: {
+          'openinference.span.kind': 'LLM',
+          'llm.token_count.prompt': 616,
+          'llm.token_count.prompt_details.cache_read': 'n/a',
+        },
+      }),
+    )
+    expect(record.measurability?.cache_read).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('keeps a reported zero measured', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'gen-zero-output',
+        attributes: genAi({
+          'gen_ai.usage.input_tokens': 100,
+          'gen_ai.usage.output_tokens': 0,
+          'gen_ai.usage.cache_read.input_tokens': 0,
+        }),
+      }),
+    )
+    expect(record.measurability?.output).toBe('measured')
+    expect(record.measurability?.cache_read).toBe('measured')
+    expect(record.tokens.cacheRead).toBe(0)
+  })
+})

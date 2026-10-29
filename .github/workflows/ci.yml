@@ -716,6 +716,47 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
+  # Harness-collection standard: deterministic per-harness completeness
+  # enforcement. Runs the Playwright conformance spec against an isolated
+  # dashboard booted from a self-seeded temp canon.db — never the live 4747
+  # host. Ubuntu-only, no funded model call, no new secret.
+  #
+  # The spec runs from the repository root with the pinned dash Playwright
+  # (`--prefix dash`, the same pattern as the archived spine e2e commands) so
+  # no floating npx fetch can move the runner under CI, and so that
+  # dash/playwright.config.ts — whose webServer targets the live host — stays
+  # unloaded; the spec's own isolated boot is the only server.
+  dash-e2e:
+    name: Dash harness-collection e2e
+    runs-on: ubuntu-latest
+    needs: ts-gates
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/package-lock.json
+
+      # npm ci (not `npm install`): package-lock.json is committed so a CI
+      # run reproduces the same devDependency graph a contributor's local
+      # install produces. Mirrors the ts-gates install.
+      - name: Install dash dependencies
+        working-directory: dash
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: dash
+        run: npx playwright install --with-deps
+
+      - name: Harness-collection conformance spec
+        run: npx --prefix dash playwright test dash/e2e/harness-collection.spec.ts
+
   # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
   # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture
   # tests run here; the full suite stays on ts-gates. Equivalent local command:
@@ -918,6 +959,7 @@ jobs:
       - codeql
       - skill-docs-gate
       - ts-gates
+      - dash-e2e
       - capture-windows
       - tray-rust
     if: always()
@@ -935,7 +977,8 @@ jobs:
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
-          echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+           echo "| Dash harness-collection e2e | ${{ needs.dash-e2e.result }} |" >> results.md
           echo "| Capture tests (Windows) | ${{ needs.capture-windows.result }} |" >> results.md
           echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
@@ -953,6 +996,7 @@ jobs:
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
             "${{ needs.ts-gates.result }}" \
+            "${{ needs.dash-e2e.result }}" \
             "${{ needs.capture-windows.result }}" \
             "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
