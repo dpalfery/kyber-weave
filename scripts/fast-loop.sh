@@ -162,6 +162,10 @@ else
   else
     for file in "${changed_files[@]+"${changed_files[@]}"}"; do
       case "$file" in
+        *.md) needs_docs=1 ;;
+      esac
+
+      case "$file" in
         dash/tray/src-tauri/*)
           needs_rust=1
           ;;
@@ -254,7 +258,11 @@ if [[ "${needs_dash}" -eq 1 ]]; then
     npm --prefix dash run test:related -- "${dash_related_files[@]}"
   fi
 
-  if [[ "${needs_tray_ui}" -eq 1 && -d "dash/tray/ui/node_modules" ]]; then
+  if [[ "${needs_tray_ui}" -eq 1 ]]; then
+    if [[ ! -d "dash/tray/ui/node_modules" ]]; then
+      printf '\nError: dash/tray/ui/node_modules is missing. Run: npm --prefix dash/tray/ui ci\n' >&2
+      exit 1
+    fi
     step "tray ui typecheck"
     npm --prefix dash/tray/ui run typecheck
 

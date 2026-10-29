@@ -95,6 +95,7 @@ KyberWeave.Tests.McpStdioTransportTests
 KyberWeave.Tests.MultipleDocsRootTests
 KyberWeave.Tests.CodeGraphNeighborhoodPortTests
 KyberWeave.Tests.ProcessRunnerInputTests
+KyberWeave.Tests.FastLoopScriptTests
 KyberWeave.Tests.CodeGraphPortTests
 KyberWeave.Tests.SquadInstanceLinkSyncTests
 KyberWeave.Tests.ArchiveCloseoutValidatorTests
