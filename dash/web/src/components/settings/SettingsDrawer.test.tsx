@@ -911,6 +911,35 @@ describe('SettingsDrawer: version line', () => {
     expect(getsTo(mock, '/api/kyber/version')).toBe(1)
   })
 
+  // A 200 whose body is the wrong shape is a deterministic answer: the same engine
+  // gives the same body on a retry, so retrying only repeats the request. Fail fast.
+  // Regression guard: the drawer's retry once also retried these validation failures.
+  it.each([
+    ['a whitespace-only version', { version: '   ', apiVersion: 1 }],
+    ['an empty object', {}],
+    ['the 0.0.0 placeholder version', { version: '0.0.0', apiVersion: 1 }],
+  ])('makes exactly one version request, then shows unknown, when the engine reports %s', async (_label, body) => {
+    const mock = stubFetch({ version: () => ({ json: body }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
+  it('retries once after a dropped connection and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { networkError: true } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
   // The engine can be restarting while the drawer opens. One retry lets the version
   // recover; a second consecutive failure is final, with no polling behind it.
   it('retries once after a transient failure and shows the version the retry returns', async () => {

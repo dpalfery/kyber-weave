@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { SlideOutDrawer } from '../ui/SlideOutDrawer.js'
 import {
+  KyberApiError,
   fetchKyberCaptureStatus,
   fetchKyberVersion,
   postKyberCapture,
@@ -26,6 +27,18 @@ export interface SettingsDrawerProps {
 
 const CAPTURE_KEY = ['kyber-capture'] as const
 const VERSION_KEY = ['kyber-version'] as const
+
+/**
+ * Whether a failed version request is worth one more try. A dropped connection (a
+ * TypeError, not a KyberApiError) and a non-2xx answer such as a 5xx during an engine
+ * restart can change on retry. A KyberApiError with a 2xx status is different: the
+ * engine answered 2xx with a body that failed validation (fetchKyberVersion throws it
+ * with the response status), and the same engine gives the same body again.
+ */
+function isTransientVersionError(error: Error): boolean {
+  if (error instanceof KyberApiError) return !(error.status >= 200 && error.status < 300)
+  return true
+}
 
 const EVENT_LABEL: Record<KyberCaptureEvent['kind'], string> = {
   'would-write': 'Will write',
@@ -207,14 +220,16 @@ function SettingsContent() {
   })
   const busy = capture.isPending || receiver.isPending
 
-  // Requested when the drawer content mounts. One retry (default backoff) and a refetch
-  // when the connection returns let a startup race or an engine restart recover, so the
-  // version does not stay 'unknown' for the whole open session. There is no interval and
-  // no refetch on window focus or status refresh: the version does not change while open.
+  // Requested when the drawer content mounts. One retry (default backoff) for a transient
+  // failure, and a refetch when the connection returns, let a startup race or an engine
+  // restart recover, so the version does not stay 'unknown' for the whole open session. A
+  // 2xx answer with an invalid body is not retried (see isTransientVersionError). There is
+  // no interval and no refetch on window focus or status refresh: the version does not
+  // change while open.
   const version = useQuery({
     queryKey: VERSION_KEY,
     queryFn: fetchKyberVersion,
-    retry: 1,
+    retry: (failureCount, error) => failureCount < 1 && isTransientVersionError(error),
     refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   })
