@@ -20,10 +20,9 @@ namespace KyberWeave.Tests;
 /// exists on this branch, so these facts pass on arrival. They fail if someone widens the filter to
 /// pass every renderer warning through. Each fact first asserts that the renderer really produced the
 /// warning it is about, so a fixture that stops triggering it cannot make a fact pass vacuously.
-/// The gate and COPILOT_HOME are process-wide, so this class shares the non-parallel collection that
-/// <see cref="SquadOperatorChannelCollection"/> defines.
+/// Environment variables are read through injectable delegates rather than process mutation,
+/// allowing safe parallel test execution.
 /// </remarks>
-[Collection(SquadOperatorChannelCollection.Name)]
 public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 {
     private const string AgentBodyTooLongCode = "agent-body-too-long";
@@ -56,11 +55,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Install_AgentBodyOverCopilotCap_IsNotCarriedOntoTheLifecycleResult()
     {
         Harness h = NewHarness("install-body");
+        Func<string, string?> env = h.CreateEnvironmentReader(null);
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            null,
-            h.CopilotHome,
-            () => InstallAsync(h, true));
+        SquadLifecycleResult result = await InstallAsync(h, true, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(AgentBodyTooLongCode),
@@ -79,20 +76,15 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Update_AgentBodyOverCopilotCap_IsNotCarriedOntoTheLifecycleResult()
     {
         Harness h = NewHarness("update-body");
+        Func<string, string?> env = h.CreateEnvironmentReader(null);
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            null,
-            h.CopilotHome,
-            async () =>
-            {
-                await InstallAsync(h, false);
-                return await NewService(h, h.Oversized).UpdateAsync(
-                    new SquadUpdateRequest(
-                        h.Anchor,
-                        SquadDeploymentScope.Global,
-                        [SquadTarget.Copilot],
-                        Version: UpdateVersion));
-            });
+        await InstallAsync(h, false, env);
+        SquadLifecycleResult result = await NewService(h, h.Oversized, env).UpdateAsync(
+            new SquadUpdateRequest(
+                h.Anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Copilot],
+                Version: UpdateVersion));
 
         Assert.True(
             h.Renderer.Codes.Contains(AgentBodyTooLongCode),
@@ -111,11 +103,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Install_GateOnServerAbsent_ShowsTheOperatorChannelWarningOnTheLifecycleResult()
     {
         Harness h = NewHarness("install-absent");
+        Func<string, string?> env = h.CreateEnvironmentReader("true");
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            () => InstallAsync(h, false));
+        SquadLifecycleResult result = await InstallAsync(h, false, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(ServerAbsentCode),
@@ -133,11 +123,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Install_OversizedConductorAndServerAbsentInOneRender_ShowsOnlyTheOperatorChannelWarning()
     {
         Harness h = NewHarness("install-both");
+        Func<string, string?> env = h.CreateEnvironmentReader("true");
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            () => InstallAsync(h, true));
+        SquadLifecycleResult result = await InstallAsync(h, true, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(AgentBodyTooLongCode) && h.Renderer.Codes.Contains(ServerAbsentCode),
@@ -158,12 +146,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Install_GateOnServerNameMissing_ShowsTheNameMissingWarningOnTheLifecycleResult()
     {
         Harness h = NewHarness("install-name-missing");
+        Func<string, string?> env = h.CreateEnvironmentReader("true", null);
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            () => InstallAsync(h, false),
-            serverName: null);
+        SquadLifecycleResult result = await InstallAsync(h, false, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(SquadOperatorChannelFixture.NameMissingWarning),
@@ -180,12 +165,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Install_GateOnServerNameInvalid_ShowsTheNameInvalidWarningOnTheLifecycleResult()
     {
         Harness h = NewHarness("install-name-invalid");
+        Func<string, string?> env = h.CreateEnvironmentReader("true", "bad name zz1");
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            () => InstallAsync(h, false),
-            serverName: "bad name zz1");
+        SquadLifecycleResult result = await InstallAsync(h, false, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(SquadOperatorChannelFixture.NameInvalidWarning),
@@ -208,10 +190,8 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         await AssertBodyAloneFitsCapAsync(padding);
 
         using PaddedConductorReleaseSource padded = new(padding);
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            () => InstallFrom(h, padded, InstallVersion));
+        Func<string, string?> env = h.CreateEnvironmentReader("true");
+        SquadLifecycleResult result = await InstallFrom(h, padded, InstallVersion, env);
 
         AssertOverflowWarningShown(h, result);
     }
@@ -229,19 +209,14 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         await AssertBodyAloneFitsCapAsync(padding);
 
         using PaddedConductorReleaseSource padded = new(padding);
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            "true",
-            h.CopilotHome,
-            async () =>
-            {
-                await InstallFrom(h, h.Corpus, InstallVersion);
-                return await NewService(h, padded).UpdateAsync(
-                    new SquadUpdateRequest(
-                        h.Anchor,
-                        SquadDeploymentScope.Global,
-                        [SquadTarget.Copilot],
-                        Version: UpdateVersion));
-            });
+        Func<string, string?> env = h.CreateEnvironmentReader("true");
+        await InstallFrom(h, h.Corpus, InstallVersion, env);
+        SquadLifecycleResult result = await NewService(h, padded, env).UpdateAsync(
+            new SquadUpdateRequest(
+                h.Anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Copilot],
+                Version: UpdateVersion));
 
         AssertOverflowWarningShown(h, result);
     }
@@ -266,11 +241,8 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             WriteServerConfig(h);
         }
 
-        SquadLifecycleResult result = await SquadOperatorChannelFixture.RunWithGateAsync(
-            gateValue,
-            h.CopilotHome,
-            () => InstallFrom(h, h.Oversized, InstallVersion),
-            serverName);
+        Func<string, string?> env = h.CreateEnvironmentReader(gateValue, serverName);
+        SquadLifecycleResult result = await InstallFrom(h, h.Oversized, InstallVersion, env);
 
         Assert.True(
             h.Renderer.Codes.Contains(AgentBodyTooLongCode),
@@ -323,10 +295,8 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     {
         Harness probe = NewHarness("body-alone-probe");
         using PaddedConductorReleaseSource padded = new(padding);
-        await SquadOperatorChannelFixture.RunWithGateAsync(
-            null,
-            probe.CopilotHome,
-            () => InstallFrom(probe, padded, InstallVersion));
+        Func<string, string?> env = probe.CreateEnvironmentReader(null);
+        await InstallFrom(probe, padded, InstallVersion, env);
 
         Assert.DoesNotContain(AgentBodyTooLongCode, probe.Renderer.Codes);
     }
@@ -342,39 +312,53 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         return SquadOperatorChannelFixture.ConductorText(result).Length;
     }
 
-    private static void WriteServerConfig(Harness h) =>
+    private static void WriteServerConfig(Harness h)
+    {
         File.WriteAllText(
             Path.Combine(h.CopilotHome, "mcp-config.json"),
             SquadOperatorChannelFixture.ServerPresentConfig,
             Encoding.UTF8);
+    }
 
-    private static Task<SquadLifecycleResult> InstallFrom(Harness h, ISquadReleaseSource source, string version) =>
-        NewService(h, source).InstallAsync(
+    private static Task<SquadLifecycleResult> InstallFrom(
+        Harness h,
+        ISquadReleaseSource source,
+        string version,
+        Func<string, string?>? environmentReader = null)
+    {
+        return NewService(h, source, environmentReader).InstallAsync(
             new SquadInstallRequest(
                 h.Anchor,
                 SquadDeploymentScope.Global,
                 [SquadTarget.Copilot],
                 Version: version));
+    }
 
     private static IReadOnlyList<string> WarningsOf(SquadLifecycleResult result)
     {
         return result.Warnings ?? throw new InvalidOperationException("The lifecycle result carries no warnings list.");
     }
 
-    private static Task<SquadLifecycleResult> InstallAsync(Harness h, bool oversizedConductor)
+    private static Task<SquadLifecycleResult> InstallAsync(
+        Harness h,
+        bool oversizedConductor,
+        Func<string, string?>? environmentReader = null)
     {
         ISquadReleaseSource releaseSource = oversizedConductor ? h.Oversized : h.Corpus;
-        return NewService(h, releaseSource).InstallAsync(
-            new SquadInstallRequest(
-                h.Anchor,
-                SquadDeploymentScope.Global,
-                [SquadTarget.Copilot],
-                Version: InstallVersion));
+        return InstallFrom(h, releaseSource, InstallVersion, environmentReader);
     }
 
-    private static SquadLifecycleService NewService(Harness h, ISquadReleaseSource releaseSource)
+    private static SquadLifecycleService NewService(
+        Harness h,
+        ISquadReleaseSource releaseSource,
+        Func<string, string?>? environmentReader = null)
     {
-        return new SquadLifecycleService(releaseSource, h.Renderer, h.Store, globalRoots: h.GlobalRoots);
+        return new SquadLifecycleService(
+            releaseSource,
+            h.Renderer,
+            h.Store,
+            globalRoots: h.GlobalRoots,
+            environmentReader: environmentReader);
     }
 
     private Harness NewHarness(string name)
@@ -501,6 +485,13 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         public CorpusSquadReleaseSource Corpus { get; }
 
         public OversizedConductorReleaseSource Oversized { get; }
+
+        public Func<string, string?> CreateEnvironmentReader(
+            string? gateValue,
+            string? serverName = SquadOperatorChannelFixture.DefaultServerName)
+        {
+            return SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, CopilotHome, serverName);
+        }
 
         public void Dispose()
         {

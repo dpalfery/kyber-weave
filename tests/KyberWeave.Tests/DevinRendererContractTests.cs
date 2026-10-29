@@ -2,8 +2,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -45,7 +45,7 @@ public sealed class DevinRendererContractTests : IDisposable
         ("filesystem.search", ["grep", "glob"]),
         ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
         ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
-        ("network.read", ["webfetch", "web_search"]),
+        ("network.read", ["webfetch", "web_search"])
     ];
 
     /// <summary>
@@ -111,9 +111,10 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         DevinRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.ZCode],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.ZCode],
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
@@ -121,7 +122,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
 
@@ -135,7 +136,7 @@ public sealed class DevinRendererContractTests : IDisposable
         int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =
             source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
+                                                  + source.Skills.Count - suppressedSkillCount
             + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
@@ -170,7 +171,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_EachSubagentHasCanonicalFrontmatterAndBody()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -201,7 +202,8 @@ public sealed class DevinRendererContractTests : IDisposable
                 ExpectedDevinModels[agent.ModelProfile],
                 RequireScalar(frontmatter, "model", agent.Name));
 
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
+            SquadCapabilityProfile profile =
+                source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
             IReadOnlyList<string> expectedTools =
             [
                 .. ComputeExpectedBuiltInTools(profile),
@@ -253,7 +255,7 @@ public sealed class DevinRendererContractTests : IDisposable
         const string initialiseInstruction =
             "On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.";
 
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent architect = Assert.Single(source.Agents, a => a.Name == "architect");
         SquadResource planAuthoring = Assert.Single(
             architect.Resources,
@@ -309,8 +311,8 @@ public sealed class DevinRendererContractTests : IDisposable
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        foreach (SquadDeploymentFile file in result.Files.Where(
-            f => f.RelativePath.StartsWith(".devin/agents/", StringComparison.Ordinal)))
+        foreach (SquadDeploymentFile file in result.Files.Where(f =>
+                     f.RelativePath.StartsWith(".devin/agents/", StringComparison.Ordinal)))
         {
             string[] segments = file.RelativePath[".devin/agents/".Length..].Split('/');
             Assert.True(
@@ -331,7 +333,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_LowersThePrimaryAgentToASkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -364,7 +366,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_SkillsNeverCarryToolOrPermissionKeys()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         // Only the non-shared primaries are lowered to a Devin skill; a primary shared identity
         // reuses its canonical skill, which carries the approved skill key set instead.
         HashSet<string> sharedIdentities = SharedIdentities(source);
@@ -387,7 +389,9 @@ public sealed class DevinRendererContractTests : IDisposable
                 Encoding.UTF8.GetString(skill.Content.Span),
                 skill.RelativePath);
             Assert.Equal(
-                loweredIdentities.Contains(skill.RelativePath.Split('/')[2]) ? ApprovedLoweredSkillKeys : ApprovedSkillKeys,
+                loweredIdentities.Contains(skill.RelativePath.Split('/')[2])
+                    ? ApprovedLoweredSkillKeys
+                    : ApprovedSkillKeys,
                 FrontmatterKeys(frontmatter));
         }
     }
@@ -395,7 +399,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_RecordsDegradationsPerContract()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -403,7 +407,8 @@ public sealed class DevinRendererContractTests : IDisposable
 
         foreach (SquadAgent agent in source.Agents)
         {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
+            SquadCapabilityProfile profile =
+                source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
             string[] actualCodes = result.Degradations
                 .Where(d => d.CanonicalIdentity == agent.Name && d.Code != "capability-not-isolable")
                 .Select(d => d.Code)
@@ -452,7 +457,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -460,7 +465,8 @@ public sealed class DevinRendererContractTests : IDisposable
             .Where(a => a.Invocation == SquadInvocation.Subagent)
             .Where(a =>
             {
-                SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[a.DevinCapabilityProfile ?? a.CapabilityProfile];
+                SquadCapabilityProfile profile =
+                    source.CapabilityProfiles.Profiles[a.DevinCapabilityProfile ?? a.CapabilityProfile];
                 return IsAllowed(profile, "process.execute") && !IsAllowed(profile, "filesystem.write");
             })
             .ToArray();
@@ -507,9 +513,9 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new DevinRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Devin],
-            Scope: SquadDeploymentScope.Global));
+            ProductRoot,
+            [SquadTarget.Devin],
+            SquadDeploymentScope.Global));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.All(result.Files, f => Assert.True(
@@ -567,10 +573,10 @@ public sealed class DevinRendererContractTests : IDisposable
         string profileName,
         string expectedModel)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent[] agents = source.Agents
             .Where(a => a.Invocation == SquadInvocation.Subagent &&
-                string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal))
+                        string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal))
             .ToArray();
         Assert.NotEmpty(agents);
 
@@ -592,7 +598,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_OrchestrationProfileEmitsNoModel()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
         Assert.Equal("orchestration", conductor.ModelProfile);
 
@@ -611,40 +617,49 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
-        SquadSource baseline = SquadSourceLoader.Load(ProductRoot);
+        SquadSource baseline = TestSquadCorpus.CanonicalSource;
         SquadAgent primary = Assert.Single(baseline.Agents, a => a.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primary.Name);
 
-        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
-            () => new DevinRenderer().RenderAsync(new SquadRenderRequest(
-                SourceDirectory: fixture.ProductRoot,
-                Targets: [SquadTarget.Devin],
-                Scope: SquadDeploymentScope.Project)));
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            new DevinRenderer().RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Devin],
+                SquadDeploymentScope.Project)));
         Assert.Contains(primary.Name, exception.Message, StringComparison.Ordinal);
     }
 
     private static async Task<SquadRenderResult> RenderDevinAsync(string sourceDirectory)
     {
+        if (string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal))
+        {
+            return await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Devin);
+        }
+
         SquadRendererRegistry registry = new([new DevinRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: sourceDirectory,
-            Targets: [SquadTarget.Devin],
-            Scope: SquadDeploymentScope.Project));
+            sourceDirectory,
+            [SquadTarget.Devin],
+            SquadDeploymentScope.Project));
     }
 
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
+    private static HashSet<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
     /// A primary shared identity reuses its canonical skill as the entry point, so it is
     /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
     /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    }
 
     private static IReadOnlyList<string> ComputeExpectedBuiltInTools(SquadCapabilityProfile profile)
     {
@@ -664,28 +679,38 @@ public sealed class DevinRendererContractTests : IDisposable
     /// Mirrors the rule every MCP-granting renderer shares: any role allowed to read the
     /// filesystem receives the declared servers' tools, except the pure orchestrator.
     /// </summary>
-    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
-        !string.Equals(agent.DevinCapabilityProfile ?? agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) &&
-        IsAllowed(profile, "filesystem.read");
+    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile)
+    {
+        return !string.Equals(agent.DevinCapabilityProfile ?? agent.CapabilityProfile, "orchestrator",
+                   StringComparison.Ordinal) &&
+               IsAllowed(profile, "filesystem.read");
+    }
 
-    private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source) =>
-    [
-        .. source.Toolchain.RequiredMcpTools
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .SelectMany(entry => entry.Value
-                .OrderBy(tool => tool, StringComparer.Ordinal)
-                .Select(tool => $"mcp__{entry.Key}__{tool}"))
-    ];
+    private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source)
+    {
+        return
+        [
+            .. source.Toolchain.RequiredMcpTools
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .SelectMany(entry => entry.Value
+                    .OrderBy(tool => tool, StringComparer.Ordinal)
+                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
+        ];
+    }
 
-    private static bool IsAllowed(SquadCapabilityProfile profile, string capability) =>
-        profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-        decision == SquadPermissionDecision.Allow;
+    private static bool IsAllowed(SquadCapabilityProfile profile, string capability)
+    {
+        return profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+               decision == SquadPermissionDecision.Allow;
+    }
 
-    private static string CollapseToSingleLine(string value) =>
-        string.Join(
+    private static string CollapseToSingleLine(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     private static string NormalizeBody(string body)
     {
@@ -707,11 +732,13 @@ public sealed class DevinRendererContractTests : IDisposable
         return (Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode), text[(end + 5)..]);
     }
 
-    private static string[] FrontmatterKeys(YamlMappingNode frontmatter) =>
-        frontmatter.Children.Keys
+    private static string[] FrontmatterKeys(YamlMappingNode frontmatter)
+    {
+        return frontmatter.Children.Keys
             .OfType<YamlScalarNode>()
             .Select(key => key.Value ?? string.Empty)
             .ToArray();
+    }
 
     private static string RequireScalar(YamlMappingNode node, string key, string identity)
     {
@@ -719,7 +746,7 @@ public sealed class DevinRendererContractTests : IDisposable
             node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value),
             $"'{identity}' frontmatter is missing '{key}'.");
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 
     private static string[] RequireSequence(YamlMappingNode node, string key, string identity)
@@ -766,11 +793,14 @@ internal sealed class DevinModelOverrideFixture : IDisposable
         string mutated = SetHarnessValue(original, OverriddenProfile, OverrideModel);
         mutated = SetHarnessValue(mutated, InheritProfile, "inherit");
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(false));
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     /// <summary>
     /// Replaces the profile's <c>devin:</c> line, or adds one after <c>default</c> when the

@@ -1,7 +1,8 @@
+using System.Globalization;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -25,23 +26,26 @@ public sealed class SquadRootWrapperAgentTests
 
     private static readonly string[] RootWrapperIdentities = ["bug-crusher", "product-owner"];
 
-    public static TheoryData<SquadTarget, string?, string> TargetProjections() => new()
+    public static TheoryData<SquadTarget, string?, string> TargetProjections()
     {
-        // target, agent-file template (null when the target emits no agent principal), skill path
-        { SquadTarget.Copilot, ".github/agents/{0}.agent.md", ".github/skills/{0}/SKILL.md" },
-        { SquadTarget.Cursor, null, ".cursor/skills/{0}/SKILL.md" },
-        { SquadTarget.Claude, ".claude/agents/{0}.md", ".claude/skills/{0}/SKILL.md" },
-        { SquadTarget.Codex, ".codex/agents/{0}.toml", ".codex/skills/{0}/SKILL.md" },
-        { SquadTarget.OpenCode, ".opencode/agents/{0}.md", ".opencode/skills/{0}/SKILL.md" },
-        { SquadTarget.Kilo, ".kilo/agents/{0}.md", ".kilo/skills/{0}/SKILL.md" },
-        { SquadTarget.Antigravity, ".agents/agents/{0}/agent.md", ".agents/skills/{0}/SKILL.md" },
-        { SquadTarget.Warp, null, ".warp/skills/{0}/SKILL.md" },
-        { SquadTarget.Factory, ".factory/droids/{0}.md", ".factory/skills/{0}/SKILL.md" },
-        { SquadTarget.Pi, null, ".pi/skills/{0}/SKILL.md" },
-        { SquadTarget.ZCode, null, ".zcode/skills/{0}/SKILL.md" },
-        { SquadTarget.Devin, null, ".devin/skills/{0}/SKILL.md" },
-        { SquadTarget.CommandCode, ".commandcode/agents/{0}.md", ".commandcode/skills/{0}/SKILL.md" },
-    };
+        return new TheoryData<SquadTarget, string?, string>
+        {
+            // target, agent-file template (null when the target emits no agent principal), skill path
+            { SquadTarget.Copilot, ".github/agents/{0}.agent.md", ".github/skills/{0}/SKILL.md" },
+            { SquadTarget.Cursor, null, ".cursor/skills/{0}/SKILL.md" },
+            { SquadTarget.Claude, ".claude/agents/{0}.md", ".claude/skills/{0}/SKILL.md" },
+            { SquadTarget.Codex, ".codex/agents/{0}.toml", ".codex/skills/{0}/SKILL.md" },
+            { SquadTarget.OpenCode, ".opencode/agents/{0}.md", ".opencode/skills/{0}/SKILL.md" },
+            { SquadTarget.Kilo, ".kilo/agents/{0}.md", ".kilo/skills/{0}/SKILL.md" },
+            { SquadTarget.Antigravity, ".agents/agents/{0}/agent.md", ".agents/skills/{0}/SKILL.md" },
+            { SquadTarget.Warp, null, ".warp/skills/{0}/SKILL.md" },
+            { SquadTarget.Factory, ".factory/droids/{0}.md", ".factory/skills/{0}/SKILL.md" },
+            { SquadTarget.Pi, null, ".pi/skills/{0}/SKILL.md" },
+            { SquadTarget.ZCode, null, ".zcode/skills/{0}/SKILL.md" },
+            { SquadTarget.Devin, null, ".devin/skills/{0}/SKILL.md" },
+            { SquadTarget.CommandCode, ".commandcode/agents/{0}.md", ".commandcode/skills/{0}/SKILL.md" }
+        };
+    }
 
     /// <summary>
     /// Every target emits exactly one canonical-skill projection per root-wrapper identity, with
@@ -55,19 +59,15 @@ public sealed class SquadRootWrapperAgentTests
         string? agentPathTemplate,
         string skillPathTemplate)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = AllRenderers();
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project));
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (string identity in RootWrapperIdentities)
         {
             SquadSkill skill = Assert.Single(source.Skills, s => s.Name == identity);
-            string skillPath = string.Format(System.Globalization.CultureInfo.InvariantCulture, skillPathTemplate, identity);
+            string skillPath = string.Format(CultureInfo.InvariantCulture, skillPathTemplate, identity);
             string skillDirectory = skillPath[..^"/SKILL.md".Length];
 
             // The complete expected path set for this identity, built from source. Asserting the
@@ -87,14 +87,15 @@ public sealed class SquadRootWrapperAgentTests
                 // only principal.
                 Assert.DoesNotContain(
                     result.Files,
-                    f => MentionsIdentity(f.RelativePath, identity) && f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
+                    f => MentionsIdentity(f.RelativePath, identity) &&
+                         f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
                          !f.RelativePath.StartsWith($"{skillDirectory}/", StringComparison.Ordinal) &&
                          !f.RelativePath.StartsWith($".agents/agents/{identity}/", StringComparison.Ordinal) &&
                          !f.RelativePath.StartsWith($".devin/agents/{identity}/", StringComparison.Ordinal));
             }
             else
             {
-                expectedPaths.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, agentPathTemplate, identity));
+                expectedPaths.Add(string.Format(CultureInfo.InvariantCulture, agentPathTemplate, identity));
             }
 
             string[] actualPaths = result.Files
@@ -139,7 +140,7 @@ public sealed class SquadRootWrapperAgentTests
     [Fact]
     public void RootWrappersArePrimarySharedIdentitiesWithThinWrapperBodies()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = source.FallbackProfiles.Profiles["role-skill"].SharedIdentities
             .ToHashSet(StringComparer.Ordinal);
 
@@ -173,18 +174,15 @@ public sealed class SquadRootWrapperAgentTests
     [InlineData(SquadTarget.Factory)]
     public async Task DualEntryPointTargetsDoNotDoubleEmitTheSkill(SquadTarget target)
     {
-        SquadRendererRegistry registry = AllRenderers();
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project));
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         string token = SquadTargetCatalog.GetToken(target);
         foreach (string identity in RootWrapperIdentities)
         {
-            string skillPath = $"{token switch { "claude" => ".claude", "factory" => ".factory", _ => throw new InvalidOperationException() }}/skills/{identity}/SKILL.md";
+            string skillPath =
+                $"{token switch { "claude" => ".claude", "factory" => ".factory", _ => throw new InvalidOperationException() }}/skills/{identity}/SKILL.md";
             Assert.Single(result.Files, f => f.RelativePath == skillPath);
 
             SquadDegradationRecord fallback = Assert.Single(
@@ -236,11 +234,7 @@ public sealed class SquadRootWrapperAgentTests
         SquadDeploymentScope scope,
         string expectedDirectory)
     {
-        SquadRendererRegistry registry = AllRenderers();
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [SquadTarget.Claude],
-            scope));
+        SquadRenderResult result = await TestSquadCorpus.GetDefaultRenderAsync(SquadTarget.Claude, scope);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -268,7 +262,7 @@ public sealed class SquadRootWrapperAgentTests
     [Fact]
     public void FullBundleRosterMatchesTheAgentDirectory()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.Contains("bug-crusher", source.Bundle.AgentNames);
         Assert.Equal(
@@ -276,20 +270,23 @@ public sealed class SquadRootWrapperAgentTests
             source.Bundle.AgentNames.Order(StringComparer.Ordinal));
     }
 
-    private static SquadRendererRegistry AllRenderers() => new(
-    [
-        new CopilotRenderer(),
-        new CursorRenderer(),
-        new ClaudeRenderer(),
-        new AntigravityRenderer(),
-        new CodexRenderer(),
-        new OpenCodeRenderer(),
-        new KiloRenderer(),
-        new PiRenderer(),
-        new FactoryRenderer(),
-        new WarpRenderer(),
-        new ZCodeRenderer(),
-        new DevinRenderer(),
-        new CommandCodeRenderer(),
-    ]);
+    private static SquadRendererRegistry AllRenderers()
+    {
+        return new SquadRendererRegistry(
+        [
+            new CopilotRenderer(),
+            new CursorRenderer(),
+            new ClaudeRenderer(),
+            new AntigravityRenderer(),
+            new CodexRenderer(),
+            new OpenCodeRenderer(),
+            new KiloRenderer(),
+            new PiRenderer(),
+            new FactoryRenderer(),
+            new WarpRenderer(),
+            new ZCodeRenderer(),
+            new DevinRenderer(),
+            new CommandCodeRenderer()
+        ]);
+    }
 }
