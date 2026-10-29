@@ -171,8 +171,9 @@ function CheckSummary({ check }: { check: KyberCaptureCheck }) {
  */
 function versionLineText(version: { data: KyberVersion | undefined; isError: boolean }): string {
   const reported: unknown = version.data?.version
-  if (typeof reported === 'string' && reported.trim() !== '' && reported !== '0.0.0') {
-    return `KyberDash version ${reported}`
+  const trimmed = typeof reported === 'string' ? reported.trim() : ''
+  if (trimmed !== '' && trimmed !== '0.0.0') {
+    return `KyberDash version ${trimmed}`
   }
   return version.data === undefined && !version.isError ? 'KyberDash version …' : 'KyberDash version unknown'
 }

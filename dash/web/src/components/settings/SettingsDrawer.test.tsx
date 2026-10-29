@@ -866,12 +866,21 @@ describe('SettingsDrawer: version line', () => {
   it.each([
     ['a whitespace-only version', { version: '   ', apiVersion: 1 }],
     ['the 0.0.0 placeholder version', { version: '0.0.0', apiVersion: 1 }],
+    ['the 0.0.0 placeholder padded with spaces', { version: ' 0.0.0 ', apiVersion: 1 }],
+    ['the 0.0.0 placeholder with a trailing space', { version: '0.0.0 ', apiVersion: 1 }],
   ])('shows unknown, never a blank or placeholder version, when the engine reports %s', async (_label, body) => {
     stubFetch({ version: () => ({ json: body }) })
     await openedDrawer()
 
     await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
     expect(versionLine().textContent).not.toMatch(/0\.0\.0/)
+  })
+
+  it('shows a real version trimmed, with no padding inside the line, when the engine pads it with spaces', async () => {
+    stubFetch({ version: () => ({ json: { version: ' 1.2.3 ', apiVersion: 1 } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 1.2.3'))
   })
 
   it('requests the version exactly once when the drawer content mounts, and a status refresh does not repeat it', async () => {

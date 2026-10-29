@@ -26,8 +26,9 @@ type Props = {
  * version reads as unknown, never as `undefined`, `null` or a blank.
  */
 function kyberdashVersionText(kyberdashVersion: KyberdashVersion | null | undefined): string {
-  const version: unknown = kyberdashVersion?.version
-  return typeof version === 'string' && version.trim() !== '' && version !== '0.0.0'
+  const reported: unknown = kyberdashVersion?.version
+  const version = typeof reported === 'string' ? reported.trim() : ''
+  return version !== '' && version !== '0.0.0'
     ? `KyberDash version ${version}`
     : 'KyberDash version unknown'
 }

@@ -205,12 +205,31 @@ describe('GET /api/kyber/version', () => {
       { label: 'empty', packageJson: { version: '' } },
       { label: 'whitespace-only', packageJson: { version: '   ' } },
       { label: 'the 0.0.0 placeholder', packageJson: { version: '0.0.0' } },
+      { label: 'the 0.0.0 placeholder with a leading space', packageJson: { version: ' 0.0.0 ' } },
+      { label: 'the 0.0.0 placeholder with a trailing space', packageJson: { version: '0.0.0 ' } },
     ])('answers 503 with an error rather than 200 with 0.0.0 when the version is $label', async ({ packageJson }) => {
       const { handleKyberRequest: handle } = await routesWithPackageJson(packageJson)
       const { status, body } = call('/api/kyber/version', 'GET', bridgeStub(), handle)
       expect(status, `package.json ${JSON.stringify(packageJson)}`).toBe(503)
       expect(body).toMatchObject({ error: expect.any(String) })
       expect(body, 'a defaulted version must not be served').not.toHaveProperty('version')
+    })
+  })
+
+  describe('when the package version is padded with spaces', () => {
+    afterEach(() => {
+      versionSeam.packageJson = undefined
+    })
+
+    it.each([
+      { label: 'a leading space', packageJson: { version: ' 1.2.3' }, expected: '1.2.3' },
+      { label: 'a trailing space', packageJson: { version: '1.2.3 ' }, expected: '1.2.3' },
+      { label: 'spaces on both sides', packageJson: { version: ' 1.2.3 ' }, expected: '1.2.3' },
+    ])('serves the trimmed version when the package version has $label', async ({ packageJson, expected }) => {
+      const { handleKyberRequest: handle } = await routesWithPackageJson(packageJson)
+      const { status, body } = call('/api/kyber/version', 'GET', bridgeStub(), handle)
+      expect(status, `package.json ${JSON.stringify(packageJson)}`).toBe(200)
+      expect(body).toEqual({ version: expected, apiVersion: 1 })
     })
   })
 })

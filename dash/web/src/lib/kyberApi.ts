@@ -1589,7 +1589,7 @@ function isKyberVersion(value: unknown): value is KyberVersion {
     isRaw(value) &&
     typeof value.version === 'string' &&
     value.version.trim() !== '' &&
-    value.version !== '0.0.0' &&
+    value.version.trim() !== '0.0.0' &&
     typeof value.apiVersion === 'number' &&
     Number.isFinite(value.apiVersion)
   )

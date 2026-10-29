@@ -1239,16 +1239,13 @@ export function handleKyberRequest(
     }
     // Why 503: a defaulted '0.0.0' would read as a real build to the tray's version check,
     // so an absent, blank, or placeholder '0.0.0' package version is reported as unavailable.
-    if (
-      typeof KYBERDASH_VERSION_RAW !== 'string' ||
-      KYBERDASH_VERSION_RAW.trim() === '' ||
-      KYBERDASH_VERSION_RAW === '0.0.0'
-    ) {
+    const version = typeof KYBERDASH_VERSION_RAW === 'string' ? KYBERDASH_VERSION_RAW.trim() : ''
+    if (version === '' || version === '0.0.0') {
       sendKyberJson(res, 503, { error: 'KyberDash version is unavailable' })
       return true
     }
     sendKyberJson(res, 200, {
-      version: KYBERDASH_VERSION_RAW,
+      version,
       apiVersion: REPORT_SCHEMA_VERSION,
     })
     return true
