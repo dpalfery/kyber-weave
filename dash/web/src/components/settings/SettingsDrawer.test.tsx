@@ -929,6 +929,25 @@ describe('SettingsDrawer: version line', () => {
     expect(getsTo(mock, '/api/kyber/version')).toBe(1)
   })
 
+  // A 4xx other than 429 is a deterministic answer: an older engine without the version
+  // route answers 404, and a rejected request answers 400 or 405. The same engine answers
+  // the same way on a retry, so a second request only repeats the first. Fail fast.
+  // Regression guard: the drawer's retry once also retried every non-2xx answer.
+  it.each([
+    ['404 Not Found', 404],
+    ['400 Bad Request', 400],
+    ['405 Method Not Allowed', 405],
+  ])('makes exactly one version request, then shows unknown, when the engine answers %s', async (_label, status) => {
+    const mock = stubFetch({ version: () => ({ status, json: { error: 'Not here' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
   it('retries once after a dropped connection and shows the version the retry returns', async () => {
     let attempt = 0
     const mock = stubFetch({
@@ -946,6 +965,18 @@ describe('SettingsDrawer: version line', () => {
     let attempt = 0
     const mock = stubFetch({
       version: () => (++attempt === 1 ? { status: 500, json: { error: 'Version failed' } } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  // 429 is the one 4xx that means "try again later", so it is retried like a 5xx.
+  it('retries once after a 429 rate limit and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { status: 429, json: { error: 'Too many requests' } } : { json: VERSION_JSON }),
     })
     await openedDrawer()
 

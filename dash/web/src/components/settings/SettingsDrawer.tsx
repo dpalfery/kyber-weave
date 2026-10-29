@@ -30,13 +30,14 @@ const VERSION_KEY = ['kyber-version'] as const
 
 /**
  * Whether a failed version request is worth one more try. A dropped connection (a
- * TypeError, not a KyberApiError) and a non-2xx answer such as a 5xx during an engine
- * restart can change on retry. A KyberApiError with a 2xx status is different: the
- * engine answered 2xx with a body that failed validation (fetchKyberVersion throws it
- * with the response status), and the same engine gives the same body again.
+ * TypeError, not a KyberApiError) can change on retry, so it is retried. A KyberApiError
+ * is retried only for a 5xx (an engine restarting) or a 429 (rate limited, try later).
+ * Every other KyberApiError fails fast: a 2xx whose body failed validation, a 404 from an
+ * older engine without the route, and a 400 or 405 are deterministic, and the same engine
+ * gives the same answer again.
  */
 function isTransientVersionError(error: Error): boolean {
-  if (error instanceof KyberApiError) return !(error.status >= 200 && error.status < 300)
+  if (error instanceof KyberApiError) return error.status >= 500 || error.status === 429
   return true
 }
 
