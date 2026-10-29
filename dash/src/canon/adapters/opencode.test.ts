@@ -10,8 +10,9 @@
 // receiver's quarantine store; the tool and app-span fixtures carry the same
 // vocabulary (only the LLM payload was captured with its attributes intact).
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
+import { getModelCosts, loadPricing } from '../../pricing/models.js'
 import { ADAPTERS, ingestBatch } from '../ingest.js'
 import { CanonStore } from '../store.js'
 import { contextLimitOf } from '../context-window.js'
@@ -405,6 +406,119 @@ describe('opencode envelope context window (T7, D6)', () => {
     )
     expect(resolveContextWindowForModel([record], 'zz-synth-alpha-1', store).measurable).toBe(false)
     store.close()
+  })
+})
+
+// A1 regression: the model id bridge in `opencodeAdapter.normalize`.// Native `llm.model_name` wins, then envelope `opencode.model.id`, onto the
+// downstream-read `gen_ai.request.model`. An already-canonical model or an
+// absent/empty model bridges nothing, so absence stays absence and never
+// becomes a zero; the adapter never fabricates a cost figure.
+describe('opencode model identity bridge (A1 regression)', () => {
+  beforeAll(async () => {
+    await loadPricing()
+  })
+
+  it('bridges native llm.model_name onto gen_ai.request.model with a priced rate', () => {
+    const attributes: Record<string, unknown> = {
+      'openinference.span.kind': 'LLM',
+      'llm.model_name': 'deepseek-v4.1-flash-free',
+    }
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'bridge-native', attributes }))
+
+    const bridged = (record.raw as Record<string, unknown>)['gen_ai.request.model']
+    expect(bridged).toBe('deepseek-v4.1-flash-free')
+    expect(getModelCosts(bridged as string)).not.toBeNull()
+    expect(attributes['gen_ai.request.model']).toBeUndefined()
+  })
+
+  it('bridges envelope opencode.model.id onto gen_ai.request.model with a priced rate', () => {
+    const attributes: Record<string, unknown> = {
+      'opencode.session.id': 'ses_bridge_envelope',
+      [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+      'opencode.model.id': 'claude-opus-4-6',
+    }
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'bridge-envelope', attributes }))
+
+    const bridged = (record.raw as Record<string, unknown>)['gen_ai.request.model']
+    expect(bridged).toBe('claude-opus-4-6')
+    expect(getModelCosts(bridged as string)).not.toBeNull()
+    expect(attributes['gen_ai.request.model']).toBeUndefined()
+  })
+
+  it('prefers native llm.model_name over envelope opencode.model.id', () => {
+    const attributes: Record<string, unknown> = {
+      'openinference.span.kind': 'LLM',
+      'llm.model_name': 'deepseek-v4.1-flash-free',
+      [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+      'opencode.model.id': 'claude-opus-4-6',
+    }
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'bridge-native-wins', attributes }))
+
+    expect((record.raw as Record<string, unknown>)['gen_ai.request.model']).toBe(
+      'deepseek-v4.1-flash-free',
+    )
+  })
+
+  it('never overwrites an already-canonical model', () => {
+    const attributes: Record<string, unknown> = {
+      'openinference.span.kind': 'LLM',
+      'gen_ai.request.model': 'already-canonical-model',
+      'llm.model_name': 'deepseek-v4.1-flash-free',
+      [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+      'opencode.model.id': 'claude-opus-4-6',
+    }
+    const record = opencodeAdapter.normalize(rawSpan({ spanId: 'bridge-canonical-wins', attributes }))
+
+    expect((record.raw as Record<string, unknown>)['gen_ai.request.model']).toBe(
+      'already-canonical-model',
+    )
+  })
+
+  it('bridges nothing and keeps cost unknown/no_rate when the model is absent or empty', () => {
+    const absent = opencodeAdapter.normalize(
+      rawSpan({ spanId: 'bridge-absent', attributes: { 'openinference.span.kind': 'LLM' } }),
+    )
+    expect((absent.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
+    expect(absent.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+
+    const empty = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'bridge-empty',
+        attributes: {
+          'openinference.span.kind': 'LLM',
+          'llm.model_name': '',
+          'opencode.model.id': '',
+        },
+      }),
+    )
+    expect((empty.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
+    expect(empty.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+  })
+
+  // Review (Kilo 1): a numeric attribute is not a model identity. Coercing it
+  // with `String(value)` turned the number 0 into the model name "0", which is
+  // exactly the fabricated identity this bridge documents it never invents.
+  it('bridges nothing when the model value is a number, including 0', () => {
+    const zero = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'bridge-numeric-zero',
+        attributes: { 'openinference.span.kind': 'LLM', 'llm.model_name': 0 },
+      }),
+    )
+    expect((zero.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
+    expect(zero.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+
+    const nonZero = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'bridge-numeric',
+        attributes: {
+          'openinference.span.kind': 'LLM',
+          [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+          'opencode.model.id': 42,
+        },
+      }),
+    )
+    expect((nonZero.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
   })
 })
 

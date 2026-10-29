@@ -68,7 +68,7 @@ export type OpencodePluginSpanPayload = {
   callID?: string
   turnIndex?: number
   agent?: string
-  model?: { providerID: string; modelID: string }
+  model?: { providerID: string; modelID?: string }
   prompt_text?: string
   tool?: string
   /** Assembled system prompt (T4, T0 `SessionContext.system`); carried only when non-empty. */
@@ -117,6 +117,16 @@ function isErrorPayload(errors: OpencodePluginSpanError | undefined): boolean {
   if (typeof errors.status === 'string' && errors.status.toLowerCase() === 'error') return true
   if (typeof errors.status === 'number' && errors.status !== 0) return true
   return nonEmpty(errors.type) || nonEmpty(errors.message)
+}
+
+/**
+ * True for the B1 tool lifecycle hooks (`tool.execute.before/after` per
+ * fixtures/hook-catalog.json). Kept as literal kinds here — not imported
+ * from the skeleton — because the mapper must not depend on the plugin host
+ * surface it feeds (the plugin imports the mapper, never the reverse).
+ */
+function isToolLifecycleHook(hook: string | undefined): boolean {
+  return hook === 'tool.execute.before' || hook === 'tool.execute.after'
 }
 
 /**
@@ -178,7 +188,12 @@ export function mapOpencodePayloadToAttributes(
     if (nonEmpty(payload.tool)) attributes['opencode.tool.call.id'] = payload.callID
   }
   if (nonEmpty(payload.hook)) attributes['opencode.hook'] = payload.hook
-  if (payload.tokens !== undefined) {
+  // Double-count guard (B1, decided): a tool lifecycle span never carries
+  // usage — native OTel owns the counters, the plugin emits identity,
+  // markers, and outcomes only. The hook payload carries no counters by
+  // type, so this drops them only for a direct caller that hands the mapper
+  // a tokens bucket on a tool hook anyway. Non-tool spans are unaffected.
+  if (payload.tokens !== undefined && !isToolLifecycleHook(payload.hook)) {
     // Non-finite counters are omitted, never stamped: NaN/Infinity would
     // otherwise land as a confident measured value downstream.
     if (finiteNumber(payload.tokens.input_tokens)) {
