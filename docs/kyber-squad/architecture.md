@@ -435,15 +435,18 @@ and anything else belongs to the operator:
   so it is never claimed. Deleting the file is how an operator takes the shipped default back.
 
 Ownership is recorded only from a digest this run read back from the deployed path, and the order
-follows from that: the deployment plan is built and validated first, then the guidance is written
-and read back, then the transaction commits the receipt. The plan is what decides whether the run
-may write at all, so a plan that fails preflight — an unmanaged collision, an adoption check, a
-legacy-layout refusal — leaves the guidance exactly as it found it, and a dry run writes nothing
-at all. The record is attached to the receipt after validation, through a path that can only be
-reached with a digest a write has already produced, so a refused plan cannot describe a home file
-the run never delivered.
+follows from that: the deployment plan is built and validated first, then the transaction takes
+the home lease and re-checks the plan's preconditions against the live tree, and only then is the
+guidance classified, written and read back, with the receipt committed under the same lease. The
+plan is what decides whether the run may write at all, so a plan that fails preflight — an
+unmanaged collision, an adoption check, a legacy-layout refusal — leaves the guidance exactly as it
+found it, and a dry run writes nothing at all. The lease is what keeps two updates apart: one that
+cannot take it has written nothing, so two runs shipping different defaults cannot interleave their
+writes and leave a file the winning receipt does not describe. The record is attached to the
+receipt after validation, through a path that can only be reached with a digest a write has
+already produced, so a refused plan cannot describe a home file the run never delivered.
 
-One window remains between the write and the commit: a deployment that fails after the guidance
+One window remains between the write and the commit: a transaction that fails after the guidance
 write leaves the new default in place with the run failing loudly. A retry of the same release
 repairs it by adopting bytes that already equal the shipped default. A later release that ships
 different wording cannot tell those bytes from an operator edit, so it keeps the file and warns;

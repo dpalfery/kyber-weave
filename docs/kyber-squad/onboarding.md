@@ -1033,9 +1033,10 @@ home. The file belongs to no harness: every agent reaches the one path through t
 the file exists.
 
 **How it is installed and refreshed.** `squad update --global` builds and validates the
-deployment plan first, then writes the guidance, then commits the receipt; the digest it records
-is one it read back from the file on disk. So a run that is refused before it can deploy — an
-unmanaged file in the way, a failed adoption check, a legacy layout — leaves your guidance exactly
+deployment plan first, takes the deployment lease, then writes the guidance and commits the receipt
+while it still holds the lease; the digest it records is one it read back from the file on disk.
+So a run that is refused before it can deploy — an unmanaged file in the way, a failed adoption
+check, a legacy layout, or another update already holding the lease — leaves your guidance exactly
 as it was, and `--dry-run` writes nothing. The one window left is a failure after the guidance was
 written and before the receipt committed: the new default stays in place. Run
 `squad update --global` again and it adopts that file without rewriting it and records the
