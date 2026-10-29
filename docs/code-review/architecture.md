@@ -514,6 +514,10 @@ partitioned by ecosystem:
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
 
+#### Fast test git repository fixture template
+
+Review gate integration and command tests (`ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, `DocsInitReviewGatesTests`) initialize test repositories using a shared, pre-seeded template (`TestGitRepositoryTemplate`). On first use, the template creates a committed base git repository once. Individual test fixtures perform a sub-millisecond filesystem copy of the `.git` directory rather than spawning repeated `git init`, `git add`, and `git commit` child processes. Untracked test configuration files (such as `.kyber-weave/kyber-weave.yml`) are ignored via `.git/info/exclude` in the fixture repository copy so template repositories cleanly isolate tracked test assertions from local configuration changes.
+
 Unknown keys are not silently dropped: any key outside the tables above loads anyway but
 is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate
 id, a non-slug id, a missing or empty `run`, a non-positive timeout, or an unrecognised

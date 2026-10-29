@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -359,6 +359,13 @@ flowchart LR
 - **Scope-Independent Contention**: Project-scoped and global-scoped operations targeting the same physical root contend for the exact same mutex, preventing concurrent corruption. A project installed at the home directory therefore shares the global mutex.
 - **Per-Root Work Directory**: The transaction work directory and journal stay with the physical root. Project scope uses `<root>/.kyber-weave/.squad-transaction`; global scope uses `<home>/.kyber-weave/.squad-transaction`; instance scope uses `<instance-root>/.squad-transaction`. Only the receipt, lock, and link manifests move to the home state root.
 - **Precondition Reverification**: After acquiring the lease, all preconditions and path containment assertions are re-evaluated immediately before filesystem operations.
+
+### Transaction Engine and Disk Durability
+
+Deployments execute through `SquadTransaction`, which stages writes, prepares rollback journals (`intent.json`), and commits state atomically:
+
+- **Stable Storage Synchronization (`SquadTransaction.SyncToDisk`)**: In production, journal commits, artifact writes, receipt updates, instance link syncs (`SquadInstanceLinkSync`), and preset selections (`SquadModelPresetSelectionStore`) force all writes to stable storage via device flushes (`F_FULLFSYNC` on macOS, flush file buffers on Windows).
+- **Flow-Isolated Durability Scope (`SquadTransaction.UseSyncToDiskScope`)**: Test harnesses can selectively disable device flushes without process-wide static mutation by entering an `AsyncLocal<bool?>` execution scope via `SquadTransaction.UseSyncToDiskScope(false)`. This guarantees durability test overrides never leak filesystem flush overhead onto concurrent test threads.
 
 ### Registry
 
@@ -892,14 +899,15 @@ and validates.
   `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were
   removed.
 
-### Preset Overlay Render Seam
+### Render Source Loading and Preloaded Seams
 
-Model preset customization operates as an in-memory overlay applied directly ahead of renderer
-execution without mutating canonical release profiles or writing intermediate files:
+Rendering operations resolve source definitions and environment overrides through non-mutating seams on `SquadRenderRequest`:
 
+- **Preloaded Source Seam (`SquadRenderRequest.PreloadedSource`)**: Rendering requests carry an optional preloaded `SquadSource`. `SquadRenderSource.Load(request, target)` reuses `request.PreloadedSource ?? SquadSourceLoader.Load(request.SourceDirectory)`. `SquadRendererRegistry.RenderAsync` loads the canonical source once per render pass and threads it to all child renderer groups. Commands executing multi-target comparison renders — such as `SquadDoctorCommand.ReportGlobalCollisions` scanning all 13 supported targets for global collisions — preload `SquadSource` once before the target evaluation loop, eliminating redundant disk reads and YAML/Markdown parsing across all targets.
+- **Isolated Environment Reader Seam (`SquadRenderRequest.EnvironmentReader`)**: Target renderers and operator channel probes resolve environment variables through an injected `Func<string, string?>` delegate on `SquadRenderRequest.EnvironmentReader` (defaulting to `Environment.GetEnvironmentVariable`). This isolates operator channel gates (`KYBER_SQUAD_OPERATOR_CHANNEL`, `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`, `COPILOT_HOME`) per render operation and prevents process-wide environment variable mutation.
 - **Isolated Loader Seam (`SquadRenderSource`)**: All 13 renderers load their source through
   `SquadRenderSource.Load(request, target)`. It calls `SquadSourceLoader.Load(request.SourceDirectory)`
-  and applies the target's preset override:
+  (or reuses `request.PreloadedSource`) and applies the target's preset override:
   `source with { ModelProfiles = preset.ApplyTo(source.ModelProfiles) }`.
 - **Pure Overlay Merge (`SquadModelPreset`)**: `SquadModelPreset.ApplyTo` merges preset profiles
   into bundled `SquadModelProfiles` key-by-key per profile category. Omitted categories remain
@@ -1095,11 +1103,11 @@ Every developer subagent (`csharp-dev`, `test-dev`, `github-devops`) runs these 
 before and after each fix attempt:
 
 1. **Blast radius** — touched files stay inside authorized task scope. Out-of-scope work
-   trips `BLAST_RADIUS_EXCEEDED`.
+    trips `BLAST_RADIUS_EXCEEDED`.
 2. **Oscillation** — see Q2. Trips `THRASH_OSCILLATION_DETECTED`.
 3. **Invariant consistency** — see Q3. Trips `INVARIANT_CONTRADICTION`.
 4. **Iteration cap** — three attempts on this cluster in this dispatch. Trips
-   `ITERATION_CAP_EXCEEDED`.
+    `ITERATION_CAP_EXCEEDED`.
 
 Any tripwire emits `STATUS: ESCALATION` with the trigger, failure cluster, contradictory
 invariants, blast radius, and `RECOMMENDED_ACTION`.
