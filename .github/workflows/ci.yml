@@ -52,6 +52,7 @@ jobs:
       code: ${{ steps.areas.outputs.code }}
       dotnet: ${{ steps.areas.outputs.dotnet }}
       codeql: ${{ steps.areas.outputs.codeql }}
+      sbom: ${{ steps.areas.outputs.sbom }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -65,7 +66,7 @@ jobs:
           set -euo pipefail
           all() {
             {
-              echo "dash=true"; echo "code=true"; echo "dotnet=true"
+              echo "dash=true"; echo "code=true"; echo "dotnet=true"; echo "sbom=true"
               echo 'codeql=["csharp","javascript-typescript"]'
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -85,13 +86,17 @@ jobs:
           dotnet="$(nonempty "$(grep -Ev '^(docs/|dash/|[^/]+\.md$)' <<<"${files}" || true)")"
           cs="$(has '(\.(cs|csproj|props|targets|sln|slnx|editorconfig)$|^global\.json$|(^|/)nuget\.config$|(^|/)packages\.lock\.json$)')"
           js="$(has '\.(js|mjs|cjs|mts|cts|ts|tsx|jsx|json)$')"
+          # The release builds and attests the SBOM every time; the PR only needs to prove
+          # the generator still works when its inputs (dependency manifests, lockfiles,
+          # the scripts) change.
+          sbom="$(has '(package-lock\.json|Cargo\.lock|packages\.lock\.json|\.csproj|Directory\..*\.props|^global\.json|^scripts/(generate|validate)-sbom|^\.github/workflows/release\.yml|^dash/tray/vendor/)')"
           langs=()
           [ "${cs}" = true ] && langs+=('"csharp"')
           [ "${js}" = true ] && langs+=('"javascript-typescript"')
           codeql="[$(IFS=,; echo "${langs[*]:-}")]"
           {
             echo "dash=${dash}"; echo "code=${code}"; echo "dotnet=${dotnet}"
-            echo "codeql=${codeql}"
+            echo "codeql=${codeql}"; echo "sbom=${sbom}"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -188,7 +193,7 @@ jobs:
     # to the checked-in packages.lock.json files is knowingly partial.
     name: SBOM (CycloneDX 1.6)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.sbom == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
