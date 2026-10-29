@@ -77,6 +77,7 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
         <SettingsView
           settings={state.settings}
           sharedSettings={state.sharedSettings ?? null}
+          kyberdashVersion={state.kyberdashVersion ?? null}
           onChange={commands.setSettings}
           onSharedChange={commands.setSharedSettings}
           onBack={() => setShowSettings(false)}

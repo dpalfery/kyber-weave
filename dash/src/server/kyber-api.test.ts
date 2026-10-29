@@ -1362,6 +1362,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         { url: `${base}/api/kyber/quarantine`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/problems`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/meta`, methods: ['POST', 'PUT', 'DELETE'] },
+        { url: `${base}/api/kyber/version`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/timeline`, methods: ['POST', 'PUT', 'DELETE'] },
       ]
 

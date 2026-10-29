@@ -8,8 +8,8 @@
  * are covered by `commands.test.tsx`, which drives the handlers directly.
  */
 
-import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
 
 import empty from '../../../src/analysis/report/fixtures/empty.json' with { type: 'json' }
 import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
