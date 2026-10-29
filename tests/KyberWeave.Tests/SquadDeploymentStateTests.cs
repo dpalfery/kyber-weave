@@ -1369,12 +1369,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "---\nname: create-pull-request-github\ndescription: Prior release\n---\nPrior release guidance\n";
         const string editedContent =
             "---\nname: create-pull-request-github\ndescription: Operator edited\n---\nOperator guidance\n";
-        SquadRenderResult render = await new SquadRendererRegistry([new ClaudeRenderer()]).RenderAsync(
-            new SquadRenderRequest(
-                Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
-                [SquadTarget.Claude],
-                SquadDeploymentScope.Project,
-                PreloadedSource: TestSquadCorpus.CanonicalSource));
+        SquadRenderResult render = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Claude);
         Assert.True(render.Success, string.Join("; ", render.Errors));
         SquadReceipt previousReceipt = Receipt(new SquadOwnedFile(
             retiredSkillPath,

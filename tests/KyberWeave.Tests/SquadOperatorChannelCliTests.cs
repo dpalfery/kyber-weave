@@ -308,7 +308,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     /// <summary>One isolated install context: anchor, COPILOT_HOME, user paths, state store, and a corpus source.</summary>
     private sealed class CliHarness : IDisposable
     {
-        private readonly CorpusSquadReleaseSource _releaseSource = new();
+        private readonly SyntheticValidSquadReleaseSource _releaseSource = new();
 
         public CliHarness(string anchor, string copilotHome, string userHome)
         {

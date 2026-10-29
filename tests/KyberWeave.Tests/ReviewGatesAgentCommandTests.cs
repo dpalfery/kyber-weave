@@ -513,6 +513,8 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     public void AValidTaskSlugIsSubstitutedIntoEveryPlaceholder()
     {
         WriteRepositoryFile(".agent_scratchpad/t2r-probe/marker.txt", "marker\n");
+        MustGit("add", "-A");
+        Commit("add marker for probe");
         WriteConfiguration(ScratchpadProbeConfiguration);
         ChangeTracked("src/a.cs");
 
@@ -819,8 +821,6 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     private void WriteConfiguration(string yaml)
     {
         WriteRepositoryFile(".kyber-weave/kyber-weave.yml", yaml);
-        MustGit("add", "-A");
-        Commit("configure gates");
     }
 
     private void WriteRepositoryFile(string relativePath, string content)

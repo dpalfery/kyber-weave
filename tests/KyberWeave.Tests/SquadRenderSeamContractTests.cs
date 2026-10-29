@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -199,7 +200,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public void RenderSourceLoadHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
     {
-        SquadSource preloadedSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
         string nonExistentSourceDirectory = Path.Combine(
             Path.GetTempPath(),
             "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
@@ -227,7 +228,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public void RenderSourceLoadWithPreloadedSourceAppliesModelPresetsCleanly()
     {
-        SquadSource preloadedSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
         string nonExistentSourceDirectory = Path.Combine(
             Path.GetTempPath(),
             "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
@@ -270,7 +271,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public async Task RendererRegistryRenderAsyncHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
     {
-        SquadSource preloadedSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
         string nonExistentSourceDirectory = Path.Combine(
             Path.GetTempPath(),
             "kw-nonexistent-" + Guid.NewGuid().ToString("N"));

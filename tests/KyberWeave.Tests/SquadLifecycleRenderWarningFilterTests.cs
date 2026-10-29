@@ -465,7 +465,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             UserHome = userHome;
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
-            Renderer = new RecordingRenderer(SquadCommandComposition.ResolveRenderer());
+            Renderer = new RecordingRenderer(new SquadRendererRegistry([new CopilotRenderer()]));
             Corpus = new CorpusSquadReleaseSource();
             Oversized = new OversizedConductorReleaseSource();
         }

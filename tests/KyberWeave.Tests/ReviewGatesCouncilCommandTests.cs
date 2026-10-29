@@ -470,8 +470,6 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     private void WriteConfiguration(string yaml)
     {
         WriteRepositoryFile(".kyber-weave/kyber-weave.yml", yaml);
-        MustGit("add", "-A");
-        Commit("configure gates");
     }
 
     private void WriteRepositoryFile(string relativePath, string content)

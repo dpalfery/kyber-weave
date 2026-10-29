@@ -162,6 +162,7 @@ public static class TestGitRepositoryTemplate
             "-c", "user.email=t2r@example.invalid",
             "-c", "commit.gpgsign=false",
             "commit", "--quiet", "--allow-empty", "-m", "initial");
+        AppendInfoExclude(repo, ".kyber-weave/\n");
     }
 
     private static void InitializeReviewGatesCouncilTemplate(string repo)
@@ -176,6 +177,7 @@ public static class TestGitRepositoryTemplate
             "-c", "user.email=task3@example.invalid",
             "-c", "commit.gpgsign=false",
             "commit", "--quiet", "--allow-empty", "-m", "initial");
+        AppendInfoExclude(repo, ".kyber-weave/\n");
     }
 
     private static void InitializeDocsInitFixtureTemplate(
@@ -257,5 +259,12 @@ public static class TestGitRepositoryTemplate
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
                 $"git {string.Join(' ', arguments)} failed in '{repo}': {result.StandardError}");
+    }
+
+    private static void AppendInfoExclude(string repo, string entry)
+    {
+        string infoExcludePath = Path.Combine(repo, ".git", "info", "exclude");
+        Directory.CreateDirectory(Path.GetDirectoryName(infoExcludePath)!);
+        File.AppendAllText(infoExcludePath, entry);
     }
 }

@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
@@ -53,7 +54,7 @@ public sealed class SquadRenderingContractTests
     [Fact]
     public async Task RenderAsync_Copilot_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
