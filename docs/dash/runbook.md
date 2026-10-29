@@ -213,7 +213,7 @@ Current-shape `opencode.db`/JSON session files yield measured calls (model quali
 tokens, costUSD). Shifted schemas yield honest `not_measurable` errors, never zeros.
 
 Verify without touching the live store. The e2e conformance proof is GREEN 4/4 including
-the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts:14-44` spec header):
+the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts`, spec header):
 
 ```bash
 npx playwright test e2e/harness-collection.spec.ts
@@ -221,10 +221,10 @@ npx playwright test e2e/harness-collection.spec.ts
 
 Run it from `dash/`; it boots an isolated dashboard against a temp `canon.db`, never
 `~/.kyberdash/canon.db` (see `dash/e2e/harness-collection.spec.ts` and
-`dash/e2e/harness-collection-world.ts`). The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens` (`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output (`bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only (`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044).
+`dash/e2e/harness-collection-world.ts`). The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens` (`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output (`dash/src/server/bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only (`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044).
 
 Manual live-turn gate (manual procedure only — DO NOT run here, DO NOT touch live state,
-DO NOT change consent; durable copy of `dash/e2e/harness-collection.spec.ts:14-44`):
+DO NOT change consent; durable copy of `dash/e2e/harness-collection.spec.ts`, spec header):
 
 1. In the owner's OpenCode, pick a cheap already-consented model and run exactly one trivial turn (e.g. ask "say hi" or read one small file, no edits, no network).
 2. Run `kyberdash refresh` (or `kyber dash refresh`) for the opencode harness only, then open the dashboard HarnessDetail for `opencode` and drill into the newest run/session for that turn.

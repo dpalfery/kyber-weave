@@ -460,11 +460,10 @@ unchartable turns are counted (`unmeasuredTurns`), each with a reason (see
 (enable, restart matrix, green-enable≠capture) are in the
 [runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
 T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). E2e proof is
-GREEN 4/4 including the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts:14-44`
-spec header); the manual live-turn gate is the one-turn procedure in runbook §1b — referenced,
+GREEN 4/4 including the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts`, spec header); the manual live-turn gate is the one-turn procedure in runbook §1b — referenced,
 not run. The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens`
 (`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output
-(`bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only
+(`dash/src/server/bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only
 (`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044). Token capture via
 response/generate hooks remains unverified.
 
