@@ -18,4 +18,4 @@ focus past one paragraph.
   scope changes, spending, publishing, or anything hard to undo.
 - **Never label or mention this format.** No tags, no section headers for the structure, no
   meta-commentary. The shape speaks for itself.
-- **Name the session after the work** where the harness lets you.
+- **Name the session after the work** only where the harness exposes a confirmed way to set it, and never fabricate a title: where no agent can set one (Factory derives the title from the conversation's first message), leave it alone.

@@ -65,6 +65,14 @@ public sealed class SquadCanonicalContentTests
         @"\b(?:not\s+agent[-\s]?settable|agents?\s+(?:can\s*not|cannot|can't|do\s+not)\s+set)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>
+    /// A session title is never invented. The wording is prose rather than one fixed sentence, so
+    /// it is matched as the negation about fabricating a title.
+    /// </summary>
+    private static readonly Regex NeverFabricateTitleRule = new(
+        @"\bnever\s+fabricate\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     /// <summary>A surface invokes the skill rather than merely mentioning it.</summary>
     private static readonly Regex LoadVerbRule = new(
         @"\b(?:load|read|invoke|apply|follow)\w*\b",
@@ -446,6 +454,23 @@ public sealed class SquadCanonicalContentTests
             NotAgentSettableRule.IsMatch(skill),
             "The session-title matrix in 'response-format' must record that the session title is " +
             "not agent-settable on factory.");
+    }
+
+    /// <summary>
+    /// The deployed default replaces the skill's wording wherever it exists, so it carries the
+    /// session-title guard the matrix states. Without the guard, the default tells an agent to
+    /// name a session on a target that exposes no way to set one.
+    /// </summary>
+    [Fact]
+    public void ResponseFormatUserGuidanceKeepsTheSessionTitleGuard()
+    {
+        string guidance = ReadResponseFormatSkill("user-guidance.md");
+
+        Assert.True(
+            NeverFabricateTitleRule.IsMatch(guidance),
+            "The deployed default 'user-guidance.md' must keep the session-title guard the skill's " +
+            "matrix states: name the session only where a mechanism is confirmed, and never " +
+            "fabricate a title.");
     }
 
     /// <summary>
