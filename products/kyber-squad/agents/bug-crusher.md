@@ -31,6 +31,8 @@ an answer is the one thing this wrapper binds by name instead of restating: a se
 shape here would drift from the skill that owns it, and a bug-crusher answer has to read like
 every other Squad answer.
 
+Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.
+
 The skill assumes a cheap base model on purpose: the tiering it describes works only if this
 root runs small and the investigator it spawns runs smaller. Spawn agents by name and let
 each one's own frontmatter pick its model; do not pass model overrides.

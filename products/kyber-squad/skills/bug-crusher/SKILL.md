@@ -28,6 +28,8 @@ Spawn agents by name and let each agent's own frontmatter decide its model. Do n
 
 **Load the `response-format` skill and follow it for every user-facing response.** This skill names the shape rather than restating it: one skill owns the format, and a second copy of it here would drift from that one.
 
+Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.
+
 Every point in this workflow where you ask the human something or tell them where the work stands is one of those responses: the context request in §1, the record of a skipped RED step in §3, the questions the architect raised in §5, and the closing report in §6. The skill decides how each one is arranged and worded; this workflow says only what each one has to contain.
 
 This applies where a human reads the text and nowhere else. The investigator's verdict schema (`TRIVIAL` / `NEEDS_ARCHITECT`), the escalation digests, and any digest another agent parses keep their exact schemas: rendering a digest for the human relays its content without reshaping the digest itself.
