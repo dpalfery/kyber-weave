@@ -31,10 +31,37 @@ export async function runMcpCommand(options: { serverUrl?: string; stateDir?: st
   const client = createAnalyticsClient({ ...(options.serverUrl === undefined ? {} : { serverUrl: options.serverUrl }), ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }) })
   const server = createAnalyticsMcpServer({ client })
   const transport = new StdioServerTransport()
+  await serveMcpConnection({ server, transport })
+}
+
+/** A clock seam for the stdio keep-alive, so tests can prove it is cleared. */
+export type McpClock = {
+  setInterval(handler: (...args: never[]) => void, ms: number): unknown
+  clearInterval(id: unknown): void
+}
+
+/**
+ * The stdio MCP connection lifecycle (F10): the keep-alive, the signal
+ * handlers, the EPIPE guard, and EOF all funnel into one `close`, and a
+ * `connect` failure cleans up everything `close` would have — a rejected
+ * startup must not leave the keep-alive ticking or the process handlers
+ * registered with nobody left to call close. Transport-typed generically so
+ * tests can drive failure, EOF, and close with fakes over the real code.
+ */
+export async function serveMcpConnection<TTransport extends { onclose?: (() => void) | undefined }>(deps: {
+  server: { connect(transport: TTransport): Promise<void>; close(): Promise<void> }
+  transport: TTransport
+  clock?: McpClock
+}): Promise<void> {
+  const { server, transport } = deps
+  const clock: McpClock = deps.clock ?? {
+    setInterval: (handler, ms) => setInterval(handler, ms),
+    clearInterval: (id) => clearInterval(id as NodeJS.Timeout),
+  }
   // A pending promise alone does not keep Node alive. The stdio transport uses
   // listeners on streams that may be unreferenced by a spawned CLI child, so retain
   // a tiny command-local handle until EOF, a signal, or EPIPE closes the transport.
-  const keepAlive = setInterval(() => {}, 1_000)
+  const keepAlive = clock.setInterval(() => {}, 1_000)
   let closing = false
   let finish: (() => void) | undefined
   const closed = new Promise<void>((resolve) => { finish = resolve })
@@ -43,19 +70,36 @@ export async function runMcpCommand(options: { serverUrl?: string; stateDir?: st
       process.exitCode = 0
     })
   })
+  // Named so `close()` (and the connect-failure path below) removes exactly
+  // this registration (F10): the anonymous EPIPE guard leaked one stdout
+  // listener per in-process restart.
+  const onStdoutError = (error: NodeJS.ErrnoException): void => {
+    if (error.code === 'EPIPE') void close()
+  }
   const close = async (): Promise<void> => {
     if (closing) return
     closing = true
     detachSignals()
+    process.stdout.removeListener('error', onStdoutError)
     try {
       await Promise.race([server.close(), new Promise<void>((resolve) => setTimeout(resolve, 2_000).unref())])
     } finally {
-      clearInterval(keepAlive)
+      clock.clearInterval(keepAlive)
       finish?.()
     }
   }
-  process.stdout.on('error', (error: NodeJS.ErrnoException) => { if (error.code === 'EPIPE') void close() })
+  process.stdout.on('error', onStdoutError)
   transport.onclose = () => { void close() }
-  await server.connect(transport)
+  try {
+    await server.connect(transport)
+  } catch (error) {
+    // Startup failed before anything could call close: release the
+    // keep-alive, the signal handlers, and the stdout guard here, or the
+    // failed start leaks all three with no owner left to clean up.
+    detachSignals()
+    process.stdout.removeListener('error', onStdoutError)
+    clock.clearInterval(keepAlive)
+    throw error
+  }
   await closed
 }

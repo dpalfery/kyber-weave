@@ -276,19 +276,22 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   // Named so `close()` can remove exactly these registrations (F10):
   // anonymous handlers could never be unregistered, so every in-process
   // restart leaked listeners toward MaxListenersExceededWarning.
-  let closedService = false
   const onServiceSigint = (): void => {
     void close().finally(() => process.exit(0))
   }
   const onServiceSigterm = (): void => {
     void close().finally(() => process.exit(0))
   }
-  const close = async () => {
-    // Idempotent (F10): the signal handlers above and a second caller can
-    // both reach this, and a half-torn-down service must not throw out of
-    // its own close — `canon.close()` on an already-closed handle does.
-    if (closedService) return
-    closedService = true
+  // One shared teardown promise (F10): a second concurrent close joins the
+  // in-flight teardown instead of resolving early. Returning immediately
+  // would let a signal's `process.exit` chain fire before the first flush
+  // finished and terminate the service mid-drain.
+  let closePromise: Promise<void> | null = null
+  const close = (): Promise<void> => {
+    closePromise ??= teardown()
+    return closePromise
+  }
+  const teardown = async (): Promise<void> => {
     process.removeListener('SIGINT', onServiceSigint)
     process.removeListener('SIGTERM', onServiceSigterm)
     if (pendingReconcileTimer !== null) {

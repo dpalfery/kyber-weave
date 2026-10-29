@@ -4,7 +4,7 @@
 // MaxListenersExceededWarning. Idempotent close must also hold: closing twice
 // must resolve, not throw out of a half-torn-down service.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { startOtlpCollectorService } from './service.js'
 import { attachShutdownSignals } from '../cli/mcp.js'
@@ -34,6 +34,37 @@ describe('F10 collector service lifecycle', () => {
     const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
     await service.close()
     await expect(service.close()).resolves.toBeUndefined()
+  })
+
+  it('joins concurrent close() calls into one teardown instead of resolving the second early', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    // Hold the writer's stop behind a gate: no teardown completes until the
+    // test releases it, so an early-resolving second close is observable.
+    let releaseStop!: () => void
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+    const realStop = service.writer.stop.bind(service.writer)
+    const stopSpy = vi.spyOn(service.writer, 'stop').mockImplementation(() => stopGate.then(() => realStop()))
+    try {
+      let secondSettled = false
+      const first = service.close()
+      const second = service.close().then(() => {
+        secondSettled = true
+      })
+      // Both closes are in flight and the gate is still shut: the second
+      // close must not have resolved from a guard while teardown runs.
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(secondSettled).toBe(false)
+      // One teardown only: the concurrent close joined it, not restarted it.
+      expect(stopSpy).toHaveBeenCalledTimes(1)
+
+      releaseStop()
+      await Promise.all([first, second])
+      expect(secondSettled).toBe(true)
+    } finally {
+      stopSpy.mockRestore()
+    }
   })
 })
 
