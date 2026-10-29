@@ -228,6 +228,178 @@ function aggregate(
   }
 }
 
+/**
+ * Streaming cost accumulator mirroring `sumCosts` without holding blocks.
+ *
+ * WHY streaming: the comparison route walks the whole corpus; holding every
+ * `CostBlock` (one per record) retains a per-record array for the table's
+ * lifetime. The summary only needs bases, currencies, the priced sum, the
+ * status set, and the by-model sums — all bounded counters — so each block
+ * is folded and released. The refusal messages and totals match `sumCosts`
+ * exactly; any divergence would present a different figure than the
+ * batch path it replaces.
+ */
+type StreamingCostState = {
+  count: number
+  bases: Set<CostBasis>
+  statuses: Set<string>
+  valuedCount: number
+  valuedSum: number
+  currencies: Set<string>
+  byModel: Map<string, number>
+  allPriced: boolean
+}
+
+function createCostStream(): StreamingCostState {
+  return {
+    count: 0,
+    bases: new Set<CostBasis>(),
+    statuses: new Set<string>(),
+    valuedCount: 0,
+    valuedSum: 0,
+    currencies: new Set<string>(),
+    byModel: new Map<string, number>(),
+    allPriced: true,
+  }
+}
+
+function addCostToStream(state: StreamingCostState, block: CostBlock): void {
+  state.count += 1
+  state.bases.add(block.basis)
+  state.statuses.add(block.status)
+  const value = (block as { value?: unknown }).value
+  const finite = typeof value === 'number' && Number.isFinite(value)
+  if (block.status !== 'priced' || !finite) state.allPriced = false
+  if (!finite) return
+  state.valuedCount += 1
+  state.valuedSum += value as number
+  if (typeof block.currency === 'string') state.currencies.add(block.currency)
+  const byModel = (block as { byModel?: Record<string, unknown> }).byModel
+  if (typeof byModel === 'object' && byModel !== null) {
+    for (const [model, amount] of Object.entries(byModel)) {
+      if (typeof amount !== 'number') continue
+      state.byModel.set(model, (state.byModel.get(model) ?? 0) + amount)
+    }
+  }
+}
+
+function summarizeCostStream(state: StreamingCostState): CostSummary {
+  if (state.count === 0) {
+    return { total: { basis: 'unknown', status: 'no_rate' }, hasValue: false }
+  }
+  if (state.bases.size > 1) {
+    return {
+      total: { basis: 'unknown', status: 'no_rate' },
+      hasValue: false,
+      refused: {
+        severity: 'error',
+        code: COST_BASIS_MISMATCH,
+        message: `cost bases differ across blocks (${[...state.bases].sort().join(', ')}); refusing to blend them into one total`,
+      },
+    }
+  }
+  const basis = [...state.bases][0] as CostBasis
+  if (state.valuedCount === 0) {
+    const statuses = [...state.statuses]
+    const status = statuses.length === 1 ? (statuses[0] as CostBlock['status']) : 'partial'
+    return { total: { basis, status }, hasValue: false }
+  }
+  if (state.currencies.size > 1) {
+    return {
+      total: { basis: 'unknown', status: 'no_rate' },
+      hasValue: false,
+      refused: {
+        severity: 'error',
+        code: COST_CURRENCY_MISMATCH,
+        message: `cost figures under basis "${basis}" are in different currencies (${[...state.currencies].sort().join(', ')}); refusing to blend them into one total`,
+      },
+    }
+  }
+  const total: CostBlock = {
+    basis,
+    status: state.allPriced ? 'priced' : 'partial',
+    value: state.valuedSum,
+    ...(state.currencies.size === 1 ? { currency: [...state.currencies][0] } : {}),
+    ...(state.byModel.size > 0 ? { byModel: Object.fromEntries(state.byModel) } : {}),
+  }
+  return {
+    total,
+    hasValue: typeof total.value === 'number' && Number.isFinite(total.value),
+  }
+}
+
+/**
+ * Per-harness streaming accumulator: the bounded counterpart of `aggregate`.
+ * Holds only counters plus the cost-stream state — never record or parts
+ * arrays — so walking the corpus keeps one live record plus these figures.
+ */
+type HarnessStreamAccumulator = {
+  harness: string
+  recordCount: number
+  turns: number
+  freshInput: number
+  cacheRead: number
+  cacheCreation: number
+  output: number
+  schemaTokens: number
+  schemaContentPresent: boolean
+  unmeasurable: Set<string>
+  costAll: StreamingCostState
+  costDeclared: StreamingCostState
+}
+
+function accumulateStreamRecord(
+  acc: HarnessStreamAccumulator,
+  record: CanonicalRecord,
+  costBasis: CostBasis | undefined,
+): void {
+  acc.recordCount += 1
+  for (const [metric, availability] of Object.entries(record.measurability ?? {})) {
+    if (isNotMeasurable(availability)) acc.unmeasurable.add(metric)
+  }
+  addCostToStream(acc.costAll, record.cost)
+  if (costBasis !== undefined && record.cost.basis === costBasis) {
+    addCostToStream(acc.costDeclared, record.cost)
+  }
+  if (record.op !== TURN_OP) return
+  acc.turns += 1
+  acc.freshInput += record.tokens.freshInput
+  acc.cacheRead += record.tokens.cacheRead
+  acc.cacheCreation += record.tokens.cacheCreation
+  acc.output += record.tokens.output
+  const definitions = record.content.tool_definitions
+  if (typeof definitions === 'string' && definitions.length > 0) {
+    acc.schemaContentPresent = true
+    acc.schemaTokens += approximateO200kBase(definitions)
+  }
+}
+
+function finalizeStreamAccumulator(
+  acc: HarnessStreamAccumulator,
+  costBasis: CostBasis | undefined,
+): HarnessFigures {
+  const input = acc.freshInput + acc.cacheRead + acc.cacheCreation
+  return {
+    harness: acc.harness,
+    recordCount: acc.recordCount,
+    turns: acc.turns,
+    tokens: {
+      input,
+      freshInput: acc.freshInput,
+      cacheRead: acc.cacheRead,
+      output: acc.output,
+      all: input + acc.output,
+    },
+    schemaTokens: acc.schemaTokens,
+    schemaContentPresent: acc.schemaContentPresent,
+    cost: summarizeCostStream(acc.costAll),
+    costOnDeclaredBasis: summarizeCostStream(
+      costBasis === undefined ? acc.costAll : acc.costDeclared,
+    ),
+    unmeasurable: acc.unmeasurable,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cell construction
 // ---------------------------------------------------------------------------
@@ -586,6 +758,15 @@ export function compareHarnesses(
     aggregate(harness, sessions[index] ?? [], options.costBasis)
   )
 
+  return buildComparisonTable(figures, harnesses, options.costBasis)
+}
+
+function buildComparisonTable(
+  figures: HarnessFigures[],
+  harnesses: string[],
+  costBasis: CostBasis | undefined,
+): ComparisonTable {
+
   const cellsByMetric = new Map<string, Record<string, MetricCell>>()
   for (const def of TOKEN_METRICS) {
     const cells: Record<string, MetricCell> = {}
@@ -595,8 +776,8 @@ export function compareHarnesses(
     cellsByMetric.set(def.metric, cells)
   }
 
-  const perTurnCost = costCells(figures, options.costBasis, 'per_turn')
-  const totalCost = costCells(figures, options.costBasis, 'total')
+  const perTurnCost = costCells(figures, costBasis, 'per_turn')
+  const totalCost = costCells(figures, costBasis, 'total')
   cellsByMetric.set(COST_PER_TURN_ROW.metric, perTurnCost.cells)
   cellsByMetric.set(TOTAL_COST_ROW.metric, totalCost.cells)
 
@@ -622,6 +803,73 @@ export function compareHarnesses(
   }
 
   return { harnesses: [...harnesses], rows, problems }
+}
+
+/**
+ * Streaming counterpart of `compareHarnesses` for corpus-wide passes that
+ * must not root every record (F9). Consumes the corpus one record at a time
+ * — exactly the shape `CanonStore.iterateAll()` yields — folding each record
+ * into per-harness counters and releasing it before the next arrives, so the
+ * working set is one live record plus bounded aggregates rather than the
+ * whole canonical corpus.
+ *
+ * Harness order matches the bridge's batch path: the preferred harnesses
+ * first when present, then the remaining harnesses sorted. Figures match
+ * `aggregate` exactly: same turn filter, same token sums, same
+ * `approximateO200kBase` over the same `tool_definitions` string, same
+ * unmeasurable union, and the same cost refusal semantics via the
+ * cost-stream. No invented zeros: empty input yields no harnesses, rows, or
+ * problems, and missing corpora render their stated reasons downstream.
+ */
+export function compareIterableRecords(
+  records: Iterable<CanonicalRecord>,
+  options: ComparisonOptions = {},
+  onRecord?: (record: CanonicalRecord) => void,
+): ComparisonTable {
+  const costBasis = options.costBasis
+  const accs = new Map<string, HarnessStreamAccumulator>()
+  const accFor = (harness: string): HarnessStreamAccumulator => {
+    const existing = accs.get(harness)
+    if (existing !== undefined) return existing
+    const acc: HarnessStreamAccumulator = {
+      harness,
+      recordCount: 0,
+      turns: 0,
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      schemaTokens: 0,
+      schemaContentPresent: false,
+      unmeasurable: new Set<string>(),
+      costAll: createCostStream(),
+      costDeclared: createCostStream(),
+    }
+    accs.set(harness, acc)
+    return acc
+  }
+  for (const record of records) {
+    accFor(record.harness)
+    const acc = accs.get(record.harness)
+    if (acc === undefined) continue
+    accumulateStreamRecord(acc, record, costBasis)
+    onRecord?.(record)
+  }
+  const preferredOrder = ['copilot', 'gemini', 'pi']
+  const available = [...accs.keys()]
+  if (available.length === 0) {
+    return { harnesses: [], rows: [], problems: [] }
+  }
+  const harnesses = [
+    ...preferredOrder.filter((harness) => accs.has(harness)),
+    ...available.filter((harness) => !preferredOrder.includes(harness)).sort(),
+  ]
+  const figures = harnesses.map((harness) => {
+    const acc = accs.get(harness)
+    if (acc === undefined) throw new Error(`missing accumulator for harness ${harness}`)
+    return finalizeStreamAccumulator(acc, costBasis)
+  })
+  return buildComparisonTable(figures, harnesses, costBasis)
 }
 
 // ---------------------------------------------------------------------------

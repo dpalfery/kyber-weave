@@ -22,6 +22,7 @@ import {
   problemsHarnessWhere,
   quarantineHarnessWhere,
   readSessionSummaryFigures,
+  releaseRecordParts,
   systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
@@ -59,9 +60,10 @@ import {
   type PredictionRecord,
 } from '../analysis/calibration.js'
 import {
-  compareHarnesses,
+  compareIterableRecords,
   compareRuns as compareStoredRuns,
   type ComparisonSummary,
+  type ComparisonTable,
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
@@ -4030,64 +4032,83 @@ export class KyberBridge {
 
   /**
    * Return cross-harness comparison matrix across all active harnesses.
+   *
+   * WHY streaming, not `listAll`: the comparison folds every canonical
+   * record, including compressed payload columns. `listAll` roots the whole
+   * corpus (every raw/parts payload live at once) while the aggregate runs.
+   * The streaming walk below holds one live record plus bounded counters:
+   * the store's `iterateAll` yields timestamp-ordered records one at a
+   * time, and the direct-DB walk pages the same way without selecting the
+   * `raw` column at all. Each record's parts are released before the next
+   * arrives, so peak working set never grows with corpus size. Figures match
+   * the batch path exactly via `compareIterableRecords`.
    */
-  private canonicalRecords(): CanonicalRecord[] {
-    if (this.store) return this.store.listAll()
-    const db = this.getDb()
-    if (!this.hasTable(db, 'records')) return []
+  getComparisonTable(): ComparisonTableResult {
     try {
-      const rows = db!
-        .prepare('SELECT * FROM records ORDER BY timestamp')
-        .all() as unknown as import('../canon/store.js').RecordRow[]
-      return rows.map(toRecord)
-    } catch {
-      return []
+      const table =
+        this.store !== undefined
+          ? compareIterableRecords(
+              this.store.iterateAll(),
+              {},
+              (record) => releaseRecordParts(record),
+            )
+          : this.compareDirectDb()
+      if (table.harnesses.length === 0) {
+        return { harnesses: [], rows: [], problems: [] }
+      }
+      return {
+        harnesses: table.harnesses,
+        problems: table.problems,
+        rows: table.rows.map((row) => ({
+          ...row,
+          cells: Object.fromEntries(
+            Object.entries(row.cells).map(([harness, cell]) => [
+              harness,
+              {
+                ...cell,
+                availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
+              },
+            ]),
+          ),
+        })),
+      }
+    } catch (err) {
+      if (this.store !== undefined) throw err
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
   /**
-   * Return cross-harness comparison matrix derived only from canonical records.
+   * Direct-DB streaming walk for bridges without an injected store: the same
+   * one-record-at-a-time fold as the store path, over a cursor that never
+   * selects the `raw` column (comparison never reads it) and never buffers
+   * the corpus. Any read or decode failure yields the empty table, matching
+   * the previous `SELECT *` path's catch-all.
    */
-  getComparisonTable(): ComparisonTableResult {
-    const canonicalRecords = this.canonicalRecords()
-    if (canonicalRecords.length === 0) {
+  private compareDirectDb(): ComparisonTable {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) {
       return { harnesses: [], rows: [], problems: [] }
     }
-
-    const byHarness = new Map<string, CanonicalRecord[]>()
-    for (const record of canonicalRecords) {
-      const records = byHarness.get(record.harness) ?? []
-      records.push(record)
-      byHarness.set(record.harness, records)
-    }
-
-    const preferredOrder = ['copilot', 'gemini', 'pi']
-    const availableHarnesses = [...byHarness.keys()]
-    const harnesses = [
-      ...preferredOrder.filter((harness) => byHarness.has(harness)),
-      ...availableHarnesses
-        .filter((harness) => !preferredOrder.includes(harness))
-        .sort(),
-    ]
-    const table = compareHarnesses(
-      harnesses.map((harness) => byHarness.get(harness) ?? []),
-      harnesses,
-    )
-    return {
-      harnesses: table.harnesses,
-      problems: table.problems,
-      rows: table.rows.map((row) => ({
-        ...row,
-        cells: Object.fromEntries(
-          Object.entries(row.cells).map(([harness, cell]) => [
-            harness,
-            {
-              ...cell,
-              availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
-            },
-          ]),
-        ),
-      })),
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, trace_id, parent_span_id, source, harness, session_id, name, op, kind, timestamp, duration_ms, status, tokens_json, content_json, cost_json, measurability_json, parts_json FROM records ORDER BY timestamp',
+        )
+        .iterate() as unknown as IterableIterator<import('../canon/store.js').RecordRow>
+      const records = (function* (): Generator<CanonicalRecord> {
+        for (const row of rows) {
+          const record = toRecord(row)
+          try {
+            yield record
+          } finally {
+            releaseRecordParts(record)
+          }
+        }
+      })()
+      return compareIterableRecords(records, {}, (record) => releaseRecordParts(record))
+    } catch {
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
