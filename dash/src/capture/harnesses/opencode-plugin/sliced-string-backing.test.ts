@@ -62,6 +62,62 @@ describe('detached capped diagnostics (F2 sliced-string backing)', () => {
     expect(externalBytes() - baseline).toBeLessThan(512 * 1024)
   })
 
+  it.skipIf(!hasGc)('shortPreSlicedFailureMessagesReleaseTheirParents', async () => {
+    // SUPERVISOR-6 variant: the message is already short (a 2K slice of a
+    // 1MiB parent), so the cap sees nothing to cut — but the slice still
+    // holds the parent. A FRESH parent per iteration is essential: slices
+    // sharing one pre-baseline parent would hide in the baseline. Without
+    // the fix this retains ~60MiB (thirty 2MiB parents).
+    //
+    // Threshold note: a bare allocate-slice-drop loop in this runtime leaves
+    // exactly one parent (~2MiB) alive regardless of iterations or retention
+    // — a harness artifact, not the defect. The bound sits well above that
+    // floor and well below the real leak.
+    let current = ''
+    const plugin = createOpencodePlugin({
+      now: () => '2026-10-30T00:00:00.000Z',
+      emit: async () => {
+        throw new Error(current)
+      },
+      diagnostics: { failureLimit: 100, maxFailureBytes: 10 * 1024 * 1024 },
+    })
+    await settleGc()
+    const baseline = externalBytes()
+    for (let i = 0; i < 30; i += 1) {
+      const parent = randomBytes(1024 * 1024).toString('hex')
+      current = parent.slice(0, 2000)
+      await plugin.hooks['session.start']({ sessionId: `session-short-slice-${i}` })
+      current = ''
+    }
+    await settleGc()
+    expect(plugin.failures).toHaveLength(30)
+    expect(externalBytes() - baseline).toBeLessThan(8 * 1024 * 1024)
+
+    plugin.failures.length = 0
+    await settleGc()
+    expect(externalBytes() - baseline).toBeLessThan(8 * 1024 * 1024)
+  })
+
+  it.skipIf(!hasGc)('shortPreSlicedPromptContentReleasesItsParent', async () => {
+    // Same variant on the success path: an 8K pre-slice of a 1MiB prompt.
+    // (Same fresh-parent and threshold notes as above.)
+    const plugin = createOpencodePlugin({ now: () => '2026-10-30T00:00:00.000Z' })
+    await settleGc()
+    const baseline = externalBytes()
+    for (let i = 0; i < 30; i += 1) {
+      const parent = randomBytes(1024 * 1024).toString('hex')
+      const prompt = parent.slice(0, 8192)
+      await plugin.context({ sessionId: `session-short-prompt-${i}`, systemPrompt: prompt })
+    }
+    await settleGc()
+    expect(plugin.events).toHaveLength(30)
+    expect(externalBytes() - baseline).toBeLessThan(8 * 1024 * 1024)
+
+    plugin.events.length = 0
+    await settleGc()
+    expect(externalBytes() - baseline).toBeLessThan(8 * 1024 * 1024)
+  })
+
   it.skipIf(!hasGc)('cappedEntryContentReleasesItsParent', async () => {
     const installed = createInstalledOpencodePlugin({
       fetchFn: async () => new Response('{}', { status: 200 }),
@@ -100,7 +156,8 @@ describe('detached capped diagnostics (F2 sliced-string backing)', () => {
 
     await settleGc()
     const baseline = externalBytes()
-    // A 1MiB prompt caps to 256KiB: the tail must hold the prefix, not the parent.
+    // The parent is allocated AFTER the baseline: a retained slice shows up
+    // as new external memory; a shared pre-baseline parent would hide.
     let big: string | undefined = randomBytes(1_048_576).toString('base64')
     await callback({
       sessionID: 'session-slice-entry',

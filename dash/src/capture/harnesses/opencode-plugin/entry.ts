@@ -44,12 +44,11 @@ export const MAX_CONTENT_CHARS = 262_144
 export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
 
 function capContent(value: string): string {
-  if (value.length <= MAX_CONTENT_CHARS) return value
-  // Detach the capped prefix into independent storage. (Untagged template
-  // results already flatten today, but that is engine behavior, not a
-  // contract: a bare `slice` or `+` keeps the original prompt's backing
-  // allocation alive behind the short length, so a ring of capped prompts
-  // would retain the full originals.)
+  // Always detach, even when already under the cap: the input can be a short
+  // slice holding a huge parent alive, and the tail and the outbox both
+  // retain what this returns. (Untagged template results already flatten
+  // today, but that is engine behavior, not a contract.)
+  if (value.length <= MAX_CONTENT_CHARS) return detachedCopy(value)
   return `${detachedCopy(value.slice(0, MAX_CONTENT_CHARS))}${CONTENT_TRUNCATION_MARKER}`
 }
 
@@ -203,10 +202,10 @@ async function toContextPayload(
   const window = model === undefined ? undefined : await contextLimit(provider, model)
 
   const payload: OpencodeHookPayload = {
-    sessionId,
-    ...(model !== undefined ? { model } : {}),
-    ...(provider !== undefined ? { provider } : {}),
-    ...(agent !== undefined ? { agent } : {}),
+    sessionId: detachedCopy(sessionId),
+    ...(model !== undefined ? { model: detachedCopy(model) } : {}),
+    ...(provider !== undefined ? { provider: detachedCopy(provider) } : {}),
+    ...(agent !== undefined ? { agent: detachedCopy(agent) } : {}),
     ...(window !== undefined ? { contextLimit: window } : {}),
   }
   if (!consent()) return payload
@@ -219,7 +218,11 @@ async function toContextPayload(
     ...(systemPrompt !== undefined ? { systemPrompt: capContent(systemPrompt) } : {}),
     ...(toolsText !== undefined ? { toolsText } : {}),
     // A missing or malformed block leaves skills absent; the adapter names the reason (T7).
-    ...(skills?.ok === true && skills.ids.length > 0 ? { skills: skills.ids } : {}),
+    // Skill ids are regex slices of the prompt: detach them so a retained id
+    // cannot hold the whole prompt's backing alive.
+    ...(skills?.ok === true && skills.ids.length > 0
+      ? { skills: skills.ids.map((id) => detachedCopy(id)) }
+      : {}),
   }
 }
 

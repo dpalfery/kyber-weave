@@ -304,16 +304,16 @@ function eventRetainedBytes(event: OpencodeHookEvent): number {
 /**
  * Normalize a thrown value to bounded diagnostics. Only the error name and a
  * capped message are kept; attached buffers, causes, and custom fields are
- * never retained, however small their string rendering looks. Each cap is
- * detached into independent storage: a bare `slice` would keep the original
- * message's backing allocation alive behind the short length. `String()` of
- * the result renders the message.
+ * never retained, however small their string rendering looks. Every kept
+ * string is detached into independent storage — even an already-short value
+ * can be a slice holding a huge parent alive. `String()` of the result
+ * renders the message.
  */
 function normalizeFailureError(error: unknown): OpencodeFailureDiagnostics {
   const cap = (text: string): string =>
     text.length > MAX_FAILURE_MESSAGE_CHARS
       ? detachedCopy(text.slice(0, MAX_FAILURE_MESSAGE_CHARS))
-      : text
+      : detachedCopy(text)
   const diagnosed = (name: string, message: string): OpencodeFailureDiagnostics => {
     const cappedMessage = cap(message)
     const cappedName = cap(name)
@@ -351,13 +351,27 @@ function failureRetainedBytes(failure: OpencodeHookFailure): number {
 /**
  * The diagnostic copy of an event. The transport owns the original object it
  * was handed; the tail retains only this copy, so session-end cleanup can
- * never mutate an event still queued for delivery.
+ * never mutate an event still queued for delivery. Every retained string is
+ * detached into independent storage — even an already-short value can be a
+ * slice holding a huge parent alive. Absent keys stay absent (a
+ * consent-dropped field must never become `key: undefined`).
  */
 function diagnosticCopyOf(event: OpencodeHookEvent): OpencodeHookEvent {
-  // Spread preserves absent keys as absent (a consent-dropped field must
-  // stay absent, never `key: undefined`); only the shared array is re-owned.
-  const copy: OpencodeHookEvent = { ...event }
-  if (event.skills !== undefined) copy.skills = [...event.skills]
+  const copy: OpencodeHookEvent = {
+    kind: event.kind,
+    sessionId: detachedCopy(event.sessionId),
+    timestamp: detachedCopy(event.timestamp),
+  }
+  if (event.turnIndex !== undefined) copy.turnIndex = event.turnIndex
+  if (event.spanId !== undefined) copy.spanId = detachedCopy(event.spanId)
+  if (event.messageId !== undefined) copy.messageId = detachedCopy(event.messageId)
+  if (event.systemPrompt !== undefined) copy.systemPrompt = detachedCopy(event.systemPrompt)
+  if (event.toolsText !== undefined) copy.toolsText = detachedCopy(event.toolsText)
+  if (event.skills !== undefined) copy.skills = event.skills.map((skill) => detachedCopy(skill))
+  if (event.model !== undefined) copy.model = detachedCopy(event.model)
+  if (event.provider !== undefined) copy.provider = detachedCopy(event.provider)
+  if (event.contextLimit !== undefined) copy.contextLimit = event.contextLimit
+  if (event.agent !== undefined) copy.agent = detachedCopy(event.agent)
   return copy
 }
 
@@ -395,11 +409,13 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
    * the full original, which the transport owns untouched.
    */
   const recordEvent = (event: OpencodeHookEvent): void => {
-    const diagnostic = diagnosticCopyOf(event)
-    if (eventRetainedBytes(diagnostic) > maxEventBytes) {
+    // Measure the original first: an oversize record is omitted without
+    // paying for a detached copy that would be dropped immediately.
+    if (eventRetainedBytes(event) > maxEventBytes) {
       plugin.droppedEvents += 1
       return
     }
+    const diagnostic = diagnosticCopyOf(event)
     plugin.events.push(diagnostic)
     retainedEventBytes += eventRetainedBytes(diagnostic)
     while (plugin.events.length > eventLimit || retainedEventBytes > maxEventBytes) {
@@ -414,7 +430,7 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     const failure: OpencodeHookFailure =
       sessionId === undefined
         ? { kind, error: normalizeFailureError(error) }
-        : { kind, sessionId, error: normalizeFailureError(error) }
+        : { kind, sessionId: detachedCopy(sessionId), error: normalizeFailureError(error) }
     // Normalized records are capped by construction, so one failure can
     // never exceed the budget the way one event can — no omit path needed.
     plugin.failures.push(failure)
