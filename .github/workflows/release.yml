@@ -3,7 +3,9 @@
 # Kick off from Actions → Release → Run workflow on main. Only dpalfery may
 # start it. The run stops once, at the `approve` job, until David Palfery clicks
 # Review deployments on that run and approves. Every build and publish job
-# runs after that single approval; none of them asks again.
+# runs after that single approval; none of them asks again, provided the `release`
+# environment has no required reviewer (build-tray still names it for the signing
+# secrets, so a reviewer left on it would prompt a second time).
 # Leave "Make production release" unchecked to publish the next RC
 # (0.1.7-rc.9 → 0.1.7-rc.10). Check it to publish the next stable
 # (0.1.7-rc.9 → 0.1.7). scripts/next-release-version.sh picks the number.
@@ -139,10 +141,10 @@ jobs:
               fi
               echo
               echo "### David Palfery — approve here"
-              echo "Builds run first. When they finish, this run waits."
+              echo "This run waits at the **Approve release** job before anything builds."
               echo "On **this same workflow run page**, click **Review deployments**"
-              echo "(top right, yellow banner). Tick \`release\` → **Approve and deploy**."
-              echo "Nobody else can approve. That click publishes \`${TAG}\`."
+              echo "(top right, yellow banner). Tick \`release-approval\` → **Approve and deploy**."
+              echo "Nobody else can approve. That one click builds and publishes \`${TAG}\`."
               echo
               echo "Release notes compare \`${TAG}\` with \`${NOTES_START_TAG:-<no earlier release>}\`."
             } >> "${GITHUB_STEP_SUMMARY}"
