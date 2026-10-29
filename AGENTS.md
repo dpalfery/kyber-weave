@@ -1,193 +1,89 @@
 # Working in this repository
 
 Kyber-Weave governs the artifacts that shape agent behaviour. **What** it does and **why**
-lives in [`docs/`](docs/README.md) — this file is only about not breaking things while
-working in the code.
+lives in [`docs/`](docs/README.md) — this file is only operational rules for working in the
+code without breaking the repository.
 
 ## Commands
 
 ### The inner loop
 
-While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It automatically
-inspects modified workspace files and routes to targeted fast checks:
-
-- **.NET**: warm incremental build (warnings-as-errors, `AnalysisMode=all`), fast test tier,
-  `docs validate`, and whitespace formatting. Edits to `products/kyber-squad/**`, `REVIEW.md`,
-  config files, scripts, or clean working trees correctly route here. The fast tier is the list in
-  `scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
-  `scripts/fast-loop.sh --regenerate`.
-- **KyberDash (`dash/`)**: `typecheck`, `lint`, and `test:related` targeting changed TypeScript files
-  (plus tray UI `typecheck` and `test` if `dash/tray/ui/` changed).
-- **Tray Rust (`dash/tray/src-tauri/`)**: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`.
-- **Docs (`docs/`, `*.md`)**: `docs validate .`.
-
-Use `scripts/fast-loop.sh --scoped` to run declared repository gates scoped to changed files, or
-`--full` to run all declared gates unscoped (`review gates . --all`).
-
-It is **not** evidence and must never be cited as such. It answers "did this edit break
-something"; the declared suite below answers "may this change be committed", and a
-review citing a hand-picked subset is citing evidence it selected
-([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
+While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It inspects
+modified files and routes to targeted checks for .NET, KyberDash, the tray crate, and
+governed docs. Use `--scoped` for declared gates limited to changed files, or `--full` for
+all gates unscoped (`review gates . --all`). It is **not** evidence and must never be cited
+as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
 
 ### Before opening a PR
 
-Run the local equivalents of the required CI gates, plus the
-CodeGraph-backed documentation drift check:
-
-```bash
-dotnet restore KyberWeave.sln
-dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
-dotnet format KyberWeave.sln style --verify-no-changes --severity warn --no-restore -v minimal
-dotnet build KyberWeave.sln -c Release --no-restore
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-docs-authoring
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-docs-authoring --min-desc-score 70
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-docs-authoring --fail-on critical
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
-```
-
-Or run all of them, plus build, test, and ReSharper InspectCode, through the declared gate
-suite — the same command a review executes, so what you check is what the reviewer cites:
+Run the same declared gate suite a review cites — scoped by default, full before push:
 
 ```bash
 dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
-```
-
-Council gates are automatically scoped to changed files (`review gates .`), skipping gates
-whose `include` does not match (`KW-REVIEW-026`). For a full, unscoped repository audit
-running all 27 gates across all ecosystems (the same check `--full` runs), pass `--all`:
-
-```bash
 dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
+dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
+dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
 
-InspectCode needs the pinned tool restored once per clone (`dotnet tool restore`). It exits
-zero whether or not it finds anything; the report lands at `artifacts/inspectcode.xml`, and
-the `static-analysis-triage` review lens attributes its findings to the diff. See the
-`resharper-clt` skill for how to read it.
-
-Touching the self-updater, `install.sh`, the Squad release path, or how `kyberdash` is built
-or updated also means running the local release loop documented in
-[distribution](docs/distribution.md#verifying-a-release-locally). It builds `kyberdash` too,
-so it needs `node` and `npm` on `PATH`:
-
-```bash
-./scripts/update-loop.sh
-```
-
-KyberDash under [`dash/`](docs/dash/README.md) is TypeScript, not .NET, and none of the gates
-above reach it. Changes there run its own:
-
-```bash
-npm --prefix dash run typecheck
-npm --prefix dash run lint
-npm --prefix dash run test
-npm --prefix dash run check:reachable
-```
-
-The tray (`dash/tray/`) is a Tauri 2 crate plus a React UI. After
-`npm --prefix dash/tray/ui ci`, its gates are:
-
-```bash
-npm --prefix dash/tray/ui run typecheck
-npm --prefix dash/tray/ui run test
-cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
-```
-
-`npm --prefix dash run lint` already covers `dash/tray/ui`. The loop builds `kyberdash` and
-drives its update path, including the hand-off to `kyberdash menubar --update`. It installs
-no tray and does not run `install.sh`. See
-[what it covers](docs/distribution.md#kyberdash-in-the-loop) before assuming a green loop
-covered either.
+Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
+see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
+test, and skill argv are the `review.gates` entries in
+[`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate
+restore gate: `--no-restore` is omitted on format and build, so those gates restore
+themselves. InspectCode runs in the council (`dotnet tool restore` once per clone) and
+exits zero whether or not it finds anything; the result is `artifacts/inspectcode.xml` —
+see the `resharper-clt` skill. Release/self-updater/kyberdash
+build paths: `./scripts/update-loop.sh` ([`docs/distribution.md`](docs/distribution.md#verifying-a-release-locally)).
+KyberDash and tray gates: [`dash/AGENTS.md`](dash/AGENTS.md), [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md).
 
 ## Exploration order
 
-Do not start with grep, find, or arbitrary file browsing when a semantic index covers the
-question. MCP tool names may be namespace-qualified by the active harness.
+Do not start with grep, find, or arbitrary browsing when a semantic index covers the question.
+MCP tool names may be namespace-qualified by the active harness.
 
 <!-- CODEGRAPH_START -->
-**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to
-understand or locate code:
-
-- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol
-  when current line-numbered source is required.
-- The shell fallback is `codegraph explore "<symbol names or question>"`.
+**Code:** When `.codegraph/` exists, use `codegraph_explore` (or `codegraph explore "…"`)
+before text search; name a file or symbol when you need line-numbered source.
 <!-- CODEGRAPH_END -->
 
-**Missing index.** If there is no `.codegraph/` directory, this repository authorizes
-`codegraph init .` from the repository root without further approval. This approval
-covers only repository-local initialization; installing CodeGraph or other system-wide
-tools remains the user's decision.
+If `.codegraph/` is missing, this repository authorizes `codegraph init .` at the root
+(repository-local only; installing CodeGraph is the user's decision). Before init, record
+`git status --short` and both staged (`git diff --cached`) and unstaged (`git diff`)
+tracked diffs; afterwards undo only tracked edits init introduced. Blocked or unusable
+init → report under GAPS and fall back;
+`docs drift` without an index → report skipped, not passed.
 
-- Before initialization, record `git status --short` and both staged and unstaged
-  tracked-file diffs. Initialization can rewrite the marked CodeGraph block above.
-  Afterwards, inspect `git status --short` and undo only tracked-file edits introduced
-  by initialization, preserving all pre-existing edits. The index itself is gitignored.
-- If initialization is blocked (no `codegraph` on `PATH`, no write access, a read-only
-  role) or leaves the index unusable, report the blocker under GAPS and fall back to
-  text search, stating in the result that CodeGraph was unavailable. The conductor
-  relays the blocker and stops that path.
-- If `docs drift` cannot run because no usable index is available, report it as skipped
-  rather than passed.
-
-**Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
-`docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
-`docs_for_symbol` to find formal `code-refs` ownership. Use `docs_glossary` and
-`docs_analysis_candidates` for taxonomy and review queries. These MCP operations have no CLI
-equivalent; if the server is unavailable, start at the [documentation index](docs/README.md)
-and state that the fallback was necessary. Never retrieve `docs/archive/` as current guidance.
-
-Every docs tool response leads with a `provenance:` line naming the absolute `root=` it
-answered from. Before trusting an answer, confirm that root is this checkout: call
-`docs_status` (it takes no arguments) or read `root=` from the response, and compare it to
-`git rev-parse --show-toplevel`. A mismatch means a same-named server is bound to a different
-repository — do not treat those results as this checkout, and stop using that server.
+Before `docs/` greps, use Kyber-Weave MCP `docs_explore`; before contract changes,
+`docs_for_symbol`; for taxonomy, `docs_glossary` and `docs_analysis_candidates`. No CLI
+equivalent — fall back to [`docs/README.md`](docs/README.md). Never use `docs/archive/` as
+current guidance. Confirm each response's `provenance:` `root=` matches
+`git rev-parse --show-toplevel` (`docs_status`); a mismatch means the wrong repository.
 
 ## Non-negotiables
 
-**Persisted plans belong in docs.** When a durable plan artifact is warranted, store it under
-`<docs-root>/plans`, the directory indexed by `<plan-index>`. Do not put plans in hidden tool
-folders or create a plan file for an otherwise ephemeral execution plan. A plan artifact must be
-committed, not merely written to disk: an untracked plan is not persisted, it is lost to a checkout,
-a clean, or another machine. This holds for the plan's whole life — an active plan under `<plan-index>`
-and an archived plan under `<docs-root>/archive/plans` are both tracked. Creating the file without
-staging it is an incomplete plan write, not a finished one.
+- **Persisted plans belong in docs.** Under `<docs-root>/plans` / `<plan-index>`; no hidden
+  tool folders. Committed, not untracked — same for archived plans under
+  `<docs-root>/archive/plans`.
+- **`TreatWarningsAsErrors` is on, with `AnalysisMode=all`.** Do not add to `NoWarn` in
+  `Directory.Build.props` without a reason you can state.
+- **Rule ids are permanent (`KW-*`).** Add new ids; never reuse or renumber.
+- **Editing anything under `docs/` means re-running `docs validate` and `docs drift`.** The
+  corpus stays at zero findings.
+- **Do not widen the ontology to make a failure disappear.** Fix the document.
+- **Todos:** capture authorized deferred work under `<todo-index>`. A review finding does not
+  authorize a repository change by itself.
 
-**`TreatWarningsAsErrors` is on, with `AnalysisMode=all`.** A warning fails the build.
-Fix the cause; do not add to the `NoWarn` list in `Directory.Build.props` without a reason
-you can state.
+## KyberDash
 
-**Rule ids are permanent.** A `KW-*` id is what suppressions, SARIF baselines, and
-code-scanning alerts key on. Renumbering one silently un-suppresses findings in every host
-repository. Add new ids; never reuse or renumber.
+The tray and web dashboard are **display layers** only — no isolated feature logic,
+schedulers, or jobs; shared engine, one datastore, one `/api/kyber/*` API. See
+[`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) and
+[`dash/AGENTS.md`](dash/AGENTS.md). KyberDash is first-party ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)); upstream references stay only in `dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md`.
 
-**Editing anything under `docs/` means re-running `docs validate` and `docs drift`.** This
-repository's documentation is a governed corpus that must stay at zero findings — that
-claim is made in the README, and it has to remain true.
+## Dependencies
 
-**Do not widen the ontology to make a failure disappear.** If a document fails, fix the
-document.
-
-**KyberDash is first-party code.** `dash/` began as a soft fork of the CodeBurn project
-and was taken as a one-time fork ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)):
-nothing is merged from upstream any more, so judge an edit to any file under `dash/` on its
-merits, under the same gates as the rest of the repository. AgentSeal's MIT notice stays in
-`dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md`; outside those two files, no upstream
-reference belongs anywhere in the tree.
-
-**KyberDash surfaces are display layers.** **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE) LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db, resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.** See [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), enforced by `dash/src/architecture/display-layer.test.ts`.
-
-**New dependencies need justification.** Core takes only Markdig and YamlDotNet. The
-CodeGraph index is read through the `sqlite3` CLI rather than `Microsoft.Data.Sqlite`
-because that package's native dependency carries an unresolved advisory — a deliberate
-trade, documented where it is made.
-
-**Capture authorized deferred work as todos.** During implementation, preserve accepted
-follow-up work under [`docs/todo/`](docs/todo/README.md). A review finding or declined
-suggestion does not by itself authorize a repository change: report it, and create a todo only
-when the user accepts or explicitly asks to retain it. See the todo index for mechanics and the
-[documentation index](docs/README.md) for the distinction between specs, plans, and todos.
+Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
+[`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md).
 
 ## Where to go next
 
@@ -198,21 +94,15 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it. Editing `dash/tray` or `dash/web` — a display layer — also read [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) |
+| KyberDash gates (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md) |
+| KyberDash architecture and runbook (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md), [`docs/dash/architecture.md`](docs/dash/architecture.md), [`docs/dash/runbook.md`](docs/dash/runbook.md) |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-docs-authoring` skill in [`.apm/skills/`](.apm/skills/kyber-docs-authoring/SKILL.md) |
 
 ## House style
 
-Match the surrounding code. Two habits are consistent throughout and worth keeping:
-
-**Comments explain why, not what.** The codebase carries `<remarks>` blocks giving the
-reasoning behind a decision — why sqlite3 and not the package, why the corpus is rebuilt
-rather than persisted, why plans are demoted in ranking. Preserve that when editing, and
-add it when a choice would otherwise look arbitrary.
-
-**Diagnostics carry a hint.** A finding that cannot be acted on is noise. Where a
-nearest-match suggestion is computable, offer it.
+Match the surrounding code: comments explain why, not what; diagnostics carry a hint when a
+nearest-match suggestion is computable.
 
 ## Protecting hand-authored instruction files
 

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 ---
 
 # Wiring Kyber-Weave into CI
@@ -215,6 +215,42 @@ Local equivalent (must stay GREEN 3/3):
 ```bash
 npx --prefix dash playwright test dash/e2e/harness-collection.spec.ts
 ```
+
+## This repository's own CI: path-targeted jobs and the CodeQL neutral check
+
+`.github/workflows/ci.yml` fans out from a `changes` job ("Detect changed areas") that
+classifies the pull-request diff, then gates the expensive jobs with job-level `if:`
+expressions — never a workflow-level `paths:` filter. Only "CI Summary" is a required
+check, and a skipped job counts as passed, while a workflow that never starts would leave
+the required check pending. The comments on the `changes` job in `ci.yml` state the
+invariant; the `codeql` job's `if: needs.changes.outputs.codeql != '[]'` is one instance
+of it.
+
+Three jobs always run, even on docs-only pull requests: `build-test`, `gitleaks`, and
+`skill-docs-gate` (the skill and docs gate). The .NET tests read files under `docs/`,
+`products/`, `.kyber-weave/`, `.github/`, `scripts/`, and a few under `dash/`, so no path
+set can prove them irrelevant.
+
+Anything that is not a pull request — a push to `main`, the weekly Monday cron, a manual
+dispatch — runs everything. So does any edit to `.github/workflows/ci.yml` itself or to
+anything under `.github/codeql/`: a change to the filters is itself fully exercised.
+
+### The expected neutral "1 configuration not found" check
+
+A pull request that touches no .NET code skips the `csharp` CodeQL matrix leg, and a
+docs-only pull request skips both legs. GitHub then reports a neutral
+"1 configuration not found" check such as `CodeQL Analysis (csharp) /language:csharp`
+(both languages on a docs-only change). This is expected and safe, for three reasons:
+
+1. The neutral check cannot fail CI Summary — only `failure` or `cancelled` fails the
+   gate; `skipped` passes.
+2. Pushes to `main` and the weekly Monday cron always analyze both languages, so full
+   coverage is continuous.
+3. A pull request that cannot change C# cannot introduce C# alerts; there is nothing for
+   the skipped leg to catch.
+
+See the `changes` and `codeql` job comments in `.github/workflows/ci.yml` for the gating
+logic.
 
 ## Related
 
