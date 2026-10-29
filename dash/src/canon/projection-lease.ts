@@ -253,12 +253,15 @@ export function heartbeatProjectionLease(
  * Keep our lease fresh for the duration of a pass. The timer is unref'd so
  * it can never hold the process open, and a failed beat stops the timer
  * rather than throwing out of a tick — the pass's own `finally` still
- * releases whatever claim remains.
+ * releases whatever claim remains. A beat that throws (a broken store,
+ * not a lost race) is reported through `onError` so the pass knows it no
+ * longer owns the cadence; a lost race simply stops, with nothing to say.
  */
 export function startLeaseHeartbeat(
   store: CanonStore,
   claimed: ClaimedProjectionLease,
   intervalMs: number = PROJECTION_LEASE_HEARTBEAT_MS,
+  onError?: (err: unknown) => void,
 ): { stop: () => void; current: () => ClaimedProjectionLease } {
   const every = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : PROJECTION_LEASE_HEARTBEAT_MS
   let current = claimed
@@ -270,7 +273,12 @@ export function startLeaseHeartbeat(
         return
       }
       current = next
-    } catch {
+    } catch (err) {
+      try {
+        onError?.(err)
+      } catch {
+        // An observability tap must never break the driver either.
+      }
       clearInterval(timer)
     }
   }, every)

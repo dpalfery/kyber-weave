@@ -8,7 +8,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from './store.js'
 import {
@@ -21,6 +21,7 @@ import {
   readSharedProjectionStart,
   releaseProjectionLease,
   sharedProjectionDue,
+  startLeaseHeartbeat,
   tryClaimProjectionLease,
   type ClaimedProjectionLease,
 } from './projection-lease.js'
@@ -275,6 +276,44 @@ describe('heartbeatProjectionLease', () => {
     // aged out): our next beat must fail, not overwrite them.
     store.setMetadata(PROJECTION_LEASE_KEY, leaseJson({ owner: 'successor', sinceMs: T0 + 200_000 }))
     expect(heartbeatProjectionLease(store, claimed, T0 + 10_000)).toBeNull()
+  })
+})
+
+describe('startLeaseHeartbeat', () => {
+  it('reports a throwing beat through onError instead of dying quietly', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = openMemoryStore()
+      const claimed = tryClaimProjectionLease(store, { owner: 'receiver', nowMs: T0 }) as ClaimedProjectionLease
+      const beatFailure = new Error('heartbeat store failed')
+      const broken: CanonStore = new Proxy(store, {
+        get(target, property, receiver) {
+          if (property === 'compareAndSetMetadata') {
+            return () => {
+              throw beatFailure
+            }
+          }
+          const value = Reflect.get(target, property, receiver)
+          return typeof value === 'function' ? (value as (...call: never[]) => unknown).bind(target) : value
+        },
+      })
+      const seen: unknown[] = []
+      const heartbeat = startLeaseHeartbeat(broken, claimed, 10, (err) => {
+        seen.push(err)
+      })
+      try {
+        await vi.advanceTimersByTimeAsync(50)
+        // The failed beat surfaces instead of vanishing into a silent
+        // clearInterval, and the stopped timer beats no more.
+        expect(seen).toEqual([beatFailure])
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(seen).toEqual([beatFailure])
+      } finally {
+        heartbeat.stop()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
