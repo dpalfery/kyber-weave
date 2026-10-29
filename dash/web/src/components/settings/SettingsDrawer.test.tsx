@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import statusMixed from '../../../../src/server/fixtures/capture-api/status-mixed.json'
@@ -60,6 +60,21 @@ const VERSION_JSON = { version: '9.8.7-rc.1', apiVersion: 1 }
 function getsTo(mock: Mock, url: string): number {
   return mock.calls.filter((c) => c.method === 'GET' && c.url === url).length
 }
+
+/**
+ * Lets real time pass, so a request the drawer would make later has the chance to
+ * happen before a test counts. Proving that nothing more is requested needs a window.
+ */
+async function elapse(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms))
+  })
+}
+
+/** A retry fires after a short delay, so waits for it need more than waitFor's 1s default. */
+const RETRY_WAIT = { timeout: 5000 }
+/** Longer than the retry delay, so a further request (polling) would land inside the window. */
+const SETTLE_MS = 2500
 
 /**
  * One fetch mock for the drawer's whole surface. `status` may be a function so
@@ -883,7 +898,7 @@ describe('SettingsDrawer: version line', () => {
     await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 1.2.3'))
   })
 
-  it('requests the version exactly once when the drawer content mounts, and a status refresh does not repeat it', async () => {
+  it('requests the version once when the first request succeeds, and a status refresh does not repeat it', async () => {
     const mock = stubFetch({ version: () => ({ json: VERSION_JSON }) })
     await openedDrawer()
 
@@ -894,5 +909,57 @@ describe('SettingsDrawer: version line', () => {
 
     await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
     expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
+  // The engine can be restarting while the drawer opens. One retry lets the version
+  // recover; a second consecutive failure is final, with no polling behind it.
+  it('retries once after a transient failure and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { status: 500, json: { error: 'Version failed' } } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  it('shows unknown after two consecutive failures, and makes no further request', async () => {
+    const mock = stubFetch({ version: () => ({ status: 500, json: { error: 'Version failed' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  it('fetches the version again when the connection comes back after the failures', async () => {
+    let engineUp = false
+    const mock = stubFetch({
+      version: () => (engineUp ? { json: VERSION_JSON } : { status: 500, json: { error: 'Version failed' } }),
+    })
+    await openedDrawer()
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    const before = getsTo(mock, '/api/kyber/version')
+
+    engineUp = true
+    try {
+      act(() => {
+        window.dispatchEvent(new Event('offline'))
+      })
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+      await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    } finally {
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+    }
+    expect(getsTo(mock, '/api/kyber/version')).toBe(before + 1)
   })
 })

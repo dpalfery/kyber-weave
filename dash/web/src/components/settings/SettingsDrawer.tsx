@@ -207,12 +207,15 @@ function SettingsContent() {
   })
   const busy = capture.isPending || receiver.isPending
 
-  // Read once when the drawer content mounts: the version does not change while the
-  // drawer is open, so there is no interval and no refetch on focus or status refresh.
+  // Requested when the drawer content mounts. One retry (default backoff) and a refetch
+  // when the connection returns let a startup race or an engine restart recover, so the
+  // version does not stay 'unknown' for the whole open session. There is no interval and
+  // no refetch on window focus or status refresh: the version does not change while open.
   const version = useQuery({
     queryKey: VERSION_KEY,
     queryFn: fetchKyberVersion,
-    retry: false,
+    retry: 1,
+    refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   })
 
