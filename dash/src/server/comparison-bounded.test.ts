@@ -3,7 +3,6 @@ import { CanonStore } from '../canon/store.js'
 import { KyberBridge } from './bridge.js'
 import { compareHarnesses } from '../analysis/compare.js'
 import type { CanonicalRecord } from '../canon/types.js'
-import { contentFromParts } from '../canon/types.js'
 
 let spanCounter = 0
 
