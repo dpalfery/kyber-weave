@@ -56,15 +56,26 @@ internal sealed class SquadResponseGuidanceDeployer
     /// <summary>The manifest resource the shipped default is read from.</summary>
     private const string DefaultResourceName = "Squad.response-guidance.md";
 
-    private static readonly Lazy<byte[]> DefaultBytes = new(ReadDefaultContent);
-
     private readonly string _homeStateRoot;
+    private readonly Func<byte[]> _readDefault;
 
     /// <param name="homeStateRoot">
     ///     The home state root, <c>&lt;home&gt;/.kyber-weave</c>. Fully qualified, because every path
     ///     this type writes is one an operator later finds by hand.
     /// </param>
     public SquadResponseGuidanceDeployer(string homeStateRoot)
+        : this(homeStateRoot, null)
+    {
+    }
+
+    /// <param name="homeStateRoot">The home state root, as the public constructor documents it.</param>
+    /// <param name="readDefault">
+    ///     Reads the shipped default text, or null to read it from this assembly's embedded resource.
+    ///     Injected so a test can drive the one failure mode a real deployment cannot provoke — a build
+    ///     that shipped without its default — without putting a resource-loading seam in the path that
+    ///     ships.
+    /// </param>
+    internal SquadResponseGuidanceDeployer(string homeStateRoot, Func<byte[]>? readDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeStateRoot);
         if (!Path.IsPathFullyQualified(homeStateRoot))
@@ -73,6 +84,28 @@ internal sealed class SquadResponseGuidanceDeployer
                 nameof(homeStateRoot));
 
         _homeStateRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(homeStateRoot));
+        _readDefault = readDefault ?? ReadDefaultContent;
+    }
+
+    /// <summary>
+    ///     Whether a failure leaves the guidance undeployed but the rest of the run intact, rather than
+    ///     meaning this code asked for something it should not have.
+    /// </summary>
+    /// <remarks>
+    ///     The degradable set is what a filesystem or sandbox can do to a run on an otherwise healthy
+    ///     host: <see cref="IOException" /> and its subclasses, <see cref="UnauthorizedAccessException" />,
+    ///     <see cref="NotSupportedException" /> for a path form the platform cannot represent, and
+    ///     <see cref="System.Security.SecurityException" /> for a host policy that denies the write.
+    ///     <para>
+    ///         <see cref="ArgumentException" /> and <see cref="InvalidOperationException" /> are
+    ///         deliberately left out: both mean the caller or this code broke its own contract, and
+    ///         turning that into a warning an operator cannot act on is how a defect survives.
+    ///     </para>
+    /// </remarks>
+    internal static bool IsDegradableFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException;
     }
 
     /// <summary>Deploys or refreshes the guidance, returning the ownership record to persist.</summary>
@@ -92,7 +125,21 @@ internal sealed class SquadResponseGuidanceDeployer
         ArgumentNullException.ThrowIfNull(warnings);
 
         string path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName);
-        byte[] shipped = DefaultBytes.Value;
+
+        // Read under the same degrade policy as the write. A default that cannot be read is a defect
+        // in this build, not in the operator's environment, but it still must not cost them their
+        // deployment: the rest of the run is unaffected and the warning says what to do about it.
+        byte[] shipped;
+        try
+        {
+            shipped = _readDefault();
+        }
+        catch (Exception exception) when (IsDegradableFailure(exception))
+        {
+            warnings.Add(ShippedDefaultUnavailableMessage(exception));
+            return null;
+        }
+
         string shippedDigest = Digest(shipped);
         SquadHomeFile record = new(FileName, shippedDigest);
 
@@ -195,11 +242,23 @@ internal sealed class SquadResponseGuidanceDeployer
                "itself is unaffected; rerun 'squad update --global' to retry.";
     }
 
+    /// <summary>
+    ///     The warning for a default this build cannot supply. It names reinstallation rather than a
+    ///     retry because the defect travels inside the binary: another run of the same build fails the
+    ///     same way, so telling an operator to rerun would send them round a loop that never closes.
+    /// </summary>
+    private static string ShippedDefaultUnavailableMessage(Exception exception)
+    {
+        return $"The default response guidance this build ships could not be read " +
+               $"({exception.Message}), so no response guidance was written. The deployment itself is " +
+               "unaffected. Reinstall Kyber-Weave from a release that ships the response guidance.";
+    }
+
     private static byte[] ReadDefaultContent()
     {
         Assembly assembly = typeof(SquadResponseGuidanceDeployer).Assembly;
         using Stream stream = assembly.GetManifestResourceStream(DefaultResourceName)
-                              ?? throw new InvalidOperationException(
+                              ?? throw new SquadShippedGuidanceUnavailableException(
                                   $"KyberWeave.Core does not carry its default response guidance " +
                                   $"('{DefaultResourceName}'), so a global update has nothing to deploy. " +
                                   "Rebuild the assembly from the canonical products/kyber-squad tree.");
@@ -211,5 +270,33 @@ internal sealed class SquadResponseGuidanceDeployer
     private static string Digest(ReadOnlySpan<byte> content)
     {
         return Convert.ToHexStringLower(SHA256.HashData(content));
+    }
+}
+
+/// <summary>
+///     Raised when this assembly carries no readable default response guidance, so a global update has
+///     nothing to deploy.
+/// </summary>
+/// <remarks>
+///     An <see cref="IOException" /> subclass on purpose: an embedded stream that cannot be opened is
+///     the same class of failure as a file that cannot be read, and it belongs on the degradable side of
+///     <see cref="SquadResponseGuidanceDeployer.IsDegradableFailure" /> so a broken build costs a warning
+///     rather than the whole deployment. The type is distinct so the warning can name a defect a rerun
+///     cannot fix, which a plain <see cref="IOException" /> from the filesystem must not claim.
+/// </remarks>
+internal sealed class SquadShippedGuidanceUnavailableException : IOException
+{
+    public SquadShippedGuidanceUnavailableException()
+    {
+    }
+
+    public SquadShippedGuidanceUnavailableException(string message)
+        : base(message)
+    {
+    }
+
+    public SquadShippedGuidanceUnavailableException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
