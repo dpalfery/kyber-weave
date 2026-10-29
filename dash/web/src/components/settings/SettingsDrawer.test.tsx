@@ -35,7 +35,7 @@ function mixedWith(id: string, patch: Json): Json {
 }
 
 type Recorded = { url: string; method: string; body: Json | null }
-type Reply = { status?: number; json?: unknown; hold?: Promise<void> }
+type Reply = { status?: number; json?: unknown; hold?: Promise<void>; networkError?: boolean }
 
 interface Mock {
   calls: Recorded[]
@@ -53,6 +53,9 @@ const SETTINGS_JSON = {
   dashboardPort: 4747,
 }
 
+/** The running engine's version, as `/api/kyber/version` answers it. */
+const VERSION_JSON = { version: '9.8.7-rc.1', apiVersion: 1 }
+
 /** GET calls to one URL, so a new read-only fetch elsewhere does not move a count. */
 function getsTo(mock: Mock, url: string): number {
   return mock.calls.filter((c) => c.method === 'GET' && c.url === url).length
@@ -66,6 +69,7 @@ function stubFetch(options: {
   status?: () => Reply
   post?: (call: Recorded) => Reply
   put?: (call: Recorded) => Reply
+  version?: () => Reply
 }): Mock {
   const calls: Recorded[] = []
   vi.stubGlobal(
@@ -80,9 +84,12 @@ function stubFetch(options: {
       calls.push(call)
       let reply: Reply
       if (method === 'GET' && String(url).includes('/api/kyber/settings')) reply = { json: SETTINGS_JSON }
+      else if (method === 'GET' && String(url) === '/api/kyber/version') reply = options.version?.() ?? { json: VERSION_JSON }
       else if (method === 'GET') reply = options.status?.() ?? { json: statusMixed }
       else if (method === 'POST') reply = options.post?.(call) ?? { status: 500, json: {} }
       else reply = options.put?.(call) ?? { json: { receiverHosted: true } }
+      // A rejected fetch, as a dropped connection surfaces: no response at all.
+      if (reply.networkError) throw new TypeError('Failed to fetch')
       if (reply.hold) await reply.hold
       const status = reply.status ?? 200
       return { ok: status >= 200 && status < 300, status, json: async () => reply.json ?? {} } as Response
@@ -814,5 +821,46 @@ describe('SettingsDrawer: receiver section', () => {
     fireEvent.click(toggle)
 
     await waitFor(() => expect(mock.puts()[0]?.body).toEqual({ receiverHosted: true }))
+  })
+})
+
+describe('SettingsDrawer: version line', () => {
+  const versionLine = () => screen.getByTestId('settings-kyberdash-version')
+
+  it('shows the KyberDash version the server reports, inside the dialog', async () => {
+    stubFetch({ version: () => ({ json: VERSION_JSON }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'))
+    expect(screen.getByRole('dialog').contains(versionLine())).toBe(true)
+  })
+
+  it('shows unknown, never a placeholder version, when the version request fails with a 500', async () => {
+    stubFetch({ version: () => ({ status: 500, json: { error: 'Version failed' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toContain('0.0.0')
+  })
+
+  it('shows unknown, never a placeholder version, when the version request is rejected', async () => {
+    stubFetch({ version: () => ({ networkError: true }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toContain('0.0.0')
+  })
+
+  it('requests the version exactly once when the drawer content mounts, and a status refresh does not repeat it', async () => {
+    const mock = stubFetch({ version: () => ({ json: VERSION_JSON }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'))
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+
+    fireEvent.click(screen.getByTestId('settings-refresh-status-button'))
+
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
   })
 })

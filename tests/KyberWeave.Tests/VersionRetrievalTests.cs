@@ -67,6 +67,7 @@ public class VersionRetrievalTests
         // Assert
         Assert.Equal("0.0.0", dummyVersion);
     }
+
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
@@ -82,6 +83,35 @@ public class VersionRetrievalTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("kyber-weave", result.StandardOutput, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("0.1.0", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pins the exact line the CLI prints for its version flags, which is the line the install
+    /// runbook and distribution.md document. A `+sha` build suffix reaching that line would be a
+    /// user-visible regression that the looser assertions above cannot see.
+    /// </summary>
+    [Theory]
+    [InlineData("--version")]
+    [InlineData("-v")]
+    public void CliVersionFlagPrintsExactlyNameAndVersionWithoutBuildMetadata(string flag)
+    {
+        // Arrange
+        Assembly assembly = typeof(AgentCatalogCommand).Assembly;
+        string informationalVersion = assembly
+                                          .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                                          ?.InformationalVersion
+                                      ?? throw new InvalidOperationException(
+                                          "The CLI assembly has no AssemblyInformationalVersion.");
+        int plusIndex = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        string expectedVersion = plusIndex >= 0 ? informationalVersion[..plusIndex] : informationalVersion;
+
+        // Act
+        ProcessResult result = RunAssembly(assembly, flag);
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal($"kyber-weave {expectedVersion}", result.StandardOutput.Trim());
+        Assert.DoesNotContain("+", result.StandardOutput, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -108,7 +138,8 @@ public class VersionRetrievalTests
             return "0.0.0";
         }
 
-        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        string? infoVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
         {
             return infoVersion;
@@ -122,9 +153,10 @@ public class VersionRetrievalTests
 
         return "0.0.0";
     }
+
     private static ProcessResult RunAssembly(Assembly assembly, params string[] args)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("dotnet")
+        ProcessStartInfo startInfo = new("dotnet")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -137,7 +169,8 @@ public class VersionRetrievalTests
         }
 
         using Process process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException($"Could not start dotnet process for '{assembly.Location}'.");
+                                ?? throw new InvalidOperationException(
+                                    $"Could not start dotnet process for '{assembly.Location}'.");
 
         return ProcessRunner.ReadToEnd(process);
     }

@@ -56,6 +56,9 @@ pub struct ViewState {
     /// native saber and the popover read only its `receiver` key; `None`
     /// means the fetch failed and renders red/unknown, never a default.
     pub coverage: Option<serde_json::Value>,
+    /// The running KyberDash version (`GET /api/kyber/version`), carried
+    /// verbatim as `kyberdashVersion`; `None` means the fetch failed.
+    pub kyberdash_version: Option<serde_json::Value>,
     /// Tray-local display preferences only.
     pub settings: TraySettings,
 }
@@ -66,6 +69,9 @@ pub struct ViewState {
 /// statement about the whole tray: setup outranks everything (there is nothing
 /// to show), then the supervisor's own phase, and a cache holding an error over
 /// an old document is stale however healthy the server looks.
+// One parameter per server document the poll carries verbatim; a parameter
+// struct would only restate ViewState.
+#[allow(clippy::too_many_arguments)]
 pub fn view_state(
     setup: Option<SetupState>,
     server: ServerPhase,
@@ -73,6 +79,7 @@ pub fn view_state(
     jobs: Option<serde_json::Value>,
     shared_settings: Option<serde_json::Value>,
     coverage: Option<serde_json::Value>,
+    kyberdash_version: Option<serde_json::Value>,
     settings: &TraySettings,
 ) -> ViewState {
     let phase = match (&setup, server) {
@@ -92,6 +99,7 @@ pub fn view_state(
         jobs,
         shared_settings,
         coverage,
+        kyberdash_version,
         settings: settings.clone(),
     }
 }
@@ -221,6 +229,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &TraySettings::default(),
         )
     }
@@ -243,6 +252,10 @@ mod tests {
         assert!(
             json["coverage"].is_null(),
             "unknown coverage is null, not a default"
+        );
+        assert!(
+            json["kyberdashVersion"].is_null(),
+            "unknown version is null, not a default"
         );
         assert!(json.get("refresh").is_none() && json.get("receiver").is_none());
         assert_eq!(json["settings"]["harness"], "all");
@@ -302,6 +315,7 @@ mod tests {
         let jobs = json!({ "refresh": { "state": "failed", "lastFailure": "canon.db is locked" } });
         let shared = json!({ "refreshMinutes": 15, "hostReceiver": true });
         let coverage = json!({ "receiver": { "healthy": true } });
+        let version = json!({ "version": "1.2.3", "apiVersion": 1 });
         let json = serde_json::to_value(view_state(
             None,
             ServerPhase::Ready,
@@ -309,6 +323,7 @@ mod tests {
             Some(jobs.clone()),
             Some(shared.clone()),
             Some(coverage.clone()),
+            Some(version.clone()),
             &TraySettings::default(),
         ))
         .unwrap();
@@ -316,6 +331,7 @@ mod tests {
         assert_eq!(json["jobs"], jobs);
         assert_eq!(json["sharedSettings"], shared);
         assert_eq!(json["coverage"], coverage);
+        assert_eq!(json["kyberdashVersion"], version);
     }
 
     /// The tray matches the same table the CLI and the web router match.

@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use crate::api::{
     self, LoopbackClient, Method, CLEAN_PATH, COVERAGE_PATH, IMPORT_HISTORY_PATH, JOBS_PATH,
-    REFRESH_PATH, SETTINGS_PATH,
+    REFRESH_PATH, SETTINGS_PATH, VERSION_PATH,
 };
 use crate::cli::{self, Resolution, SetupReason, SetupState};
 use crate::ipc::{self, ViewState};
@@ -178,6 +178,9 @@ struct ReportCacheState {
     /// Shared coverage (`GET /api/kyber/coverage`), carried verbatim like
     /// `jobs`: the tray renders only its `receiver` key for the saber.
     coverage: Option<Value>,
+    /// The KyberDash version document (`GET /api/kyber/version`), carried
+    /// verbatim; `None` when the latest read failed.
+    kyberdash_version: Option<Value>,
 }
 
 impl Runtime {
@@ -308,6 +311,7 @@ impl Runtime {
             self.cache.jobs.clone(),
             self.cache.shared_settings.clone(),
             self.cache.coverage.clone(),
+            self.cache.kyberdash_version.clone(),
             &self.settings,
         )
     }
@@ -604,6 +608,8 @@ impl Runtime {
         // Same rule for coverage: the saber reads it on the existing poll
         // loop, and a failed read renders red rather than a stale green.
         self.cache.coverage = self.fetch_document(&server_url, COVERAGE_PATH);
+        // Same rule for the version: a failed read must not keep an old one.
+        self.cache.kyberdash_version = self.fetch_document(&server_url, VERSION_PATH);
     }
 
     fn fetch_document(&mut self, server_url: &str, path: &str) -> Option<Value> {
@@ -628,6 +634,188 @@ impl Drop for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::ApiResponse;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    const SERVER: &str = "http://127.0.0.1:4747";
+    const VERSION_ROUTE: &str = "/api/kyber/version";
+
+    /// Routes answered by path. A poll reads five documents, so an ordered
+    /// queue like the api tests' `FakeFetcher` would tie these tests to the
+    /// order the runtime fetches them in.
+    type Routes = Arc<Mutex<HashMap<String, Value>>>;
+    type Fetched = Arc<Mutex<Vec<String>>>;
+
+    struct RoutedFetcher {
+        routes: Routes,
+        fetched: Fetched,
+    }
+
+    impl LoopbackClient for RoutedFetcher {
+        fn send(&mut self, _method: Method, _url: &str, _body: &Value) -> Result<ApiResponse> {
+            bail!("the poll tests never send actions")
+        }
+
+        fn get(&mut self, url: &str) -> Result<Value> {
+            self.fetched
+                .lock()
+                .expect("fetched lock")
+                .push(url.to_string());
+            let path = match url.find("/api/kyber/") {
+                Some(start) => url[start..].split('?').next().unwrap_or_default(),
+                None => bail!("connection refused"),
+            };
+            match self.routes.lock().expect("routes lock").get(path) {
+                Some(document) => Ok(document.clone()),
+                None => bail!("connection refused"),
+            }
+        }
+    }
+
+    struct NoLaunch;
+
+    impl Spawner for NoLaunch {
+        fn spawn(
+            &mut self,
+            _program: &str,
+            _args: &[&str],
+        ) -> std::io::Result<Box<dyn supervisor::ServerProcess>> {
+            Err(std::io::Error::other(
+                "the poll tests never launch a server",
+            ))
+        }
+    }
+
+    struct NoopClock;
+
+    impl Clock for NoopClock {
+        fn sleep(&mut self, _duration: Duration) {}
+    }
+
+    struct SilentEvents;
+
+    impl EventSink for SilentEvents {
+        fn emit(&mut self, _name: &str, _state: &ViewState) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct SilentOpener;
+
+    impl Opener for SilentOpener {
+        fn open(&mut self, _url: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn at(secs: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    /// Every document a poll reads, with the version document the server
+    /// reports for this build.
+    fn server_routes() -> Routes {
+        let routes = HashMap::from([
+            ("/api/kyber/report".to_string(), json!({"schemaVersion": 1})),
+            (
+                "/api/kyber/jobs".to_string(),
+                json!({"refresh": {"state": "idle"}}),
+            ),
+            (
+                "/api/kyber/settings".to_string(),
+                json!({"refreshMinutes": 15}),
+            ),
+            (
+                "/api/kyber/coverage".to_string(),
+                json!({"receiver": {"healthy": true}}),
+            ),
+            (
+                VERSION_ROUTE.to_string(),
+                json!({"version": "9.8.7", "apiVersion": 1}),
+            ),
+        ]);
+        Arc::new(Mutex::new(routes))
+    }
+
+    /// A runtime whose supervisor is already attached to the fake server, so a
+    /// poll has a server URL to read from without launching anything.
+    fn attached_runtime(routes: Routes, fetched: Fetched) -> Runtime {
+        let settings_dir =
+            std::env::temp_dir().join(format!("kyberdash-version-poll-{}", std::process::id()));
+        let mut runtime = Runtime::new(
+            RuntimeConfig {
+                cli_program: Some("kyberdash".to_string()),
+                settings_dir,
+                now: at(1_700_000_000),
+            },
+            RuntimeDependencies {
+                server_spawner: Box::new(NoLaunch),
+                fetcher: Box::new(RoutedFetcher { routes, fetched }),
+                clock: Box::new(NoopClock),
+                event_sink: Box::new(SilentEvents),
+                opener: Box::new(SilentOpener),
+            },
+        );
+        if let Some(attached) = runtime.supervisor.as_mut() {
+            attached.attach(supervisor::Listening {
+                url: SERVER.to_string(),
+                pid: std::process::id(),
+                version: "9.8.7".to_string(),
+                api_version: 1,
+            });
+        }
+        runtime
+    }
+
+    fn snapshot(runtime: &Runtime) -> Value {
+        serde_json::to_value(runtime.get_view_state()).expect("serialize view state")
+    }
+
+    /// The popover shows the KyberDash version the server reports. A poll must
+    /// fetch it from the version route and carry the document through unchanged,
+    /// as it does the jobs, settings and coverage documents.
+    #[test]
+    fn a_poll_carries_the_server_version_document_unchanged() {
+        let fetched: Fetched = Arc::default();
+        let mut runtime = attached_runtime(server_routes(), fetched.clone());
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        assert_eq!(
+            snapshot(&runtime)["kyberdashVersion"],
+            json!({"version": "9.8.7", "apiVersion": 1})
+        );
+        let version_url = format!("{SERVER}{VERSION_ROUTE}");
+        assert!(
+            fetched.lock().expect("fetched lock").contains(&version_url),
+            "the poll must read {version_url}"
+        );
+    }
+
+    /// A failed version read must not keep the version an earlier poll read.
+    /// Unknown stays unknown, as with jobs, settings and coverage; the popover
+    /// must not show a version the latest poll could not confirm.
+    #[test]
+    fn a_failed_version_read_clears_the_version_from_an_earlier_poll() {
+        let routes = server_routes();
+        let mut runtime = attached_runtime(routes.clone(), Arc::default());
+        runtime.poll_report(at(1_700_000_000)).expect("first poll");
+        assert_eq!(
+            snapshot(&runtime)["kyberdashVersion"],
+            json!({"version": "9.8.7", "apiVersion": 1}),
+            "precondition: the first poll reads the version"
+        );
+
+        routes.lock().expect("routes lock").remove(VERSION_ROUTE);
+        runtime.poll_report(at(1_700_000_300)).expect("second poll");
+
+        assert!(
+            snapshot(&runtime)["kyberdashVersion"].is_null(),
+            "a failed version read must clear the earlier version"
+        );
+    }
 
     #[test]
     fn a_clean_body_omits_reingest_weeks_unless_asked() {

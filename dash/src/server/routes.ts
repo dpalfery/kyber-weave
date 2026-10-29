@@ -1227,6 +1227,21 @@ export function handleKyberRequest(
     return true
   }
 
+  // Store-free on purpose: `/meta` calls bridge.getMeta(), which measured 23 s during a
+  // projection, and the tray polls every 15 s. The build identity needs no store read,
+  // so this answers instantly even while the database is busy or unavailable.
+  if (url.pathname === '/api/kyber/version') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    sendKyberJson(res, 200, {
+      version: KYBERDASH_VERSION,
+      apiVersion: REPORT_SCHEMA_VERSION,
+    })
+    return true
+  }
+
   // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T5,
   // issues #189/#198/#199). Refresh window, receiver activity, quarantine
   // reasons, checkpoint statuses, and fresh receiver state in one read-only payload —

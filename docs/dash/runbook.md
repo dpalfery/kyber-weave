@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -1070,6 +1070,14 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    - `--port <number>`: HTTP port for this run only (overrides the persisted `dashboard.port`; default `4747`). A taken port refuses the start with an actionable error — it never falls back to a random port.
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
+
+   Check which engine version is answering. The route is store-free, so it answers at once even while a projection runs:
+
+   ```bash
+   curl -s http://127.0.0.1:3000/api/kyber/version
+   ```
+
+   It returns `{ "version": "...", "apiVersion": 1 }`. A dev checkout reports the version in `dash/package.json`. A release reports the version stamped into `dash/package.json` at release time, which is the same version the web and tray Settings views show.
 
 #### Navigating the web dashboard
 

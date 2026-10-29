@@ -47,6 +47,12 @@ export type SharedSettings = {
   receiverHosted: boolean
 }
 
+/** The running KyberDash version (`GET /api/kyber/version`), carried verbatim. */
+export type KyberdashVersion = {
+  version: string
+  apiVersion: number
+}
+
 /**
  * Live receiver health (`GET /api/kyber/coverage` → `receiver`), carried
  * verbatim like `jobs`. `healthy` is authoritative; the saber renders it and
@@ -108,6 +114,8 @@ export type ViewState = {
   sharedSettings?: SharedSettings | null
   /** Shared coverage, carried verbatim; the saber reads only `receiver`. */
   coverage?: CoverageDoc | null
+  /** `null` or absent means the core could not read the version: unknown, never a default. */
+  kyberdashVersion?: KyberdashVersion | null
   /**
    * Legacy: the Rust core no longer serializes these two (the server owns the
    * refresh and receiver state now, see `jobs` / `sharedSettings`). They stay

@@ -6,6 +6,7 @@
 // server silently corrects is worse than an error: the caller would render figures for a
 // window it did not ask for and have no way to tell.
 
+import { readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, expect, it } from 'vitest'
 
@@ -112,10 +113,52 @@ describe('GET /api/kyber/meta', () => {
   })
 })
 
+describe('GET /api/kyber/version', () => {
+  it('returns exactly two keys: the build version and the REST contract version', () => {
+    const { status, body } = call('/api/kyber/version')
+    expect(status).toBe(200)
+    expect(Object.keys(body as Record<string, unknown>).sort()).toEqual(['apiVersion', 'version'])
+  })
+
+  it('reports the version from dash/package.json, the same build identity /meta carries', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      version: string
+    }
+    expect(call('/api/kyber/version').body).toMatchObject({ version: pkg.version })
+  })
+
+  it('reports the REST contract version (REPORT_SCHEMA_VERSION, currently 1)', () => {
+    expect(call('/api/kyber/version').body).toMatchObject({ apiVersion: 1 })
+  })
+
+  it('answers without reading the store, so a missing or broken database cannot block it', () => {
+    // Every property access on the bridge throws, so any store read (getMeta included) fails the test.
+    const storeless = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          throw new Error(`store read '${String(prop)}' must not run for /api/kyber/version`)
+        },
+      },
+    ) as unknown as KyberBridge
+    const { status, body } = call('/api/kyber/version', 'GET', storeless)
+    expect(status).toBe(200)
+    expect(body).toEqual({ version: expect.any(String), apiVersion: 1 })
+  })
+
+  it('rejects a method other than GET with 405 for POST, PUT and DELETE', () => {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const { status } = call('/api/kyber/version', method)
+      expect(status, method).toBe(405)
+    }
+  })
+})
+
 describe('the existing routing rules still hold', () => {
   it('claims every /api/kyber path, so none falls through to the SPA', () => {
     expect(call('/api/kyber/report').handled).toBe(true)
     expect(call('/api/kyber/meta').handled).toBe(true)
+    expect(call('/api/kyber/version').handled).toBe(true)
   })
 
   it('404s an unknown /api/kyber path instead of serving HTML', () => {

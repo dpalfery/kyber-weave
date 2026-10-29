@@ -6,19 +6,28 @@
  * webview overwrite a value something else had just changed.
  */
 
-import type { SharedSettings, TraySettings } from '../viewState'
+import type { KyberdashVersion, SharedSettings, TraySettings } from '../viewState'
 import { CadenceField } from './CadenceField'
 
 type Props = {
   settings: TraySettings
   /** The server-owned document; `null` means the core could not read it. */
   sharedSettings?: SharedSettings | null
+  /** The running KyberDash version; `null` means the core could not read it. */
+  kyberdashVersion?: KyberdashVersion | null
   onChange: (patch: Partial<TraySettings>) => void
   onSharedChange?: (patch: Partial<SharedSettings>) => void
   onBack: () => void
 }
 
-export function SettingsView({ settings, sharedSettings = null, onChange, onSharedChange, onBack }: Props) {
+export function SettingsView({
+  settings,
+  sharedSettings = null,
+  kyberdashVersion = null,
+  onChange,
+  onSharedChange,
+  onBack,
+}: Props) {
   return (
     <section className="settings" data-testid="settings-view">
       <h1 className="settings__heading">Settings</h1>
@@ -116,6 +125,12 @@ export function SettingsView({ settings, sharedSettings = null, onChange, onShar
           </label>
         </>
       )}
+
+      <p className="settings__note" data-testid="settings-kyberdash-version">
+        {kyberdashVersion === null
+          ? 'KyberDash version unknown'
+          : `KyberDash version ${kyberdashVersion.version}`}
+      </p>
 
       <nav className="actions">
         <button type="button" onClick={onBack} data-testid="settings-back">

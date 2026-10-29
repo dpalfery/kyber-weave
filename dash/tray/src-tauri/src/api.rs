@@ -34,17 +34,21 @@ pub const SETTINGS_PATH: &str = "/api/kyber/settings";
 /// reads only `receiver` from it for the green/red collector saber; the full
 /// document rides to the popover as `coverage` in `ViewState`.
 pub const COVERAGE_PATH: &str = "/api/kyber/coverage";
+/// The running KyberDash version document (`GET`, read-only), carried to the
+/// popover as `kyberdashVersion` in `ViewState`.
+pub const VERSION_PATH: &str = "/api/kyber/version";
 pub const REFRESH_PATH: &str = "/api/kyber/refresh";
 pub const CLEAN_PATH: &str = "/api/kyber/clean";
 pub const IMPORT_HISTORY_PATH: &str = "/api/kyber/import-history";
 
 /// Every endpoint the tray may contact. A closed list, so a bug that builds a
 /// URL from webview input cannot reach an arbitrary route on the server.
-const API_PATHS: [&str; 7] = [
+const API_PATHS: [&str; 8] = [
     REPORT_PATH,
     JOBS_PATH,
     SETTINGS_PATH,
     COVERAGE_PATH,
+    VERSION_PATH,
     REFRESH_PATH,
     CLEAN_PATH,
     IMPORT_HISTORY_PATH,
@@ -472,6 +476,30 @@ mod tests {
             "http://127.0.0.1:4747/other",
             "http://evil.test/api/kyber/clean",
             "http://127.0.0.1:1@evil.test/api/kyber/clean",
+        ] {
+            assert!(
+                api_request_url(refused).is_err(),
+                "{refused} should be refused"
+            );
+        }
+    }
+
+    /// The KyberDash version comes from its own fixed route. Only that exact
+    /// path is accepted, and like the other documents it takes no query.
+    #[test]
+    fn the_version_route_is_a_fixed_endpoint_that_takes_no_query() {
+        assert_eq!(VERSION_PATH, "/api/kyber/version");
+        assert!(API_PATHS.contains(&VERSION_PATH));
+
+        let url = endpoint_url("http://127.0.0.1:4747", VERSION_PATH).unwrap();
+        assert_eq!(url, "http://127.0.0.1:4747/api/kyber/version");
+        assert_eq!(api_request_url(&url).unwrap(), url);
+
+        for refused in [
+            "http://127.0.0.1:4747/api/kyber/version?days=30",
+            "http://127.0.0.1:4747/api/kyber/version#fragment",
+            "http://127.0.0.1:4747/api/kyber/version/../clean",
+            "http://127.0.0.1:4747/api/kyber/versions",
         ] {
             assert!(
                 api_request_url(refused).is_err(),

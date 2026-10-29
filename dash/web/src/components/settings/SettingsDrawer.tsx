@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { SlideOutDrawer } from '../ui/SlideOutDrawer.js'
 import {
   fetchKyberCaptureStatus,
+  fetchKyberVersion,
   postKyberCapture,
   updateKyberSettings,
   type KyberCaptureAction,
@@ -23,6 +24,7 @@ export interface SettingsDrawerProps {
 }
 
 const CAPTURE_KEY = ['kyber-capture'] as const
+const VERSION_KEY = ['kyber-version'] as const
 
 const EVENT_LABEL: Record<KyberCaptureEvent['kind'], string> = {
   'would-write': 'Will write',
@@ -188,6 +190,15 @@ function SettingsContent() {
     },
   })
   const busy = capture.isPending || receiver.isPending
+
+  // Read once when the drawer content mounts: the version does not change while the
+  // drawer is open, so there is no interval and no refetch on focus or status refresh.
+  const version = useQuery({
+    queryKey: VERSION_KEY,
+    queryFn: fetchKyberVersion,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
 
   const harnesses = status.data?.harnesses ?? []
   const nameOf = (id: string): string => harnesses.find((h) => h.id === id)?.displayName ?? id
@@ -392,6 +403,14 @@ function SettingsContent() {
       )}
 
       <DashboardPortSetting />
+
+      <p data-testid="settings-kyberdash-version" className="text-[11px] text-muted-foreground">
+        {version.data
+          ? `KyberDash version ${version.data.version}`
+          : version.isError
+            ? 'KyberDash version unknown'
+            : 'KyberDash version …'}
+      </p>
     </>
   )
 }

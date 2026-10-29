@@ -1572,6 +1572,16 @@ export function fetchKyberSettings(): Promise<KyberSettings> {
   return fetchJson<KyberSettings>('/api/kyber/settings')
 }
 
+/** `GET /api/kyber/version`: the running engine's version and its API contract version. */
+export interface KyberVersion {
+  version: string
+  apiVersion: number
+}
+
+export function fetchKyberVersion(): Promise<KyberVersion> {
+  return fetchJson<KyberVersion>('/api/kyber/version')
+}
+
 /**
  * Applies a partial settings change and returns the full settings as the server
  * now holds them, so the panel renders what was persisted rather than what was
