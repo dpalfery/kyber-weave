@@ -390,19 +390,10 @@ public sealed class SquadLifecycleService
                 ? effectiveGlobalRoots
                 : _globalRoots;
 
-            // Written before the plan so the digest the receipt records is one this run has already
-            // read back from the deployed path; recording it any earlier would claim ownership of a
-            // file the run never wrote, and every later run would read the operator's untouched file
-            // as an edit. The cost of the ordering is the mirror case: a deployment that fails after
-            // this write leaves the guidance updated and the run failing loudly, which the next run
-            // repairs by adopting bytes that already equal the shipped default.
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
-            SquadResponseGuidanceDeployer? guidanceDeployer =
-                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
-                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
-                    : null;
-            SquadHomeFile? guidance = guidanceDeployer?.Deploy(previousReceipt.HomeFiles, warnings);
-
+            // The plan is built first, so preflight — conflicts, adoption checks, legacy-layout refusal —
+            // decides whether this run may write at all before anything outside the transaction is
+            // touched. The home guidance is written after that decision and before the commit, so the
+            // receipt carries only a digest read back from the deployed path.
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
                 targetRoot,
                 request.Scope,
@@ -413,8 +404,7 @@ public sealed class SquadLifecycleService
                 request.ReplaceManaged,
                 _timeProvider,
                 planGlobalRoots,
-                [],
-                guidance is null ? null : ReplaceHomeFile(previousReceipt.HomeFiles, guidance));
+                []);
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -426,6 +416,18 @@ public sealed class SquadLifecycleService
                     DryRun: true,
                     ModelChanges: modelChanges,
                     Warnings: RenderWarningMessages(renderResult.Warnings));
+
+            // Before the commit, after preflight: the remaining trade is that a failure after this write
+            // leaves the new default in place with a failing run; the next run adopts those bytes, so it
+            // repairs itself rather than reporting an edit the operator never made.
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            SquadResponseGuidanceDeployer? guidanceDeployer =
+                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
+                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    : null;
+            SquadHomeFile? guidance = guidanceDeployer?.Deploy(previousReceipt.HomeFiles, warnings);
+            if (guidance is not null)
+                plan.AttachHomeFiles(ReplaceHomeFile(previousReceipt.HomeFiles, guidance));
 
             SquadTransaction transaction = new(_stateStore, _observer);
             transaction.Execute(plan);

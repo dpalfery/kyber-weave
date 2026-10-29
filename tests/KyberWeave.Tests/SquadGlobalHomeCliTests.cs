@@ -901,6 +901,83 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
+    /// Preflight is what decides whether a run is allowed to write, so it must decide before the home
+    /// guidance is touched. A run that fails on a conflicting path and has already written the guidance
+    /// would leave behind a change nothing accounted for.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalWhosePlanFailsPreflightLeavesAnAbsentResponseGuidanceAbsent()
+    {
+        using Harness h = NewHarness("guidance-blocked-preflight-absent");
+        ScriptedAgentRenderer installRenderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, installRenderer, SquadTarget.Codex);
+
+        // An unowned hand-authored file at a path the update would claim, so plan construction throws
+        // before any write — the same portable mechanism the collision tests use.
+        string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
+        File.WriteAllBytes(
+            Path.Combine(Path.GetDirectoryName(architect)!, "collider.md"),
+            Encoding.UTF8.GetBytes("hand-authored collider\n"));
+        string guidance = GuidancePath(h);
+        Assert.False(File.Exists(guidance), $"The scenario requires no guidance at '{guidance}' beforehand.");
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+
+        AssertExit(execution, 1);
+        Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
+        Assert.False(
+            File.Exists(guidance),
+            "A run whose plan fails preflight must not have written the response guidance: preflight " +
+            $"decides whether the run may write, and '{guidance}' did not exist beforehand.");
+        string receipt = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
+        Assert.False(
+            receipt.Contains("response-guidance.md", StringComparison.Ordinal),
+            "A run that never deployed the guidance must not record ownership of it.");
+    }
+
+    /// <summary>
+    /// The same ordering seen from the other side: a refreshable default already on disk keeps both its
+    /// bytes and its record when the plan is refused, so a failed run cannot silently upgrade the file
+    /// it was never allowed to touch.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalWhosePlanFailsPreflightLeavesADigestMatchingResponseGuidanceUntouched()
+    {
+        using Harness h = NewHarness("guidance-blocked-preflight-deployed");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+
+        // An earlier release's default, on disk and recorded: exactly the file a later run would replace.
+        string guidance = GuidancePath(h);
+        byte[] current = File.ReadAllBytes(guidance);
+        byte[] superseded = Encoding.UTF8.GetBytes(
+            "Response guidance from an earlier Kyber-Weave release, which the current release supersedes.\n");
+        RewriteRecordedDigest(h, current, superseded);
+        File.WriteAllBytes(guidance, superseded);
+        string receiptBefore = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
+
+        string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
+        File.WriteAllBytes(
+            Path.Combine(Path.GetDirectoryName(architect)!, "collider.md"),
+            Encoding.UTF8.GetBytes("hand-authored collider\n"));
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+
+        AssertExit(execution, 1);
+        Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(superseded, File.ReadAllBytes(guidance));
+        Assert.Equal(receiptBefore, File.ReadAllText(RequireFile(GlobalReceiptPath(h))));
+    }
+
+    /// <summary>
     /// Rewrites the recorded SHA-256 of the deployed guidance across the home state, so the superseded
     /// bytes look like a default this release replaced rather than a user edit. The receipt is the whole
     /// ownership record, so replacing the digest there is the same state an older release leaves behind.
