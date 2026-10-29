@@ -434,16 +434,26 @@ and anything else belongs to the operator:
   with no ownership record was written by the operator or by a release older than the receipt,
   so it is never claimed. Deleting the file is how an operator takes the shipped default back.
 
-Ownership is recorded only from a digest this run read back from the deployed path. The write
-therefore happens before the deployment plan is built and before the transaction commits: a
-digest copied from the copy this run intended to write would claim ownership of a file the run
-never verified, and every later run would then read the operator's untouched file as an edit.
-The cost of that ordering is the mirror case — a deployment that fails after the guidance write
-leaves the new default in place and the run failing loudly — and the next run repairs it by
-adopting bytes that already equal the shipped default. A guidance file that cannot be read or
-written degrades the run's report with a warning naming the remedy — rerun
-`squad update --global` — and never fails the deployment. Nothing is ever written outside the
-home root.
+Ownership is recorded only from a digest this run read back from the deployed path, and the order
+follows from that: the deployment plan is built and validated first, then the guidance is written
+and read back, then the transaction commits the receipt. The plan is what decides whether the run
+may write at all, so a plan that fails preflight — an unmanaged collision, an adoption check, a
+legacy-layout refusal — leaves the guidance exactly as it found it, and a dry run writes nothing
+at all. The record is attached to the receipt after validation, through a path that can only be
+reached with a digest a write has already produced, so a refused plan cannot describe a home file
+the run never delivered.
+
+One window remains between the write and the commit: a deployment that fails after the guidance
+write leaves the new default in place with the run failing loudly, and the next run repairs it by
+adopting bytes that already equal the shipped default. A guidance write that degrades leaves the
+run's exit status unchanged. The conditions that degrade rather than throw are the ones a
+filesystem, a platform path form, or a host policy can impose on an otherwise healthy run: an I/O
+failure, a permission denial, a path form the platform cannot represent, and a security policy
+that refuses the write. A programming error still throws, because a warning an operator cannot act
+on is how a defect survives. The shipped default is read under the same policy: a build that
+carries no readable default writes nothing, records nothing, and warns to reinstall from a release
+that ships the guidance rather than to retry — the defect travels inside the binary, so another
+run of the same build would fail the same way. Nothing is ever written outside the home root.
 
 #### Lock version and preset contract
 
@@ -920,6 +930,9 @@ drift from the first, and that drift is exactly what the standard exists to prev
 - **The conductor relays**: every specialist digest the conductor surfaces to the human is
   relayed in the same shape. The digest schemas themselves stay machine-consumed and are
   unchanged — the format governs how a digest is presented, never which fields it carries.
+  Presentation is the only thing that changes: every status marker, id, path, count, gap, open
+  question, and evidence value reaches the human exactly as the specialist returned it, and
+  nothing is dropped, merged, or paraphrased.
 
 **Why a name and not a link.** The body resource-closure rule governs local path links: a
 Markdown link in an agent or skill body resolves only to a file inside that owner's own
@@ -933,8 +946,16 @@ instead of each body restating it. The `response-format` skill links its own def
 lives in the skill's `user-guidance.md`; the override is the user's own file at
 `<home>/.kyber-weave/response-guidance.md`, deployed and refreshed as described under
 [home-owned files](#home-owned-files-and-the-user-home-response-guidance). Where that file
-exists it replaces the skill's default wording — one file the operator edits, rather than a
-deployed skill the next update would replace.
+exists and is usable, agents follow it in place of the skill's wording — one file the operator
+edits, rather than a deployed skill the next update would replace. Where it is missing, empty,
+unreadable, or longer than about 8 KB, it is ignored and the skill's wording is used, so one stray
+file cannot leave every answer shapeless.
+
+The override shapes how an agent writes and nothing else. Anything in it that asks an agent to run
+commands, call tools, read or send data, or change permissions or safety rules is ignored: the file
+is a style override, not an instruction channel, and a customisation that carried authority would
+be a way to widen what a deployed agent may do without any of the review that a canonical body
+gets.
 
 **Enforcement is instruction-based, by necessity.** Nothing in the squad's release model can
 intercept an assistant's prose, so the contract is carried by the skill and the two agent

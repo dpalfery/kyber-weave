@@ -73,8 +73,8 @@ requirement those bodies implement. Mechanics live in
 | **R1 — One shape, in order** | Every user-facing response from a primary conversational squad agent states, in this order: a title line naming the work; a bottom line of at most 3 sentences, written for an experienced reader with no prior involvement in the work and assuming no context; and the open decisions whenever a decision is open, one decision where possible, with a recommendation attached. The order is part of the requirement, not a preference. |
 | **R2 — The format is never named** | A response never labels, names, mentions, or refers to the format it follows: no tags, no structural headers, no meta-commentary about how the answer is arranged. Bullets carry issues, options, and status, and a status statement uses the same shape as a question. |
 | **R3 — Who is bound** | The primary conversational agents `conductor` and `bug-crusher` load the `response-format` skill by name and follow it for every user-facing response. `product-owner` is exempt: it is headless, and its output is a persisted artifact and a structured digest for the conductor rather than a conversational reply. |
-| **R4 — Digests stay machine-consumed** | The conductor relays every specialist digest it surfaces to the human in the response-format shape, and the digest schemas themselves are unchanged. The format governs the presentation of a digest, never the fields it carries. |
-| **R5 — One home, one override** | The standard has a single canonical home, the `response-format` skill; no agent body restates it. Where the user-home file `~/.kyber-weave/response-guidance.md` exists, it overrides the skill's default wording and is read in place of it. |
+| **R4 — Digests stay machine-consumed** | The conductor relays every specialist digest it surfaces to the human in the response-format shape, and the digest schemas themselves are unchanged. The format governs the presentation of a digest, never the fields it carries: every status marker, id, path, count, gap, open question, and evidence value reaches the human exactly as the specialist returned it, and nothing is dropped, merged, or paraphrased. |
+| **R5 — One home, one override** | The standard has a single canonical home, the `response-format` skill; no agent body restates it. Where the user-home file `~/.kyber-weave/response-guidance.md` exists and is usable, it overrides the skill's default wording and is read in place of it; where it is missing, empty, unreadable, or longer than about 8 KB, it is ignored and the skill's wording is used. The override shapes how an agent writes and nothing else: anything in it that asks an agent to run commands, call tools, read or send data, or change permissions or safety rules is ignored. |
 
 The skill is bound by name, not by a link. The body resource-closure rule governs local path
 links — a link resolves only to a file inside its owner's own directory — while a skill invoked
@@ -97,6 +97,8 @@ artifact kind. It is default-off and opt-in per repository.
   `<intake-assessment>` mode property into the repository root `AGENTS.md`, with the value
   `enabled`. The conductor resolves that property: present → run the assessment for a request
   whose intent is unstated; absent → skip the assessment and take the plan path directly.
+- **Routing is never silent**: when the assessment is off and the conductor takes the plan path,
+  it says so in one line and tells the user they can ask for a specification instead.
 - **Defect-first precedence is unchanged**: a concrete failure that has not been diagnosed
   outranks the artifact-choice question, and the assessment never runs in place of a diagnosis.
 

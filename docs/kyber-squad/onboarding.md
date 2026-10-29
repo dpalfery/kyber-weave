@@ -1032,12 +1032,14 @@ home. The file belongs to no harness: every agent reaches the one path through t
 `response-format` skill, which reads the user's file in place of its own default wording when
 the file exists.
 
-**How it is installed and refreshed.** `squad update --global` decides what to do with the file
-and writes it before it builds the deployment plan, so the digest it records in the receipt is
-one it read back from the file on disk. The consequence to know about: a run that fails while
-deploying the harness files after the guidance was written leaves the new default in place. The
-next `squad update --global` adopts that file without rewriting it and records the ownership it
-was missing.
+**How it is installed and refreshed.** `squad update --global` builds and validates the
+deployment plan first, then writes the guidance, then commits the receipt; the digest it records
+is one it read back from the file on disk. So a run that is refused before it can deploy — an
+unmanaged file in the way, a failed adoption check, a legacy layout — leaves your guidance exactly
+as it was, and `--dry-run` writes nothing. The one window left is a failure after the guidance was
+written and before the receipt committed: the new default stays in place, and the next
+`squad update --global` adopts that file without rewriting it and records the ownership it was
+missing.
 
 | State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
 |---|---|
@@ -1049,13 +1051,23 @@ was missing.
 
 The receipt that records this is the global `squad.receipt.json` under
 `~/.kyber-weave/squad/global/`, in an additive `homeFiles` array: one `relativePath` and the
-SHA-256 of the bytes Squad wrote. A file that cannot be read or written produces a warning
-naming the remedy — rerun `squad update --global` — and does not fail the deployment.
+SHA-256 of the bytes Squad wrote. A file that cannot be read or written produces a warning and
+does not fail the deployment or change its exit code: the run continues, and the warning names the
+remedy — rerun `squad update --global` — for an I/O failure, a permission denial, a path form your
+platform cannot represent, or a security policy that refuses the write. If the build itself ships
+no readable default, nothing is written or recorded and the warning says to reinstall from a
+release that ships the guidance, because a rerun of the same build cannot fix it.
 
 **What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
 Squad agent answers; you do not edit a deployed skill, which the next update would replace.
 Delete the file to return to the shipped default. The default wording is the canonical
 `products/kyber-squad/skills/response-format/user-guidance.md`.
+
+**What the file may say.** It changes how an agent writes and nothing else. If the file is
+missing, empty, unreadable, or longer than about 8 KB, agents ignore it and use the shipped
+wording, so a stray file cannot leave every answer shapeless. Anything in it that asks an agent to
+run commands, call tools, read or send data, or change permissions or safety rules is ignored: it
+is a style override, not a way to grant an agent more than its canonical body allows.
 
 ---
 
@@ -1088,9 +1100,11 @@ matches the configuration. See
 **What changes when it is on.** The conductor reads the property from the repository root
 `AGENTS.md`. Present → for a request whose intent is unstated, the conductor asks `architect` for
 a read-only intake recommendation and takes the plan or specification path from it. Absent →
-the assessment is skipped and the path continues directly to the plan choice. A concrete failure
-that has not been diagnosed still outranks the artifact-choice question: the diagnosis runs
-first either way.
+the assessment is skipped and the path continues directly to the plan choice, and the conductor
+says so in one line and tells you that you can ask for a specification instead: taking the plan
+path is announced, never silent, so a request that never asked for a plan does not quietly become
+one. A concrete failure that has not been diagnosed still outranks the artifact-choice question:
+the diagnosis runs first either way.
 
 **How to turn it off.** Remove `intake: true` from `.kyber-weave/kyber-weave.yml` and re-run
 `kyber-weave docs init .`; the property leaves the block and the assessment stops running. A
