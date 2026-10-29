@@ -308,3 +308,146 @@ describe('CanonicalProjectionScheduler shared lease', () => {
     expect(waiterGated.passes).toBe(1)
   })
 })
+
+describe('CanonicalProjectionScheduler shutdown deadline (F1)', () => {
+  it('drain() gives up waiting for a heartbeat-live stuck holder, retains work, and settles', async () => {
+    const { store: holderStore } = openFileStore()
+    const waiterStore = new CanonStore(join(tempDirs[0] as string, 'canon.db'))
+    stores.push(waiterStore)
+    const holderGated = gatedProjector()
+    const waiterGated = gatedProjector()
+    const reported: unknown[] = []
+    const holder = trackScheduler(
+      new CanonicalProjectionScheduler({
+        store: holderStore,
+        project: holderGated.project,
+        idleMs: 1_000,
+        maxWaitMs: 60_000,
+        minIntervalMs: 0,
+        leaseOwner: 'holder',
+      }),
+    )
+    // Past the 90 s stale gate: without the holder's 10 s heartbeat the
+    // lease would reclaim, so surviving past it proves the holder stayed
+    // live the whole wait and the deadline — not the staleness gate — ended it.
+    const waiter = trackScheduler(
+      new CanonicalProjectionScheduler({
+        store: waiterStore,
+        project: waiterGated.project,
+        idleMs: 60_000,
+        maxWaitMs: 60_000,
+        minIntervalMs: 0,
+        leaseOwner: 'waiter',
+        shutdownDeferredTimeoutMs: 120_000,
+        onError: (error) => {
+          reported.push(error)
+        },
+      }),
+    )
+
+    holder.request()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await holderGated.started(1) // holder's pass wedges here; its heartbeat keeps the lease fresh
+
+    const waiting = waiter.request()
+    let waitingSettled = false
+    void waiting.then(() => {
+      waitingSettled = true
+    })
+    const drained = waiter.drain()
+    let drainedResolved = false
+    void drained.then(() => {
+      drainedResolved = true
+    })
+    // Poll past the stale gate while the holder heartbeats: every retry
+    // still defers, so no waiter pass ever starts.
+    for (let elapsed = 0; elapsed < 120_000; elapsed += SCHEDULER_DEFERRED_RETRY_MS) {
+      await vi.advanceTimersByTimeAsync(SCHEDULER_DEFERRED_RETRY_MS)
+    }
+    await drained
+    expect(drainedResolved).toBe(true)
+    expect(waiterGated.passes).toBe(0)
+    expect(holderGated.passes).toBe(1)
+    // Fail loudly: the give-up is reported and the request settles instead
+    // of hanging on owed work that never ran.
+    expect(reported).toHaveLength(1)
+    expect(String((reported[0] as Error)?.message ?? reported[0])).toMatch(/gave up waiting for a live foreign leaseholder/)
+    await waiting
+    expect(waitingSettled).toBe(true)
+
+    // Retained work survives the give-up: once the stuck holder finishes,
+    // the next drain runs it.
+    holderGated.open(1)
+    await vi.advanceTimersByTimeAsync(SCHEDULER_DEFERRED_RETRY_MS)
+    const redrained = waiter.drain()
+    await waiterGated.started(1)
+    waiterGated.open(1)
+    await redrained
+    expect(waiterGated.passes).toBe(1)
+  })
+
+  it('close() gives up waiting for a heartbeat-live stuck holder and still seals', async () => {
+    const { store: holderStore } = openFileStore()
+    const waiterStore = new CanonStore(join(tempDirs[0] as string, 'canon.db'))
+    stores.push(waiterStore)
+    const holderGated = gatedProjector()
+    const waiterGated = gatedProjector()
+    const reported: unknown[] = []
+    const holder = trackScheduler(
+      new CanonicalProjectionScheduler({
+        store: holderStore,
+        project: holderGated.project,
+        idleMs: 1_000,
+        maxWaitMs: 60_000,
+        minIntervalMs: 0,
+        leaseOwner: 'holder',
+      }),
+    )
+    const waiter = trackScheduler(
+      new CanonicalProjectionScheduler({
+        store: waiterStore,
+        project: waiterGated.project,
+        idleMs: 60_000,
+        maxWaitMs: 60_000,
+        minIntervalMs: 0,
+        leaseOwner: 'waiter',
+        shutdownDeferredTimeoutMs: 5_000,
+        onError: (error) => {
+          reported.push(error)
+        },
+      }),
+    )
+
+    holder.request()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await holderGated.started(1) // wedged pass; heartbeat keeps the lease live
+
+    waiter.request()
+    const closing = waiter.close()
+    let closedResolved = false
+    void closing.then(() => {
+      closedResolved = true
+    })
+    for (let elapsed = 0; elapsed < 5_000; elapsed += SCHEDULER_DEFERRED_RETRY_MS) {
+      await vi.advanceTimersByTimeAsync(SCHEDULER_DEFERRED_RETRY_MS)
+    }
+    await closing
+    expect(closedResolved).toBe(true)
+    expect(waiterGated.passes).toBe(0)
+    expect(reported).toHaveLength(1)
+    expect(String((reported[0] as Error)?.message ?? reported[0])).toMatch(/gave up waiting for a live foreign leaseholder/)
+
+    // Sealed: no later request starts anything, so the store can be closed.
+    // Release the stuck holder for the shared afterEach teardown.
+    holderGated.open(1)
+    await vi.advanceTimersByTimeAsync(SCHEDULER_DEFERRED_RETRY_MS)
+    expect(holderGated.passes).toBe(1)
+    await waiter.request()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(waiterGated.passes).toBe(0)
+    // Cleanup for the shared afterEach `close()`: the waiter still retains
+    // owed work (the give-up never clears it), so the teardown close will
+    // run one final pass — pre-open its gate so the teardown cannot hang.
+    waiterGated.open(1)
+  })
+})

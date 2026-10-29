@@ -57,7 +57,7 @@ import {
   type Measurability,
 } from './types.js'
 import type { OtlpLog, OtlpSpan } from '../otel/receiver.js'
-import { DEFAULT_PENDING_TTL_MS, ingestLogBatch, PENDING_INTERACTION_PROMPT } from './log-ingest.js'
+import { beginLogIngestBatch, DEFAULT_PENDING_TTL_MS, ingestLogPage, PENDING_INTERACTION_PROMPT } from './log-ingest.js'
 
 /**
  * Rows per replay page (F8): the byte cap (`DEFAULT_PENDING_PAGE_BYTES`)
@@ -522,18 +522,26 @@ export function ingestBatchWithAdapters(
   // just timing: an api_request_body parse landing in the same replay must
   // replace the prompt-derived part, not be replaced by it (Q4).
   settlePendingInteractionPrompts(store, Date.now(), DEFAULT_PENDING_TTL_MS)
-  // Byte-bounded replay (F8): pending logs are replayed page by page in
-  // `log_id` order instead of snapshotting every payload at once. Each page
-  // is enriched, consumed, or re-pended before the next is read, so the
+  // Byte-bounded replay (F8 review): pending logs are replayed page by page in
+  // `log_id` order instead of snapshotting every payload at once. Expiry and
+  // the dedup map are computed once up front — not once per page — and each
+  // page is enriched, consumed, or re-pended before the next is read, so the
   // working set stays near one page however heavy the backlog is. Deletions
   // during a page advance the `log_id` cursor safely: consumed rows sort
-  // below every row the next page reads.
+  // below every row the next page reads. Re-pends reuse the same `logId`
+  // (`INSERT OR REPLACE`), so they sit behind the cursor and are never
+  // revisited in the same replay — partial per-page commits stay committed.
+  const ingestSession = beginLogIngestBatch(store, Date.now(), DEFAULT_PENDING_TTL_MS)
   for (let after = ''; ;) {
     const page = store.pendingLogsPage(after, PENDING_REPLAY_PAGE_ROWS, DEFAULT_PENDING_PAGE_BYTES)
     if (page.length === 0) break
-    ingestLogBatch(
-      page.map((row) => row.log) as Parameters<typeof ingestLogBatch>[0],
+    // The outcome is discarded, exactly as before: the batch outcome counts
+    // the span batch's own accept/quarantine/reject, not the replay's
+    // enrichments — the replay's work lands in the store either way.
+    ingestLogPage(
+      page.map((row) => row.log) as Parameters<typeof ingestLogPage>[0],
       store,
+      ingestSession,
     )
     after = page[page.length - 1]!.logId
   }

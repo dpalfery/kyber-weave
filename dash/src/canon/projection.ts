@@ -247,6 +247,12 @@ export type CanonicalProjectionSchedulerOptions = {
    * so a contended lease reads back who held it.
    */
   leaseOwner?: string
+  /**
+   * How long `drain()`/`close()` wait out a live foreign leaseholder before
+   * giving up. Defaults to `SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS`; tests
+   * pass a small value to avoid advancing the full default under fake timers.
+   */
+  shutdownDeferredTimeoutMs?: number
 }
 
 export const DEFAULT_PROJECTION_IDLE_MS = 10_000
@@ -259,6 +265,16 @@ export const DEFAULT_PROJECTION_MIN_INTERVAL_MS = 600_000
  * on the first retry.
  */
 export const SCHEDULER_DEFERRED_RETRY_MS = 1_000
+/**
+ * How long `drain()`/`close()` wait out a live foreign leaseholder before
+ * giving up (F1 shutdown-liveness bound). A holder whose `project()` wedges
+ * while its heartbeat keeps ticking (10 s heartbeat < 90 s stale gate)
+ * never goes stale, so an unbounded poll couples shutdown liveness to
+ * foreign liveness. Past this deadline the waiter reports through `onError`,
+ * settles its waiters, retains the owed work for the next explicit
+ * request/drain, and returns — the same give-up posture as a failed pass.
+ */
+export const SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS = 30_000
 
 /**
  * Serialized, coalescing, DEBOUNCED runner for the live collector's
@@ -305,6 +321,7 @@ export class CanonicalProjectionScheduler {
   private readonly maxWaitMs: number
   private readonly minIntervalMs: number
   private readonly leaseOwner: string
+  private readonly shutdownDeferredTimeoutMs: number
 
   /** Un-projected work exists: a pass is owed on the next opportunity. */
   private dirty = false
@@ -335,6 +352,13 @@ export class CanonicalProjectionScheduler {
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_PROJECTION_MAX_WAIT_MS
     this.minIntervalMs = options.minIntervalMs ?? DEFAULT_PROJECTION_MIN_INTERVAL_MS
     this.leaseOwner = options.leaseOwner ?? 'receiver'
+    const configuredTimeout = options.shutdownDeferredTimeoutMs
+    this.shutdownDeferredTimeoutMs =
+      typeof configuredTimeout === 'number' &&
+      Number.isFinite(configuredTimeout) &&
+      configuredTimeout >= 0
+        ? configuredTimeout
+        : SCHEDULER_SHUTDOWN_DEFERRED_TIMEOUT_MS
     const onError = options.onError
     this.report = (error: unknown) => {
       if (onError !== undefined) {
@@ -377,9 +401,15 @@ export class CanonicalProjectionScheduler {
    * Wait the scheduler out: the pending timer is bypassed, any pass in
    * flight finishes, and owed work with no pass running runs now. A failed
    * pass settles its requests and retains the work — drain does not turn
-   * into a retry loop. Resolves only when quiescent or after a failure.
+   * into a retry loop. A live foreign leaseholder is waited out only up to
+   * `shutdownDeferredTimeoutMs`: past that the waiter reports, settles its
+   * requests, retains the owed work for the next explicit request/drain, and
+   * returns, so a heartbeat-live stuck holder cannot block shutdown forever.
+   * Resolves only when quiescent, after a failure, or after giving up on a
+   * live foreign lease.
    */
   async drain(): Promise<void> {
+    const startMs = Date.now()
     for (;;) {
       this.cancelTimer()
       if (this.currentRun !== null) {
@@ -392,7 +422,19 @@ export class CanonicalProjectionScheduler {
       if (outcome === 'deferred') {
         // A live foreign pass holds the lease: poll rather than spin. The
         // holder's pass is seconds of work, and the staleness gate reclaims
-        // a dead holder's lease on the first retry.
+        // a dead holder's lease on the first retry — but a holder whose
+        // project wedged while its heartbeat keeps ticking never goes stale,
+        // so the poll is bounded by the shutdown deadline.
+        if (Date.now() - startMs >= this.shutdownDeferredTimeoutMs) {
+          this.cancelTimer()
+          this.report(
+            new Error(
+              `projection drain gave up waiting for a live foreign leaseholder after ${this.shutdownDeferredTimeoutMs}ms; retained work stays owed`,
+            ),
+          )
+          this.settleWaiters()
+          return
+        }
         await new Promise<void>((resolve) => { setTimeout(resolve, SCHEDULER_DEFERRED_RETRY_MS) })
         continue
       }
@@ -404,10 +446,15 @@ export class CanonicalProjectionScheduler {
   /**
    * Seal the scheduler and drain it. Work still dirty — including work
    * retained by a failed pass — runs one last time; after this resolves no
-   * `request()` starts anything, so the store can be closed safely.
+   * `request()` starts anything, so the store can be closed safely. A live
+   * foreign leaseholder is waited out only up to
+   * `shutdownDeferredTimeoutMs`: past that the waiter reports, retains the
+   * owed work, and returns, so a heartbeat-live stuck holder cannot block
+   * shutdown forever.
    */
   async close(): Promise<void> {
     this.closed = true
+    const startMs = Date.now()
     for (;;) {
       this.cancelTimer()
       if (this.currentRun !== null) {
@@ -418,7 +465,19 @@ export class CanonicalProjectionScheduler {
       const outcome = await this.startRun()
       if (outcome === 'deferred') {
         // Same poll as `drain()`: shutdown still rebuilds retained work, so
-        // it waits out a live foreign pass rather than racing or dropping it.
+        // it waits out a live foreign pass rather than racing or dropping
+        // it — but only up to the shutdown deadline, past which a stuck but
+        // heartbeating holder would otherwise block close forever.
+        if (Date.now() - startMs >= this.shutdownDeferredTimeoutMs) {
+          this.cancelTimer()
+          this.report(
+            new Error(
+              `projection close gave up waiting for a live foreign leaseholder after ${this.shutdownDeferredTimeoutMs}ms; retained work stays owed`,
+            ),
+          )
+          this.settleWaiters()
+          return
+        }
         await new Promise<void>((resolve) => { setTimeout(resolve, SCHEDULER_DEFERRED_RETRY_MS) })
         continue
       }

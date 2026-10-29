@@ -7,7 +7,7 @@
 // for expiry, only matching rows' for correlation, and replay walks
 // byte-bounded pages in log_id order.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { OtlpSpan } from '../otel/receiver.js'
 import { ingestBatch } from './ingest.js'
@@ -295,6 +295,122 @@ describe('F8 targeted pending-log correlation', () => {
       })
       expect(outcome).toMatchObject({ enriched: 0, pending: 1, quarantined: 0 })
       expect(store.pendingLogMetadata().find((row) => row.logId === 'known-pending')?.pendingSince).toBe(since)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('F8 replay hoists batch-wide scans out of the page loop', () => {
+  it('reconciles and snapshots dedup once per batch while paging a multi-page backlog', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      // Six 1 MiB bodies exceed the 4 MiB replay byte cap, so the replay
+      // must walk at least two pages. None match a record, so every row is
+      // re-pended — the path that reads the dedup snapshot. Fresh arrivals
+      // so the pre-replay reconcile keeps (not quarantines) them for paging.
+      const since = Date.now()
+      for (let i = 0; i < 6; i++) {
+        store.addPendingLog(heavyLog(`bulk-${String(i).padStart(2, '0')}`, 1024 * 1024, since))
+      }
+      const metadataSpy = vi.spyOn(store, 'pendingLogMetadata')
+      const expiredSpy = vi.spyOn(store, 'takeExpiredPendingLogs')
+      const pageSpy = vi.spyOn(store, 'pendingLogsPage')
+
+      const junk = {
+        traceId: 'junk-trace',
+        spanId: 'junk-span',
+        parentSpanId: null,
+        name: 'junk',
+        kind: 'internal',
+        startTimeUnixNano: '1756478400000000000',
+        endTimeUnixNano: '1756478400100000000',
+        timestamp: '2026-08-29T12:00:00.000Z',
+        durationMs: 1,
+        status: { code: 'unset' },
+        attributes: {},
+        resource: {},
+        scope: {},
+      } as unknown as OtlpSpan
+      void ingestBatch([junk], store)
+
+      // Batch-wide work ran once: one expiry reconciliation (one expired
+      // selection) and one dedup metadata snapshot — not once per page.
+      // `pendingLogMetadata` may be read again by the assertions below;
+      // only the replay's own scans are counted here, so the count is taken
+      // before any follow-up reads.
+      expect(expiredSpy).toHaveBeenCalledTimes(1)
+      expect(metadataSpy).toHaveBeenCalledTimes(1)
+      // But the backlog itself was paged: more than one page read proves the
+      // backlog did not fit in a single page.
+      expect(pageSpy.mock.calls.length).toBeGreaterThan(1)
+      metadataSpy.mockRestore()
+      expiredSpy.mockRestore()
+      pageSpy.mockRestore()
+
+      // `pendingSince` semantics survive the hoist: re-pends kept the same
+      // `logId`, so the original arrival time — not the replay time — rides
+      // every row.
+      for (const row of store.pendingLogMetadata()) {
+        expect(row.pendingSince).toBe(since)
+      }
+      expect(store.pendingLogMetadata()).toHaveLength(6)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps bounded pages: every page holds at most one oversized row past the cap', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsert(storedRecord('reward-span', 'reward-trace'))
+      // Two enrichable rows plus a heavy backlog around them: the replay
+      // must enrich exactly the matches however the pages split.
+      for (const n of ['hit-1', 'hit-2']) {
+        store.addPendingLog(pendingLog(n, { traceId: 'reward-trace', spanId: 'reward-span' }))
+      }
+      for (let i = 0; i < 6; i++) {
+        store.addPendingLog(heavyLog(`bulk-${String(i).padStart(2, '0')}`, 1024 * 1024))
+      }
+
+      const pageSizes: number[] = []
+      const originalPage = store.pendingLogsPage.bind(store)
+      vi.spyOn(store, 'pendingLogsPage').mockImplementation((after, limit, maxBytes) => {
+        const page = originalPage(after, limit, maxBytes)
+        if (page.length > 0) {
+          pageSizes.push(page.reduce((total, row) => total + JSON.stringify(row.log).length, 0))
+        }
+        return page
+      })
+
+      const junk = {
+        traceId: 'junk-trace',
+        spanId: 'junk-span',
+        parentSpanId: null,
+        name: 'junk',
+        kind: 'internal',
+        startTimeUnixNano: '1756478400000000000',
+        endTimeUnixNano: '1756478400100000000',
+        timestamp: '2026-08-29T12:00:00.000Z',
+        durationMs: 1,
+        status: { code: 'unset' },
+        attributes: {},
+        resource: {},
+        scope: {},
+      } as unknown as OtlpSpan
+      void ingestBatch([junk], store)
+
+      // Multi-page replay with bounded pages: at least two pages, each
+      // within the byte cap unless it holds a single oversized row.
+      expect(pageSizes.length).toBeGreaterThan(1)
+      for (const bytes of pageSizes) {
+        expect(bytes <= 4 * 1024 * 1024).toBe(true)
+      }
+      // Partial-commit semantics: the two matches enriched (and left the
+      // backlog) even though the replay spanned pages; the rest stayed pending.
+      expect(store.isLogEnriched('hit-1')).toBe(true)
+      expect(store.isLogEnriched('hit-2')).toBe(true)
+      expect(store.pendingLogMetadata()).toHaveLength(6)
     } finally {
       store.close()
     }
