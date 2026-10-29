@@ -26,10 +26,13 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
 
 Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
-see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Individual
-restore/format/build/test/skill commands: [`docs/cli-command-surface.md`](docs/cli-command-surface.md).
-InspectCode runs in the council (`dotnet tool restore` once per clone); report at
-`artifacts/inspectcode.xml` — see the `resharper-clt` skill. Release/self-updater/kyberdash
+see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
+test, and skill argv are the `review.gates` entries in
+[`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate
+restore gate: `--no-restore` is omitted on format and build, so those gates restore
+themselves. InspectCode runs in the council (`dotnet tool restore` once per clone) and
+exits zero whether or not it finds anything; the result is `artifacts/inspectcode.xml` —
+see the `resharper-clt` skill. Release/self-updater/kyberdash
 build paths: `./scripts/update-loop.sh` ([`docs/distribution.md`](docs/distribution.md#verifying-a-release-locally)).
 KyberDash and tray gates: [`dash/AGENTS.md`](dash/AGENTS.md), [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md).
 
@@ -44,8 +47,10 @@ before text search; name a file or symbol when you need line-numbered source.
 <!-- CODEGRAPH_END -->
 
 If `.codegraph/` is missing, this repository authorizes `codegraph init .` at the root
-(repository-local only; installing CodeGraph is the user's decision). Record `git status --short` and tracked diffs first; undo only
-tracked edits init introduced. Blocked or unusable init → report under GAPS and fall back;
+(repository-local only; installing CodeGraph is the user's decision). Before init, record
+`git status --short` and both staged (`git diff --cached`) and unstaged (`git diff`)
+tracked diffs; afterwards undo only tracked edits init introduced. Blocked or unusable
+init → report under GAPS and fall back;
 `docs drift` without an index → report skipped, not passed.
 
 Before `docs/` greps, use Kyber-Weave MCP `docs_explore`; before contract changes,
