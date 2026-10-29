@@ -324,8 +324,7 @@ describe('opencode file-based provider - A2 current-shape restoration', () => {
     expect(c.costUSD).toBeGreaterThan(0)
   })
 
-  it('yields an honest failure (never a silent zero) when a discovered session file shifts to an unrecognized schema', async () => {
-    // A present store that can no longer be parsed must surface its reason
+  it('yields an honest failure (never a silent zero) when a discovered session file shifts to an unrecognized schema', async () => {    // A present store that can no longer be parsed must surface its reason
     // instead of reading as an empty provider.
     await writeSession({
       sessionId: 'ses_shifted',
@@ -352,5 +351,101 @@ describe('opencode file-based provider - A2 current-shape restoration', () => {
       return out
     }
     await expect(consume()).rejects.toThrow(/opencode.*session|unrecognized|unexpected|parse/i)
+  })
+
+  // Review (Kilo 5): `if (flatMeta?.id)` trusted any truthy value, so a flat
+  // file carrying `{"id": 42}` discovered as a session and its number became
+  // the id used for the message directory join. A session id is a non-empty
+  // string or the file is not a session.
+  it('does not discover a flat session file whose id is not a string', async () => {
+    const storage = join(tmpDir, 'opencode', 'storage')
+    await mkdir(join(storage, 'session'), { recursive: true })
+    await writeFile(join(storage, 'session', 'numeric.json'), JSON.stringify({
+      id: 42,
+      directory: '/Users/test/flatproject',
+      title: 'Numeric id',
+    }))
+
+    const sources = await createOpenCodeProvider(tmpDir).discoverSessions()
+    expect(sources).toHaveLength(0)
+  })
+
+  // Review (Kilo 5), parse gate: a session file reached by a hand-built source
+  // whose id is not a string is a schema shift, not a session with id "42".
+  it('rejects a session file whose id is not a string at parse time', async () => {
+    const storage = join(tmpDir, 'opencode', 'storage')
+    const sessionDir = join(storage, 'session', 'global')
+    await mkdir(sessionDir, { recursive: true })
+    const path = join(sessionDir, 'numeric.json')
+    await writeFile(path, JSON.stringify({ id: 42, directory: '/Users/test/myproject' }))
+
+    const provider = createOpenCodeProvider(tmpDir)
+    const consume = async (): Promise<ParsedProviderCall[]> => {
+      const out: ParsedProviderCall[] = []
+      for await (const call of provider
+        .createSessionParser({ path, project: 'test', provider: 'opencode' }, new Set())
+        .parse()) {
+        out.push(call)
+      }
+      return out
+    }
+    await expect(consume()).rejects.toThrow(/unrecognized schema/i)
+  })
+
+  // Review (Kilo 6): only ENOENT counted as absence. ENOTDIR means a path
+  // component that was a directory is now a file, so the discovered session
+  // file is not there either — the same absence, not a read failure.
+  it('treats ENOTDIR as absence, not as a cannot-read failure', async () => {
+    const { sessionId } = await writeSession({
+      sessionId: 'ses_enotdir',
+      messages: [{
+        id: 'msg_a',
+        data: {
+          role: 'assistant', modelID: 'gpt-5.3-codex-spark', cost: 0.01,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1 },
+        },
+        parts: [{ type: 'text', text: 'x' }],
+      }],
+    })
+    const provider = createOpenCodeProvider(tmpDir)
+    const sources = await provider.discoverSessions()
+    expect(sources).toHaveLength(1)
+    const source = sources[0]!
+
+    // Replace the whole project directory with a file of the same name: the
+    // session path now fails with ENOTDIR rather than ENOENT.
+    const projectDir = join(tmpDir, 'opencode', 'storage', 'session', 'global')
+    await rm(projectDir, { recursive: true, force: true })
+    await writeFile(projectDir, 'not a directory')
+
+    const consume = async (): Promise<ParsedProviderCall[]> => {
+      const out: ParsedProviderCall[] = []
+      for await (const call of provider.createSessionParser(source, new Set()).parse()) out.push(call)
+      return out
+    }
+    await expect(consume()).resolves.toEqual([])
+    expect(source.path).toContain(sessionId)
+  })
+
+  // Review (Kilo 4): the same `includes('/')` predicate lived here too. The
+  // shared helper must qualify a slashed id that is not already prefixed.
+  it('qualifies a slashed model id that is not already provider-prefixed', async () => {
+    await writeSession({
+      sessionId: 'ses_slashed',
+      messages: [{
+        id: 'msg_a',
+        data: {
+          role: 'assistant', modelID: 'my-model/v2', providerID: 'opencode-go', cost: 0.05,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1 },
+        },
+        parts: [{ type: 'text', text: 'x' }],
+      }],
+    })
+
+    const calls = await parseAll()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('opencode-go/my-model/v2')
   })
 })

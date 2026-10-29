@@ -1,7 +1,13 @@
 import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 
-import { buildAssistantCall, sanitize, type MessageData, type PartData } from './session-message.js'
+import {
+  buildAssistantCall,
+  qualifyProviderModel,
+  sanitize,
+  type MessageData,
+  type PartData,
+} from './session-message.js'
 import type { SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // OpenCode 1.1+ stores sessions as file-based JSON instead of a SQLite DB:
@@ -25,16 +31,35 @@ type FileMessageData = MessageData & {
 
 // Current-shape assistant messages carry modelID alongside a separate
 // providerID (e.g. providerID 'opencode-go' + modelID 'muse-spark'). The
-// shared builder keys pricing off a single model string, so qualify the pair
-// here: without it the call still yields but prices against a bare model that
-// never matches the rate table and falls back to the stored cost.
+// shared builder keys pricing off a single model string, so the pair is
+// qualified through the shared helper: without it the call still yields but
+// prices against a bare model that never matches the rate table and falls back
+// to the stored cost. The helper lives in session-message.ts so this reader and
+// the SQLite reader cannot drift apart.
 function withQualifiedModel(data: FileMessageData): FileMessageData {
-  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
-  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
-  const providerID = carrier.providerID.trim()
-  const modelID = carrier.modelID.trim()
-  if (!providerID || !modelID || modelID.includes('/')) return data
-  return { ...data, modelID: `${providerID}/${modelID}` }
+  return qualifyProviderModel(data)
+}
+
+/**
+ * A session id is the folder name the message files live under, so it has to
+ * be a non-empty string. `id` arrives from unchecked JSON (`JSON.parse(...)
+ * as SessionMeta`), and a truthiness test admitted `42` or `{}` — which then
+ * joined into a message path and keyed the dedupe map.
+ */
+function sessionIdOf(meta: SessionMeta | null): string | undefined {
+  return typeof meta?.id === 'string' && meta.id !== '' ? meta.id : undefined
+}
+
+/**
+ * A discovered session file that is no longer readable is absence (R1.2), not
+ * a cannot-read failure: `ENOENT` says the file is gone, and `ENOTDIR` says a
+ * path component that used to be a directory is now a file. Both mean this
+ * session is not in the store; anything else is a present-but-unreadable store
+ * (R1.3) and keeps its reason.
+ */
+function isMissingPathError(err: unknown): boolean {
+  const code = (err as { code?: unknown }).code
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 async function readJson<T>(path: string): Promise<T | null> {
@@ -84,10 +109,10 @@ export async function discoverOpenCodeFileSessions(
     if (entry.endsWith('.json')) {
       const flatPath = join(sessionRoot, entry)
       const flatMeta = await readJson<SessionMeta>(flatPath)
-      if (flatMeta?.id) {
+      if (sessionIdOf(flatMeta) !== undefined) {
         sources.push({
           path: flatPath,
-          project: sanitize(flatMeta.directory || flatMeta.title || ''),
+          project: sanitize(flatMeta!.directory || flatMeta!.title || ''),
           provider: providerName,
         })
         continue
@@ -103,10 +128,10 @@ export async function discoverOpenCodeFileSessions(
       if (!f.endsWith('.json')) continue
       const path = join(sessionRoot, entry, f)
       const meta = await readJson<SessionMeta>(path)
-      if (!meta?.id) continue
+      if (sessionIdOf(meta) === undefined) continue
       sources.push({
         path,
-        project: sanitize(meta.directory || meta.title || ''),
+        project: sanitize(meta!.directory || meta!.title || ''),
         provider: providerName,
       })
     }
@@ -130,7 +155,7 @@ export function createOpenCodeFileSessionParser(
       try {
         raw = await readFile(source.path, 'utf8')
       } catch (err) {
-        if ((err as { code?: unknown }).code === 'ENOENT') return
+        if (isMissingPathError(err)) return
         throw new Error(
           `cannot read OpenCode session file ${source.path}: ${err instanceof Error ? err.message : String(err)}`,
         )
@@ -143,12 +168,12 @@ export function createOpenCodeFileSessionParser(
           `cannot parse OpenCode session file ${source.path}: ${err instanceof Error ? err.message : String(err)}`,
         )
       }
-      if (!meta?.id) {
+      const sessionId = sessionIdOf(meta)
+      if (sessionId === undefined) {
         throw new Error(
           `OpenCode session file ${source.path} has an unrecognized schema (missing session id)`,
         )
       }
-      const sessionId = meta.id
 
       const messageDir = join(dataDir, 'storage', 'message', sessionId)
       let messageFiles: string[]
