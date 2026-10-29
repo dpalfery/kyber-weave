@@ -84,6 +84,28 @@ export function sanitize(dir: string): string {
   return dir.replace(/^\//, '').replace(/\//g, '-')
 }
 
+/**
+ * Qualify a `{ providerID, modelID }` pair into the single model string the
+ * built call prices against.
+ *
+ * The predicate has to be an exact prefix test, not a substring search: a
+ * model id may legitimately contain a slash of its own (`my-model/v2`), and
+ * `includes('/')` read that as "already qualified", skipped the prefix, and
+ * left the rate table unable to match the model — the call then silently fell
+ * back to the store's pre-calculated cost.
+ *
+ * Shared by the SQLite and file OpenCode readers so the two cannot drift.
+ */
+export function qualifyProviderModel<T extends MessageData>(data: T): T {
+  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
+  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
+  const providerID = carrier.providerID.trim()
+  const modelID = carrier.modelID.trim()
+  if (!providerID || !modelID) return data
+  if (modelID === providerID || modelID.startsWith(`${providerID}/`)) return data
+  return { ...data, modelID: `${providerID}/${modelID}` }
+}
+
 export function parseTimestamp(raw: number): string {
   const ms = raw < 1e12 ? raw * 1000 : raw
   return new Date(ms).toISOString()

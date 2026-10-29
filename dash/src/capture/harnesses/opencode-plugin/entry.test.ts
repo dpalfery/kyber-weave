@@ -153,7 +153,7 @@ describe('setup registers exactly one context hook', () => {
     ).resolves.toBeUndefined()
     expect(hook).toHaveBeenCalledTimes(1)
     expect(hook).toHaveBeenCalledWith('context', expect.any(Function))
-    expect(touched.filter((p) => p !== 'session' && p !== 'model')).toEqual([])
+    expect(touched.filter((p) => p !== 'session' && p !== 'model' && p !== 'tool')).toEqual([])
   })
 
   it('the shipped default setup registers one context hook', async () => {

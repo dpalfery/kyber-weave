@@ -24,6 +24,7 @@ import {
   type InstalledOpencodePlugin,
   type InstalledOpencodePluginOptions,
   type OpencodeHookPayload,
+  type OpencodeToolHookKind,
 } from './plugin.js'
 import { parseAvailableSkills } from './skills-block.js'
 
@@ -59,6 +60,15 @@ export type EntryOptions = Omit<InstalledOpencodePluginOptions, 'emit'> & {
 /** The slice of the 2.1.4 setup `Context` this plugin touches. */
 export type OpencodePluginSetupContext = {
   session?: {
+    hook?: (name: string, callback: (input: never) => void | Promise<void>) => Promise<unknown>
+  }
+  /**
+   * B1 tool domain. The v2 namespaced catalog (fixtures/hook-catalog.json)
+   * lists `execute.before`/`execute.after` under `tool`; registration mirrors
+   * the pinned `session.hook("context", …)` shape with the bare in-domain
+   * name. Optional throughout — a host without it keeps context-only capture.
+   */
+  tool?: {
     hook?: (name: string, callback: (input: never) => void | Promise<void>) => Promise<unknown>
   }
   model?: {
@@ -206,6 +216,98 @@ async function toContextPayload(
   }
 }
 
+/** Cap on remembered tool starts; past it the oldest unpaired before is dropped. */
+const MAX_PENDING_TOOL_STARTS = 1000
+
+function isToolErrorStatus(status: unknown): boolean {
+  if (typeof status === 'string') return status.toLowerCase() === 'error'
+  return typeof status === 'number' && Number.isFinite(status) && status !== 0
+}
+
+/**
+ * A turn index is a non-negative integer. `Number.isFinite` alone admitted
+ * `-1` and `1.5`, which then rode `opencode.turn.index` as if they were turn
+ * numbers.
+ */
+function isTurnIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+/**
+ * Map one tool lifecycle input to a hook payload. Keys follow the T0
+ * skeleton (`fixtures/span-payload-skeleton.json`: `sessionID`, `messageID`,
+ * the `tools` bucket's `tool`/`callID`, the `errors` bucket), tolerating the
+ * same field's camelCase spelling where the codebase already uses both.
+ * Returns undefined when the input names no session (an unattributable event
+ * is dropped, not emitted).
+ *
+ * The before phase only records the start time under the stable call
+ * identity. The after phase measures the duration from it (absent when no
+ * before was seen — never zero), derives success from the errors bucket
+ * (absent error means completed), and sizes the observed output text in
+ * bytes without ever carrying the text itself — size is metadata, like the
+ * duration, so consent gating (context content only) is untouched.
+ */
+function toToolPayload(
+  raw: unknown,
+  phase: OpencodeToolHookKind,
+  starts: Map<string, number>,
+  nowMs: () => number,
+): OpencodeHookPayload | undefined {
+  if (!isRecord(raw)) return undefined
+  const sessionId = text(raw['sessionID']) ?? text(raw['sessionId'])
+  if (sessionId === undefined) return undefined
+  const tool = text(raw['tool'])
+  const callId = text(raw['callID']) ?? text(raw['callId'])
+  const messageId = text(raw['messageID']) ?? text(raw['messageId'])
+  const agent = text(raw['agent'])
+  const spanId = text(raw['spanId']) ?? text(raw['span_id'])
+  const turnIndex = raw['turnIndex']
+  const payload: OpencodeHookPayload = {
+    sessionId,
+    ...(tool !== undefined ? { tool } : {}),
+    ...(callId !== undefined ? { callId } : {}),
+    ...(messageId !== undefined ? { messageId } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+    ...(spanId !== undefined ? { spanId } : {}),
+    ...(isTurnIndex(turnIndex) ? { turnIndex } : {}),
+  }
+  const key = callId ?? spanId
+  if (phase === 'tool.execute.before') {
+    if (key !== undefined) {
+      if (starts.size >= MAX_PENDING_TOOL_STARTS) {
+        const oldest = starts.keys().next()
+        if (!oldest.done) starts.delete(oldest.value)
+      }
+      starts.set(`${sessionId}::${key}`, nowMs())
+    }
+    return payload
+  }
+  if (key !== undefined) {
+    const started = starts.get(`${sessionId}::${key}`)
+    starts.delete(`${sessionId}::${key}`)
+    if (started !== undefined) {
+      const elapsed = nowMs() - started
+      if (Number.isFinite(elapsed) && elapsed >= 0) payload.durationMs = elapsed
+    }
+  }
+  const explicit = raw['success']
+  const errors = isRecord(raw['errors']) ? raw['errors'] : undefined
+  const failed =
+    errors !== undefined &&
+    (isToolErrorStatus(errors['status']) ||
+      text(errors['type']) !== undefined ||
+      text(errors['message']) !== undefined)
+  // Failure wins over the hook's own checkbox: a run that reports both
+  // `success: true` and an error bucket failed. Otherwise an explicit
+  // boolean is the harness's answer, and its absence falls back to the bucket.
+  payload.success = failed ? false : typeof explicit === 'boolean' ? explicit : true
+  const output =
+    text(raw['output_text']) ?? text(raw['outputText']) ?? text(raw['output']) ?? text(raw['result'])
+  if (output !== undefined) payload.resultSizeBytes = new TextEncoder().encode(output).length
+  return payload
+}
+
 /**
  * Build the 2.1.4 `setup` function. The pipeline, catalog lookup and consent
  * reader are created when `setup` runs, never at import. `setup` always
@@ -222,23 +324,52 @@ export function createSetup(
   return async (ctx) => {
     try {
       const session = ctx?.session
-      if (typeof session?.hook !== 'function') return
+      const tool = ctx?.tool
+      const hasSession = typeof session?.hook === 'function'
+      const hasTool = typeof tool?.hook === 'function'
+      if (!hasSession && !hasTool) return
       const installed = injected ?? createInstalledOpencodePlugin(pipelineOptions)
       const path = consentPath ?? resolveConsentPath()
-      const lookup = createContextLimitLookup(ctx.model, lookupBoundMs)
-      const callback = async (input: unknown): Promise<void> => {
-        try {
-          const payload = await toContextPayload(
-            input,
-            () => resolveContentConsent(env ?? process.env, path),
-            lookup,
-          )
-          if (payload !== undefined) await installed.plugin.context(payload)
-        } catch {
-          // Swallow — a context event is never worth failing the request.
+      const lookup = createContextLimitLookup(ctx?.model, lookupBoundMs)
+      if (hasSession) {
+        const callback = async (input: unknown): Promise<void> => {
+          try {
+            const payload = await toContextPayload(
+              input,
+              () => resolveContentConsent(env ?? process.env, path),
+              lookup,
+            )
+            if (payload !== undefined) await installed.plugin.context(payload)
+          } catch {
+            // Swallow — a context event is never worth failing the request.
+          }
         }
+        await session?.hook?.('context', callback as (input: never) => Promise<void>)
       }
-      await session.hook('context', callback as (input: never) => Promise<void>)
+      if (hasTool) {
+        // Paired before/after start times, keyed by the stable call identity.
+        // Drop-oldest past the cap so a hook that never pairs cannot grow
+        // host memory without bound.
+        const starts = new Map<string, number>()
+        const before = async (input: unknown): Promise<void> => {
+          try {
+            const payload = toToolPayload(input, 'tool.execute.before', starts, Date.now)
+            if (payload !== undefined) await installed.plugin.toolHooks['tool.execute.before'](payload)
+          } catch {
+            // Swallow — a tool event is never worth failing the request.
+          }
+        }
+        const after = async (input: unknown): Promise<void> => {
+          try {
+            const payload = toToolPayload(input, 'tool.execute.after', starts, Date.now)
+            if (payload !== undefined) await installed.plugin.toolHooks['tool.execute.after'](payload)
+          } catch {
+            // Swallow — a tool event is never worth failing the request.
+          }
+        }
+        await tool?.hook?.('execute.before', before as (input: never) => Promise<void>)
+        await tool?.hook?.('execute.after', after as (input: never) => Promise<void>)
+      }
     } catch {
       // Swallow — setup must never fail the host.
     }

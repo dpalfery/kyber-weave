@@ -102,6 +102,59 @@ const OPENINFERENCE_CACHE_READ_KEYS = ['llm.token_count.prompt_details.cache_rea
 const OPENINFERENCE_CACHE_CREATION_KEYS = ['llm.token_count.prompt_details.cache_write'] as const
 const OPENINFERENCE_REASONING_KEYS = ['llm.token_count.completion_details.reasoning'] as const
 
+/**
+ * Native OpenInference model identity. The deployed OpenCode emits the model
+ * under `llm.model_name`; downstream cost basis reads only the `gen_ai.*`
+ * and `model` keys, so a native span without bridging resolves no model and
+ * prices as `no_rate`. Bridged onto `gen_ai.request.model` in `normalize`
+ * (never synthesized when absent).
+ */
+const NATIVE_MODEL_KEYS = ['llm.model_name'] as const
+
+/**
+ * Envelope model identity. `opencode.model.id` already feeds the context-window
+ * identity but not the session `MODEL_KEYS`, so it is bridged the same way.
+ * No new envelope marker: the existing `opencode.model.*` markers suffice.
+ */
+const ENVELOPE_MODEL_ID_KEYS = ['opencode.model.id'] as const
+
+/**
+ * Keys downstream already reads for the model (`sessions.ts` `MODEL_KEYS`,
+ * `context-window.ts` `MODEL_IDENTITY_KEYS`, `store.ts`
+ * `PROJECTED_ATTRIBUTE_KEYS`). Bridging writes only here so no downstream
+ * reader needs a new key.
+ */
+const CANONICAL_MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
+
+/** First non-empty model string under the given keys, or undefined. Never synthesized. */
+function readModelString(
+  attributes: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  // Strings only. A numeric attribute is not a model identity: coercing it
+  // with `String(value)` turned the number `0` into the model name `"0"`,
+  // which is precisely the fabricated identity this bridge never invents.
+  for (const key of keys) {
+    const value = attributes[key]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return undefined
+}
+
+/**
+ * The model id to bridge onto the record, or undefined when none is needed.
+ * An already-canonical model wins by absence (nothing to bridge); otherwise
+ * the native `llm.model_name` wins over the envelope `opencode.model.id`.
+ * Absent stays absent: no fallback, no empty string, no zero.
+ */
+function bridgedModelId(attributes: Record<string, unknown>): string | undefined {
+  if (readModelString(attributes, CANONICAL_MODEL_KEYS) !== undefined) return undefined
+  return (
+    readModelString(attributes, NATIVE_MODEL_KEYS) ??
+    readModelString(attributes, ENVELOPE_MODEL_ID_KEYS)
+  )
+}
+
 /** True when the span carries the OpenInference `openinference.*` namespace. */
 function hasOpenInference(attributes: Record<string, unknown>): boolean {
   return hasNamespace(attributes, [OPENINFERENCE_NAMESPACE])
@@ -521,6 +574,19 @@ export const opencodeAdapter: HarnessAdapter = {
     }
     applyUsage(record, raw.attributes)
     applyEnvelope(record, raw)
+    // Bridge the model id onto a key downstream already reads
+    // (`gen_ai.request.model` is in `MODEL_KEYS`, `MODEL_IDENTITY_KEYS` and
+    // `PROJECTED_ATTRIBUTE_KEYS`). Native `llm.model_name` wins over envelope
+    // `opencode.model.id`; an already-canonical model or an absent model
+    // bridges nothing, so absence stays absence and never becomes a zero.
+    const bridged = bridgedModelId(raw.attributes)
+    if (bridged !== undefined) {
+      const rawAttributes =
+        record.raw !== null && typeof record.raw === 'object' && !Array.isArray(record.raw)
+          ? (record.raw as Record<string, unknown>)
+          : {}
+      record.raw = { ...rawAttributes, 'gen_ai.request.model': bridged }
+    }
     // The app spans keep `unspecified`, which the ingest seam quarantines as
     // non-model. `llm.invoke` is the model call; an OpenInference `TOOL` span
     // is the tool call. A `gen_ai.tool.name` still wins over a model vote.

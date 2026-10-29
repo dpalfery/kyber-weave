@@ -53,9 +53,24 @@ export const OPENCODE_PLUGIN_HOOK_KINDS = [
 /** v2 `ctx.session.hook("context")` kind per the T0 pin (fixtures/context-payload.json @opencode/plugin 2.1.4). Not a lifecycle boundary. */
 export const OPENCODE_CONTEXT_HOOK_KIND = 'session.context' as const
 
+/**
+ * Tool lifecycle hooks (B1). Names pinned by fixtures/hook-catalog.json: the
+ * v1 `tool.execute.before`/`tool.execute.after` hooks and the v2 namespaced
+ * `tool` surface (`execute.before`/`execute.after`). Provider-usage surfaces
+ * (`session.http.response`, `session.model.request`, `session.generate`) are
+ * deliberately NOT registered: the catalog pins their names only, no payload
+ * shape, so there is nothing verifiable to map (no guessing, no live calls).
+ */
+export const OPENCODE_PLUGIN_TOOL_HOOK_KINDS = [
+  'tool.execute.before',
+  'tool.execute.after',
+] as const
+
 export type OpencodeLifecycleKind = (typeof OPENCODE_PLUGIN_HOOK_KINDS)[number]
 
-export type OpencodeHookKind = OpencodeLifecycleKind | typeof OPENCODE_CONTEXT_HOOK_KIND
+export type OpencodeToolHookKind = (typeof OPENCODE_PLUGIN_TOOL_HOOK_KINDS)[number]
+
+export type OpencodeHookKind = OpencodeLifecycleKind | OpencodeToolHookKind | typeof OPENCODE_CONTEXT_HOOK_KIND
 
 /** Opencode config keys the dash CLI manages for this plugin (never hand-edited paths). */
 export const OPENCODE_PLUGIN_CONFIG_KEYS = {
@@ -69,6 +84,27 @@ export type OpencodeHookPayload = {
   spanId?: string
   /** v2 SessionContext.request message identity (chat.params message.id on the v1 ladder). */
   messageId?: string
+  /** Tool name observed on a tool lifecycle hook (T0 `tools` bucket `tool`). Never synthesized. */
+  tool?: string
+  /** Tool call identity observed on a tool lifecycle hook (T0 `callID`). Never synthesized. */
+  callId?: string
+  /**
+   * Tool outcome observed on `tool.execute.after`: false when the T0
+   * `errors` bucket names an error, true when it names none. Absent on
+   * `tool.execute.before` — the outcome is not yet known, never defaulted.
+   */
+  success?: boolean
+  /**
+   * Milliseconds between the paired before/after observations (entry-side
+   * clock). Absent when no before was seen — never zero.
+   */
+  durationMs?: number
+  /**
+   * UTF-8 byte length of the observed tool output text. The text itself is
+   * never carried (consent content stays exactly as it is); the size is
+   * metadata, like the duration. Absent when no output was observed.
+   */
+  resultSizeBytes?: number
   /** Assembled system prompt (v2 SessionContext.system; v1 experimental.chat.system.transform output). */
   systemPrompt?: string
   /** JSON-serialized tool definitions (v2 SessionContext.tools; v1 tool.definition output). */
@@ -139,6 +175,8 @@ export type OpencodePlugin = {
   hooks: Record<OpencodeLifecycleKind, OpencodeHookHandler>
   /** v2 session.context handler (content payload); same never-fail-host contract as hooks. */
   context: OpencodeHookHandler
+  /** B1 tool lifecycle handlers; same never-fail-host contract as hooks. */
+  toolHooks: Record<OpencodeToolHookKind, OpencodeHookHandler>
   /** Every boundary attempted, in firing order, whether or not delivery succeeded. */
   events: OpencodeHookEvent[]
   /** Every swallowed delivery failure, in order. */
@@ -160,6 +198,7 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
   const plugin: OpencodePlugin = {
     hooks: undefined as never,
     context: undefined as never,
+    toolHooks: undefined as never,
     events: [],
     failures: [],
   }
@@ -193,6 +232,10 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     'session.end': hook('session.end'),
   }
   plugin.context = hook('session.context')
+  plugin.toolHooks = {
+    'tool.execute.before': hook('tool.execute.before'),
+    'tool.execute.after': hook('tool.execute.after'),
+  }
   return plugin
 }
 
@@ -207,7 +250,7 @@ export function registerOpencodePlugin(
   plugin: OpencodePlugin = createOpencodePlugin(),
 ): OpencodePlugin {
   try {
-    host.hooks?.({ ...plugin.hooks, 'session.context': plugin.context })
+    host.hooks?.({ ...plugin.hooks, ...plugin.toolHooks, 'session.context': plugin.context })
   } catch {
     // Swallow — a host that rejects hook registration must not take the session down.
   }
@@ -227,6 +270,12 @@ export function registerOpencodePlugin(
       ...host.tool,
       'span.start': plugin.hooks['span.start'],
       'span.end': plugin.hooks['span.end'],
+      // B1: v1 dotted kinds + v2 namespaced `tool.hook("execute.*")` per
+      // fixtures/hook-catalog.json; same identities on both targets.
+      'tool.execute.before': plugin.toolHooks['tool.execute.before'],
+      'tool.execute.after': plugin.toolHooks['tool.execute.after'],
+      'execute.before': plugin.toolHooks['tool.execute.before'],
+      'execute.after': plugin.toolHooks['tool.execute.after'],
     }
   } catch {
     // Swallow — a frozen host surface is not the session's problem.
@@ -294,12 +343,26 @@ export type InstalledOpencodePlugin = {
 /** Default evidence cap: mirrors the outbox scale so one bound covers a long session. */
 const DEFAULT_EVIDENCE_LIMIT = 500
 
+function nonEmptyEventText(value: unknown): value is string {
+  return typeof value === 'string' && value !== ''
+}
+
+function finiteEventNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 /**
  * Stamp a hook event onto a mapper-shaped payload. Session, turn, and span
  * identity ride verbatim — never synthesized. The sender anchors every span
  * on the session trace downstream (Q3a); when the hook observed no span, the
  * mapped span takes the hook-anchored identity so the envelope still names
  * the boundary it came from.
+ *
+ * Double-count guard (B1, decided): the stamper never stamps usage — the
+ * hook payload carries no token counters by type, and the mapper additionally
+ * drops counters on tool lifecycle spans. Native OTel owns usage; the plugin
+ * emits identity, markers, and outcomes only, so a tool observed by both
+ * paths is counted once.
  */
 function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload {
   const atMs = Date.parse(event.timestamp)
@@ -325,10 +388,17 @@ function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload
     ...(event.skills !== undefined && event.skills.length > 0 ? { skills: [...event.skills] } : {}),
     ...(event.model !== undefined && event.model !== '' ? { modelId: event.model } : {}),
     ...(event.provider !== undefined && event.provider !== ''
-      ? { model: { providerID: event.provider, modelID: event.model ?? '' } }
+      ? { model: { providerID: event.provider, ...(event.model !== undefined && event.model !== '' ? { modelID: event.model } : {}) } }
       : {}),
     ...(event.contextLimit !== undefined ? { contextLimit: event.contextLimit } : {}),
     ...(event.agent !== undefined && event.agent !== '' ? { agent: event.agent } : {}),
+    // B1 tool identity (T0 `tools` bucket): the mapper forwards a bare
+    // `opencode.call.id` and gates only `opencode.tool.call.id` on the tool,
+    // so the stamper mirrors it — a call id always rides, and a bare one
+    // never fabricates a tool marker.
+    ...(nonEmptyEventText(event.tool) ? { tool: event.tool } : {}),
+    ...(nonEmptyEventText(event.callId) ? { callID: event.callId } : {}),
+    ...(nonEmptyEventText(event.messageId) ? { messageID: event.messageId } : {}),
     startTimeUnixNano: nanos,
     endTimeUnixNano: nanos,
     hook: event.kind,
@@ -336,17 +406,31 @@ function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload
 }
 
 /**
- * Stamp a hook event onto a turn outcome payload. The outcome fields stay
- * unset — the hook observed the boundary, not the result — so the log carries
- * the correlation identity (exact span when observed, session+bounds
- * otherwise) under the `com.opencode` `tool_result` vocabulary.
+ * Stamp a hook event onto a turn outcome payload. Lifecycle and context
+ * boundaries observed no result, so their outcome fields stay unset and the
+ * log carries only the correlation identity under the `com.opencode`
+ * `tool_result` vocabulary. A `tool.execute.after` event forwards the
+ * observed outcome — name, success, duration, size — each only when observed,
+ * never defaulted.
+ *
+ * The trace is the session trace (Q3a anchoring, the same trace the mapped
+ * spans ride), so a log whose span was observed joins it exactly; with no
+ * observed span the log names the trace but no span and waits for it
+ * (pending) rather than joining the wrong record.
  */
 function stampTurnOutcome(event: OpencodeHookEvent): OpencodeTurnOutcomePayload {
   return {
-    traceId: null,
+    traceId: event.sessionId,
     spanId: event.spanId ?? null,
     sessionID: event.sessionId,
     ...(event.turnIndex !== undefined ? { turnIndex: event.turnIndex } : {}),
+    ...(nonEmptyEventText(event.tool) ? { tool: event.tool } : {}),
+    ...(nonEmptyEventText(event.callId) ? { callID: event.callId } : {}),
+    ...(nonEmptyEventText(event.messageId) ? { messageID: event.messageId } : {}),
+    ...(nonEmptyEventText(event.agent) ? { agent: event.agent } : {}),
+    ...(typeof event.success === 'boolean' ? { success: event.success } : {}),
+    ...(finiteEventNumber(event.durationMs) ? { durationMs: event.durationMs } : {}),
+    ...(finiteEventNumber(event.resultSizeBytes) ? { resultSizeBytes: event.resultSizeBytes } : {}),
     hook: event.kind,
     timestamp: event.timestamp,
   }
