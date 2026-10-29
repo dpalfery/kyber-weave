@@ -174,7 +174,7 @@ internal sealed class SquadResponseGuidanceDeployer
                 "default back.");
             return null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsDegradableFailure(exception))
         {
             warnings.Add(UnavailableMessage(path, exception));
             return null;

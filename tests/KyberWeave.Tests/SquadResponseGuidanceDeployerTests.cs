@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Security;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
@@ -68,6 +69,50 @@ public sealed class SquadResponseGuidanceDeployerTests : IDisposable
     }
 
     /// <summary>
+    ///     The classification only protects an operator if <c>Deploy</c> applies it where the file work
+    ///     happens. A host failure raised while the existing guidance is compared, replaced or read back
+    ///     has to come out as a warning with no record, not as an exception that fails the whole update.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(HostFailures))]
+    public void AHostFailureRaisedDuringTheFileWorkBecomesAWarningNotAFailedDeployment(Exception exception)
+    {
+        SquadResponseGuidanceDeployer deployer = DeployerOverAnOperatorEditedFile(out string path);
+        List<string> warnings = [];
+        SquadHomeFile? record = null;
+
+        Exception? escaped = Record.Exception(
+            () => record = deployer.Deploy(new FaultingHomeFiles(exception), warnings));
+
+        Assert.True(
+            escaped is null,
+            $"'{exception.GetType().Name}' escaped the guidance deploy, so a host that refuses the file " +
+            "work would fail the whole update instead of only skipping the guidance.");
+        Assert.Null(record);
+        string warning = Assert.Single(warnings);
+        Assert.Contains(SquadResponseGuidanceDeployer.FileName, warning, StringComparison.Ordinal);
+        Assert.Equal("operator text", File.ReadAllText(path));
+    }
+
+    /// <summary>
+    ///     The negative control for the test above: a guard wide enough to pass it by swallowing
+    ///     everything would also hide a defect in this code, so those failures must still escape.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ContractViolations))]
+    public void AContractViolationRaisedDuringTheFileWorkStillFailsTheDeployment(Exception exception)
+    {
+        SquadResponseGuidanceDeployer deployer = DeployerOverAnOperatorEditedFile(out _);
+        List<string> warnings = [];
+
+        Exception? escaped = Record.Exception(
+            () => deployer.Deploy(new FaultingHomeFiles(exception), warnings));
+
+        Assert.Same(exception, escaped);
+        Assert.Empty(warnings);
+    }
+
+    /// <summary>
     ///     A build that shipped without its default guidance is a packaging defect, not a disk problem.
     ///     It must still leave the deployment intact, but the warning may not tell the operator to rerun:
     ///     no rerun can add a resource the binary does not carry.
@@ -99,5 +144,41 @@ public sealed class SquadResponseGuidanceDeployerTests : IDisposable
     public void Dispose()
     {
         _temp.Dispose();
+    }
+
+    /// <summary>
+    ///     A deployer whose guidance file exists with text Squad never shipped, so the deploy has to
+    ///     consult the receipt's records before deciding what to do with it.
+    /// </summary>
+    private SquadResponseGuidanceDeployer DeployerOverAnOperatorEditedFile(out string path)
+    {
+        string home = Path.Combine(_temp.Path, "home");
+        Directory.CreateDirectory(home);
+        path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
+        File.WriteAllText(path, "operator text");
+
+        return new SquadResponseGuidanceDeployer(home, () => "shipped default"u8.ToArray());
+    }
+
+    /// <summary>
+    ///     A receipt's home-file records that fail when read. The deploy enumerates them inside the same
+    ///     guarded region as every filesystem call, and no real filesystem on a CI host can be made to
+    ///     raise an unsupported-path or security failure, so this is the one input that can.
+    /// </summary>
+    private sealed class FaultingHomeFiles(Exception fault) : IReadOnlyList<SquadHomeFile>
+    {
+        public int Count => 1;
+
+        public SquadHomeFile this[int index] => throw fault;
+
+        public IEnumerator<SquadHomeFile> GetEnumerator()
+        {
+            throw fault;
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
+        }
     }
 }
