@@ -30,9 +30,11 @@ import { handleCaptureRequest, type CaptureRouteSettings } from './capture-route
 import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
-const KYBERDASH_VERSION = String(
-  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
-)
+const KYBERDASH_VERSION_RAW = (
+  createRequire(import.meta.url)('../../package.json') as { version?: string }
+).version
+/** `/meta` keeps its long-standing '0.0.0' fallback; `/version` must not use it. */
+const KYBERDASH_VERSION = String(KYBERDASH_VERSION_RAW ?? '0.0.0')
 
 const VALID_SECTIONS: readonly ReportSection[] = [
   'coverage',
@@ -1235,8 +1237,14 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
+    // Why 503: a defaulted '0.0.0' would read as a real build to the tray's version check,
+    // so an absent or empty package version is reported as unavailable instead.
+    if (typeof KYBERDASH_VERSION_RAW !== 'string' || KYBERDASH_VERSION_RAW === '') {
+      sendKyberJson(res, 503, { error: 'KyberDash version is unavailable' })
+      return true
+    }
     sendKyberJson(res, 200, {
-      version: KYBERDASH_VERSION,
+      version: KYBERDASH_VERSION_RAW,
       apiVersion: REPORT_SCHEMA_VERSION,
     })
     return true

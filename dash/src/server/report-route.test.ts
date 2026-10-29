@@ -8,10 +8,44 @@
 
 import { readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { KyberBridge } from './bridge.js'
 import { handleKyberRequest } from './routes.js'
+
+// routes.ts reads its build version once, at import time, through
+// `createRequire(import.meta.url)('../../package.json')`. This seam lets a test choose what
+// that one require returns (or nothing at all) and then re-import routes.ts to see it.
+// Every other require passes through to the real module.
+const versionSeam = vi.hoisted(() => ({
+  packageJson: undefined as Record<string, unknown> | undefined,
+}))
+
+vi.mock('node:module', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:module')>()
+  return {
+    ...actual,
+    createRequire: (url: string | URL) => {
+      const realRequire = actual.createRequire(url)
+      const fakeRequire = (id: string): unknown =>
+        id === '../../package.json' && versionSeam.packageJson !== undefined
+          ? versionSeam.packageJson
+          : realRequire(id)
+      return fakeRequire as unknown as ReturnType<typeof actual.createRequire>
+    },
+  }
+})
+
+/** Re-import routes.ts with `package.json` replaced, so its import-time version constant sees it. */
+async function routesWithPackageJson(packageJson: Record<string, unknown>) {
+  versionSeam.packageJson = packageJson
+  vi.resetModules()
+  try {
+    return await import('./routes.js')
+  } finally {
+    versionSeam.packageJson = undefined
+  }
+}
 
 function bridgeStub(): KyberBridge {
   return {
@@ -29,6 +63,7 @@ function call(
   href: string,
   method = 'GET',
   bridge: KyberBridge = bridgeStub(),
+  handle: typeof handleKyberRequest = handleKyberRequest,
 ): { status: number; body: unknown; handled: boolean } {
   let status = 0
   let body = ''
@@ -37,7 +72,7 @@ function call(
     writeHead: (code: number) => { status = code },
     end: (data: string) => { body = data },
   } as unknown as ServerResponse
-  const handled = handleKyberRequest(req, res, new URL(href, 'http://127.0.0.1:4747'), bridge)
+  const handled = handle(req, res, new URL(href, 'http://127.0.0.1:4747'), bridge)
   return { status, body: body === '' ? undefined : JSON.parse(body), handled }
 }
 
@@ -151,6 +186,30 @@ describe('GET /api/kyber/version', () => {
       const { status } = call('/api/kyber/version', method)
       expect(status, method).toBe(405)
     }
+  })
+
+  describe('when the engine has no version to report', () => {
+    afterEach(() => {
+      versionSeam.packageJson = undefined
+    })
+
+    it('reports the version it does carry, so the seam below is proven live', async () => {
+      const { handleKyberRequest: handle } = await routesWithPackageJson({ version: '9.9.9' })
+      const { status, body } = call('/api/kyber/version', 'GET', bridgeStub(), handle)
+      expect(status).toBe(200)
+      expect(body).toEqual({ version: '9.9.9', apiVersion: 1 })
+    })
+
+    it.each([
+      { label: 'absent', packageJson: {} },
+      { label: 'empty', packageJson: { version: '' } },
+    ])('answers 503 with an error rather than 200 with 0.0.0 when the version is $label', async ({ packageJson }) => {
+      const { handleKyberRequest: handle } = await routesWithPackageJson(packageJson)
+      const { status, body } = call('/api/kyber/version', 'GET', bridgeStub(), handle)
+      expect(status, `package.json ${JSON.stringify(packageJson)}`).toBe(503)
+      expect(body).toMatchObject({ error: expect.any(String) })
+      expect(body, 'a defaulted version must not be served').not.toHaveProperty('version')
+    })
   })
 })
 
