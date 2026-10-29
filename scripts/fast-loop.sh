@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # The fast local inner loop. Answers "did this edit break something" in seconds.
 #
-#   scripts/fast-loop.sh                  # fast tier (~29s on macOS when measured; re-measure after regenerating)
-#   scripts/fast-loop.sh --class Docs*    # one area
-#   scripts/fast-loop.sh --method <FQN>   # one test
-#   scripts/fast-loop.sh --full           # the declared gate suite, unchanged
+#   scripts/fast-loop.sh                  # component-aware fast checks based on changed files
+#   scripts/fast-loop.sh --class Docs*    # one area (.NET)
+#   scripts/fast-loop.sh --method <FQN>   # one test (.NET)
+#   scripts/fast-loop.sh --full           # the declared gate suite, all gates (--all)
+#   scripts/fast-loop.sh --scoped         # declared gate suite scoped to changed files
 #
 # WHY THIS IS NOT A THINNER `review gates`
 #
@@ -50,6 +51,32 @@ CLASS_LIST="scripts/fast-loop-classes.txt"
 
 step() { printf '\n=== %s ===\n' "$1"; }
 
+test_log=""
+cleanup() {
+  if [[ -n "${test_log:-}" && -f "${test_log}" ]]; then
+    rm -f "${test_log}"
+  fi
+}
+trap cleanup EXIT
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'EOF'
+Usage: scripts/fast-loop.sh [OPTIONS]
+
+Fast local inner loop for Kyber-Weave developers.
+
+Options:
+  (no options)     Component-aware fast checks based on changed workspace files.
+  --class PATTERN  Run .NET fast tests matching class pattern.
+  --method FQN     Run one specific .NET test method.
+  --full           Run all declared repository gates unscoped (--all).
+  --scoped         Run declared repository gates scoped to changed files.
+  --regenerate     Regenerate scripts/fast-loop-classes.txt timing list.
+  --help, -h       Show this help message.
+EOF
+  exit 0
+fi
+
 # Regenerate the fast-tier class list from a fresh timing run. Takes ~90s, so it
 # is a deliberate act rather than something the loop does on its own. Re-run it when a
 # class is added, renamed, or found to have gotten materially slower.
@@ -91,6 +118,13 @@ fi
 if [[ "${1:-}" == "--full" ]]; then
   step "full declared gate suite"
   exec dotnet run --project src/KyberWeave.Cli -c "${CONFIGURATION}" -- \
+    review gates . --all --out artifacts/gates.json
+fi
+
+# --scoped runs declared repository gates scoped to changed files against base.
+if [[ "${1:-}" == "--scoped" ]]; then
+  step "scoped declared gate suite"
+  exec dotnet run --project src/KyberWeave.Cli -c "${CONFIGURATION}" -- \
     review gates . --out artifacts/gates.json
 fi
 
@@ -103,41 +137,135 @@ case "${1:-}" in
   *) printf 'unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac
 
-if [[ ${#test_args[@]} -eq 0 ]]; then
-  while IFS= read -r class || [[ -n "${class}" ]]; do
-    class="${class%$'\r'}"
-    [[ -z "${class}" || "${class}" == \#* ]] && continue
-    test_args+=(-class "${class}")
-  done < "${CLASS_LIST}"
+# Component routing: if --class or --method was supplied, focus on .NET and docs validate.
+# Otherwise, inspect changed workspace paths to run targeted fast checks.
+needs_dotnet=0
+needs_dash=0
+needs_tray_ui=0
+needs_rust=0
+needs_docs=0
+dash_related_files=()
+
+if [[ ${#test_args[@]} -gt 0 ]]; then
+  needs_dotnet=1
+  needs_docs=1
+else
+  changed_files=()
+  while IFS= read -r file || [[ -n "${file}" ]]; do
+    [[ -z "${file}" ]] && continue
+    changed_files+=("${file}")
+  done < <({ git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | sort -u)
+
+  if [[ ${#changed_files[@]} -eq 0 ]]; then
+    needs_dotnet=1
+    needs_docs=1
+  else
+    for file in "${changed_files[@]+"${changed_files[@]}"}"; do
+      case "$file" in
+        dash/tray/src-tauri/*)
+          needs_rust=1
+          ;;
+        dash/tray/ui/*)
+          needs_tray_ui=1
+          needs_dash=1
+          ;;
+        dash/*.md | docs/*)
+          needs_docs=1
+          ;;
+        dash/*)
+          needs_dash=1
+          if [[ -f "$file" ]]; then
+            case "$file" in
+              *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs)
+                dash_related_files+=("${file#dash/}")
+                ;;
+            esac
+          fi
+          ;;
+        README.md | CHANGELOG.md | CONTRIBUTING.md | SECURITY.md)
+          needs_docs=1
+          ;;
+        *)
+          needs_dotnet=1
+          case "$file" in
+            *.md | .kyber-weave/* | src/*)
+              needs_docs=1
+              ;;
+          esac
+          ;;
+      esac
+    done
+  fi
+fi
+
+if [[ "${needs_dotnet}" -eq 1 ]]; then
+  step "build (Release, warnings-as-errors, AnalysisMode=all)"
+  dotnet build KyberWeave.sln -c "${CONFIGURATION}"
+
   if [[ ${#test_args[@]} -eq 0 ]]; then
-    printf 'no classes in %s; run --regenerate\n' "${CLASS_LIST}" >&2
+    while IFS= read -r class || [[ -n "${class}" ]]; do
+      class="${class%$'\r'}"
+      [[ -z "${class}" || "${class}" == \#* ]] && continue
+      test_args+=(-class "${class}")
+    done < "${CLASS_LIST}"
+    if [[ ${#test_args[@]} -eq 0 ]]; then
+      printf 'no classes in %s; run --regenerate\n' "${CLASS_LIST}" >&2
+      exit 1
+    fi
+    # The scale envelope is a size-stress test, not an edit check; keep it out even if its class
+    # ever lands in the generated list.
+    test_args+=(-trait- "Category=Scale")
+    step "tests (fast tier: $(wc -l < "${CLASS_LIST}" | tr -d ' ') classes)"
+  else
+    step "tests (filtered)"
+  fi
+
+  # A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
+  test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
+  dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}"
+  if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
+    printf 'no tests ran; check the --class / --method filter\n' >&2
     exit 1
   fi
-  # The scale envelope is a size-stress test, not an edit check; keep it out even if its class
-  # ever lands in the generated list.
-  test_args+=(-trait- "Category=Scale")
-  step "tests (fast tier: $(wc -l < "${CLASS_LIST}" | tr -d ' ') classes)"
-else
-  step "tests (filtered)"
+
+  step "format (whitespace)"
+  dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
 fi
 
-step "build (Release, warnings-as-errors, AnalysisMode=all, --no-incremental)"
-dotnet build KyberWeave.sln -c "${CONFIGURATION}" --no-incremental
-
-# A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
-test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
-trap 'rm -f "${test_log}"' EXIT
-dotnet "${TEST_DLL}" "${test_args[@]}" | tee "${test_log}"
-if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
-  printf 'no tests ran; check the --class / --method filter\n' >&2
-  exit 1
+if [[ "${needs_docs}" -eq 1 ]]; then
+  step "docs validate (no CodeGraph index required)"
+  if [[ "${needs_dotnet}" -eq 0 && ! -f "src/KyberWeave.Cli/bin/${CONFIGURATION}/net10.0/kyber-weave.dll" ]]; then
+    step "build CLI for docs validate"
+    dotnet build src/KyberWeave.Cli -c "${CONFIGURATION}"
+  fi
+  dotnet run --project src/KyberWeave.Cli -c "${CONFIGURATION}" --no-build -- \
+    docs validate .
 fi
 
-step "docs validate (no CodeGraph index required)"
-dotnet run --project src/KyberWeave.Cli -c "${CONFIGURATION}" --no-build -- \
-  docs validate .
+if [[ "${needs_dash}" -eq 1 ]]; then
+  step "dash typecheck"
+  npm --prefix dash run typecheck
 
-step "format (whitespace)"
-dotnet format KyberWeave.sln whitespace --verify-no-changes --no-restore -v minimal
+  step "dash lint"
+  npm --prefix dash run lint
+
+  if [[ ${#dash_related_files[@]} -gt 0 ]]; then
+    step "dash tests (related: ${#dash_related_files[@]} files)"
+    npm --prefix dash run test:related -- "${dash_related_files[@]}"
+  fi
+
+  if [[ "${needs_tray_ui}" -eq 1 && -d "dash/tray/ui/node_modules" ]]; then
+    step "tray ui typecheck"
+    npm --prefix dash/tray/ui run typecheck
+
+    step "tray ui test"
+    npm --prefix dash/tray/ui run test
+  fi
+fi
+
+if [[ "${needs_rust}" -eq 1 ]]; then
+  step "tray rust (fmt, clippy, test)"
+  (cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test)
+fi
 
 printf '\nFast tier clean. Run scripts/fast-loop.sh --full before pushing.\n'

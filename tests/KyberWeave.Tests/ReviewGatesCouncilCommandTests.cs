@@ -8,16 +8,16 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins how <c>kyber-weave review gates</c> without <c>--agent</c> selects the repository-wide council gates
-/// by their <c>include</c> and <c>os</c> keys, and how it reports a changed set it cannot determine. Driven
-/// through a real <see cref="CommandApp"/> against a temporary git repository with its own
-/// <c>.kyber-weave/kyber-weave.yml</c>.
+///     Pins how <c>kyber-weave review gates</c> without <c>--agent</c> selects the repository-wide council gates
+///     by their <c>include</c> and <c>os</c> keys, and how it reports a changed set it cannot determine. Driven
+///     through a real <see cref="CommandApp" /> against a temporary git repository with its own
+///     <c>.kyber-weave/kyber-weave.yml</c>.
 /// </summary>
 /// <remarks>
-/// The only program any gate runs is <c>git</c>, or a program the test names on purpose to be missing, so the
-/// same assertions hold on macOS and Linux. Assertions read the boundary a caller sees: the exit code, the rule
-/// identifiers rendered to the console, and the gate report written by <c>--out</c>. A gate that must not start
-/// proves it by leaving no mark in the repository's own git configuration, which the test reads back.
+///     The only program any gate runs is <c>git</c>, or a program the test names on purpose to be missing, so the
+///     same assertions hold on macOS and Linux. Assertions read the boundary a caller sees: the exit code, the rule
+///     identifiers rendered to the console, and the gate report written by <c>--out</c>. A gate that must not start
+///     proves it by leaving no mark in the repository's own git configuration, which the test reads back.
 /// </remarks>
 public sealed class ReviewGatesCouncilCommandTests : IDisposable
 {
@@ -29,8 +29,8 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     private const int ClientInputExitCode = 2;
     private const string StartedMarkerKey = "council.started";
     private const string MissingProgram = "kw-task3-no-such-program";
-    private readonly TempDirectory _temp = new();
     private readonly string _repo;
+    private readonly TempDirectory _temp = new();
 
     public ReviewGatesCouncilCommandTests()
     {
@@ -43,6 +43,31 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         MustGit("add", "-A");
         Commit("initial");
     }
+
+    // -----------------------------------------------------------------------------------------
+    // Configuration fixtures and harness.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>A probe that must never start; starting it sets a marker that the test reads back.</summary>
+    private static string MustNotRunConfiguration => $"""
+                                                      review:
+                                                        gates:
+                                                          - id: must-not-run
+                                                            include: ["**/*.cs"]
+                                                            run: [git, config, --local, {StartedMarkerKey}, yes]
+                                                      """;
+
+    /// <summary>The repository-wide <c>review.gates</c> list, with one ungated probe.</summary>
+    private static string RepositoryGateConfiguration => """
+                                                         review:
+                                                           gates:
+                                                             - id: repository-wide
+                                                               run: [git, --version]
+                                                         """;
+
+    private static string OtherOs => OperatingSystem.IsWindows() ? "unix" : "windows";
+
+    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
 
     public void Dispose()
     {
@@ -258,33 +283,77 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
-    // Configuration fixtures and harness.
+    // --all flag and clean tree selection contracts.
     // -----------------------------------------------------------------------------------------
 
-    /// <summary>A probe that must never start; starting it sets a marker that the test reads back.</summary>
-    private static string MustNotRunConfiguration => $"""
-                                                      review:
-                                                        gates:
-                                                          - id: must-not-run
-                                                            include: ["**/*.cs"]
-                                                            run: [git, config, --local, {StartedMarkerKey}, yes]
-                                                      """;
+    [Fact]
+    public void ReviewGates_WithCleanTree_SkipsIncludeGatesWithKWREVIEW026()
+    {
+        WriteConfiguration("""
+                           review:
+                             gates:
+                               - id: scoped-gate
+                                 include: ["src/**"]
+                                 run: [git, --version]
+                               - id: unscoped-gate
+                                 run: [git, --version]
+                           """);
 
-    /// <summary>The repository-wide <c>review.gates</c> list, with one ungated probe.</summary>
-    private static string RepositoryGateConfiguration => """
-                                                         review:
-                                                           gates:
-                                                             - id: repository-wide
-                                                               run: [git, --version]
-                                                         """;
+        CliRun run = Cli(GatesCommand("--base", "HEAD", "--format", "json"));
 
-    private static string OtherOs => OperatingSystem.IsWindows() ? "unix" : "windows";
+        AssertExitCode(0, run);
+        AssertDiagnostic(run.Output, GateSkipped, "INFO");
+        using JsonDocument report = ReadReport();
+        Assert.Equal(["unscoped-gate"], GateIds(report));
+        Assert.True(GatePassed(report, "unscoped-gate"));
+        AssertSkipped(run, report, "scoped-gate");
+    }
 
-    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
+    [Fact]
+    public void ReviewGates_WithAllFlag_RunsAllGatesEvenWhenDiffMatchesSubset()
+    {
+        WriteConfiguration("""
+                           review:
+                             gates:
+                               - id: dotnet-build
+                                 include: ["src/**"]
+                                 run: [git, --version]
+                               - id: dash-lint
+                                 include: ["dash/**"]
+                                 run: [git, --version]
+                           """);
+        WriteRepositoryFile("dash/index.ts", "// ts\n");
+        MustGit("add", "dash/index.ts");
+        Commit("add dash");
+        ChangeTracked("dash/index.ts");
+
+        CliRun run = Cli(GatesCommand("--all", "--format", "json"));
+
+        AssertExitCode(0, run);
+        Assert.DoesNotContain(GateSkipped, run.Output, StringComparison.Ordinal);
+        using JsonDocument report = ReadReport();
+        Assert.Equal(["dotnet-build", "dash-lint"], GateIds(report));
+        Assert.True(GatePassed(report, "dotnet-build"));
+        Assert.True(GatePassed(report, "dash-lint"));
+    }
+
+    [Theory]
+    [InlineData("--agent", "csharp-dev")]
+    [InlineData("--base", "HEAD")]
+    [InlineData("--paths", "dash/foo.ts")]
+    public void ReviewGates_WithAllAndContradictoryFlag_ExitsWithClientInputError(string flag, string value)
+    {
+        WriteConfiguration(RepositoryGateConfiguration);
+
+        CliRun run = Cli(GatesCommand("--all", flag, value));
+
+        AssertExitCode(ClientInputExitCode, run);
+        AssertRendered(run, InvalidInput);
+    }
 
     /// <summary>
-    /// The <c>review gates</c> invocation without <c>--agent</c>, always writing the report to a path
-    /// inside the temporary root so the test can read it back.
+    ///     The <c>review gates</c> invocation without <c>--agent</c>, always writing the report to a path
+    ///     inside the temporary root so the test can read it back.
     /// </summary>
     private string[] GatesCommand(params string[] options)
     {
@@ -295,8 +364,8 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The CLI boundary: a strict-parsing <see cref="CommandApp"/> with the review branch registered,
-    /// driven with console output captured and the process-wide console lock held.
+    ///     The CLI boundary: a strict-parsing <see cref="CommandApp" /> with the review branch registered,
+    ///     driven with console output captured and the process-wide console lock held.
     /// </summary>
     private static CliRun Cli(string[] arguments)
     {
@@ -336,16 +405,14 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The gate must be explicitly reported skipped (a KW-REVIEW-026 diagnostic naming it), so a gate that
-    /// vanished from the plan cannot pass as skipped; it must also never read as passed.
+    ///     The gate must be explicitly reported skipped (a KW-REVIEW-026 diagnostic naming it), so a gate that
+    ///     vanished from the plan cannot pass as skipped; it must also never read as passed.
     /// </summary>
     private static void AssertSkipped(CliRun run, JsonDocument report, string id)
     {
         AssertRendered(run, $"{id}: skipped,");
         if (GateIds(report).Contains(id))
-        {
             Assert.False(GatePassed(report, id), $"Gate '{id}' was reported passed, but it should have been skipped.");
-        }
     }
 
     private static void AssertExitCode(int expected, CliRun run)
@@ -382,10 +449,8 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
         if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (JsonElement item in element.EnumerateArray())
-            {
                 if (ContainsDiagnostic(item, code, severity))
                     return true;
-            }
 
             return false;
         }
@@ -397,15 +462,11 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
             && foundCode.GetString() == code
             && element.TryGetProperty("severity", out JsonElement foundSeverity)
             && foundSeverity.GetString() == severity)
-        {
             return true;
-        }
 
         foreach (JsonProperty property in element.EnumerateObject())
-        {
             if (ContainsDiagnostic(property.Value, code, severity))
                 return true;
-        }
 
         return false;
     }

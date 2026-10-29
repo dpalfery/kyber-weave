@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-29
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -452,7 +452,7 @@ whose target lies outside the repository, and a `--task` that is not a slug, ref
 A YAML anchor is the way to share a gate between agents: define it on the first agent and alias
 it under the others. This repository does so for:
 
-- .NET: `format-whitespace`, `format-style`, `format-analyzers` and `dotnet-build`, anchored under `csharp-dev`.
+- .NET: `format-whitespace`, `format-style` and `dotnet-build`, anchored under `csharp-dev`. `format-analyzers` was removed because `dotnet-build` immediately follows it and already runs all Roslyn analyzers under `AnalysisMode=all` with `TreatWarningsAsErrors=true` (D3), eliminating ~24s of redundant overhead per task completion with no loss of analyzer enforcement.
 - TypeScript: `dash-typecheck` and `dash-lint`, anchored under `react-dev`; `tray-ui-typecheck` is anchored there too.
 - Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under `tauri-dev`.
 
@@ -493,6 +493,26 @@ accepted without `--agent` (the default ref is `origin/HEAD`). The set is only c
 when at least one gate declares `include`. When git cannot list the changes, every gate
 runs unscoped and the report says why (`KW-REVIEW-034`, Info): fetch the full history,
 or name a base that exists with `--base`.
+
+For whole-repository audits and CI verification, `--all` executes all declared gates matching
+the host OS unconditionally (`changed = null`), bypassing `include:` path filtering. Combining
+`--all` with contradictory scoping options (`--agent`, `--base`, or `--paths`) is refused before
+any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
+
+#### Repository gate scoping and caching in this repository
+
+This repository configures `include:` globs on all 27 council gates in `.kyber-weave/kyber-weave.yml`,
+partitioned by ecosystem:
+
+- **Pure C# formatting and static analysis** (`format-whitespace`, `format-style`, `inspectcode`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
+- **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, `.config/dotnet-tools.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
+- **APM skill gates** (`skill-*`, 12 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
+- **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
+- **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
+- **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
+
+ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
+persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
 
 Unknown keys are not silently dropped: any key outside the tables above loads anyway but
 is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate
@@ -604,4 +624,3 @@ pass in particular is unmeasured and may exceed the council itself on a findings
 - [The review council plan](../archive/plans/2026-08-20-code-review-council.md) — why it is shaped this way
 - [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) — three-layer review council and verdict engine
 - [ADR 0003](../adr/0003-cross-file-duplication-and-prior-art-lenses.md) — cross-file duplication and prior art
-

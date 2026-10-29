@@ -40,9 +40,13 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [Description("Run each task gate's fix command before its verify command. Requires --agent.")]
     public bool Fix { get; set; }
 
+    [CommandOption("--all")]
+    [Description("Run all declared repository gates on the host OS without include path filtering.")]
+    public bool All { get; set; }
+
     /// <summary>
-    /// Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
-    /// scope the repository-wide council gates, so they are not agent-only.
+    ///     Whether an option that only makes sense for one agent was given. <c>--paths</c> and <c>--base</c> also
+    ///     scope the repository-wide council gates, so they are not agent-only.
     /// </summary>
     public bool HasAgentOnlyOptions => TaskSlug is not null || Fix;
 }

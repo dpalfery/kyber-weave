@@ -2,7 +2,7 @@
 id: plans/2026-10-29-local-ci-checks-optimization
 title: "Local CI checks and inner loop performance optimization"
 doc-type: plan
-status: current
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 last-reviewed: 2026-10-29
@@ -13,7 +13,7 @@ impact-components: [ReviewCouncil]
 
 # Local CI checks and inner loop performance optimization
 
-**Status: Ready — approved for execution (AP1: autonomous: recommendation accepted).**
+**Status: Archived — complete 2026-10-29.** Closeout mapping is in the Closeout section. Approved for execution 2026-10-29 (AP1: autonomous: recommendation accepted). Frontmatter status: archived follows the closed status vocabulary (KW-DOC-SPEC-002).
 
 **Development mode:** `test-first` (default; no user opt-out).  
 **Autonomy:** `autonomous` (resolved from repository Config Reg `<autonomy>`).  
@@ -135,7 +135,7 @@ Optimize local CI checks, council review gates, agent task-gates, and `scripts/f
 
 ---
 
-## 3. Decisions
+## Decisions
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
@@ -280,22 +280,20 @@ In accordance with `development-mode: test-first`, tests verifying all new behav
 
 ---
 
-## 6. Documentation impact & design harvest
+## Design harvest
 
 ```yaml
 documentation-impact: extends-component
 impact-components: [ReviewCouncil]
 ```
 
-### Design Harvest Table
-
-| Item | Description | Target Component | Doc Type | Target Document |
+| ID | Target component | Target doc type | Target doc | Durable item |
 |---|---|---|---|---|
-| H1 | Council gate path scoping, two-tier .NET asset paths, task-gate anchor list update, and `--all` flag contract | ReviewCouncil | architecture | `docs/code-review/architecture.md` |
-| H2 | CLI command surface for `kyber-weave review gates --all` and exit-code rule | ReviewCouncil | reference | `docs/cli-command-surface.md` |
-| H3 | Task-gate analyzer deduplication and InspectCode cache | ReviewCouncil | standard | `docs/standards/csharp/README.md` |
-| H4 | Inner loop component targeting and incremental build in `scripts/fast-loop.sh` | ReviewCouncil | guide | `AGENTS.md` |
-| H5 | Cross-file test asset dependencies (`products/**`, `REVIEW.md` in `net-test-paths`) | ReviewCouncil | architecture | `docs/code-review/architecture.md` |
+| H1 | ReviewCouncil | architecture | [`docs/code-review/architecture.md`](../../code-review/architecture.md) | Council gate path scoping, two-tier .NET asset paths, task-gate anchor list update, and `--all` flag contract |
+| H2 | ReviewCouncil | reference | [`docs/cli-command-surface.md`](../../cli-command-surface.md) | CLI command surface for `kyber-weave review gates --all` and exit-code rule |
+| H3 | ReviewCouncil | coding-standard | [`docs/standards/csharp/README.md`](../../standards/csharp/README.md) | Task-gate analyzer deduplication and InspectCode cache |
+| H4 | ReviewCouncil | guide | [`AGENTS.md`](../../../AGENTS.md) | Inner loop component targeting and incremental build in `scripts/fast-loop.sh` |
+| H5 | ReviewCouncil | architecture | [`docs/code-review/architecture.md`](../../code-review/architecture.md) | Cross-file test asset dependencies (`products/**`, `REVIEW.md` in `net-test-paths`) |
 
 **ADR Waiver**:
 No new ADR required — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../adr/0005-task-level-fast-review.md)), utilizing the already implemented `CouncilGateSelection` include-matching engine without altering architectural boundaries, storage models, or public external schemas.
@@ -315,3 +313,46 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 ```
+
+## Closeout
+
+**Closed 2026-10-29 by `docs-dev` (T6).** Links below are written for the archived location, `docs/archive/plans/`.
+
+### Verification
+
+- **Full test suite**: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build` passed all 4,206 tests (4,179 passed, 27 skipped, 0 failed) in 3m 06.9s.
+- **Council gate execution**:
+  - `review gates --paths docs/README.md`: executed 2 gates (`docs-validate`, `docs-drift`), 25 skipped with `KW-REVIEW-026` in ~2.0s (down from >270s).
+  - `review gates --paths dash/package.json`: executed 5 gates (`ts-typecheck`, `ts-test`, `ts-lint`, `ts-reachable`, `docs-drift`), 22 skipped with `KW-REVIEW-026` in ~47s (down from >270s).
+  - `review gates --paths dash/tray/src-tauri/Cargo.toml`: executed 8 gates (3 cargo + 4 ts + docs-drift), 19 skipped with `KW-REVIEW-026` in 60.0s (down from >270s).
+  - `review gates --all`: executed all 27 declared gates unscoped and passed.
+- **InspectCode cache performance**:
+  - Cold run: 66.71s (254s CPU).
+  - Warm run with `--caches-home=artifacts/inspectcode-cache`: 43.45s (81.8s CPU) — **-34.9% wall-clock, -68.6% CPU**.
+- **Task gate deduplication**:
+  - `csharp-dev` task-gate: 25.89s (down from ~37.5s, **-31.0% wall-clock**), with 100% of analyzer diagnostics enforced via `dotnet build` with `TreatWarningsAsErrors` and `AnalysisMode=all`.
+- **Vitest inner loop**:
+  - `npm --prefix dash run test:related`: 2.39s wall-clock on leaf module vs 29.19s full suite.
+- **Fast-loop build**:
+  - Warm C# incremental build dropped from 8.17s to 0.91s (-88.9%).
+
+## Closeout mapping
+
+ADR waiver for the whole plan: `no ADR — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../adr/0005-task-level-fast-review.md)), utilizing the already implemented CouncilGateSelection include-matching engine without altering architectural boundaries, storage models, or public external schemas.`
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | Council gate include path scoping: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D2 | Clean tree KW-REVIEW-026 skip and `--all` flag: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates); [CLI command surface, review gates](../../cli-command-surface.md#review--the-deterministic-review-half) and [Exit codes](../../cli-command-surface.md#kyber-weave) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D3 | Removal of redundant `format-analyzers` from task-gates: [Review council architecture, Task gates](../../code-review/architecture.md#task-gates); [C# coding standard, The build is the first reviewer](../../standards/csharp/README.md#the-build-is-the-first-reviewer) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D4 | InspectCode persistent cache `--caches-home=artifacts/inspectcode-cache`: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates); [C# coding standard, The build is the first reviewer](../../standards/csharp/README.md#the-build-is-the-first-reviewer) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D5 | KyberDash Vitest isolation preservation and `test:related`: [KyberDash runbook, Running Unit & Contract Tests](../../dash/runbook.md#running-unit--contract-tests); [Review council architecture, Council gates](../../code-review/architecture.md#council-gates) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D6 | Fast loop component targeting and incremental build in `scripts/fast-loop.sh`: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates); [AGENTS.md, The inner loop](../../../AGENTS.md#the-inner-loop) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D7 | Retain unified .NET test gate across solution dependencies: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| D8 | Documentation waiver: approval provenance and execution authorization under repository Config Reg `<autonomy>`. Transient, with no surviving invariant. | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| AP1 | Documentation waiver: approval provenance and phase gate authorization. Transient, with no surviving invariant. | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| H1 | Council gate path scoping, two-tier .NET asset paths, task-gate anchor list update, and `--all` flag contract: [Review council architecture, Task gates](../../code-review/architecture.md#task-gates) and [Council gates](../../code-review/architecture.md#council-gates) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| H2 | CLI command surface for `kyber-weave review gates --all` and exit-code rule: [CLI command surface, review gates](../../cli-command-surface.md#review--the-deterministic-review-half) and [Exit codes](../../cli-command-surface.md#kyber-weave) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| H3 | Task-gate analyzer deduplication and InspectCode cache: [C# coding standard, The build is the first reviewer](../../standards/csharp/README.md#the-build-is-the-first-reviewer) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| H4 | Inner loop component targeting and incremental build in `scripts/fast-loop.sh`: [Review council architecture, Council gates](../../code-review/architecture.md#council-gates); [AGENTS.md, The inner loop and Before opening a PR](../../../AGENTS.md#the-inner-loop) | extends-component | ReviewCouncil | 2026-10-29 | archived |
+| H5 | Cross-file test asset dependencies (`products/**`, `REVIEW.md` in `net-test-paths`): [Review council architecture, Council gates](../../code-review/architecture.md#council-gates) | extends-component | ReviewCouncil | 2026-10-29 | archived |
