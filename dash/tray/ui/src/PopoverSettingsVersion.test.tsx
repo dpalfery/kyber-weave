@@ -144,6 +144,26 @@ describe('Popover settings view shows the KyberDash version', () => {
     expect(versionLine()!.textContent).toBe('KyberDash version unknown')
   })
 
+  it('says unknown when the version object carries a whitespace-only version string', async () => {
+    await openSettings(
+      viewState({ kyberdashVersion: { version: '   ', apiVersion: 1 } }),
+    )
+
+    expect(versionLine(), 'settings-kyberdash-version is missing from Settings').not.toBeNull()
+    expect(versionLine()!.textContent).toBe('KyberDash version unknown')
+  })
+
+  // The engine's placeholder for "no release version". Shown as a real version it
+  // would look like a working install that is in fact unversioned.
+  it('says unknown when the version object carries the 0.0.0 placeholder', async () => {
+    await openSettings(
+      viewState({ kyberdashVersion: { version: '0.0.0', apiVersion: 1 } }),
+    )
+
+    expect(versionLine(), 'settings-kyberdash-version is missing from Settings').not.toBeNull()
+    expect(versionLine()!.textContent).toBe('KyberDash version unknown')
+  })
+
   it('places the version line just above the Back navigation', async () => {
     await openSettings(
       viewState({ kyberdashVersion: { version: '9.8.7', apiVersion: 1 } }),

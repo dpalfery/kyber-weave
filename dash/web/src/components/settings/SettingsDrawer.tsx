@@ -165,12 +165,15 @@ function CheckSummary({ check }: { check: KyberCaptureCheck }) {
 
 /**
  * The version line's words. The version is shown only when the engine reported a
- * non-empty string; a failed or unusable answer reads as unknown, never as a
- * placeholder, and only a request still in flight shows the loading dots.
+ * real string (not blank, not the `0.0.0` placeholder); a failed or unusable answer
+ * reads as unknown, never as a placeholder, and only a request still in flight
+ * shows the loading dots.
  */
 function versionLineText(version: { data: KyberVersion | undefined; isError: boolean }): string {
   const reported: unknown = version.data?.version
-  if (typeof reported === 'string' && reported !== '') return `KyberDash version ${reported}`
+  if (typeof reported === 'string' && reported.trim() !== '' && reported !== '0.0.0') {
+    return `KyberDash version ${reported}`
+  }
   return version.data === undefined && !version.isError ? 'KyberDash version …' : 'KyberDash version unknown'
 }
 

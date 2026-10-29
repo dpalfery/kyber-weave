@@ -203,6 +203,8 @@ describe('GET /api/kyber/version', () => {
     it.each([
       { label: 'absent', packageJson: {} },
       { label: 'empty', packageJson: { version: '' } },
+      { label: 'whitespace-only', packageJson: { version: '   ' } },
+      { label: 'the 0.0.0 placeholder', packageJson: { version: '0.0.0' } },
     ])('answers 503 with an error rather than 200 with 0.0.0 when the version is $label', async ({ packageJson }) => {
       const { handleKyberRequest: handle } = await routesWithPackageJson(packageJson)
       const { status, body } = call('/api/kyber/version', 'GET', bridgeStub(), handle)

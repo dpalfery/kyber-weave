@@ -1580,12 +1580,16 @@ export interface KyberVersion {
 
 const VERSION_PATH = '/api/kyber/version'
 
-/** A 2xx version body must carry a non-empty version string and a finite API version number. */
+/**
+ * A 2xx version body must carry a real version string (not blank, not the `0.0.0`
+ * placeholder a dev build stamps) and a finite API version number.
+ */
 function isKyberVersion(value: unknown): value is KyberVersion {
   return (
     isRaw(value) &&
     typeof value.version === 'string' &&
-    value.version !== '' &&
+    value.version.trim() !== '' &&
+    value.version !== '0.0.0' &&
     typeof value.apiVersion === 'number' &&
     Number.isFinite(value.apiVersion)
   )

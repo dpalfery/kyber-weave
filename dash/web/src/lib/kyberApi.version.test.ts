@@ -36,6 +36,8 @@ describe('fetchKyberVersion', () => {
     ['an empty version string', { version: '', apiVersion: 1 }],
     ['a missing apiVersion', { version: '1.0.0' }],
     ['a non-numeric apiVersion', { version: '1.0.0', apiVersion: '1' }],
+    ['a whitespace-only version', { version: '   ', apiVersion: 1 }],
+    ['the 0.0.0 placeholder version', { version: '0.0.0', apiVersion: 1 }],
     ['a null body', null],
   ])('rejects a 2xx answer that is %s, rather than passing it through as a version', async (_label, body) => {
     stubFetch(200, body)

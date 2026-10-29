@@ -27,7 +27,7 @@ type Props = {
  */
 function kyberdashVersionText(kyberdashVersion: KyberdashVersion | null | undefined): string {
   const version: unknown = kyberdashVersion?.version
-  return typeof version === 'string' && version !== ''
+  return typeof version === 'string' && version.trim() !== '' && version !== '0.0.0'
     ? `KyberDash version ${version}`
     : 'KyberDash version unknown'
 }
