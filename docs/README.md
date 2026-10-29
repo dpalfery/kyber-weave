@@ -188,3 +188,4 @@ The cross-cutting infrastructure, diagnostic pipeline, and distribution mechanic
 - [Installing Kyber-Weave](install.md) — Binary distribution and installation steps
 - [Configuration](configuration.md) — Customizing the ontology and tool settings
 - [Distribution and release flow](distribution.md) — Maintainer-facing release process
+
