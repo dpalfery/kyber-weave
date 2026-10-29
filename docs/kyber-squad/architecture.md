@@ -455,7 +455,10 @@ run's exit status unchanged. The conditions that degrade rather than throw are t
 filesystem, a platform path form, or a host policy can impose on an otherwise healthy run: an I/O
 failure, a permission denial, a path form the platform cannot represent, and a security policy
 that refuses the write. A programming error still throws, because a warning an operator cannot act
-on is how a defect survives. The shipped default is read under the same policy: a build that
+on is how a defect survives. Resolving the file's path follows that policy too, since it probes the
+attributes of each segment on the way: a host that refuses the probe degrades like any other
+denial, while a path that resolves outside the home root, such as a guidance file that is a link
+out of it, still fails the run. The shipped default is read under the same policy: a build that
 carries no readable default writes nothing, records nothing, and warns to reinstall from a release
 that ships the guidance rather than to retry — the defect travels inside the binary, so another
 run of the same build would fail the same way. Nothing is ever written outside the home root.

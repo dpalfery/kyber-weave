@@ -141,9 +141,116 @@ public sealed class SquadResponseGuidanceDeployerTests : IDisposable
             "A build with no default guidance must write nothing rather than an empty file.");
     }
 
+    /// <summary>
+    ///     Resolving the guidance path probes the attributes of every segment on the way to it, so a host
+    ///     that denies that read fails there, ahead of all the file work the degrade policy guards. The
+    ///     denial has to come out as the same warning with no record, not as an exception that fails the
+    ///     whole update.
+    /// </summary>
+    [Fact]
+    public void AGuidancePathTheProcessCannotProbeBecomesAWarningNotAFailedDeployment()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes are not enforced on Windows, so a denied path probe cannot be simulated.");
+            return;
+        }
+
+        string home = PhysicalHome();
+        SquadResponseGuidanceDeployer deployer = new(home, () => "shipped default"u8.ToArray());
+        List<string> warnings = [];
+        SquadHomeFile? record = null;
+        Exception? escaped;
+
+        File.SetUnixFileMode(home, UnixFileMode.None);
+        try
+        {
+            if (!AttributeReadIsDenied(Path.Combine(home, SquadResponseGuidanceDeployer.FileName)))
+            {
+                Assert.Skip("The process can probe a path beneath a mode-000 directory (running as root?), so a denied path probe cannot be simulated.");
+                return;
+            }
+
+            escaped = Record.Exception(() => record = deployer.Deploy(null, warnings));
+        }
+        finally
+        {
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.True(
+            escaped is null,
+            $"'{escaped?.GetType().Name}' escaped the guidance deploy while its path was being resolved, so a " +
+            "host that denies the probe would fail the whole update instead of only skipping the guidance.");
+        Assert.Null(record);
+        string warning = Assert.Single(warnings);
+        Assert.Contains(SquadResponseGuidanceDeployer.FileName, warning, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFileSystemEntries(home));
+    }
+
+    /// <summary>
+    ///     The negative control for the test above: a guard wide enough to pass it by absorbing whatever the
+    ///     path policy raises would also absorb a guidance file that is a link out of the home root. That
+    ///     is a breach of the root's boundary rather than something the host inflicted, and it has to keep
+    ///     failing the deployment.
+    /// </summary>
+    [Fact]
+    public void AGuidanceFileThatLinksOutOfTheHomeRootStillFailsTheDeployment()
+    {
+        string home = PhysicalHome();
+        string outside = Path.Combine(_temp.Path, "outside.md");
+        File.WriteAllText(outside, "text beyond the home root");
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(home, SquadResponseGuidanceDeployer.FileName), outside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Skip($"This host cannot create symbolic links ({exception.Message}).");
+            return;
+        }
+
+        SquadResponseGuidanceDeployer deployer = new(home, () => "shipped default"u8.ToArray());
+        List<string> warnings = [];
+
+        Assert.Throws<SquadPathContainmentException>(() => deployer.Deploy(null, warnings));
+        Assert.Empty(warnings);
+        Assert.Equal("text beyond the home root", File.ReadAllText(outside));
+    }
+
     public void Dispose()
     {
         _temp.Dispose();
+    }
+
+    /// <summary>
+    ///     A home state root spelled without a symbolic link. The path probe stops at the first link it
+    ///     meets, so a scratch directory under macOS's <c>/var</c> alias would never reach the segment a
+    ///     test needs it to be denied.
+    /// </summary>
+    private string PhysicalHome()
+    {
+        string home = Path.Combine(SquadFileSystemPathSemantics.Canonicalize(_temp.Path), "home");
+        Directory.CreateDirectory(home);
+        return home;
+    }
+
+    /// <summary>Whether the process is refused when it reads the attributes of <paramref name="path" />.</summary>
+    private static bool AttributeReadIsDenied(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

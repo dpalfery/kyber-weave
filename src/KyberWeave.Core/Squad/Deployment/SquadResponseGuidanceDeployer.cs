@@ -124,7 +124,21 @@ internal sealed class SquadResponseGuidanceDeployer
     {
         ArgumentNullException.ThrowIfNull(warnings);
 
-        string path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName);
+        // Resolving the path probes the attributes of every segment on the way to it, so a host that
+        // denies that read fails here rather than in the file work below. A path that leaves the home
+        // root raises SquadPathContainmentException, an InvalidOperationException outside the degradable
+        // set: that is a breach of the root's boundary, not something the host inflicted, and it must
+        // keep failing the run.
+        string path;
+        try
+        {
+            path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName);
+        }
+        catch (Exception exception) when (IsDegradableFailure(exception))
+        {
+            warnings.Add(UnavailableMessage(Path.Combine(_homeStateRoot, FileName), exception));
+            return null;
+        }
 
         // Read under the same degrade policy as the write. A default that cannot be read is a defect
         // in this build, not in the operator's environment, but it still must not cost them their
