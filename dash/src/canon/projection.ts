@@ -290,8 +290,13 @@ export class CanonicalProjectionScheduler {
   private oldestUnprojectedAt: number | null = null
   /** When the previous pass started; the floor is measured from it. */
   private lastPassStartAt: number | null = null
-  /** Promises to settle the next time the scheduler stops owing work. */
-  private waiters: Array<() => void> = []
+  /**
+   * The one completion promise owed to every requester of the current cycle
+   * (F7): all requests made before the next quiescence share it, so waiter
+   * state is O(1) however many requests arrive mid-pass. Created on first
+   * request, handed out until the scheduler next settles, then dropped.
+   */
+  private cycle: { promise: Promise<void>; settle: () => void } | null = null
 
   constructor(options: CanonicalProjectionSchedulerOptions) {
     this.store = options.store
@@ -317,7 +322,8 @@ export class CanonicalProjectionScheduler {
   /**
    * Mark the work dirty and schedule its projection. Resolves — never
    * rejects — when the scheduler next reaches quiescence, including any
-   * trailing pass the requests that arrived mid-pass coalesced into.
+   * trailing pass the requests that arrived mid-pass coalesced into. Every
+   * requester of one cycle shares one promise (F7).
    */
   request(): Promise<void> {
     if (this.closed) return Promise.resolve()
@@ -326,9 +332,14 @@ export class CanonicalProjectionScheduler {
     this.lastRequestAt = now
     if (this.oldestUnprojectedAt === null) this.oldestUnprojectedAt = now
     this.schedule()
-    return new Promise<void>((resolve) => {
-      this.waiters.push(resolve)
-    })
+    this.cycle ??= (() => {
+      let settle!: () => void
+      const promise = new Promise<void>((resolve) => {
+        settle = resolve
+      })
+      return { promise, settle }
+    })()
+    return this.cycle.promise
   }
 
   /**
@@ -455,8 +466,8 @@ export class CanonicalProjectionScheduler {
   }
 
   private settleWaiters(): void {
-    const settled = this.waiters
-    this.waiters = []
-    for (const resolve of settled) resolve()
+    const cycle = this.cycle
+    this.cycle = null
+    cycle?.settle()
   }
 }
