@@ -6195,6 +6195,9 @@ export class KyberBridge {
     generation: string,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+      throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+    }
     const db = this.sessionHandle()
     if (db === undefined) return { error: 'content_unavailable' }
     const resolved = this.resolveCapturedScope(db, target)

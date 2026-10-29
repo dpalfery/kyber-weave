@@ -259,6 +259,30 @@ describe('captured context bounded paging (F4)', () => {
     }
   })
 
+  it('answers cancelled for content on an empty scope without partial data', async () => {
+    const fixture = createContextFixture()
+    try {
+      // An unknown session resolves zero units, so the prefix walk never
+      // reaches an abort check: without the entry gate, a pre-aborted
+      // content read answers stale_cursor while manifest answers cancelled.
+      const preAborted = new AbortController()
+      preAborted.abort()
+      const refused = await fixture.bridge.analyticsCapturedContext(
+        {
+          mode: 'content',
+          target: { kind: 'session', sessionId: 'no-such-session' },
+          representation: 'captured_parts',
+          byteLimit: 1024,
+          projectionGeneration: 'projection-1',
+        },
+        { signal: preAborted.signal },
+      )
+      expect(refused).toMatchObject({ error: 'cancelled' })
+    } finally {
+      fixture.close()
+    }
+  })
+
   it('answers cancelled for manifest and content without partial data', async () => {
     const fixture = createContextFixture()
     try {
