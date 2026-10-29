@@ -451,6 +451,85 @@ describe('F3 writer admission under persistent persistence failure', () => {
     expect(writer.pendingBytes).toBe(0)
     await writer.stop()
   })
+
+  it('keeps concurrent enqueue calls behind a held sink within the ceilings instead of piling on', async () => {
+    const sink = new AsyncSink()
+    const failures: unknown[] = []
+    const writer = new IngestWriter(sink, {
+      batchSize: 2,
+      highWaterMark: 1,
+      maxPendingSpans: 8,
+      maxPendingBytes: 1_000_000,
+      measureBytes: (items) => items.length * 10,
+      onError: (error) => {
+        failures.push(error)
+      },
+    })
+
+    // Ten producers race behind a sink that settles nothing: admission runs
+    // before adding, so the first four batches are accepted and block while
+    // the other six are refused instead of piling past the ceiling.
+    const pending = Array.from({ length: 10 }, (_, batch) =>
+      writer
+        .enqueue([
+          { spanId: `q${batch}-0` } as OtlpSpan,
+          { spanId: `q${batch}-1` } as OtlpSpan,
+        ])
+        .then(
+          () => 'admitted' as const,
+          (error: unknown) => error,
+        ),
+    )
+    // Every admit/push ran synchronously in call order before any waiter
+    // could proceed: four accepted-and-blocked, six refused up front.
+    // Queued plus in-flight, exactly at the ceiling — never past it.
+    expect(writer.pending + writer.inflightRecords).toBe(8)
+    expect(writer.pendingBytes + writer.inflightBytes).toBe(80)
+    await settleHeldDrain(writer, sink)
+    const outcomes = await Promise.all(pending)
+    expect(outcomes.filter((outcome) => outcome === 'admitted')).toHaveLength(4)
+    const refused = outcomes.filter((outcome) => outcome !== 'admitted')
+    expect(refused).toHaveLength(6)
+    for (const error of refused) expect(error).toBeInstanceOf(WriterBackpressureError)
+
+    expect(sink.spans.map((span) => span.spanId)).toEqual([
+      'q0-0',
+      'q0-1',
+      'q1-0',
+      'q1-1',
+      'q2-0',
+      'q2-1',
+      'q3-0',
+      'q3-1',
+    ])
+    await writer.stop()
+  })
+
+  it('refuses a non-finite custom byte measure instead of poisoning the ledger', () => {
+    const sink = new FailoverSink()
+    const failures: unknown[] = []
+    const writer = new IngestWriter(sink, {
+      batchSize: 4,
+      measureBytes: () => Number.NaN,
+      onError: (error) => {
+        failures.push(error)
+      },
+    })
+
+    let threw: unknown = null
+    try {
+      writer.write([{ spanId: 'nan-0' } as OtlpSpan])
+    } catch (err) {
+      threw = err
+    }
+    expect(threw).toBeInstanceOf(Error)
+    expect((threw as Error).message).toMatch(/non-finite/)
+    // Nothing was ledgered: the ceilings still bind exactly as before.
+    expect(writer.pending).toBe(0)
+    expect(writer.pendingBytes).toBe(0)
+    expect(() => writer.checkAdmission([{ spanId: 'probe' } as OtlpSpan])).toThrow(/non-finite/)
+    expect(writer.pending).toBe(0)
+  })
 })
 
 describe('F3 receiver sheds load with a precise status before acceptance', () => {
