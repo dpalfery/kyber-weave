@@ -233,7 +233,8 @@ describe('CanonStore iterateAll (streaming corpus walk)', () => {
   })
 })
 
-describe('CanonStore Claude model-call candidate lookups', () => {  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
+describe('CanonStore Claude model-call candidate lookups', () => {
+  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
     record({
       spanId,
       traceId: 'trace-claude',

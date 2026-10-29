@@ -58,15 +58,25 @@ export type IngestWriterOptions = {
   highWaterMark?: number
   /**
    * Backlog ceiling (F3): `write`/`writeLogs` throw `WriterBackpressureError`
-   * instead of queueing past this many spans plus logs. Defaults to four
-   * times the high-water mark; always at least `batchSize`.
+   * instead of queueing past this many spans plus logs — and
+   * `BatchTooLargeError` for a batch that alone exceeds it, however empty
+   * the backlog is. Defaults to four times the high-water mark. Strict:
+   * no empty-queue exception admits an oversize batch.
    */
   maxPendingSpans?: number
   /**
-   * Byte ceiling for the same backlog (F3): estimated queued bytes past this
-   * throw `WriterBackpressureError` the same way. Defaults to 256 MiB.
+   * Byte ceiling for the same backlog (F3): accounted backlog bytes past
+   * this throw the same way, and a batch that alone exceeds it is
+   * permanently oversize. Defaults to 256 MiB.
    */
   maxPendingBytes?: number
+  /**
+   * Byte measure for the backlog ledger (F3): maps an admitted batch to its
+   * accounted bytes. Defaults to the conservative decoded-JSON measure. A
+   * measure that throws refuses the batch with a boundary error rather than
+   * ledgering it weightless — unmeasurable input must not bypass admission.
+   */
+  measureBytes?: (items: readonly unknown[]) => number
   /**
    * Where flush failures land when the writer itself triggered the flush
    * (the periodic timer, or the receiver's fire-and-forget `write` port).
@@ -92,9 +102,8 @@ export const DEFAULT_HIGH_WATER_MARK = DEFAULT_BATCH_SIZE * 8
  * fire-and-forget port) never blocks, so without its own ceiling a failing store
  * with continued intake retains every payload (F3). Sized as a multiple of the
  * high-water mark so ordinary bursts that engage `enqueue` backpressure stay
- * well below it. An empty queue always admits the arriving batch, so a batch
- * larger than the ceiling can still make progress instead of wedging its
- * exporter in a retry loop; the ceiling bounds the *backlog*, not one batch.
+ * well below it. Strict: a batch that alone exceeds either ceiling is
+ * permanently oversize and refused even into an empty backlog.
  */
 export const MAX_PENDING_SPANS_FACTOR = 4
 /**
@@ -122,15 +131,40 @@ export class WriterBackpressureError extends Error {
   }
 }
 
-/** Wire-size estimate for a batch the caller could not measure (F3). */
-function estimateBatchBytes(items: readonly unknown[]): number {
-  try {
-    return Buffer.byteLength(JSON.stringify(items), 'utf8')
-  } catch {
-    // Unserializable input is the sink's problem, not the ledger's: count
-    // the batch as weightless rather than refuse to queue it.
-    return 0
+/**
+ * The writer refused a batch before acceptance because it can never fit the
+ * backlog ceilings, however empty the backlog is (F3). Permanent by
+ * contract: retrying the identical batch refuses again, so the caller must
+ * shrink or split the batch instead of retrying it. The receiver answers
+ * 413 for these; `WriterBackpressureError` (above) is the transient sibling
+ * answered with 503 + Retry-After.
+ */
+export class BatchTooLargeError extends Error {
+  readonly retryable = false
+  constructor(message: string) {
+    super(message)
+    this.name = 'BatchTooLargeError'
   }
+}
+
+/** Where a `checkAdmission` verdict lands: admitted, transiently full, or permanently oversize. */
+export type Admission = 'ok' | 'saturated' | 'oversize'
+
+/**
+ * Conservative per-batch byte measure for the backlog ledger (F3). The
+ * default JSON-measures the DECODED batch — wire bytes do not measure the
+ * retained decoded objects — times a constant overhead factor for the object
+ * graph JSON text does not show. Conservative on purpose: the ledger must
+ * over-estimate retained bytes, never under-estimate them. Injectable so
+ * tests can pin amplification without shipping megabyte fixtures.
+ */
+export const DECODED_BYTE_OVERHEAD_FACTOR = 2
+
+/** Default ledger measure: decoded JSON bytes with the overhead factor above. */
+function defaultMeasureBatchBytes(items: readonly unknown[]): number {
+  // No fail-open fallback: a batch whose bytes cannot be measured is refused
+  // by the caller (`accountedBytes` below) rather than ledgered weightless.
+  return Buffer.byteLength(JSON.stringify(items), 'utf8') * DECODED_BYTE_OVERHEAD_FACTOR
 }
 
 /**
@@ -188,6 +222,16 @@ export class IngestWriter implements OtlpSpanStore {
   private logQueueBytes: number[] = []
   /** Sum of the byte ledgers above: the backlog's estimated retained bytes. */
   private queuedBytes = 0
+  /**
+   * Batches the queues handed to the sink but the sink has not settled (F3):
+   * spliced out of the queues above, still retained, still counted. A held
+   * async sink with continued intake must see its in-flight batches in the
+   * admission totals, or the ledger stops bounding the moment a flush starts.
+   */
+  private inflightSpanCount = 0
+  private inflightLogCount = 0
+  private inflightByteCount = 0
+  private readonly measure: (items: readonly unknown[]) => number
   private readonly maxPendingSpans: number
   private readonly maxPendingBytes: number
   private flushInFlight: Promise<void> | null = null
@@ -209,13 +253,14 @@ export class IngestWriter implements OtlpSpanStore {
       Math.floor(opts.highWaterMark ?? DEFAULT_HIGH_WATER_MARK),
     )
     this.maxPendingSpans = Math.max(
-      this.batchSize,
+      1,
       Math.floor(opts.maxPendingSpans ?? this.highWaterMark * MAX_PENDING_SPANS_FACTOR),
     )
     this.maxPendingBytes = Math.max(
-      4096,
+      1,
       Math.floor(opts.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES),
     )
+    this.measure = opts.measureBytes ?? defaultMeasureBatchBytes
     this.onPersisted = opts.onPersisted
     const onError = opts.onError
     this.report = (error: unknown) => {
@@ -246,19 +291,76 @@ export class IngestWriter implements OtlpSpanStore {
     return this.queuedBytes
   }
 
+  /** Records handed to the sink but not yet settled — still retained, still counted. */
+  get inflightRecords(): number {
+    return this.inflightSpanCount + this.inflightLogCount
+  }
+
+  /** Estimated bytes of the unsettled in-flight batches. */
+  get inflightBytes(): number {
+    return this.inflightByteCount
+  }
+
+  /** Queued plus in-flight records: everything retained but uncommitted. */
+  private backlogCount(): number {
+    return this.queue.length + this.logQueue.length + this.inflightSpanCount + this.inflightLogCount
+  }
+
+  /** Queued plus in-flight bytes: the ledger admission is computed against. */
+  private backlogBytes(): number {
+    return this.queuedBytes + this.inflightByteCount
+  }
+
   /**
-   * Whether `count` records carrying `bytes` would be admitted right now
-   * (F3): the same gate `write`/`writeLogs` enforce, exposed so the receiver
-   * can shed load with a retryable status BEFORE acceptance instead of
-   * queueing and then failing.
+   * The F3 admission verdict for a batch of decoded `items` carrying `hint`
+   * wire bytes: the same gate `write`/`writeLogs` enforce, exposed so the
+   * receiver can shed load with a precise status BEFORE acceptance instead of
+   * queueing and then failing. `saturated` is transient (retry the batch
+   * later); `oversize` is permanent (the batch alone exceeds a ceiling and
+   * never fits).
    */
-  canAccept(count: number, bytes: number): boolean {
-    if (this.stopped) return false
-    if (this.queue.length + this.logQueue.length === 0) return true
-    return (
-      this.queue.length + this.logQueue.length + Math.max(0, count) <= this.maxPendingSpans &&
-      this.queuedBytes + Math.max(0, bytes) <= this.maxPendingBytes
-    )
+  checkAdmission(items: readonly unknown[], hint?: OtlpWriteHint): Admission {
+    if (this.stopped) return 'saturated'
+    return this.verdict(items.length, this.accountedBytes(items, hint))
+  }
+
+  /**
+   * Whether a batch of decoded `items` carrying `hint` bytes would be
+   * admitted right now.
+   */
+  canAccept(items: readonly unknown[], hint?: OtlpWriteHint): boolean {
+    return this.checkAdmission(items, hint) === 'ok'
+  }
+
+  /**
+   * The ledgered bytes for one batch (F3): the conservative decoded measure
+   * and the caller's wire hint, whichever is larger. The hint can only raise
+   * the accounting, never lower it — an arbitrary `bytes: 0`, negative, or
+   * NaN hint falls back to the decoded measure rather than bypassing the
+   * byte ceiling. A batch the measure cannot read is refused outright:
+   * unmeasurable input must not be ledgered weightless.
+   */
+  private accountedBytes(items: readonly unknown[], hint?: OtlpWriteHint): number {
+    let decoded: number
+    try {
+      decoded = Math.max(0, Math.floor(this.measure(items)))
+    } catch (err) {
+      throw new Error(
+        `cannot admit batch: byte measurement failed (${err instanceof Error ? err.message : String(err)}); refusing unmeasurable input`,
+      )
+    }
+    const hinted = hint?.bytes
+    const wire =
+      typeof hinted === 'number' && Number.isFinite(hinted) && hinted > 0 ? Math.floor(hinted) : 0
+    return Math.max(decoded, wire)
+  }
+
+  /** Strict verdict: oversize first (permanent), then the backlog totals. */
+  private verdict(count: number, width: number): Admission {
+    if (count > this.maxPendingSpans || width > this.maxPendingBytes) return 'oversize'
+    if (this.backlogCount() + count > this.maxPendingSpans) return 'saturated'
+    if (this.backlogBytes() + width > this.maxPendingBytes) return 'saturated'
+    return 'ok'
   }
 
   /**
@@ -275,19 +377,20 @@ export class IngestWriter implements OtlpSpanStore {
    * blocking the decode path, triggering a flush whenever a batch is full.
    * Spans are never dropped; a flush failure surfaces through `onError`.
    *
-   * Past the backlog ceiling the batch is refused with
-   * `WriterBackpressureError` instead of queued (F3): the caller must retry
-   * it, because nothing accepted is ever dropped and nothing refused was
-   * ever accepted. `hint.bytes` should carry the request's wire bytes (the
-   * receiver knows them without re-serializing); without a hint the batch
-   * is JSON-measured, which costs a serialization on that path.
+   * Admission is strict (F3): a batch that alone exceeds either ceiling is
+   * refused with `BatchTooLargeError` (permanent — do not retry it as-is),
+   * and a batch that would overflow a full backlog with
+   * `WriterBackpressureError` (transient — retry it later). Nothing refused
+   * was ever accepted. `hint.bytes` may carry the request's wire bytes; the
+   * ledger takes the larger of the hint and the conservative decoded measure,
+   * so the hint can never shrink the accounting.
    */
   write(spans: readonly OtlpSpan[], hint?: OtlpWriteHint): void {
     if (spans.length === 0) return
     if (this.stopped) {
       throw new Error('IngestWriter is stopped; enqueueing more spans would silently drop them')
     }
-    const bytes = hint?.bytes ?? estimateBatchBytes(spans)
+    const bytes = this.accountedBytes(spans, hint)
     this.admit(spans.length, bytes)
     pushWithBytes(this.queue, this.queueBytes, spans, bytes)
     if (this.queue.length >= this.batchSize) this.autoFlush()
@@ -296,7 +399,7 @@ export class IngestWriter implements OtlpSpanStore {
   writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void {
     if (logs.length === 0) return
     if (this.stopped) throw new Error('IngestWriter is stopped; enqueueing more logs would silently drop them')
-    const bytes = hint?.bytes ?? estimateBatchBytes(logs)
+    const bytes = this.accountedBytes(logs, hint)
     this.admit(logs.length, bytes)
     pushWithBytes(this.logQueue, this.logQueueBytes, logs, bytes)
     if (this.logQueue.length >= this.batchSize) this.autoFlush()
@@ -304,24 +407,32 @@ export class IngestWriter implements OtlpSpanStore {
 
   /**
    * Queue spans with backpressure (R2.5): the returned promise resolves
-   * only once the spans are queued *and* the queue has been flushed back
+   * only once the spans are queued *and* the backlog has been flushed back
    * under the high-water mark, so a producer outrunning persistence is
    * slowed to the store's pace. A store failure rejects here — with the
-   * batch re-queued at the head of the queue, not dropped.
+   * batch re-queued at the head of the queue, not dropped. A batch that
+   * alone exceeds either ceiling is permanently oversize
+   * (`BatchTooLargeError`): blocking cannot drain what never fits.
    */
   async enqueue(spans: readonly OtlpSpan[], hint?: OtlpWriteHint): Promise<void> {
     if (this.stopped) {
       throw new Error('IngestWriter is stopped; enqueueing more spans would silently drop them')
     }
     if (spans.length > 0) {
-      const bytes = hint?.bytes ?? estimateBatchBytes(spans)
-      this.admit(spans.length, bytes)
+      const bytes = this.accountedBytes(spans, hint)
+      if (spans.length > this.maxPendingSpans || bytes > this.maxPendingBytes) {
+        throw new BatchTooLargeError(
+          `batch of ${spans.length} spans (${bytes} bytes) exceeds the backlog ceiling; shrink or split the batch`,
+        )
+      }
+      this.queuedBytes += bytes
       pushWithBytes(this.queue, this.queueBytes, spans, bytes)
       if (this.queue.length >= this.batchSize) this.autoFlush()
     }
-    while (this.queue.length > this.highWaterMark) {
+    while (this.queue.length > this.highWaterMark || this.backlogBytes() > this.maxPendingBytes) {
       // Either rejects with the store's failure (batch re-queued, caller
-      // decides what to do) or resolves with the queue drained.
+      // decides what to do) or resolves with the backlog drained. The byte
+      // arm bounds huge-payload trickles a span count alone would not see.
       await this.pokeFlush()
     }
   }
@@ -381,7 +492,14 @@ export class IngestWriter implements OtlpSpanStore {
       const batchBytes = this.queueBytes.splice(0, this.batchSize)
       const logs = this.logQueue.splice(0, this.batchSize)
       const logBytes = this.logQueueBytes.splice(0, this.batchSize)
-      this.queuedBytes -= sumBytes(batchBytes) + sumBytes(logBytes)
+      // Handed to the sink but not settled: still retained, still counted.
+      // Splicing out of the queues must not look like drained backlog to
+      // the admission gate while the sink holds the batch.
+      const sentBytes = sumBytes(batchBytes) + sumBytes(logBytes)
+      this.queuedBytes -= sentBytes
+      this.inflightSpanCount += batch.length
+      this.inflightLogCount += logs.length
+      this.inflightByteCount += sentBytes
       try {
         let result: unknown
         if (this.batchSink !== null) {
@@ -399,17 +517,26 @@ export class IngestWriter implements OtlpSpanStore {
         if (isThenable(result)) await result
         // The sink committed: receipt and persistence are different moments, and this is
         // the second one. A batch the sink refused never reaches here (it re-queues below).
+        // Settled in-flight batches leave the ledger: committed bytes are the
+        // sink's now, not the backlog's.
+        this.inflightSpanCount -= batch.length
+        this.inflightLogCount -= logs.length
+        this.inflightByteCount -= sentBytes
         if (batch.length > 0 || logs.length > 0) this.notifyPersisted(batch.length, logs.length)
       } catch (err) {
         // The store refused the batch: put it back at the head, in order,
         // so no span is dropped (R2.5), and let the caller see the failure.
-        // The byte ledger goes back with it, so the refusal does not look
-        // like drained backlog to the admission gate.
+        // The ledgers go back with it, exactly as admitted — a refusal must
+        // restore the totals, neither leaking the in-flight reservation nor
+        // double-counting it.
+        this.inflightSpanCount -= batch.length
+        this.inflightLogCount -= logs.length
+        this.inflightByteCount -= sentBytes
         this.queue.unshift(...batch)
         this.queueBytes.unshift(...batchBytes)
         this.logQueue.unshift(...logs)
         this.logQueueBytes.unshift(...logBytes)
-        this.queuedBytes += sumBytes(batchBytes) + sumBytes(logBytes)
+        this.queuedBytes += sentBytes
         throw err
       }
     }
@@ -418,30 +545,25 @@ export class IngestWriter implements OtlpSpanStore {
   }
 
   /**
-   * The F3 backlog gate: refuse `count` records carrying `bytes` with a
-   * retryable error when the backlog is already full, instead of queueing
-   * without bound behind a failing store. An empty queue always admits the
-   * arriving batch (liveness over strictness for one batch); the ceiling
-   * bounds what can accumulate, not what one request may carry.
+   * The F3 backlog gate: refuse `count` records carrying `width` ledgered
+   * bytes with a permanent error when the batch alone exceeds a ceiling,
+   * or a transient one when it would overflow a full backlog. Strict — no
+   * empty-queue exception: an oversize batch is refused however empty the
+   * backlog is, because retrying it could never succeed.
    */
-  private admit(count: number, bytes: number): void {
-    if (this.queue.length + this.logQueue.length === 0) {
-      this.queuedBytes += Math.max(0, bytes)
-      return
-    }
-    const size = Math.max(0, count)
-    const width = Math.max(0, bytes)
-    if (this.queue.length + this.logQueue.length + size > this.maxPendingSpans) {
-      throw new WriterBackpressureError(
-        `ingest backlog is full (${this.queue.length + this.logQueue.length} records queued); retry the batch`,
+  private admit(count: number, width: number): void {
+    const verdict = this.verdict(Math.max(0, count), Math.max(0, width))
+    if (verdict === 'oversize') {
+      throw new BatchTooLargeError(
+        `batch of ${count} records (${width} bytes) exceeds the backlog ceiling; shrink or split the batch`,
       )
     }
-    if (this.queuedBytes + width > this.maxPendingBytes) {
+    if (verdict === 'saturated') {
       throw new WriterBackpressureError(
-        `ingest backlog is full (${this.queuedBytes} bytes queued); retry the batch`,
+        `ingest backlog is full (${this.backlogCount()} records, ${this.backlogBytes()} bytes retained); retry the batch`,
       )
     }
-    this.queuedBytes += width
+    this.queuedBytes += Math.max(0, width)
   }
 
   private notifyPersisted(spans: number, logs: number): void {

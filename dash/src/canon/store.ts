@@ -5033,9 +5033,9 @@ export class CanonStore {
    * Every canonical record, one at a time, in timestamp order — the streaming
    * counterpart of `listAll` for passes that must walk the whole corpus without
    * holding it in memory (F9: corpus-wide summaries over compressed payload
-   * columns). The cursor yields one row per turn of the event loop's caller, so
-   * only one record is live at a time; callers needing a snapshot should keep
-   * using `listAll`. The store must stay open for the generator's lifetime.
+   * columns). The cursor yields one row per `next()` call, so only one record
+   * is live at a time; callers needing a snapshot should keep using `listAll`.
+   * The store must stay open for the generator's lifetime.
    */
   *iterateAll(): Generator<import('./types.js').CanonicalRecord> {
     const rows = this.db.prepare('SELECT * FROM records ORDER BY timestamp').iterate() as IterableIterator<RecordRow>
