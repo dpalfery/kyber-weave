@@ -37,7 +37,7 @@ jobs:
   # workflow-level `paths:` filter) because only "CI Summary" is a required check and a
   # skipped job counts as passed, while a workflow that never starts leaves it pending.
   # Anything that is not a pull request runs everything. A change to this workflow
-  # also runs everything, so an edit to the filters is itself fully exercised.
+  # or to the CodeQL config also runs everything, so an edit to the filters is itself fully exercised.
   #
   # build-test, gitleaks and the skill and docs gate always run: the .NET tests read
   # files under docs/, products/, .kyber-weave/, .github/, scripts/ and a few under
@@ -75,7 +75,7 @@ jobs:
           files="$(git diff --name-only "${BASE_SHA}" HEAD)"
           printf 'Changed files:\n%s\n' "${files}"
           [ -n "${files}" ] || all
-          if grep -qxF '.github/workflows/ci.yml' <<<"${files}"; then all; fi
+          if grep -qxF '.github/workflows/ci.yml' <<<"${files}" || grep -q '^\.github/codeql/' <<<"${files}"; then all; fi
 
           has() { if grep -Eq "$1" <<<"${files}"; then echo true; else echo false; fi; }
           nonempty() { if [ -n "$1" ]; then echo true; else echo false; fi; }
@@ -84,7 +84,7 @@ jobs:
           code="$(nonempty "$(grep -Ev '^(docs/|[^/]+\.md$)' <<<"${files}" || true)")"
           dotnet="$(nonempty "$(grep -Ev '^(docs/|dash/|[^/]+\.md$)' <<<"${files}" || true)")"
           cs="$(has '(\.(cs|csproj|props|targets|sln|slnx|editorconfig)$|^global\.json$|(^|/)nuget\.config$|(^|/)packages\.lock\.json$)')"
-          js="$(has '(^dash/|\.(js|mjs|cjs|ts|tsx)$)')"
+          js="$(has '\.(js|mjs|cjs|mts|cts|ts|tsx|jsx|json)$')"
           langs=()
           [ "${cs}" = true ] && langs+=('"csharp"')
           [ "${js}" = true ] && langs+=('"javascript-typescript"')
