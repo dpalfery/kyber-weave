@@ -636,6 +636,7 @@ mod tests {
     use super::*;
     use crate::api::ApiResponse;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -739,11 +740,22 @@ mod tests {
         Arc::new(Mutex::new(routes))
     }
 
+    /// Hands out a distinct number to each settings directory in this process.
+    static NEXT_SETTINGS_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    /// A settings directory that no other test in this process shares. Tests
+    /// run in parallel inside one process, so the process id alone names the
+    /// same directory for all of them; the counter separates them, and the
+    /// process id separates concurrent test runs.
+    fn unique_settings_dir() -> PathBuf {
+        let n = NEXT_SETTINGS_DIR.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("kyberdash-version-poll-{}-{n}", std::process::id()))
+    }
+
     /// A runtime whose supervisor is already attached to the fake server, so a
     /// poll has a server URL to read from without launching anything.
     fn attached_runtime(routes: Routes, fetched: Fetched) -> Runtime {
-        let settings_dir =
-            std::env::temp_dir().join(format!("kyberdash-version-poll-{}", std::process::id()));
+        let settings_dir = unique_settings_dir();
         let mut runtime = Runtime::new(
             RuntimeConfig {
                 cli_program: Some("kyberdash".to_string()),
