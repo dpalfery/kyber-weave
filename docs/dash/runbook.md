@@ -1086,6 +1086,14 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
+   Check which engine version is answering. The route is store-free, so it answers at once even while a projection runs:
+
+   ```bash
+   curl -s http://127.0.0.1:3000/api/kyber/version
+   ```
+
+   It returns `{ "version": "...", "apiVersion": 1 }`. A dev checkout reports the version in `dash/package.json`. A release reports the version stamped into `dash/package.json` at release time, which is the same version the web and tray Settings views show.
+
 #### Navigating the web dashboard
 
 Every view has its own URL, so a view can be bookmarked, shared, or opened directly.

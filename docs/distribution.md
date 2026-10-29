@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 ---
 
 # Distribution and release flow
@@ -276,7 +276,9 @@ kyber-weave-mcp --version
 kyber-weave-mcp -v
 ```
 
-Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`).
+Output format: exactly `kyber-weave <version>`, with the `+<sha>` build metadata removed. For example, a release candidate prints `kyber-weave 0.2.0-rc.1`. The output never contains a `+` suffix. The [local release loop](#verifying-a-release-locally) enforces this exact format on the published binaries; the release workflow's publish step does not run this check itself.
+
+The same release also stamps `dash/package.json` with that version (`npm version` in `.github/workflows/release.yml`) before the KyberDash binaries are built. The KyberDash Settings views, in the web dashboard and the tray, read the version from the engine, so for a release they show the same version that `kyber-weave --version` prints. A source checkout keeps whatever version `dash/package.json` holds, so its Settings views show that value.
 
 ## Code signing status
 
@@ -506,6 +508,13 @@ because it means the binaries already on this machine. The loop serves
 Run against a **published single-file binary**, never `dotnet run`. The failure this exists
 to catch — a running image replacing itself and then failing to load an assembly it had not
 yet touched — does not exist in any other shape.
+
+The loop unpacks the `kyber-weave` and `kyber-weave-mcp` archives that `release-local.sh` publishes,
+and after the self-update asserts that `kyber-weave --version` prints exactly `kyber-weave <version>`
+and `kyber-weave-mcp --version` prints exactly `kyber-weave-mcp <version>`. An unstripped `+<sha>`
+suffix or a default version therefore fails the loop. The release workflow's own publish step
+(`.github/workflows/release.yml`) does not run `kyber-weave --version`; that exact-match check is the
+loop's, not a step the workflow repeats.
 
 ### KyberDash in the loop
 
