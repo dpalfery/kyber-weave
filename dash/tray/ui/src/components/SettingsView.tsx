@@ -20,6 +20,18 @@ type Props = {
   onBack: () => void
 }
 
+/**
+ * The version line's text. The bridge carries the core's JSON verbatim, so the
+ * value is typed `unknown` until narrowed: anything but a non-empty string
+ * version reads as unknown, never as `undefined`, `null` or a blank.
+ */
+function kyberdashVersionText(kyberdashVersion: KyberdashVersion | null | undefined): string {
+  const version: unknown = kyberdashVersion?.version
+  return typeof version === 'string' && version !== ''
+    ? `KyberDash version ${version}`
+    : 'KyberDash version unknown'
+}
+
 export function SettingsView({
   settings,
   sharedSettings = null,
@@ -127,9 +139,7 @@ export function SettingsView({
       )}
 
       <p className="settings__note" data-testid="settings-kyberdash-version">
-        {kyberdashVersion === null
-          ? 'KyberDash version unknown'
-          : `KyberDash version ${kyberdashVersion.version}`}
+        {kyberdashVersionText(kyberdashVersion)}
       </p>
 
       <nav className="actions">

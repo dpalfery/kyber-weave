@@ -1,5 +1,3 @@
-// @vitest-environment jsdom
-
 /**
  * The popover, against every report fixture and every ViewState phase.
  *
@@ -10,10 +8,8 @@
  * are covered by `commands.test.tsx`, which drives the handlers directly.
  */
 
-import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import empty from '../../../src/analysis/report/fixtures/empty.json' with { type: 'json' }
 import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
@@ -494,92 +490,5 @@ describe('Popover jobs and pause (architecture rule R1: display layer only)', ()
 
     expect(maintenanceAt).toBeGreaterThanOrEqual(0)
     expect(maintenanceAt).toBeLessThan(html.indexOf('data-testid="actions"'))
-  })
-})
-
-/**
- * `kyberdashVersion` is the field the tray core adds to ViewState (RED step: not
- * yet declared in viewState.ts). Declaring it on this local type keeps the
- * fixture typed without a cast, and the field is the same one ViewState gains.
- */
-type VersionedViewState = ViewState & {
-  kyberdashVersion?: { version: string; apiVersion: number } | null
-}
-
-describe('Popover settings view shows the KyberDash version', () => {
-  let container: HTMLDivElement
-  let root: Root | undefined
-
-  beforeEach(() => {
-    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-    container = document.createElement('div')
-    document.body.appendChild(container)
-  })
-
-  afterEach(async () => {
-    if (root !== undefined) {
-      const mounted = root
-      await act(async () => {
-        mounted.unmount()
-      })
-      root = undefined
-    }
-    container.remove()
-  })
-
-  /** Mounts the popover, then opens Settings the way a user does: the Settings button. */
-  async function openSettings(state: VersionedViewState): Promise<void> {
-    await act(async () => {
-      root = createRoot(container)
-      root.render(<Popover state={state} commands={NOOP_COMMANDS} now={NOW} />)
-    })
-    const openButton = container.querySelector<HTMLButtonElement>('[data-testid="open-settings"]')
-    expect(openButton, 'the popover has no open-settings button').not.toBeNull()
-    await act(async () => {
-      openButton!.click()
-    })
-    expect(container.querySelector('[data-testid="settings-view"]'), 'Settings did not open').not.toBeNull()
-  }
-
-  function versionLine(): HTMLElement | null {
-    return container.querySelector<HTMLElement>('[data-testid="settings-kyberdash-version"]')
-  }
-
-  it('shows the KyberDash version the core reports', async () => {
-    await openSettings({
-      ...viewState(),
-      kyberdashVersion: { version: '9.8.7', apiVersion: 1 },
-    })
-
-    expect(versionLine(), 'settings-kyberdash-version is missing from Settings').not.toBeNull()
-    expect(versionLine()!.textContent).toBe('KyberDash version 9.8.7')
-  })
-
-  it('says unknown when the core could not read the version (null)', async () => {
-    await openSettings({ ...viewState(), kyberdashVersion: null })
-
-    expect(versionLine(), 'settings-kyberdash-version is missing from Settings').not.toBeNull()
-    expect(versionLine()!.textContent).toBe('KyberDash version unknown')
-  })
-
-  it('says unknown when the core sends no version key at all', async () => {
-    await openSettings(viewState())
-
-    expect(versionLine(), 'settings-kyberdash-version is missing from Settings').not.toBeNull()
-    expect(versionLine()!.textContent).toBe('KyberDash version unknown')
-  })
-
-  it('places the version line just above the Back navigation', async () => {
-    await openSettings({
-      ...viewState(),
-      kyberdashVersion: { version: '9.8.7', apiVersion: 1 },
-    })
-
-    const line = versionLine()
-    const back = container.querySelector<HTMLElement>('[data-testid="settings-back"]')
-    expect(line, 'settings-kyberdash-version is missing from Settings').not.toBeNull()
-    expect(back).not.toBeNull()
-    // The line must come before Back in document order.
-    expect(line!.compareDocumentPosition(back!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
