@@ -94,10 +94,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ExecuteWithDurableWritesEnabledDeploysWhatItWrote()
     {
         // The test assembly turns SyncToDisk off for speed (SquadTestDurability), so the branch
-        // that ships would otherwise never run. Exercise it once, then put the switch back.
-        bool original = SquadTransaction.SyncToDisk;
-        SquadTransaction.SyncToDisk = true;
-        try
+        // that ships would otherwise never run. Exercise it once in an isolated async flow scope.
+        using (SquadTransaction.UseSyncToDiskScope(true))
         {
             using TempDirectory fixture = new();
             string targetRoot = Path.Combine(fixture.Path, "target");
@@ -117,10 +115,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Assert.Equal(
                 "durable",
                 File.ReadAllText(Path.Combine(targetRoot, ".codex", "agents", "durable.toml")));
-        }
-        finally
-        {
-            SquadTransaction.SyncToDisk = original;
         }
     }
 

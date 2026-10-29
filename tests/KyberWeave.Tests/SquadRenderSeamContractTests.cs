@@ -1,21 +1,22 @@
 using System.Text;
-using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the contract for the EnvironmentReader and PreloadedSource seams designed in
-/// Plan §2.1 &amp; §2.2 for .NET test suite optimization.
+///     Pins the contract for the EnvironmentReader and PreloadedSource seams designed in
+///     Plan §2.1 &amp; §2.2 for .NET test suite optimization.
 /// </summary>
 /// <remarks>
-/// These seams eliminate process environment mutation (<see cref="Environment.SetEnvironmentVariable(string, string?)" />)
-/// and redundant canonical disk I/O across squad rendering tests, enabling thread-safe parallel test execution
-/// and sub-second suite runs without altering the production render output.
+///     These seams eliminate process environment mutation (
+///     <see cref="Environment.SetEnvironmentVariable(string, string?)" />)
+///     and redundant canonical disk I/O across squad rendering tests, enabling thread-safe parallel test execution
+///     and sub-second suite runs without altering the production render output.
 /// </remarks>
 public sealed class SquadRenderSeamContractTests : IDisposable
 {
@@ -30,8 +31,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadOperatorChannel.IsGateOn honors an injected environment reader delegate
-    /// without reading or mutating process-level environment variables.
+    ///     Verifies that SquadOperatorChannel.IsGateOn honors an injected environment reader delegate
+    ///     without reading or mutating process-level environment variables.
     /// </summary>
     [Fact]
     public void OperatorChannelGateHonorsInjectedEnvironmentReaderWithoutMutatingProcessEnvironment()
@@ -53,8 +54,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadOperatorChannel.ResolveServerName honors an injected environment reader delegate
-    /// without reading or mutating process-level environment variables.
+    ///     Verifies that SquadOperatorChannel.ResolveServerName honors an injected environment reader delegate
+    ///     without reading or mutating process-level environment variables.
     /// </summary>
     [Fact]
     public void OperatorChannelResolveServerNameHonorsInjectedEnvironmentReaderWithoutMutatingProcessEnvironment()
@@ -91,10 +92,10 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadRendererRegistry honors SquadRenderRequest.EnvironmentReader:
-    /// when the injected reader supplies the gate and server name while the process environment is unset,
-    /// Copilot at global scope renders the operator channel overlay referencing the server and Claude emits
-    /// the operator-channel-not-rendered degradation record.
+    ///     Verifies that SquadRendererRegistry honors SquadRenderRequest.EnvironmentReader:
+    ///     when the injected reader supplies the gate and server name while the process environment is unset,
+    ///     Copilot at global scope renders the operator channel overlay referencing the server and Claude emits
+    ///     the operator-channel-not-rendered degradation record.
     /// </summary>
     [Fact]
     public async Task RendererRegistryHonorsRenderRequestEnvironmentReaderForCopilotOverlayAndDegradations()
@@ -147,8 +148,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that when SquadRenderRequest.EnvironmentReader returns null, neither the Copilot conductor
-    /// overlay nor the Claude degradation record is emitted.
+    ///     Verifies that when SquadRenderRequest.EnvironmentReader returns null, neither the Copilot conductor
+    ///     overlay nor the Claude degradation record is emitted.
     /// </summary>
     [Fact]
     public async Task RendererRegistryOmitsOverlayAndDegradationsWhenEnvironmentReaderReturnsNull()
@@ -194,8 +195,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadRenderSource.Load honors PreloadedSource on SquadRenderRequest
-    /// without requiring or touching SourceDirectory on disk.
+    ///     Verifies that SquadRenderSource.Load honors PreloadedSource on SquadRenderRequest
+    ///     without requiring or touching SourceDirectory on disk.
     /// </summary>
     [Fact]
     public void RenderSourceLoadHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
@@ -222,8 +223,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadRenderSource.Load applies ModelPresets cleanly to the in-memory PreloadedSource
-    /// without requiring or touching SourceDirectory on disk.
+    ///     Verifies that SquadRenderSource.Load applies ModelPresets cleanly to the in-memory PreloadedSource
+    ///     without requiring or touching SourceDirectory on disk.
     /// </summary>
     [Fact]
     public void RenderSourceLoadWithPreloadedSourceAppliesModelPresetsCleanly()
@@ -265,8 +266,8 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that SquadRendererRegistry.RenderAsync executes successfully with a PreloadedSource
-    /// against a non-existent SourceDirectory path without touching the filesystem.
+    ///     Verifies that SquadRendererRegistry.RenderAsync executes successfully with a PreloadedSource
+    ///     against a non-existent SourceDirectory path without touching the filesystem.
     /// </summary>
     [Fact]
     public async Task RendererRegistryRenderAsyncHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
@@ -304,6 +305,44 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotEmpty(result.Files);
         Assert.False(Directory.Exists(nonExistentSourceDirectory));
+    }
+
+    /// <summary>
+    ///     Verifies that SquadTransaction.UseSyncToDiskScope isolates disk sync overrides to the current
+    ///     asynchronous flow so concurrent test threads remain guarded by SquadTestDurability.DisableDeviceFlush.
+    /// </summary>
+    [Fact]
+    public async Task UseSyncToDiskScopeIsolatesOverrideToCurrentAsyncFlow()
+    {
+        Assert.False(SquadTransaction.SyncToDisk);
+
+        using (SquadTransaction.UseSyncToDiskScope(true))
+        {
+            Assert.True(SquadTransaction.SyncToDisk);
+            await Task.Yield();
+            Assert.True(SquadTransaction.SyncToDisk);
+
+            TaskCompletionSource<bool> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Thread thread;
+            using (ExecutionContext.SuppressFlow())
+            {
+                thread = new Thread(static state =>
+                {
+                    TaskCompletionSource<bool> completionSource = (TaskCompletionSource<bool>)state!;
+                    completionSource.SetResult(SquadTransaction.SyncToDisk);
+                })
+                {
+                    IsBackground = true
+                };
+                thread.Start(tcs);
+            }
+
+            bool independentObserved = await tcs.Task;
+            thread.Join();
+            Assert.False(independentObserved);
+        }
+
+        Assert.False(SquadTransaction.SyncToDisk);
     }
 
     private sealed class TestGlobalRootResolver(string copilotRoot, string claudeRoot) : ISquadGlobalRootResolver
