@@ -599,10 +599,17 @@ impl Runtime {
                 return;
             }
         };
+        // A hung secondary read must not hold one poll past its 15 s interval,
+        // and a read that never ran must not leave old data shown as current.
+        // So the whole poll spends one budget: each read gets the lesser of
+        // its own cap and what is left, and once nothing is left the rest are
+        // skipped and cleared (unknown, never stale).
+        let started = self.dependencies.clock.elapsed();
+        let budget = api::POLL_WHILE_OPEN;
         match self
             .dependencies
             .fetcher
-            .get_with_timeout(&report_url, api::REQUEST_TIMEOUT)
+            .get_with_timeout(&report_url, api::REQUEST_TIMEOUT.min(budget))
         {
             Ok(report) => self.cache.report.record_success(report, now),
             Err(error) => {
@@ -610,24 +617,42 @@ impl Runtime {
                 // A server that cannot answer the report will not answer the
                 // rest, and the poll must stay inside its 15 s interval.
                 // Unknown stays unknown: nothing old is left on screen.
-                self.cache.jobs = None;
-                self.cache.shared_settings = None;
-                self.cache.coverage = None;
-                self.cache.kyberdash_version = None;
+                self.clear_secondary_documents();
                 return;
             }
         }
-        // Unknown stays unknown: a failed fetch clears the value instead of
-        // leaving old (or inventing default) job and settings state on screen.
-        self.cache.jobs = self.fetch_document(&server_url, JOBS_PATH, api::REQUEST_TIMEOUT);
-        self.cache.shared_settings =
-            self.fetch_document(&server_url, SETTINGS_PATH, api::REQUEST_TIMEOUT);
-        // Same rule for coverage: the saber reads it on the existing poll
-        // loop, and a failed read renders red rather than a stale green.
-        self.cache.coverage = self.fetch_document(&server_url, COVERAGE_PATH, api::REQUEST_TIMEOUT);
-        // Same rule for the version: a failed read must not keep an old one.
-        self.cache.kyberdash_version =
-            self.fetch_document(&server_url, VERSION_PATH, api::VERSION_REQUEST_TIMEOUT);
+        // Unknown stays unknown: a failed or skipped fetch clears the value
+        // instead of leaving old (or inventing default) state on screen.
+        // Jobs, settings, coverage (the saber's red-not-stale-green) and the
+        // version are read in order under the shared budget.
+        self.clear_secondary_documents();
+        let reads = [
+            (JOBS_PATH, api::REQUEST_TIMEOUT),
+            (SETTINGS_PATH, api::REQUEST_TIMEOUT),
+            (COVERAGE_PATH, api::REQUEST_TIMEOUT),
+            (VERSION_PATH, api::VERSION_REQUEST_TIMEOUT),
+        ];
+        for (path, cap) in reads {
+            let spent = self.dependencies.clock.elapsed().saturating_sub(started);
+            let remaining = budget.saturating_sub(spent);
+            if remaining.is_zero() {
+                break;
+            }
+            let document = self.fetch_document(&server_url, path, cap.min(remaining));
+            match path {
+                JOBS_PATH => self.cache.jobs = document,
+                SETTINGS_PATH => self.cache.shared_settings = document,
+                COVERAGE_PATH => self.cache.coverage = document,
+                _ => self.cache.kyberdash_version = document,
+            }
+        }
+    }
+
+    fn clear_secondary_documents(&mut self) {
+        self.cache.jobs = None;
+        self.cache.shared_settings = None;
+        self.cache.coverage = None;
+        self.cache.kyberdash_version = None;
     }
 
     fn fetch_document(&mut self, server_url: &str, path: &str, timeout: Duration) -> Option<Value> {
@@ -671,11 +696,29 @@ mod tests {
     type Fetched = Arc<Mutex<Vec<String>>>;
     /// Each timed read, with the deadline the runtime asked the client for.
     type Timeouts = Arc<Mutex<Vec<(String, Duration)>>>;
+    /// Monotonic fake time, shared by the fake clock and the fake fetcher. A
+    /// read that takes time advances it, so the poll's budget is spent by the
+    /// reads themselves, as it would be on a real socket.
+    type SharedTime = Arc<Mutex<Duration>>;
+    /// What a read costs in fake time, keyed by route path. A missing route
+    /// answers at once.
+    type SharedCosts = Arc<Mutex<HashMap<String, Cost>>>;
+
+    #[derive(Clone, Copy)]
+    enum Cost {
+        /// Answers after this long. When that exceeds the read's deadline, the
+        /// read times out instead, having run to the deadline.
+        Takes(Duration),
+        /// Never answers: runs to its deadline, then fails.
+        Hangs,
+    }
 
     struct RoutedFetcher {
         routes: Routes,
         fetched: Fetched,
         timeouts: Timeouts,
+        time: SharedTime,
+        costs: SharedCosts,
     }
 
     impl LoopbackClient for RoutedFetcher {
@@ -703,7 +746,37 @@ mod tests {
                 .lock()
                 .expect("timeouts lock")
                 .push((url.to_string(), timeout));
-            self.get(url)
+            let path = url
+                .find("/api/kyber/")
+                .map(|start| {
+                    url[start..]
+                        .split('?')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string()
+                })
+                .unwrap_or_default();
+            let cost = self
+                .costs
+                .lock()
+                .expect("costs lock")
+                .get(&path)
+                .copied()
+                .unwrap_or(Cost::Takes(Duration::ZERO));
+            let answers = matches!(cost, Cost::Takes(took) if took <= timeout);
+            let spent = match cost {
+                Cost::Takes(took) if answers => took,
+                _ => timeout,
+            };
+            *self.time.lock().expect("time lock") += spent;
+            if answers {
+                return self.get(url);
+            }
+            self.fetched
+                .lock()
+                .expect("fetched lock")
+                .push(url.to_string());
+            bail!("the read timed out after {timeout:?}")
         }
     }
 
@@ -721,10 +794,18 @@ mod tests {
         }
     }
 
-    struct NoopClock;
+    /// Reads the shared fake time, so a budget spent by the fetcher is visible
+    /// to the poll. Sleeping is free.
+    struct ManualClock {
+        time: SharedTime,
+    }
 
-    impl Clock for NoopClock {
+    impl Clock for ManualClock {
         fn sleep(&mut self, _duration: Duration) {}
+
+        fn elapsed(&self) -> Duration {
+            *self.time.lock().expect("time lock")
+        }
     }
 
     struct SilentEvents;
@@ -792,6 +873,24 @@ mod tests {
 
     /// As [`attached_runtime`], also recording the deadline of each timed read.
     fn attached_runtime_recording(routes: Routes, fetched: Fetched, timeouts: Timeouts) -> Runtime {
+        attached_runtime_timed(
+            routes,
+            fetched,
+            timeouts,
+            SharedTime::default(),
+            SharedCosts::default(),
+        )
+    }
+
+    /// As [`attached_runtime_recording`], with fake time: the poll's clock and
+    /// the fetcher share `time`, and each route's reads cost what `costs` says.
+    fn attached_runtime_timed(
+        routes: Routes,
+        fetched: Fetched,
+        timeouts: Timeouts,
+        time: SharedTime,
+        costs: SharedCosts,
+    ) -> Runtime {
         let settings_dir = unique_settings_dir();
         let mut runtime = Runtime::new(
             RuntimeConfig {
@@ -805,8 +904,10 @@ mod tests {
                     routes,
                     fetched,
                     timeouts,
+                    time: time.clone(),
+                    costs,
                 }),
-                clock: Box::new(NoopClock),
+                clock: Box::new(ManualClock { time }),
                 event_sink: Box::new(SilentEvents),
                 opener: Box::new(SilentOpener),
             },
@@ -824,6 +925,48 @@ mod tests {
 
     fn snapshot(runtime: &Runtime) -> Value {
         serde_json::to_value(runtime.get_view_state()).expect("serialize view state")
+    }
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    /// Sets what the named routes cost, leaving the other routes as they were.
+    fn with_costs(costs: &SharedCosts, entries: &[(&str, Cost)]) {
+        let mut map = costs.lock().expect("costs lock");
+        for (path, cost) in entries {
+            map.insert(path.to_string(), *cost);
+        }
+    }
+
+    /// A request URL reduced to its route path: no origin, no query.
+    fn route_path(url: &str) -> String {
+        let rest = url.strip_prefix(SERVER).unwrap_or(url);
+        rest.split('?').next().unwrap_or_default().to_string()
+    }
+
+    /// The route path of each request, in the order the poll issued them.
+    fn requested_paths(fetched: &Fetched) -> Vec<String> {
+        fetched
+            .lock()
+            .expect("fetched lock")
+            .iter()
+            .map(|url| route_path(url))
+            .collect()
+    }
+
+    /// Each timed read as (route path, deadline), in the order the poll issued them.
+    fn timed_reads(timeouts: &Timeouts) -> Vec<(String, Duration)> {
+        timeouts
+            .lock()
+            .expect("timeouts lock")
+            .iter()
+            .map(|(url, deadline)| (route_path(url), *deadline))
+            .collect()
+    }
+
+    fn timed(path: &str, deadline: Duration) -> (String, Duration) {
+        (path.to_string(), deadline)
     }
 
     /// The popover shows the KyberDash version the server reports. A poll must
@@ -973,6 +1116,172 @@ mod tests {
         ];
         expected.sort_unstable();
         assert_eq!(paths, expected);
+    }
+
+    /// The poll gets one budget, the length of its 15 s interval, so a slow
+    /// secondary read cannot leave stale data shown as current. Here the report
+    /// and jobs reads spend all of it, so settings, coverage and the version are
+    /// not attempted, and their values read as unknown rather than as what an
+    /// earlier poll read.
+    #[test]
+    fn a_poll_that_spends_its_budget_skips_the_remaining_reads_and_clears_them() {
+        assert_eq!(
+            api::POLL_WHILE_OPEN,
+            secs(15),
+            "the scenario below assumes a 15 s budget"
+        );
+        let fetched: Fetched = Arc::default();
+        let costs: SharedCosts = Arc::default();
+        let mut runtime = attached_runtime_timed(
+            server_routes(),
+            fetched.clone(),
+            Timeouts::default(),
+            SharedTime::default(),
+            costs.clone(),
+        );
+        runtime.poll_report(at(1_700_000_000)).expect("first poll");
+        assert!(
+            !snapshot(&runtime)["sharedSettings"].is_null(),
+            "precondition: the first poll reads settings"
+        );
+
+        fetched.lock().expect("fetched lock").clear();
+        with_costs(
+            &costs,
+            &[
+                (api::REPORT_PATH, Cost::Takes(secs(5))),
+                (api::JOBS_PATH, Cost::Takes(secs(10))),
+            ],
+        );
+        runtime.poll_report(at(1_700_000_300)).expect("second poll");
+
+        assert_eq!(
+            requested_paths(&fetched),
+            vec![api::REPORT_PATH.to_string(), api::JOBS_PATH.to_string()],
+            "with the budget spent, no secondary read may be issued"
+        );
+        let after = snapshot(&runtime);
+        assert_eq!(
+            after["jobs"],
+            json!({"refresh": {"state": "idle"}}),
+            "the jobs read answered in time, so it is current"
+        );
+        assert!(after["error"].is_null(), "the report answered");
+        for key in ["sharedSettings", "coverage", "kyberdashVersion"] {
+            assert!(
+                after[key].is_null(),
+                "{key} must read as unknown once the budget is spent, got {}",
+                after[key]
+            );
+        }
+    }
+
+    /// Each timed read gets the smaller of its own cap and the budget left when
+    /// it is issued. Report and jobs take 1 s each. Settings hangs and is cut
+    /// off at its 10 s cap, leaving 3 s for coverage, which also hangs. The
+    /// version read then has no budget left and is not attempted.
+    #[test]
+    fn each_timed_read_gets_the_lesser_of_its_cap_and_the_budget_left() {
+        let fetched: Fetched = Arc::default();
+        let timeouts: Timeouts = Arc::default();
+        let costs: SharedCosts = Arc::default();
+        let mut runtime = attached_runtime_timed(
+            server_routes(),
+            fetched.clone(),
+            timeouts.clone(),
+            SharedTime::default(),
+            costs.clone(),
+        );
+        with_costs(
+            &costs,
+            &[
+                (api::REPORT_PATH, Cost::Takes(secs(1))),
+                (api::JOBS_PATH, Cost::Takes(secs(1))),
+                (api::SETTINGS_PATH, Cost::Hangs),
+                (api::COVERAGE_PATH, Cost::Hangs),
+            ],
+        );
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        assert_eq!(
+            timed_reads(&timeouts),
+            vec![
+                timed(api::REPORT_PATH, secs(10)),
+                timed(api::JOBS_PATH, secs(10)),
+                timed(api::SETTINGS_PATH, secs(10)),
+                timed(api::COVERAGE_PATH, secs(3)),
+            ],
+            "deadline = min(own cap, budget left at issue)"
+        );
+        assert_eq!(
+            requested_paths(&fetched),
+            vec![
+                api::REPORT_PATH.to_string(),
+                api::JOBS_PATH.to_string(),
+                api::SETTINGS_PATH.to_string(),
+                api::COVERAGE_PATH.to_string(),
+            ],
+            "the version read is not attempted once the budget is spent"
+        );
+        assert!(snapshot(&runtime)["kyberdashVersion"].is_null());
+    }
+
+    /// The version read has a 2 s cap, but when less than that is left in the
+    /// budget it gets what is left. Coverage here answers after 8 s, leaving 1 s.
+    #[test]
+    fn the_version_read_gets_the_budget_left_when_that_is_less_than_its_cap() {
+        let timeouts: Timeouts = Arc::default();
+        let costs: SharedCosts = Arc::default();
+        let mut runtime = attached_runtime_timed(
+            server_routes(),
+            Fetched::default(),
+            timeouts.clone(),
+            SharedTime::default(),
+            costs.clone(),
+        );
+        with_costs(
+            &costs,
+            &[
+                (api::REPORT_PATH, Cost::Takes(secs(6))),
+                (api::COVERAGE_PATH, Cost::Takes(secs(8))),
+            ],
+        );
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        assert_eq!(
+            timed_reads(&timeouts),
+            vec![
+                timed(api::REPORT_PATH, secs(10)),
+                timed(api::JOBS_PATH, secs(9)),
+                timed(api::SETTINGS_PATH, secs(9)),
+                timed(api::COVERAGE_PATH, secs(9)),
+                timed(api::VERSION_PATH, secs(1)),
+            ]
+        );
+    }
+
+    /// With no time spent the budget never binds: each of the five reads keeps
+    /// its own cap, and they are issued in the order the poll reads them.
+    #[test]
+    fn a_healthy_fast_poll_reads_all_five_with_their_own_caps() {
+        let timeouts: Timeouts = Arc::default();
+        let mut runtime =
+            attached_runtime_recording(server_routes(), Fetched::default(), timeouts.clone());
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        assert_eq!(
+            timed_reads(&timeouts),
+            vec![
+                timed(api::REPORT_PATH, api::REQUEST_TIMEOUT),
+                timed(api::JOBS_PATH, api::REQUEST_TIMEOUT),
+                timed(api::SETTINGS_PATH, api::REQUEST_TIMEOUT),
+                timed(api::COVERAGE_PATH, api::REQUEST_TIMEOUT),
+                timed(api::VERSION_PATH, api::VERSION_REQUEST_TIMEOUT),
+            ]
+        );
     }
 
     #[test]

@@ -396,6 +396,8 @@ mod tests {
     struct FakeFetcher {
         responses: Vec<Result<Value>>,
         urls: Vec<String>,
+        /// Every timed read, with the deadline the caller asked the client for.
+        deadlines: Vec<(String, Duration)>,
     }
 
     impl FakeFetcher {
@@ -403,6 +405,7 @@ mod tests {
             FakeFetcher {
                 responses: values.into_iter().map(Ok).collect(),
                 urls: Vec::new(),
+                deadlines: Vec::new(),
             }
         }
     }
@@ -420,9 +423,36 @@ mod tests {
             self.responses.remove(0)
         }
 
-        fn get_with_timeout(&mut self, url: &str, _timeout: Duration) -> Result<Value> {
+        fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value> {
+            self.deadlines.push((url.to_string(), timeout));
             self.get(url)
         }
+    }
+
+    /// The runtime bounds each document read with a deadline it passes in. A
+    /// double that drops that argument lets a wrong deadline pass every test,
+    /// so the double keeps the deadlines it was given and this pins that the
+    /// caller's value reaches it, distinct per read.
+    #[test]
+    fn a_timed_read_hands_the_client_the_deadline_the_caller_asked_for() {
+        let mut fetcher = FakeFetcher::ok(vec![json!({"ok": true}), json!({"ok": true})]);
+        let report_url = "http://127.0.0.1:4747/api/kyber/report?days=7";
+        let version_url = "http://127.0.0.1:4747/api/kyber/version";
+
+        fetcher
+            .get_with_timeout(report_url, REQUEST_TIMEOUT)
+            .expect("the fake can answer the report");
+        fetcher
+            .get_with_timeout(version_url, VERSION_REQUEST_TIMEOUT)
+            .expect("the fake can answer the version");
+
+        assert_eq!(
+            fetcher.deadlines,
+            vec![
+                (report_url.to_string(), REQUEST_TIMEOUT),
+                (version_url.to_string(), VERSION_REQUEST_TIMEOUT),
+            ]
+        );
     }
 
     fn at(secs: u64) -> SystemTime {
