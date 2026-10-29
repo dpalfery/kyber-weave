@@ -93,6 +93,7 @@ function insertSession(
 type MessageFixture = {
   role: string
   modelID?: string
+  providerID?: string
   cost?: number
   tokens?: {
     input: number
@@ -949,6 +950,130 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.costUSD).toBe(0)
     expect(calls[0]!.tools).toEqual([])
+  })
+
+  it('A2 restores current-shape providerID/modelID yield with a measured call and priced cost', async () => {
+    // Current-shape opencode.db assistant messages carry modelID alongside a
+    // separate providerID (e.g. opencode-go/muse-spark). The pair must yield
+    // one measured call with the qualified model and a priced cost, never a
+    // silent zero or a bare-model fallback.
+    const dbPath = createTestDb(tmpDir)
+    withTestDb(dbPath, (db) => {
+      insertSession(db, 'sess-1')
+      insertMessage(db, 'msg-1', 'sess-1', 1793045491882, {
+        role: 'assistant',
+        modelID: 'muse-spark-1.3-contributor',
+        providerID: 'opencode-go',
+        cost: 0.001820626,
+        tokens: { input: 18044, output: 71, reasoning: 9, cache: { read: 113, write: 0 } },
+      })
+      insertPart(db, 'part-1', 'msg-1', 'sess-1', {
+        type: 'text', text: 'current-shape output',
+      })
+    })
+
+    const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('opencode-go/muse-spark-1.3-contributor')
+    expect(calls[0]!.inputTokens).toBe(18044)
+    expect(calls[0]!.outputTokens).toBe(71)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+  })
+
+  it('A2 reads a plain-string session model for the session-level fallback (measured, never zero)', async () => {
+    // Current-shape session rows may store model as a plain string rather
+    // than a JSON {id,providerID} object. The fallback must still yield a
+    // measured call with that model, never a silent zero.
+    const dbPath = createTestDb(tmpDir)
+    withTestDb(dbPath, (db) => {
+      db.exec(`ALTER TABLE session ADD COLUMN cost REAL`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_input INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_output INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_reasoning INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_cache_read INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_cache_write INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN model TEXT`)
+
+      insertSession(db, 'sess-1')
+      db.prepare(`UPDATE session SET cost = ?, tokens_input = ?, tokens_output = ?, tokens_reasoning = ?, tokens_cache_read = ?, tokens_cache_write = ?, model = ? WHERE id = ?`)
+        .run(0.15, 5000, 2000, 0, 3000, 1000, 'anthropic/claude-sonnet-4-20250514', 'sess-1')
+
+      insertMessage(db, 'msg-1', 'sess-1', 1700000001000, {
+        role: 'assistant', modelID: 'claude-sonnet-4-20250514',
+      })
+    })
+
+    const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('anthropic/claude-sonnet-4-20250514')
+    expect(calls[0]!.inputTokens).toBe(5000)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+  })
+
+  // Review (Kilo 2): the plain-string branch is for a bare model token, not a
+  // licence to adopt anything JSON.parse rejected. A truncated or malformed
+  // blob used to be returned verbatim as the model name and fed to the rate
+  // table; unparseable stays unknown.
+  it('keeps an unparseable session model unknown instead of adopting the raw blob', async () => {
+    const dbPath = createTestDb(tmpDir)
+    withTestDb(dbPath, (db) => {
+      db.exec(`ALTER TABLE session ADD COLUMN cost REAL`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_input INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_output INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_reasoning INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_cache_read INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN tokens_cache_write INTEGER`)
+      db.exec(`ALTER TABLE session ADD COLUMN model TEXT`)
+
+      insertSession(db, 'sess-1')
+      db.prepare(`UPDATE session SET cost = ?, tokens_input = ?, tokens_output = ?, tokens_reasoning = ?, tokens_cache_read = ?, tokens_cache_write = ?, model = ? WHERE id = ?`)
+        .run(0.15, 5000, 2000, 0, 3000, 1000, '{"id":"claude-opus-4-6",', 'sess-1')
+
+      insertMessage(db, 'msg-1', 'sess-1', 1700000001000, { role: 'assistant' })
+    })
+
+    const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('unknown')
+  })
+
+  // Review (Kilo 3): `includes('/')` treated any slashed id as already
+  // provider-qualified, so `my-model/v2` skipped prefixing, missed the rate
+  // table, and silently fell back to the stored cost.
+  it('qualifies a slashed model id that is not already provider-prefixed', async () => {
+    const dbPath = createTestDb(tmpDir)
+    withTestDb(dbPath, (db) => {
+      insertSession(db, 'sess-1')
+      insertMessage(db, 'msg-1', 'sess-1', 1700000001000, {
+        role: 'assistant',
+        modelID: 'my-model/v2',
+        providerID: 'opencode-go',
+        cost: 0.05,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+    })
+
+    const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('opencode-go/my-model/v2')
+  })
+
+  it('does not re-prefix a model id that already starts with its provider', async () => {
+    const dbPath = createTestDb(tmpDir)
+    withTestDb(dbPath, (db) => {
+      insertSession(db, 'sess-1')
+      insertMessage(db, 'msg-1', 'sess-1', 1700000001000, {
+        role: 'assistant',
+        modelID: 'opencode-go/muse-spark-1.3-contributor',
+        providerID: 'opencode-go',
+        cost: 0.05,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+    })
+
+    const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.model).toBe('opencode-go/muse-spark-1.3-contributor')
   })
 })
 
