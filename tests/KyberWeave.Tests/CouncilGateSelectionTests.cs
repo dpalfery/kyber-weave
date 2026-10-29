@@ -109,13 +109,13 @@ public sealed class CouncilGateSelectionTests
     ///     match, while gates for other operating systems remain skipped.
     /// </summary>
     [Fact]
-    public void WhenAllFlagSpecified_PlanRunsAllGatesUnscoped()
+    public void WhenChangedFilesNull_PlanRunsAllGatesUnscoped()
     {
         ReviewGate dotNetGate = new("build", ["dotnet", "build"]) { Include = ["**/*.cs"] };
         ReviewGate webGate = new("web-lint", ["npx", "eslint"]) { Include = ["**/*.ts"] };
         ReviewGate windowsOnlyGate = new("windows-only", ["dotnet", "build"], Os: "windows");
 
-        // Simulate --all by passing changed: null on unix
+        // changed: null represents unscoped planning (CLI --all flag wiring is tested end-to-end in ReviewGatesCouncilCommandTests.ReviewGates_WithAllFlag_RunsAllGatesEvenWhenDiffMatchesSubset)
         CouncilGatePlan plan = CouncilGateSelection.Plan([dotNetGate, webGate, windowsOnlyGate], null, "unix");
 
         Assert.Equal(["build", "web-lint"], plan.Run.Select(gate => gate.Id).ToArray());

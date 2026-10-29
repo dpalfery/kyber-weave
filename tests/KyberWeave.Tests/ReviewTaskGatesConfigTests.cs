@@ -723,6 +723,8 @@ public sealed class ReviewTaskGatesConfigTests
 
         string[] shouldMatch =
         [
+            "src/KyberWeave.Cli/Program.cs",
+            "KyberWeave.sln",
             "products/kyber-squad/agents/conductor.md",
             "REVIEW.md",
             ".kyber-weave/kyber-weave.yml",
