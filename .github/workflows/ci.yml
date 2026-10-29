@@ -33,6 +33,68 @@ env:
   CONFIGURATION: Release
 
 jobs:
+  # Decides which jobs a change needs. Skipping is done with job-level `if:` (never a
+  # workflow-level `paths:` filter) because only "CI Summary" is a required check and a
+  # skipped job counts as passed, while a workflow that never starts leaves it pending.
+  # Anything that is not a pull request runs everything. A change to this workflow
+  # also runs everything, so an edit to the filters is itself fully exercised.
+  #
+  # build-test, gitleaks and the skill and docs gate always run: the .NET tests read
+  # files under docs/, products/, .kyber-weave/, .github/, scripts/ and a few under
+  # dash/, so no path set can prove they are irrelevant.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      dash: ${{ steps.areas.outputs.dash }}
+      code: ${{ steps.areas.outputs.code }}
+      dotnet: ${{ steps.areas.outputs.dotnet }}
+      codeql: ${{ steps.areas.outputs.codeql }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Classify changed files
+        id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          all() {
+            {
+              echo "dash=true"; echo "code=true"; echo "dotnet=true"
+              echo 'codeql=["csharp","javascript-typescript"]'
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          [ "${EVENT_NAME}" = "pull_request" ] || all
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}"
+          files="$(git diff --name-only "${BASE_SHA}" HEAD)"
+          printf 'Changed files:\n%s\n' "${files}"
+          [ -n "${files}" ] || all
+          if grep -qxF '.github/workflows/ci.yml' <<<"${files}"; then all; fi
+
+          has() { if grep -Eq "$1" <<<"${files}"; then echo true; else echo false; fi; }
+          nonempty() { if [ -n "$1" ]; then echo true; else echo false; fi; }
+          dash="$(has '^dash/')"
+          # Docs-only: everything under docs/ and markdown at the repo root.
+          code="$(nonempty "$(grep -Ev '^(docs/|[^/]+\.md$)' <<<"${files}" || true)")"
+          dotnet="$(nonempty "$(grep -Ev '^(docs/|dash/|[^/]+\.md$)' <<<"${files}" || true)")"
+          cs="$(has '(\.(cs|csproj|props|targets|sln|slnx|editorconfig)$|^global\.json$|(^|/)nuget\.config$|(^|/)packages\.lock\.json$)')"
+          js="$(has '(^dash/|\.(js|mjs|cjs|ts|tsx)$)')"
+          langs=()
+          [ "${cs}" = true ] && langs+=('"csharp"')
+          [ "${js}" = true ] && langs+=('"javascript-typescript"')
+          codeql="[$(IFS=,; echo "${langs[*]:-}")]"
+          {
+            echo "dash=${dash}"; echo "code=${code}"; echo "dotnet=${dotnet}"
+            echo "codeql=${codeql}"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
@@ -125,6 +187,8 @@ jobs:
     # strictly; without it the check degrades to a warning, because the fallback
     # to the checked-in packages.lock.json files is knowingly partial.
     name: SBOM (CycloneDX 1.6)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -194,11 +258,14 @@ jobs:
 
   squad-filesystem-contract:
     name: Squad filesystem contract (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # No ubuntu leg: build-test already runs the whole suite there.
+        os: [macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -221,7 +288,8 @@ jobs:
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -271,7 +339,8 @@ jobs:
   update-loop:
     name: Self-update and Squad install loop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # The loop runs npm-resolved code (npm ci, tsup, postject) to build kyberdash, so it
     # gets no more than it needs: without this it would inherit security-events: write.
     permissions:
@@ -316,11 +385,12 @@ jobs:
   codeql:
     name: CodeQL Analysis (${{ matrix.language }})
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.codeql != '[]'
     strategy:
       fail-fast: false
       matrix:
-        language: [csharp, javascript-typescript]
+        language: ${{ fromJSON(needs.changes.outputs.codeql) }}
     permissions:
       security-events: write
       contents: read
@@ -360,7 +430,8 @@ jobs:
   trivy:
     name: Trivy OSS Security Scan
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       security-events: write
@@ -421,7 +492,8 @@ jobs:
   semgrep:
     name: Semgrep Community SAST
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       security-events: write
@@ -506,7 +578,6 @@ jobs:
   skill-docs-gate:
     name: Skill and docs gate
     runs-on: ubuntu-latest
-    needs: build-test
     permissions:
       contents: read
       security-events: write
@@ -636,7 +707,8 @@ jobs:
   ts-gates:
     name: TypeScript gates (KyberDash)
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     # Mirrors the same three gates declared in .kyber-weave/kyber-weave.yml as
     # `ts-typecheck`, `ts-test`, `ts-lint`. The commands here are the exact
     # argv the gates emit; if a future change to the gate config or to the
@@ -729,7 +801,8 @@ jobs:
   dash-e2e:
     name: Dash harness-collection e2e
     runs-on: ubuntu-latest
-    needs: ts-gates
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     permissions:
       contents: read
     steps:
@@ -768,7 +841,8 @@ jobs:
   capture-windows:
     name: Capture tests (windows-latest)
     runs-on: windows-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     permissions:
       contents: read
     steps:
@@ -794,6 +868,8 @@ jobs:
 
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -952,7 +1028,11 @@ jobs:
     name: CI Summary
     runs-on: ubuntu-latest
     needs:
+      - changes
       - build-test
+      - trivy
+      - semgrep
+      - gitleaks
       - sbom
       - publish-smoke
       - update-loop
@@ -971,14 +1051,15 @@ jobs:
           echo "" >> results.md
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
+          echo "| Detect changed areas | ${{ needs.changes.result }} |" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
           echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
-           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
-           echo "| Dash harness-collection e2e | ${{ needs.dash-e2e.result }} |" >> results.md
+          echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Dash harness-collection e2e | ${{ needs.dash-e2e.result }} |" >> results.md
           echo "| Capture tests (Windows) | ${{ needs.capture-windows.result }} |" >> results.md
           echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
@@ -989,6 +1070,7 @@ jobs:
 
           FAILED=false
           for result in \
+            "${{ needs.changes.result }}" \
             "${{ needs.build-test.result }}" \
             "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \
