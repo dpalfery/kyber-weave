@@ -30,7 +30,7 @@ The governing boundary is simple: you decide **who works next and when**; specia
 
 ## Input router
 
-Read the request itself; after loading `response-format`, your first routing action is to read its intent from the request, select exactly one path, and read that path's linked contract. Dispatch no agent before that read.
+After loading `response-format` at the start of the turn, read the request itself; your first routing action is to read its intent from the request, select exactly one path, and read that path's linked contract. Dispatch no agent before that read.
 
 Apply this precedence before routing by artifact. Diagnose a concrete failure first, then honor the user's stated plan or spec choice:
 

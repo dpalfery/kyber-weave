@@ -969,13 +969,13 @@ public sealed class SquadCanonicalContentTests
     public void ConductorLoadsResponseFormatBeforeRoutingIntent()
     {
         string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
-        string router = BlockContaining(conductor, "after loading `response-format`, your first routing action");
+        string router = BlockContaining(conductor, "After loading `response-format` at the start of the turn, read the request itself");
 
         Assert.True(
             router.Length > 0,
             "The conductor router needs a single block that can be pinned to the routing preamble.");
         Assert.Contains(
-            "after loading response-format, your first routing action",
+            "After loading response-format at the start of the turn, read the request itself; your first routing action",
             WithoutEmphasis(router),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1022,9 +1022,14 @@ public sealed class SquadCanonicalContentTests
             "A lowercased sentence must not satisfy the pin.");
         Assert.True(
             SentenceLine(
+                "- **Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.**\n",
+                ResponseFormatMandatoryLoadSentence) is not null,
+            "The deliberate sentence as a list item inside Markdown emphasis must satisfy the pin.");
+        Assert.False(
+            SentenceLine(
                 "- **Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.** Then continue.\n",
                 ResponseFormatMandatoryLoadSentence) is not null,
-            "The deliberate sentence inside Markdown emphasis must satisfy the pin.");
+            "Trailing content after the sentence must not satisfy the pin.");
     }
 
     /// <summary>
@@ -1969,7 +1974,7 @@ public sealed class SquadCanonicalContentTests
             string line = raw.TrimEnd('\r').Trim();
             string plain = WithoutEmphasis(line);
             plain = Regex.Replace(plain, @"^\s*(?:[-*+]|\d+\.)\s+", string.Empty, RegexOptions.CultureInvariant);
-            if (plain.Contains(sentence, StringComparison.Ordinal))
+            if (plain.Equals(sentence, StringComparison.Ordinal))
             {
                 return line;
             }
