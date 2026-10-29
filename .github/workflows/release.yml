@@ -120,8 +120,11 @@ jobs:
             echo "::error::Environment release-approval does not use a custom deployment branch list."
             exit 1
           }
-          policies="$(gh api "repos/${REPO}/environments/release-approval/deployment-branch-policies" \
-            --jq '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(",")')"
+          if ! policies="$(gh api "repos/${REPO}/environments/release-approval/deployment-branch-policies" \
+            --jq '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(",")' 2>gh-err.txt)"; then
+            echo "::error::Could not read the deployment branch list of release-approval: $(cat gh-err.txt)"
+            exit 1
+          fi
           if [ "${policies}" != "branch:main" ]; then
             echo "::error::Environment release-approval must allow only the branch main (found: ${policies:-none})."
             exit 1
