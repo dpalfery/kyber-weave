@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -66,6 +67,60 @@ let dbPath = ''
 
 test.describe.configure({ mode: 'serial' })
 
+/**
+ * Open one harness from the dashboard root, the app's own client-side route.
+ *
+ * Returns the `/api/kyber/runs` answer as well as navigating: the rows the tests
+ * assert on come from that payload, so a failure names what the server actually
+ * replied instead of only "element not found". The payload is also the isolation
+ * proof — it must carry the fixture run, never whatever the operator's own
+ * `~/.kyberdash/canon.db` happens to hold.
+ */
+async function openHarness(
+  page: Page,
+  harnessId: string,
+): Promise<{ status: number; body: string; runs: unknown[] }> {
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().includes('/api/kyber/runs'),
+    { timeout: 30_000 },
+  )
+  await page.goto(app)
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
+  await page.evaluate((id) => {
+    const stack = [{ level: 'context-doctor' }, { level: 'harness', harnessId: id }]
+    window.history.pushState({ stack }, '', `/harness/${id}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, harnessId)
+  await expect(page.getByTestId('page-harness')).toBeVisible()
+  await expect(page.getByTestId('page-harness')).toContainText(harnessId)
+  const response = await responsePromise
+  const body = await response.text()
+  const contentType = response.headers()['content-type'] ?? ''
+  // The zero-record test asserts an EMPTY list, so an empty list has to mean
+  // "the server reported no runs" and never "the body was not JSON". A 200 HTML
+  // body is exactly what this server sends for an unknown path (the SPA
+  // fallback serves index.html), so a swallowed parse error would let this
+  // suite stay green while the dashboard served fiction. Both cases fail here,
+  // naming what actually arrived.
+  expect(
+    contentType,
+    `the runs answer for ${harnessId} was not JSON (content-type ${contentType}): ${body.slice(0, 300)}`,
+  ).toContain('application/json')
+  let parsed: { runs?: unknown }
+  try {
+    parsed = JSON.parse(body) as { runs?: unknown }
+  } catch {
+    throw new Error(
+      `the runs answer for ${harnessId} did not parse as JSON: ${body.slice(0, 300)}`,
+    )
+  }
+  expect(
+    Array.isArray(parsed.runs),
+    `the runs answer for ${harnessId} carried no runs array: ${body.slice(0, 300)}`,
+  ).toBe(true)
+  return { status: response.status(), body, runs: parsed.runs as unknown[] }
+}
+
 test.beforeAll(async () => {
   test.setTimeout(180_000)
   mkdirSync(scratch, { recursive: true })
@@ -105,6 +160,13 @@ test.beforeAll(async () => {
     child!.on('exit', (code) => {
       if (!app) reject(new Error(`harness-collection boot exited ${code}: ${stdout}`))
     })
+    // Without this, a spawn failure (no `npx` on PATH, EACCES) arrives as an
+    // unhandled 'error' event on the child and crashes the worker instead of
+    // failing this hook with the reason.
+    child!.on('error', (error) => {
+      clearTimeout(timer)
+      reject(new Error(`harness-collection boot could not start: ${String(error)}`))
+    })
   })
 
   expect(dbPath).not.toBe(USER_CANON)
@@ -112,23 +174,34 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  child?.kill('SIGTERM')
+  // SIGTERM is a request, not a completion: wait for the exit the boot script
+  // owes us before deleting the store it was serving from.
+  if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((resolve) => {
+      child!.once('exit', () => resolve())
+    })
+    child.kill('SIGTERM')
+    const bounded = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 5_000)
+      timer.unref?.()
+    })
+    await Promise.race([exited, bounded])
+  }
+  // The boot script seeds a `mkdtemp` canon store; nothing else removes it, so
+  // a run would otherwise leave one temp root per invocation behind.
+  if (dbPath !== '') {
+    const root = dirname(dbPath)
+    if (root.startsWith(tmpdir()) && !root.includes('.kyberdash')) {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
 })
 
 test('measured harness renders measured dimensions and no lying zero', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, MEASURED_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(MEASURED_HARNESS)
+  const runs = await openHarness(page, MEASURED_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-measured-run-1')
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
 
@@ -152,18 +225,9 @@ test('measured harness renders measured dimensions and no lying zero', async ({ 
 
 test('honest-empty harness renders a visible session as unmeasurable with reason', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, HONEST_EMPTY_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(HONEST_EMPTY_HARNESS)
+  const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-honest-run-1')
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
 
@@ -181,42 +245,24 @@ test('honest-empty harness renders a visible session as unmeasurable with reason
 
 test('zero-record harness renders honest-empty and is never complete', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, ZERO_RECORD_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(ZERO_RECORD_HARNESS)
+  const runs = await openHarness(page, ZERO_RECORD_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  // A zero-record harness answers with an empty list from the fixture store; a
+  // non-empty one here means the run leaked into another store, or out of it.
+  expect(runs.runs).toEqual([])
   await expect(page.getByTestId('harness-runs-table')).toContainText('No runs recorded')
 
   // Nothing measured, so the completeness predicate cannot be satisfied here.
   await expect(page.getByTestId('dimension-value')).toHaveCount(0)
   await expect(page.getByTestId('page-harness')).not.toContainText(/complete/i)
 })
-
 test('measured opencode round trip renders model, tokens, tool call and cost', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate(
-    (args) => {
-      const stack = [
-        { level: 'context-doctor' },
-        { level: 'harness', harnessId: args.harnessId },
-      ]
-      window.history.pushState({ stack }, '', `/harness/${args.harnessId}`)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    },
-    { harnessId: HONEST_EMPTY_HARNESS },
+  const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  expect(runs.body, 'the measured opencode run must come from the fixture store').toContain(
+    MEASURED_OPENCODE_RUN_ID,
   )
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(HONEST_EMPTY_HARNESS)
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
   // Runs-table Cost cell for the measured run resolves a real figure, not a dash.

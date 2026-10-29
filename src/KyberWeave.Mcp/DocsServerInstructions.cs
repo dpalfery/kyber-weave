@@ -24,8 +24,9 @@ public static class DocsServerInstructions
         it), agent_coding_standards (how this repository writes code in a named technology, and
         the rule ids that standard states, before writing or reviewing code in it),
         docs_glossary (what a term means here), docs_analysis_candidates (duplicated or
-        contradictory documentation), and docs_status (which repository and revision the
-        documentation comes from).
+        contradictory documentation), docs_validate and docs_drift (the same schema and drift
+        gates as kyber-weave docs validate and docs drift, without a shell), and docs_status
+        (which repository and revision the documentation comes from).
         """;
 
     /// <summary>Applies the instructions to the server options.</summary>

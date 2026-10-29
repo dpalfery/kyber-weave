@@ -380,6 +380,34 @@ describe('buildSessionRow', () => {
     expect('cache_creation_coverage' in summary).toBe(false)
   })
 
+  // Review (Kilo 2/K3): the harness vocabulary says which counters CAN be
+  // exported; the record's declaration says which ones this turn DID export.
+  // Reading `totals.cacheRead` behind only the vocabulary check published a
+  // stored 0 as a 0% ratio, and counted "on 0 turns" coverage, for a turn whose
+  // adapter had already declared the counter not measurable.
+  it('omits cache figures when the record declares its cache counters unmeasurable', () => {
+    const absent = (reason: string) => ({ availability: 'not_measurable' as const, reason })
+    const row = buildSessionRow(
+      'sess-cache-declared-absent',
+      [
+        turn('cd1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+          measurability: {
+            cache_read: absent('The span exported no cache read counter.'),
+            cache_creation: absent('The span exported no cache creation counter.'),
+          },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
+  })
+
   // Issue #187: the engine's measured per-turn input never reached the wire —
   // `TurnPressure` carries no input figure — so the composition view fell back to
   // `bucketedTokens` and reported residual 0.0% for unattributed input.
@@ -1117,7 +1145,31 @@ describe('what counts as a session', () => {
     const report = await buildSessions(store)
 
     expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
-    expect(store.getSessionPayload('sess-legacy')).toBeDefined()
+    const payload = sessionPayload({ payload: store.getSessionPayload('sess-legacy') })
+    // Not merely "some payload exists": the legacy turn's own figures have to
+    // survive the evidence test that admitted it.
+    expect(payload.harness).toBe('unattributed')
+    expect(payload.summary.total_input).toBe(1200)
+    store.close()
+  })
+
+  // Review (Kilo 8): a parts ARRAY is not content. Counting `hasParts` admitted
+  // an unattributed record whose parts carried no text, which is ambient
+  // telemetry the evidence rule exists to keep out; only a bucket with
+  // non-empty text is evidence.
+  it('does not count empty parts as content evidence for an unattributed record', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('ambient-1', [{ part: 'system_prompt', text: '' }], {
+        sessionId: 'sess-ambient',
+        harness: 'unattributed',
+        tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 0, skipped: 1 })
     store.close()
   })
 })

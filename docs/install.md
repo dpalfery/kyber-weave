@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-27
 ---
 
 # Installing Kyber-Weave
@@ -542,6 +542,23 @@ narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deplo
 `kyber-docs-authoring` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
 of 11 Kyber Squad coding standards templates. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
+
+What an installing repository gets, and which step writes it:
+
+- **`docs init` writes editable gates for the declared technologies.** The `review:`
+  section of `.kyber-weave/kyber-weave.yml` carries the format, lint, typecheck, build
+  and test gates rendered from the product's shipped catalogue — see [Review council
+  architecture](code-review/architecture.md#the-shipped-gate-catalogue). The block is
+  yours: edit, remove or add gates freely. Pass `--no-review-gates` to write none.
+- **The CI workflow is a copy-ready template.** Copy
+  `templates/github-actions/kyber-weave-review-gate.yml` into `.github/workflows/` and
+  enable the toolchain steps for your stacks — see [the review-gate
+  template](ci-pipelines/workflows-runbook.md#the-review-gate-template). No command
+  writes `.github/workflows/`; the file is copied by the host, never generated.
+- **Upgrading never changes the gates a host already has.** Re-running `docs init`
+  never edits an existing `review:` section, even with `--force`, and a newer binary
+  never alters what runs for an unchanged configuration. `kyber-weave review catalogue`
+  prints the catalogue for newer releases, to copy in by hand.
 
 ## External dependencies
 

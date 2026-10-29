@@ -109,9 +109,13 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
-        // Load configuration if present
+        // Load configuration if present. A project that cannot be read — no config file,
+        // or one that does not parse — still installs: the squad config falls back to product
+        // defaults and the task-gate hint below says where review gates come from. Only a
+        // global run, which has no project whose gates could be missing, keeps the load
+        // failure fatal.
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
-        if (!configResult.Success)
+        if (!configResult.Success && scope != SquadDeploymentScope.Project)
         {
             SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
             return 1;
@@ -202,6 +206,13 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 }
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
+
+                // A project with no task gates learns where they come from. Squad writes no
+                // configuration itself, and the hint never changes this exit code.
+                if (scope == SquadDeploymentScope.Project)
+                {
+                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot);
+                }
 
                 // The capture plugin is global, so only a global deployment reaches it. It runs after the
                 // deployment has succeeded and cannot change this command's exit code.

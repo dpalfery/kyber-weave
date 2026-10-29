@@ -126,6 +126,18 @@ The gate that a Rust change must pass, run from the crate directory:
 cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
 ```
 
+The same three commands are declared in [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml)
+as council gates `cargo-fmt`, `cargo-clippy` and `cargo-test` under `review.gates`, run from the
+repository root with `--manifest-path dash/tray/src-tauri/Cargo.toml`. The council runs them on every
+review. `cargo-test` runs in the council only: no task gate runs `cargo test`.
+
+Developer agents run `cargo-fmt` and `cargo-clippy` as task gates for changes under
+`dash/tray/src-tauri/`: `rust-dev` and `tauri-dev` declare both, and `test-dev` declares both as well.
+
+Prerequisites: `cargo` must be on the `PATH` (installed through `rustup`). On Linux, the Tauri
+system packages listed in `TAURI_APT_PACKAGES` in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)
+must be installed, or clippy and the tests cannot build the Tauri dependency tree.
+
 The popover UI that the same tray ships has its own gates, listed in the root
 [`AGENTS.md`](../../../AGENTS.md) and in [`dash/tray/AGENTS.md`](../../../dash/tray/AGENTS.md).
 

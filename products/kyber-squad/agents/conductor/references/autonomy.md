@@ -41,7 +41,15 @@ Do not relay `GAPS` or `OPEN_QUESTIONS` that carry a recommended option: accept 
 
 ## Delivery
 
-Autonomous runs deliver the work only when the final council ended in `APPROVE`, or in `NEEDS_HUMAN` or an exhausted `REQUEST_CHANGES` loop whose change is parked (below). Never deliver a change that still has open `REQUEST_CHANGES`; leave it unpushed and report it. Then, with the applicable closeout done, commit to a feature branch (never the default branch), push it, and open a **draft** pull request. Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COMPLETE evidence; the draft PR carries both. The PR review is the human safety net, so assign the PR to the invoking user (and request reviewers when the repository names them) so it is notified. Put in the PR description every `autonomous: low-confidence` decision, the count of auto-approved gates, and any parked change. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
+Both modes deliver the same way. When the work is ready to leave the machine (with the applicable closeout done), the conductor commits to a feature branch (never the default branch), pushes it, and opens a **draft** pull request. The draft pull request is pushed before the review council runs, so the council reviews a pull request that already exists. Delivery never waits for the council.
+
+The draft is marked ready once required CI passes. The `create-pull-request` skill, run by `github-devops`, waits at most 60 minutes for CI. If CI fails or is not done in that time, the pull request stays draft and the report says what it is waiting for. No review or human approval is needed before ready.
+
+The council verdict goes in the PR description. It does not gate ready: required CI does. Human and bot review happens after the pull request is ready. A reviewer asking for changes at that point is ordinary PR review (`kilo-review-loop` or `pr-review-fix-comments`), not a conductor gate.
+
+Delivery requires DOCS_REVIEW: rows and, for plan/spec-backed work, CLOSEOUT_COMPLETE evidence; the draft PR carries both. Assign the PR to the invoking user, and request reviewers when the repository names them, so it is notified. CI minutes triggered by the push are expected cost, not the "spend" hard stop. Never merge.
+
+In supervised mode the conductor runs the same push, draft, and CI-only ready step, then stops and asks the user how to proceed.
 
 ## Hard stops
 
@@ -53,7 +61,13 @@ These stay human in autonomous mode:
 
 ## NEEDS_HUMAN and circuit-breakers are non-fatal
 
-In autonomous mode a `NEEDS_HUMAN` from `code-reviewer`, and a circuit-breaker that `architect` mediation cannot resolve, do not stop the run. Park that change or task, finish every unaffected queued task and the closeout, then deliver as above. Flag each parked item as pending human review in the draft pull request description and the final report, and assign the PR to the invoking user so the parked list is notified rather than buried in a draft. Do not mark the pull request ready for review.
+In autonomous mode `NEEDS_HUMAN` never blocks or parks anything. That covers a `NEEDS_HUMAN` from `code-reviewer`, the protected-path escalation (`KW-REVIEW-008`), and the size escalation (`KW-REVIEW-009`). Each is reported as a finding: delivery continues, the item is listed in the PR description and in the final report as pending human review, and the draft pull request is the human review.
+
+A circuit-breaker that `architect` mediation cannot resolve keeps rework on that cluster halted. It is listed in the PR as an open finding, and delivery continues. A failing cluster normally keeps required CI red, so the PR stays draft.
+
+Finish every unaffected queued task and the closeout, then deliver as above. "Park" applies only to an individual remediation-loop finding: it means stop reworking that finding and list its id in the PR. It never holds back delivery.
+
+In supervised mode `NEEDS_HUMAN` is terminal, and a circuit-breaker escalates to the user.
 
 ## Final report
 
@@ -61,5 +75,5 @@ Add to the completion report:
 
 - every `autonomous: low-confidence` decision: ID, decision, and why no source answered, so the user can overturn it without opening the plan;
 - the count of auto-approved gates;
-- any change pending human review;
-- the draft pull request link.
+- every `NEEDS_HUMAN` and open circuit-breaker finding, listed as pending human review;
+- the draft pull request link and its CI state (ready, or what it is waiting for).

@@ -64,9 +64,16 @@ zero or as passing by absence.
 
 PRIMARY mechanisms are OpenTelemetry (OTel), plugin hooks, and direct database
 reads. File ingest — `dash refresh` synth and `dash import-history` — is
-backup and fallback only. A fallback-derived value must never be billed as a
-primary measurement, and a completeness claim must never rest on a fallback
-value where a primary mechanism is declared.
+backup and fallback only where a harness declares a PRIMARY mechanism. A
+fallback-derived value must never be billed as a primary measurement, and a
+completeness claim must never rest on a fallback value where a primary
+mechanism is declared.
+
+Some harnesses have no OTel, plugin, or database surface at all — Command Code,
+Cursor, Devin, Warp and Kilo are read from their own files. For those, the file
+source **is** that harness's primary mechanism: it may be billed as a measured
+value, stated as file-derived, and used for a completeness claim. It is still
+not a substitute for a PRIMARY mechanism on a harness that has one.
 
 ## Cost and rate exclusion
 

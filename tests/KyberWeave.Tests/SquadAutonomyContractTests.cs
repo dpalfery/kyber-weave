@@ -12,17 +12,22 @@ public sealed class SquadAutonomyContractTests
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private static string Read(params string[] relative) =>
-        File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
+    private static string Read(params string[] relative)
+    {
+        return File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
+    }
 
-    private static string ConductorContract() => string.Join(
-        "\n",
-        Read("agents", "conductor.md"),
-        Read("agents", "conductor", "references", "autonomy.md"),
-        Read("agents", "conductor", "references", "intake-path.md"),
-        Read("agents", "conductor", "references", "plan-path.md"),
-        Read("agents", "conductor", "references", "spec-path.md"),
-        Read("agents", "conductor", "references", "execution-and-review.md"));
+    private static string ConductorContract()
+    {
+        return string.Join(
+            "\n",
+            Read("agents", "conductor.md"),
+            Read("agents", "conductor", "references", "autonomy.md"),
+            Read("agents", "conductor", "references", "intake-path.md"),
+            Read("agents", "conductor", "references", "plan-path.md"),
+            Read("agents", "conductor", "references", "spec-path.md"),
+            Read("agents", "conductor", "references", "execution-and-review.md"));
+    }
 
     private static void AssertAll(string text, params string[] phrases)
     {
@@ -88,14 +93,49 @@ public sealed class SquadAutonomyContractTests
     }
 
     [Fact]
-    public void AutonomousNeedsHumanAndCircuitBreakerParkTheChangeAndStillDeliverADraftPr()
+    public void AutonomousNeedsHumanIsAReportedFindingAndDeliveryContinues()
     {
         string autonomy = Read("agents", "conductor", "references", "autonomy.md");
         string execution = Read("agents", "conductor", "references", "execution-and-review.md");
 
-        AssertAll(autonomy, "pending human review", "Park that change or task", "Do not mark the pull request ready");
+        AssertAll(
+            autonomy,
+            "pending human review",
+            "reported as a finding",
+            "the draft pull request is the human review",
+            "listed in the PR",
+            "delivery continues");
         Assert.Contains("is terminal", execution, StringComparison.Ordinal);
         Assert.Contains("autonomy contract", execution, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The conductor pushes the draft pull request before the review council runs, so the council
+    /// reviews a PR that already exists. It marks the PR ready only once required CI passes. The
+    /// retired wording held the push back until the council returned and parked changes unpushed.
+    /// </summary>
+    [Fact]
+    public void ConductorPushesDraftBeforeCouncilAndMarksReadyOnRequiredCi()
+    {
+        string contract = ConductorContract();
+
+        AssertAll(
+            contract,
+            "draft pull request is pushed before the review council runs",
+            "marked ready once required CI passes",
+            "required CI",
+            "60 minutes",
+            "review happens after",
+            "not a conductor gate");
+        Assert.DoesNotContain(
+            "Do not commit, push, publish, or open a pull request until the council returns",
+            contract,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("leave it unpushed", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Do not mark the pull request ready", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Park that change or task", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("parked NEEDS_HUMAN", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("at least one review", contract, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -199,8 +239,10 @@ public sealed class SquadAutonomyContractTests
         AssertAll(spec, "AUTONOMOUS_APPROVAL: <gate id>", "`product-owner` records");
         Assert.DoesNotContain("conductor supplies the approval and records it", plan, StringComparison.Ordinal);
         Assert.DoesNotContain("record the approval yourself", spec, StringComparison.Ordinal);
-        AssertAll(architect, "Never infer approval", "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted", "from silence or from the mode alone");
-        AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted", "from silence or from the mode alone");
+        AssertAll(architect, "Never infer approval", "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted",
+            "from silence or from the mode alone");
+        AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted",
+            "from silence or from the mode alone");
         Assert.DoesNotContain("conductor supplies those approvals itself", owner, StringComparison.Ordinal);
     }
 

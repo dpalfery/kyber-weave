@@ -42,6 +42,17 @@ public sealed class TaskGateSelectionTests
     }
 
     [Fact]
+    public void FailOnOutputCarriesFromTheDeclaredGateToThePlannedGate()
+    {
+        ReviewTaskGate declared = FormatGate() with { FailOnOutput = true };
+
+        TaskGatePlan plan = TaskGateSelection.Plan([declared, FormatGate() with { Id = "other" }], Changed, null, "unix");
+
+        Assert.True(plan.Gates[0].FailOnOutput);
+        Assert.False(plan.Gates[1].FailOnOutput);
+    }
+
+    [Fact]
     public void AGateWithNoRunCommandIsRefusedByNameAndTheOtherGatesStillPlan()
     {
         ReviewTaskGate broken = new("broken-gate", ["**/*.cs"], null, [], [], true, 900);

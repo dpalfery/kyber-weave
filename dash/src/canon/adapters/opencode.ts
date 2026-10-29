@@ -348,7 +348,11 @@ function cacheClass(
   keys: readonly string[],
   absentReason: string,
 ): 'measured' | ReturnType<typeof notMeasurable> {
-  return keys.some((key) => key in attributes) ? 'measured' : notMeasurable(absentReason)
+  // A present key is not a measurement: `readCounter` folds an unreadable value
+  // ('n/a', null, '') to 0, so an `in`-check here declared a garbage counter
+  // measured and published a fabricated zero. Presence has to come from the
+  // same parse the counter itself uses; a reported `0` still parses.
+  return readOptionalCounter(attributes, keys) !== undefined ? 'measured' : notMeasurable(absentReason)
 }
 
 /**
@@ -388,19 +392,22 @@ function applyUsage(record: ReturnType<typeof baseRecord>, attributes: Record<st
   const gen = readUsageCounters(attributes)
   const legacyInput = readOptionalCounter(attributes, LEGACY_INPUT_KEYS)
   const legacyOutput = readOptionalCounter(attributes, LEGACY_OUTPUT_KEYS)
-  const genOutputPresent = OUTPUT_TOKEN_KEYS.some((key) => key in attributes)
+  // The output value is read with the same parser as its presence: `readCounter`
+  // inside `readUsageCounters` decides the NUMBER, so an `in`-check here would
+  // declare an unreadable value `measured` and stamp the folded 0 as a figure.
+  const genOutput = readOptionalCounter(attributes, OUTPUT_TOKEN_KEYS)
   const inputPresent = gen.inputPresent || legacyInput !== undefined
   // Cache classes are input: a span that reported only a cache counter still
   // measured the input it reads.
   const cacheReadPresent = readOptionalCounter(attributes, CACHE_READ_KEYS) !== undefined
   const cacheCreationPresent = readOptionalCounter(attributes, CACHE_CREATION_KEYS) !== undefined
-  const outputPresent = genOutputPresent || legacyOutput !== undefined
+  const outputPresent = genOutput !== undefined || legacyOutput !== undefined
 
   record.tokens = convertInclusiveCounts({
     input: gen.inputPresent ? gen.input : (legacyInput ?? 0),
     cacheRead: gen.cacheRead,
     cacheCreation: gen.cacheCreation,
-    output: genOutputPresent ? gen.output : (legacyOutput ?? 0),
+    output: genOutput ?? legacyOutput ?? 0,
     inputPresent,
     ...(gen.reasoning !== 0 ? { reasoning: gen.reasoning } : {}),
   })

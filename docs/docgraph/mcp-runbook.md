@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-10-15
+last-reviewed: 2026-10-28
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
@@ -302,7 +302,7 @@ means the server is bound to a different repository, not this checkout.
 
 ## The tools
 
-All six are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
+All eight are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
 protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -324,7 +324,7 @@ merit — superseded documents are outside the corpus, so a match is current gui
 logs` puts those nouns in permanently resident text held back only by a negation, and
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only `docs_explore` carries an
-exclusion, because it is the broadest of the six; the narrower five state their territory
+exclusion, because it is the broadest of the eight; the narrower seven state their territory
 positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — how `maxDocs` and
@@ -481,6 +481,56 @@ verdict or change the glossary. Reusable decisions enter through `docs review im
 glossary proposals enter through `docs glossary --write` at the CLI. The MCP reader reloads
 the current config and corpus for each call; embeddings remain loopback-only and are not
 called unless the local cache is safely ignored.
+
+### `docs_validate(mergeReady = false, base = "origin/HEAD", charBudget = 12000)`
+
+Runs the same schema conformance gate as [`kyber-weave docs validate`](governance.md) against
+the corpus the server already bound at startup. There is **no repository-path argument**: the
+root is `DocumentIndexHost.RepositoryRoot` for this process, disclosed by the provenance line
+on every response. Compare that `root=` to `git rev-parse --show-toplevel` before trusting a
+pass or fail.
+
+`mergeReady` maps to the CLI's `--merge-ready`. Default `false` is the **planning gate** —
+the check an architect runs while a plan still sits in its active folder. With
+`mergeReady: false`, open-work rules such as `KW-DOC-LIFECYCLE-003` do not run; with
+`mergeReady: true`, they do, so a branch that still carries an active plan fails until the
+plan is archived. Pull-request CI passes `mergeReady: true`; in-progress plan work on a branch
+must leave it `false`.
+
+`base` is consulted only when `mergeReady` is `true`. It matches the CLI default
+(`origin/HEAD`) and selects archive-closeout scope the same way [`docs validate
+--merge-ready`](governance.md) does.
+
+`charBudget` caps **finding text** in the body (default 12000, clamped 1000–120000). The
+provenance line and verdict line are always emitted whole and never count toward the budget.
+
+The response reads, in order:
+
+1. the provenance line
+2. `result: pass` or `result: fail` with error and warning counts
+3. findings — errors and criticals before warnings, each with rule id, severity, path, line,
+   message, and hint when the gate supplies one
+
+The verdict line is never truncated. When the budget omits later findings, the body ends with
+an omitted count so the caller knows how many more exist.
+
+The document walk reads the tree on disk, not `git ls-files`, so an untracked plan file under
+the active plans folder is visible to this gate the same way it is to the CLI.
+
+### `docs_drift(charBudget = 12000)`
+
+Runs the same entity-drift gate as [`kyber-weave docs drift`](governance.md) against the
+server's resolved repository root — again with no path argument and the same provenance
+contract as [`docs_validate`](#docs_validatemergeready--false-base--originhead-charbudget--12000).
+
+`charBudget` uses the same default, clamp, and truncation rules as `docs_validate`. Response
+order matches: provenance, `result: pass` or `result: fail` with counts, then findings with
+errors and criticals before warnings.
+
+Warnings such as `KW-DOC-DRIFT-003` do **not** fail the gate; they still appear in the
+findings when present. A missing or unreadable CodeGraph index is reported as critical
+`KW-DOC-DRIFT-001` with the existing "Drift cannot be verified" message — not as `result:
+pass`.
 
 ### `docs_status()`
 

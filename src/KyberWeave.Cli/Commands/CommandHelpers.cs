@@ -65,6 +65,19 @@ public static class CommandHelpers
         }
 
         config = result.Config!;
+
+        // Unknown keys load but do nothing, so each one is surfaced rather than left to be noticed later.
+        foreach (string warning in config.Review.Warnings)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigWarningCode,
+                Severity.Warning,
+                warning,
+                "kyber-weave.yml",
+                result.ConfigPath,
+                Hint: "Check the spelling against the gate keys, or remove the key."));
+        }
+
         return true;
     }
 

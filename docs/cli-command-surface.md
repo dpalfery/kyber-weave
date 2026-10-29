@@ -231,7 +231,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 
 | Verb | Flags (beyond `[path]` and `--docs-root`) | What it does |
 |---|---|---|
-| [`docs init`](docgraph/onboarding.md#1-initialize) | `--owner <OWNER>` (default `unassigned`), `-t\|--target <TARGETS>` (default `agent-skills`), `--no-skill`, `--force`, `--kyber-standards` | Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM. |
+| [`docs init`](docgraph/onboarding.md#1-initialize) | `--owner <OWNER>` (default `unassigned`), `-t\|--target <TARGETS>` (default `agent-skills`), `--no-skill`, `--force`, `--kyber-standards`, `--no-review-gates` | Scaffold host config, the catalog, and the ontology reference; append the catalogue `review:` gates for the declared technologies when none exist (`--no-review-gates` skips this); deploy the authoring skill via APM. |
 | [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs drift`](docgraph/governance.md#entity-drift--docs-drift) | validate flags + `--docs-root` | Resolve documented symbols against the CodeGraph index (`KW-DOC-DRIFT-*`). |
 | [`docs export-graph`](docgraph/architecture.md) | validate flags + `--docs-root`, `-o\|--out <DIR>` (default `./build/doc-graph`) | Export the documentation graph as `nodes.jsonl` and `edges.jsonl`. |
@@ -281,6 +281,7 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
 | [`review gates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates`; with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
+| `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
 | [`review duplicates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes / needs-human from findings and gates. |
 
@@ -289,15 +290,18 @@ declared for that agent under `review.task-gates` and runs them against the file
 changed, instead of running the repository-wide `review.gates`:
 
 - `--paths <PATH>` names a changed file, relative to the repository root, and repeats for
-  several. Without it the changed set is the diff against `--base` (default `HEAD`) plus
-  untracked files.
+  several. Without `--agent` the paths are the council gates' changed set; with `--agent`
+  they are the agent's changed files. Without it the changed set is the diff against
+  `--base` plus untracked files (`--agent`, default `HEAD`), or the diff from the merge
+  base of `--base` to the working tree (council, default `origin/HEAD`). When git cannot
+  list the changes, council gates with `include` run unscoped (`KW-REVIEW-034`).
 - `--base <REF>` is the ref the working tree is diffed against when `--paths` is absent.
 - `--task <SLUG>` is substituted for `{task}` in the gate commands. It must be a lookup name:
-  lowercase alphanumerics separated by single hyphens.
+  lowercase alphanumerics separated by single hyphens. Requires `--agent`.
 - `--fix` runs each gate's `fix` command before its verify command. The verify command still
-  decides the result.
-- `--paths`, `--base`, `--task` and `--fix` require `--agent`; given without it they are a
-  client-input error.
+  decides the result. Requires `--agent`.
+- `--task` and `--fix` given without `--agent` are a client-input error (exit `2`).
+  `--paths` and `--base` scope the council gates too and are accepted without `--agent`.
 - Two tokens expand in the gate's argv: `{changed}`, which must be a whole argv element and
   becomes one argument per changed file the gate's `include` matches, and `{task}`, which may
   sit inside an argument. Neither reaches a shell, and the program (the first element) is always
@@ -384,7 +388,9 @@ risk. The three rules below mirror the contract in
 | `docs integrity-check` | a finding at or above `--fail-on` (default `none` gates nothing) |
 | `review verdict` | `0` approve, `1` request-changes, `2` needs-human |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
-| `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for a client-input error, an agent-only option given without `--agent`; else `0` |
+| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts |
+| `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
+| `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |

@@ -486,6 +486,14 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 }
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
+
+                // A project with no task gates learns where they come from. Squad writes no
+                // configuration itself, and the hint never changes this exit code.
+                if (run.Scope == SquadDeploymentScope.Project)
+                {
+                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot);
+                }
+
                 return 0;
             }
 

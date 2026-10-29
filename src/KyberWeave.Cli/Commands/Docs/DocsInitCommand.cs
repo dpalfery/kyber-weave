@@ -48,6 +48,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             AnsiConsole.MarkupLine($"  {Label(file.Outcome)} {Markup.Escape(file.RelativePath)}{Note(file)}");
         }
 
+        if (result.ReviewGates is not null)
+        {
+            PrintReviewGates(result.ReviewGates);
+        }
+
         AnsiConsole.WriteLine();
 
         if (!settings.NoSkill)
@@ -77,7 +82,8 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 settings.DocsRoot,
                 settings.Owner,
                 settings.Force,
-                settings.KyberStandards);
+                settings.KyberStandards,
+                reviewGates: !settings.NoReviewGates);
             return (0, result, null);
         }
         catch (Exception ex) when (ex is
@@ -105,6 +111,60 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             : null);
 
         return note is null ? string.Empty : $" [grey]({Markup.Escape(note)})[/]";
+    }
+
+    /// <summary>
+    /// Reports what the scaffold did about the catalogue review gates: the ids written per
+    /// technology, the gates written commented out with their reasons, the technologies with
+    /// no gates to ship, and — when the host owns the section — the catalogue ids missing
+    /// from it. A missing section is information only; the exit code is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Printed unfolded like the retired-skill cleanup command below: a redirected console
+    /// folds at 80 columns, and a wrapped gate id or reason would fail an exact-match check
+    /// as well as read badly.
+    /// </remarks>
+    private static void PrintReviewGates(ReviewGatesOutcome review)
+    {
+        WriteUnfolded(() => PrintReviewGatesUnfolded(review));
+    }
+
+    private static void PrintReviewGatesUnfolded(ReviewGatesOutcome review)
+    {
+        if (review.OptedOut)
+        {
+            AnsiConsole.MarkupLine("review gates not written (--no-review-gates)");
+            return;
+        }
+
+        foreach (IGrouping<string, (string Technology, string GateId)> group in review.WrittenGates.GroupBy(
+                     entry => entry.Technology, StringComparer.Ordinal))
+        {
+            string ids = string.Join(", ", group.Select(entry => entry.GateId));
+            AnsiConsole.MarkupLine($"review gates for {Markup.Escape(group.Key)}: {Markup.Escape(ids)}");
+        }
+
+        foreach ((string gateId, string reason) in review.CommentedOutGates)
+        {
+            AnsiConsole.MarkupLine($"review gate '{Markup.Escape(gateId)}' commented out: {Markup.Escape(reason)}");
+        }
+
+        foreach (string technology in review.NoFamily)
+        {
+            AnsiConsole.MarkupLine($"no gates shipped for {Markup.Escape(technology)}");
+        }
+
+        foreach (string missing in review.MissingFromExisting)
+        {
+            AnsiConsole.MarkupLine(
+                $"review gate '{Markup.Escape(missing)}' is in the catalogue but missing from the host configuration.");
+        }
+
+        if (review.Written)
+        {
+            AnsiConsole.MarkupLine(
+                "CI: copy templates/github-actions/kyber-weave-review-gate.yml from https://github.com/dpalfery/kyber-weave into .github/workflows/.");
+        }
     }
 
     private static void DeploySkill(DocsInitSettings settings)
