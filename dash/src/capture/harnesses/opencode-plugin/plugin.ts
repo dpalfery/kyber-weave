@@ -388,17 +388,16 @@ function stampMapperPayload(event: OpencodeHookEvent): OpencodePluginSpanPayload
     ...(event.skills !== undefined && event.skills.length > 0 ? { skills: [...event.skills] } : {}),
     ...(event.model !== undefined && event.model !== '' ? { modelId: event.model } : {}),
     ...(event.provider !== undefined && event.provider !== ''
-      ? { model: { providerID: event.provider, modelID: event.model ?? '' } }
+      ? { model: { providerID: event.provider, ...(event.model !== undefined && event.model !== '' ? { modelID: event.model } : {}) } }
       : {}),
     ...(event.contextLimit !== undefined ? { contextLimit: event.contextLimit } : {}),
     ...(event.agent !== undefined && event.agent !== '' ? { agent: event.agent } : {}),
-    // B1 tool identity (T0 `tools` bucket): the call id rides only with its
-    // tool, the same rule the mapper applies, so a bare call id never
-    // fabricates a tool marker on its own.
+    // B1 tool identity (T0 `tools` bucket): the mapper forwards a bare
+    // `opencode.call.id` and gates only `opencode.tool.call.id` on the tool,
+    // so the stamper mirrors it — a call id always rides, and a bare one
+    // never fabricates a tool marker.
     ...(nonEmptyEventText(event.tool) ? { tool: event.tool } : {}),
-    ...(nonEmptyEventText(event.tool) && nonEmptyEventText(event.callId)
-      ? { callID: event.callId }
-      : {}),
+    ...(nonEmptyEventText(event.callId) ? { callID: event.callId } : {}),
     ...(nonEmptyEventText(event.messageId) ? { messageID: event.messageId } : {}),
     startTimeUnixNano: nanos,
     endTimeUnixNano: nanos,

@@ -117,6 +117,42 @@ describe('tool lifecycle host registration (B1)', () => {
 })
 
 describe('tool lifecycle through the installed pipeline (B1)', () => {
+  // Review (Kilo 9): the span stamper dropped a bare call id unless a tool
+  // rode with it, while the turn-outcome log stamper and the mapper both keep
+  // it. Same hook, two correlation stories. The mapper's rule wins: the call
+  // id always rides, and only `opencode.tool.call.id` is gated on the tool.
+  it('carries a bare call id on the span and the log without fabricating a tool marker', async () => {
+    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
+    await installed.plugin.toolHooks['tool.execute.before']({
+      sessionId: SESSION_ID,
+      callId: 'call_b1_bare',
+    })
+
+    const span = installed.mappedSpans.at(-1)
+    expect(span?.attributes['opencode.call.id']).toBe('call_b1_bare')
+    expect(span?.attributes).not.toHaveProperty('opencode.tool.call.id')
+    expect(span?.attributes).not.toHaveProperty('opencode.tool.name')
+
+    const log = installed.outcomeLogs.at(-1)
+    expect(log?.attributes['opencode.call.id']).toBe('call_b1_bare')
+    expect(log?.attributes).not.toHaveProperty('opencode.tool.call.id')
+  })
+
+  // Review (summary, no inline thread): a provider with no model synthesized
+  // `modelID: ''` into the mapper payload — empty-string padding, which the
+  // comment directly above it rules out. Absent stays absent.
+  it('stamps no model id at all when only the provider was reported', async () => {
+    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
+    await installed.plugin.hooks['turn.start']({
+      sessionId: SESSION_ID,
+      provider: 'opencode-go',
+    })
+
+    const span = installed.mappedSpans.at(-1)
+    expect(span?.attributes['opencode.model.provider']).toBe('opencode-go')
+    expect(span?.attributes).not.toHaveProperty('opencode.model.id')
+  })
+
   it('maps tool.execute.before onto a usage-free tool span with the hook marker', async () => {
     const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
     await installed.plugin.toolHooks['tool.execute.before']({

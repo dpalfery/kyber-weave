@@ -68,7 +68,7 @@ export type OpencodePluginSpanPayload = {
   callID?: string
   turnIndex?: number
   agent?: string
-  model?: { providerID: string; modelID: string }
+  model?: { providerID: string; modelID?: string }
   prompt_text?: string
   tool?: string
   /** Assembled system prompt (T4, T0 `SessionContext.system`); carried only when non-empty. */
