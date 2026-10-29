@@ -1598,7 +1598,8 @@ function isKyberVersion(value: unknown): value is KyberVersion {
 /**
  * Reads the engine's version. A 2xx body that is not the documented shape (or not
  * JSON at all) is a broken engine, so it is rejected as a `KyberApiError` rather
- * than passed on for the surface to render as `undefined` or `0.0.0`.
+ * than passed on for the surface to render as `undefined` or `0.0.0`. The returned
+ * version is trimmed, matching what the route serves, so every surface shows it bare.
  */
 export async function fetchKyberVersion(): Promise<KyberVersion> {
   const res = await fetch(VERSION_PATH)
@@ -1610,7 +1611,7 @@ export async function fetchKyberVersion(): Promise<KyberVersion> {
     body = null
   }
   if (!isKyberVersion(body)) throw new KyberApiError(res.status, VERSION_PATH)
-  return body
+  return { version: body.version.trim(), apiVersion: body.apiVersion }
 }
 
 /**

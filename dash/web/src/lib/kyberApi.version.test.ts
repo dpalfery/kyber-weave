@@ -50,12 +50,12 @@ describe('fetchKyberVersion', () => {
   it.each([
     ['a real version padded with spaces on both sides', ' 1.2.3 ', '1.2.3'],
     ['a real version with a trailing space', '1.2.3 ', '1.2.3'],
-  ])('resolves %s rather than rejecting a usable version',async (_label, version, expected) => {
+  ])('resolves %s rather than rejecting a usable version', async (_label, version, expected) => {
     stubFetch(200, { version, apiVersion: 1 })
 
-    // The client may return the padding or trim it; either way the real version is there.
+    // The client returns the trimmed version: the route, the drawer and the tray all show it bare.
     const answer = await fetchKyberVersion()
-    expect(answer.version.trim(), 'the engine version must survive the trim').toBe(expected)
-    expect(answer.apiVersion).toBe(1)
+    expect(answer.version, 'the engine version must survive the trim').toBe(expected)
+    expect(answer.apiVersion, 'the API contract version must pass through untouched').toBe(1)
   })
 })
