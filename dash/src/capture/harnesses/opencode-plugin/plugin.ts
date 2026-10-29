@@ -11,11 +11,16 @@
 //
 // Every hook is best-effort and never fails the host — the CommandCode
 // `statusbar.ts` swallow-and-continue precedent. An emitter throw, an async
-// rejection, or a delivery timeout is recorded on `failures` (and offered to
-// `onError`) while the hook itself resolves quietly, so the session always
-// continues. The default emitter records in memory only; production
-// delivery arrives through the injected `emit` port, backed by the T5
-// transport outbox (`transport/outbox.ts`, OTLP/HTTP to 127.0.0.1:4318).
+// rejection, or a delivery timeout is recorded on the bounded `failures`
+// tail (and offered to `onError`) while the hook itself resolves quietly, so
+// the session always continues. The default emitter records in memory only;
+// production delivery arrives through the injected `emit` port, backed by
+// the T5 transport outbox (`transport/outbox.ts`, OTLP/HTTP to 127.0.0.1:4318).
+// The in-memory `events`/`failures` tails are count- and byte-bounded
+// (oldest-first, with drop counters) and an ended session's payload bodies
+// are released at its `session.end` — a long session must not grow host
+// memory without bound (F2); the transport, not this tail, is the delivery
+// record.
 //
 // T8 assembles the full pipeline in this installed entry: every hook boundary
 // runs hook→mapper→turn→outbox→sender in order. The hook stamps a
@@ -128,6 +133,8 @@ export type OpencodeHookEvent = OpencodeHookPayload & {
 
 export type OpencodeHookFailure = {
   kind: OpencodeHookKind
+  /** The session the failed delivery belonged to; absent when the payload named none. */
+  sessionId?: string
   error: unknown
 }
 
@@ -155,6 +162,30 @@ export type OpencodePluginOptions = {
   timeoutMs?: number
   /** Observability tap for swallowed failures; itself runs swallowed. */
   onError?: (failure: OpencodeHookFailure) => void
+  /**
+   * Bounds on the in-memory delivery-attempt history (F2). The skeleton is a
+   * diagnostics tail, not an event store: the transport (outbox) is the
+   * delivery record. Every bound evicts oldest-first and counts the eviction,
+   * and `session.end` releases the ended session's retained payload bodies.
+   */
+  diagnostics?: OpencodeDiagnosticsBounds
+}
+
+/**
+ * Count and (approximate, UTF-16 units) byte bounds for the skeleton's
+ * retained diagnostics. Failures carry arbitrary error values, so their byte
+ * size is measured from a safely rendered string rather than the retained
+ * value itself; the retained value is still the original error.
+ */
+export type OpencodeDiagnosticsBounds = {
+  /** Maximum retained delivery-attempt records. Defaults to 200. */
+  eventLimit?: number
+  /** Maximum retained failure records. Defaults to 100. */
+  failureLimit?: number
+  /** Maximum retained content bytes across events. Defaults to 1 MiB. */
+  maxEventBytes?: number
+  /** Maximum retained failure bytes. Defaults to 256 KiB. */
+  maxFailureBytes?: number
 }
 
 /**
@@ -177,13 +208,49 @@ export type OpencodePlugin = {
   context: OpencodeHookHandler
   /** B1 tool lifecycle handlers; same never-fail-host contract as hooks. */
   toolHooks: Record<OpencodeToolHookKind, OpencodeHookHandler>
-  /** Every boundary attempted, in firing order, whether or not delivery succeeded. */
+  /**
+   * Freshest delivery attempts, in firing order, at most the diagnostics
+   * event bound — a debugging tail, never a session archive. Payload bodies
+   * of an ended session are released at its `session.end`.
+   */
   events: OpencodeHookEvent[]
-  /** Every swallowed delivery failure, in order. */
+  /** Freshest swallowed delivery failures, in order, at most the diagnostics failure bound. */
   failures: OpencodeHookFailure[]
+  /** Lifetime delivery-attempt records evicted oldest-first by the diagnostics bounds. */
+  droppedEvents: number
+  /** Lifetime failure records evicted oldest-first by the diagnostics bounds. */
+  droppedFailures: number
 }
 
 const DEFAULT_TIMEOUT_MS = 250
+
+/** Default diagnostics bounds (F2): a tail for debugging, not a session archive. */
+const DEFAULT_DIAGNOSTIC_EVENT_LIMIT = 200
+const DEFAULT_DIAGNOSTIC_FAILURE_LIMIT = 100
+const DEFAULT_DIAGNOSTIC_MAX_EVENT_BYTES = 1_048_576
+const DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES = 262_144
+
+/** Approximate retained content size of one event (UTF-16 units). */
+function eventContentBytes(event: OpencodeHookEvent): number {
+  return (
+    (event.systemPrompt?.length ?? 0) +
+    (event.toolsText?.length ?? 0) +
+    (event.skills?.reduce((sum, skill) => sum + skill.length, 0) ?? 0)
+  )
+}
+
+/** Safely rendered size of a failure value, without retaining the rendering. */
+function failureBytesOf(error: unknown): number {
+  try {
+    if (typeof error === 'string') return error.length
+    if (error instanceof Error) {
+      return error.name.length + error.message.length + (error.stack?.length ?? 0) + 2
+    }
+    return String(error).length
+  } catch {
+    return 64
+  }
+}
 
 /**
  * Create the skeleton plugin. Pure construction: no host is touched until
@@ -194,6 +261,10 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
   const now = options.now ?? ((): string => new Date().toISOString())
   const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? DEFAULT_TIMEOUT_MS))
   const onError = options.onError
+  const eventLimit = Math.max(1, Math.floor(options.diagnostics?.eventLimit ?? DEFAULT_DIAGNOSTIC_EVENT_LIMIT))
+  const failureLimit = Math.max(1, Math.floor(options.diagnostics?.failureLimit ?? DEFAULT_DIAGNOSTIC_FAILURE_LIMIT))
+  const maxEventBytes = Math.max(1, Math.floor(options.diagnostics?.maxEventBytes ?? DEFAULT_DIAGNOSTIC_MAX_EVENT_BYTES))
+  const maxFailureBytes = Math.max(1, Math.floor(options.diagnostics?.maxFailureBytes ?? DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES))
 
   const plugin: OpencodePlugin = {
     hooks: undefined as never,
@@ -201,21 +272,82 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     toolHooks: undefined as never,
     events: [],
     failures: [],
+    droppedEvents: 0,
+    droppedFailures: 0,
+  }
+  let retainedEventBytes = 0
+  let retainedFailureBytes = 0
+
+  /**
+   * WHY oldest-first: the tail answers "what just happened" for the live
+   * session; the transport already delivered the head. At least the newest
+   * record is always kept, so a bound of one still shows the last boundary.
+   */
+  const recordEvent = (event: OpencodeHookEvent): void => {
+    plugin.events.push(event)
+    retainedEventBytes += eventContentBytes(event)
+    while (
+      (plugin.events.length > eventLimit || retainedEventBytes > maxEventBytes) &&
+      plugin.events.length > 1
+    ) {
+      const evicted = plugin.events.shift()
+      if (evicted === undefined) break
+      retainedEventBytes -= eventContentBytes(evicted)
+      plugin.droppedEvents += 1
+    }
+  }
+
+  const recordFailure = (kind: OpencodeHookKind, sessionId: string | undefined, error: unknown): void => {
+    const failure: OpencodeHookFailure = sessionId === undefined ? { kind, error } : { kind, sessionId, error }
+    plugin.failures.push(failure)
+    retainedFailureBytes += failureBytesOf(error)
+    while (
+      (plugin.failures.length > failureLimit || retainedFailureBytes > maxFailureBytes) &&
+      plugin.failures.length > 1
+    ) {
+      const evicted = plugin.failures.shift()
+      if (evicted === undefined) break
+      retainedFailureBytes -= failureBytesOf(evicted.error)
+      plugin.droppedFailures += 1
+    }
+  }
+
+  /**
+   * Release an ended session's retained payload bodies. Identity (kind,
+   * session, timestamp) stays so the boundary record remains queryable, but
+   * the content strings — the megabytes — are freed. A later boundary for a
+   * still-open session is untouched.
+   */
+  const releaseSessionPayloads = (sessionId: string): void => {
+    for (const retained of plugin.events) {
+      if (retained.sessionId !== sessionId) continue
+      retainedEventBytes -= eventContentBytes(retained)
+      delete retained.systemPrompt
+      delete retained.toolsText
+      delete retained.skills
+    }
+    if (retainedEventBytes < 0) retainedEventBytes = 0
+    const kept = plugin.failures.filter((failure) => failure.sessionId !== sessionId)
+    if (kept.length !== plugin.failures.length) {
+      plugin.failures = kept
+      retainedFailureBytes = kept.reduce((sum, failure) => sum + failureBytesOf(failure.error), 0)
+    }
   }
 
   const deliver = async (kind: OpencodeHookKind, payload: OpencodeHookPayload): Promise<void> => {
     const event: OpencodeHookEvent = { kind, ...payload, timestamp: now() }
-    plugin.events.push(event)
+    recordEvent(event)
     try {
       await withTimeout(() => emit(event), timeoutMs)
     } catch (error) {
-      plugin.failures.push({ kind, error })
+      recordFailure(kind, payload.sessionId, error)
       try {
         onError?.({ kind, error })
       } catch {
         // Swallow — a diagnostics tap must never fail the host either.
       }
     }
+    if (kind === 'session.end') releaseSessionPayloads(payload.sessionId)
   }
 
   const hook =
