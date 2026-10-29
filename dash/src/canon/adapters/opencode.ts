@@ -131,10 +131,12 @@ function readModelString(
   attributes: Record<string, unknown>,
   keys: readonly string[],
 ): string | undefined {
+  // Strings only. A numeric attribute is not a model identity: coercing it
+  // with `String(value)` turned the number `0` into the model name `"0"`,
+  // which is precisely the fabricated identity this bridge never invents.
   for (const key of keys) {
     const value = attributes[key]
     if (typeof value === 'string' && value !== '') return value
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   }
   return undefined
 }

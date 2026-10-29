@@ -494,6 +494,32 @@ describe('opencode model identity bridge (A1 regression)', () => {
     expect((empty.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
     expect(empty.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
   })
+
+  // Review (Kilo 1): a numeric attribute is not a model identity. Coercing it
+  // with `String(value)` turned the number 0 into the model name "0", which is
+  // exactly the fabricated identity this bridge documents it never invents.
+  it('bridges nothing when the model value is a number, including 0', () => {
+    const zero = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'bridge-numeric-zero',
+        attributes: { 'openinference.span.kind': 'LLM', 'llm.model_name': 0 },
+      }),
+    )
+    expect((zero.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
+    expect(zero.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+
+    const nonZero = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'bridge-numeric',
+        attributes: {
+          'openinference.span.kind': 'LLM',
+          [OPENCODE_CONTRACT_VERSION_KEY]: '2',
+          'opencode.model.id': 42,
+        },
+      }),
+    )
+    expect((nonZero.raw as Record<string, unknown>)['gen_ai.request.model']).toBeUndefined()
+  })
 })
 
 // Review (Kilo 1/K2): presence of a KEY is not a measurement. `readCounter`
