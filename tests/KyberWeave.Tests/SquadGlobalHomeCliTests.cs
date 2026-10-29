@@ -780,6 +780,67 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
+    ///     The mirror image of the ordering guarantee above: a run that wrote the default and then failed
+    ///     leaves the shipped bytes on disk under a receipt that describes a file it never delivered. The
+    ///     next run must adopt those bytes — record, no write, no warning — rather than read its own
+    ///     default back as an operator edit and preserve it forever under a digest nobody can correct by
+    ///     hand.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalAdoptsShippedGuidanceWhoseRecordedDigestNoLongerMatches()
+    {
+        using Harness h = NewHarness("guidance-adopt");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+        string path = GuidancePath(h);
+        Assert.True(
+            File.Exists(path),
+            $"squad update --global must deploy the default response guidance to '{path}'.");
+        byte[] shipped = File.ReadAllBytes(path);
+        string shippedDigest = Convert.ToHexStringLower(SHA256.HashData(shipped));
+
+        // The receipt is rewritten to describe a different file; the deployed bytes are never touched, so
+        // the disk holds the shipped default while the record denies it. This is the state a run leaves
+        // behind when it deploys the guidance and then fails before writing the receipt.
+        RewriteRecordedDigest(h, shipped, Encoding.UTF8.GetBytes("An earlier Kyber-Weave release's default.\n"));
+        Assert.False(
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h)))
+                .Contains(shippedDigest, StringComparison.OrdinalIgnoreCase),
+            "The scenario requires a receipt that no longer records the digest of the bytes on disk.");
+
+        CommandExecution second = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(second, 0);
+        Assert.True(
+            shipped.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
+            $"'{path}' already holds the shipped default, so the run must adopt those bytes rather than " +
+            "rewrite them.");
+        Assert.DoesNotContain("Kept the edited", second.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Kept the response guidance", second.Output, StringComparison.Ordinal);
+        string receipt = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
+        Assert.True(
+            receipt.Contains(shippedDigest, StringComparison.OrdinalIgnoreCase),
+            "A run that finds the shipped default already on disk must record its digest, repairing a " +
+            "receipt that describes a file the earlier run never delivered. Expected digest: " +
+            $"{shippedDigest}.");
+
+        // Negative control, so the assertions above cannot pass vacuously: change only the file's bytes,
+        // leaving the receipt alone, and the very same run must now refuse and say so. Without this, a
+        // deployer that preserved every file — or that never re-examined the receipt — would satisfy the
+        // adopt case and this one equally.
+        File.WriteAllText(path, "Edited by the operator after the adopt.\n", Encoding.UTF8);
+
+        CommandExecution third = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(third, 0);
+        Assert.Equal("Edited by the operator after the adopt.\n", File.ReadAllText(path, Encoding.UTF8));
+        Assert.Contains("Kept the edited", third.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     A receipt may only record bytes that are on disk. A write that fails must therefore leave no
     ///     ownership record behind: a digest recorded ahead of its write describes a file the run never
     ///     wrote, and the next run reads the operator's untouched file as an edit — preserved forever, and

@@ -194,6 +194,51 @@ public class ConfigRegLoadingTests
         Assert.Contains("reserved", message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The intake assessment publishes a mode property of its own, so a host may not declare that name
+    /// as a path either. The loader's map and the resolved registry share one namespace: a path entry
+    /// under the reserved name would render a second, contradictory lookup that resolves to a file no
+    /// portable skill reads.
+    /// </summary>
+    [Fact]
+    public void TheIntakeAssessmentIsAReservedNameInTheConfigRegPathMap()
+    {
+        string message = AssertInvalid("config-reg:\n  intake-assessment: docs/x.md\n").Message;
+
+        Assert.Contains("reserved", message, StringComparison.Ordinal);
+        Assert.Contains("intake-assessment", message, StringComparison.Ordinal);
+        // The error names the key the operator should have written instead, which is the only thing
+        // that makes a rejected declaration actionable.
+        Assert.Contains("ontology.intake", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Turning the assessment off is a value, not an omission. A later configuration that writes
+    /// <c>intake: false</c> clears an earlier <c>true</c> — the null-only fallback
+    /// <c>OntologyConfig.Clone</c> makes for every other key — so the merged repository publishes no mode
+    /// property rather than inheriting the one the first layer turned on.
+    /// </summary>
+    [Fact]
+    public void ALaterIntakeFalseClearsAnEarlierTrueRatherThanFallingBack()
+    {
+        OntologyConfig enabled = OntologyConfigLoader.Merge(
+            OntologyConfig.ProductDefaults,
+            new OntologyYamlSection { Intake = true });
+        OntologyConfig disabled = OntologyConfigLoader.Merge(enabled, new OntologyYamlSection { Intake = false });
+
+        Assert.True(enabled.Intake, "'intake: true' must turn the assessment on.");
+        Assert.False(
+            disabled.Intake,
+            "'intake: false' is a value the later layer wrote, so the merge must keep it rather than " +
+            "falling back to the true it inherited.");
+        Assert.Contains(
+            "intake-assessment",
+            ConfigRegConfig.ProductDefaults.Resolve(enabled).Select(entry => entry.Name));
+        Assert.DoesNotContain(
+            "intake-assessment",
+            ConfigRegConfig.ProductDefaults.Resolve(disabled).Select(entry => entry.Name));
+    }
+
     [Theory]
     [InlineData("Auth Design")]
     [InlineData("auth_design")]

@@ -144,9 +144,9 @@ While ContextHygiene validates individual skill specifications, scores routing r
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 29 canonical skills
 (alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/` and
-manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
-harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
-`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
+manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares thirteen
+harness targets. All thirteen renderers are implemented and registered (`copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`).
 
 Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) matches the canonical

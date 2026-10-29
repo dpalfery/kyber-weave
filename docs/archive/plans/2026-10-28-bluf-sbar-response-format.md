@@ -97,7 +97,7 @@ loop. Three aggravating factors:
 | A5 | Development mode? | **test-first.** Default; no user opt-out. | RED contract tests exist before any content or code lands (T1); the CLI/config scope carries its own Test contract rows (§5). | ANSWERED. User decision (default), relayed by conductor 2026-10-28 |
 | A6 | Intake assessment on by default? | **Default OFF.** `.kyber-weave/kyber-weave.yml` gains an `intake` boolean (absent or false = off). `docs init` renders **<intake-assessment>** into the Config Reg block only when true, as a **mode property** (value `enabled`), because Config Reg values that are paths are path-checked (`KW-CONFIG-REG-001`); a mode entry is exempt from the path check but still covered by the stale-rendering check. Conductor resolution order: read **<intake-assessment>** from the repository root `AGENTS.md` Config Reg; present → run the intake assessment for unstated requests; absent → skip the assessment and take the plan path directly (default to plan). Defect-first precedence is unchanged. | Mirrors the existing **<autonomy>** resolution-order pattern in the conductor body. The Config Reg mode-property kind is a small DocGraph change with its own tests (T1/T4). This repository leaves `intake` unset: the flag ships default-off, and enabling it here is a separate deliberate act. | ANSWERED. User requirement, relayed by conductor 2026-10-28; mechanism derived here |
 | A7 | May agents label the style? | **No.** Agents use the title / bottom-line-up-front / decision structure but never state or label the style: no `BLUF:`/`SBAR:` tags, no section headers for situation/background/assessment/recommendation, no meta-commentary about the format. Encoded in the skill's normative rule. | The structure is for the reader; naming it spends the reader's attention on the format instead of the work. | ANSWERED. User requirement, relayed by conductor 2026-10-28 |
-| Q1 | One shared format standard, or per-agent copies? The user countered: why not a skill each agent is instructed to use? | **Skill route adopted.** A new canonical squad skill `products/kyber-squad/skills/response-format/` carries the standard; `conductor` and `bug-crusher` bodies instruct loading it **by name** for every user-facing response. | The resource-closure rule does NOT block this: closure governs local *path links* in a body (resolved only under the owning artifact's directory), while skills are invoked by name. Established precedent in the canonical tree: `agents/bug-crusher.md` says "Load the `bug-crusher` skill and follow it", and `skills/bug-crusher/SKILL.md` references `task-gate` and `test-dev` by name. Skills are a deployed artifact class reaching all twelve renderers, so the standard ships everywhere the agents do. This supersedes the earlier inline-binding and `standards/response-format.md` designs; duplication — the drift the bug-crusher wrapper itself warns about — is avoided. | ANSWERED. User counter-proposal, relayed by conductor 2026-10-28; closure constraint verified against product README §6 and live bodies |
+| Q1 | One shared format standard, or per-agent copies? The user countered: why not a skill each agent is instructed to use? | **Skill route adopted.** A new canonical squad skill `products/kyber-squad/skills/response-format/` carries the standard; `conductor` and `bug-crusher` bodies instruct loading it **by name** for every user-facing response. | The resource-closure rule does NOT block this: closure governs local *path links* in a body (resolved only under the owning artifact's directory), while skills are invoked by name. Established precedent in the canonical tree: `agents/bug-crusher.md` says "Load the `bug-crusher` skill and follow it", and `skills/bug-crusher/SKILL.md` references `task-gate` and `test-dev` by name. Skills are a deployed artifact class reaching all thirteen renderers, so the standard ships everywhere the agents do. This supersedes the earlier inline-binding and `standards/response-format.md` designs; duplication — the drift the bug-crusher wrapper itself warns about — is avoided. | ANSWERED. User counter-proposal, relayed by conductor 2026-10-28; closure constraint verified against product README §6 and live bodies |
 | Q2 | Supersede the personal guide `~/.claude/CLAUDE.md` ("How to respond to Dave")? | **Leave it alone.** It governs the Claude Code root assistant, a surface the squad does not deploy; the overlap with the new standard is reinforcement, not drift. | Superseding would make the squad release own a personal file it does not ship, which would drift on every reinstall. | ANSWERED. User decision, relayed by conductor 2026-10-28 |
 | Q3 | Where does the user-customizable how-to-talk-to-the-user guidance live, and how does it ship? | **Global user-home `~/.kyber-weave/response-guidance.md`: name-neutral, default content plus user override, installed and refreshed by the squad CLI.** The canonical default source is a resource inside the `response-format` skill tree (`skills/response-format/user-guidance.md`, linked from `SKILL.md` so closure stays clean). `squad update --global` deploys it to `~/.kyber-weave/response-guidance.md` and refreshes it the way model profiles are staged: if the deployed file is absent or unmodified (digest matches the shipped default), it is replaced with the current default; if the user has edited it, it is preserved and the run reports the file was kept. The skill instructs: where `~/.kyber-weave/response-guidance.md` exists, the user's file overrides the skill's default wording. The proposed default text is in [§11](#11-proposed-default-user-home-guidance-text-for-gate-review) and **was presented for review at the approve-and-execute gate** (2026-10-28; user-authored text folded in — see §11 and AP1). | Model-profile precedent: the squad already stages versioned `kyber-squad.canonical-profiles/v1` snapshots at `~/.kyber-weave/squad/profiles/` (rc.8/rc.9 observed); that staging code was absent at authoring time (behind `origin/main`) and is present on the post-sync base — `SquadCanonicalProfileStore` — per ES1. User-home ownership follows the established owned-file + receipt pattern (ADR 0026's owned-files principle; global squad state per ADR 0037). A dedicated `squad guidance` verb was considered and deferred: `squad update --global` is already the user-home refresh entry point the user cited; one more verb for one file is not warranted until proven needed. | ANSWERED (mechanism). User decision relayed 2026-10-28; default text reviewed and user-authored at the approve-and-execute gate 2026-10-28 |
 | AP1 | Approve and execute? | **Approved.** The user chose approve and execute at the conductor-presented gate, 2026-10-28, with the declared scale and components stated (extends-component; KyberSquad, DocGraph) and §11 presented as its own review item; answer: "Fold in my §11 text, then approve and execute." The user's §11 opening line ("Lead with the bottom line up front (BLUF).") was folded into §11 before approval. | A Ready plan is execution authority. This row is the recorded gate approval and permanent state; execution begins only after the conductor's finalization revalidation (§10). | ANSWERED. User approval at conductor-presented gate 2026-10-28 |
@@ -133,7 +133,7 @@ and [intake assessment opt-in](../kyber-squad/onboarding.md#intake-assessment-op
 ## 4. Investigation findings
 
 - **Canonical source location.** `products/kyber-squad/` is the canonical source for the
-  agents and skills, rendered to twelve harness targets (product README). The deployed
+  agents and skills, rendered to thirteen harness targets (product README). The deployed
   `~/.factory/droids/conductor.md`, `~/.factory/skills/bug-crusher/SKILL.md`, etc. are
   render outputs; edits go to the canonical tree.
 - **User-facing enumeration (fact, not design).** `invocation: primary` frontmatter scan
@@ -258,7 +258,7 @@ is named.
   precedence unchanged). `intake-path.md` records the default-off semantics and the flag.
 - **Acceptance criteria:** T1a pins pass; agent frontmatter unchanged; the skill's local
   links stay under its own directory (closure clean); no harness-specific machinery beyond
-  the conditional session-title rule; bodies render to all twelve targets.
+  the conditional session-title rule; bodies render to all thirteen targets.
 - **Dependencies:** T1.
 - **Required skills:** task-gate.
 
@@ -553,16 +553,16 @@ once, in §11, and not duplicated here.
 These do not block archival. They are recorded because the closeout scope was this plan and the
 plan index only.
 
-1. **`A4`'s session-title matrix has no canonical home.** The conditional rule and the per-harness
-   feasibility matrix live in `products/kyber-squad/skills/response-format/SKILL.md`. The corpus
-   states the required title line ([requirements R1](../../kyber-squad/requirements.md#user-facing-response-format))
-   but not the matrix, so a future reader of the corpus cannot learn that Factory has no
-   agent-settable title and that the rule applies only on confirmed mechanisms.
-2. **`A2`'s rejected-hooks rationale is not in the corpus.** The corpus states that the standard is
-   carried by the one skill and the binding agent bodies
-   ([architecture §8](../../kyber-squad/architecture.md#the-response-format-and-its-skill-carrier)).
-   It does not record that a deterministic prose gate was rejected for want of any hook surface in
-   the release model and remains future work.
+1. **`A4`'s session-title matrix — resolved 2026-10-28.** The decision is now recorded in
+   [architecture §8, session titles are set only where a mechanism is confirmed](../../kyber-squad/architecture.md#the-response-format-and-its-skill-carrier),
+   which states the Factory infeasibility, the confirmed-mechanism-only rule, the never-fabricate
+   rule, and names the skill's matrix as the operative copy. The requirement itself stays in
+   [requirements R1](../../kyber-squad/requirements.md#user-facing-response-format).
+2. **`A2`'s rejected-hooks rationale — resolved 2026-10-28.** Recorded in
+   [architecture §8, enforcement is instruction-based, by necessity](../../kyber-squad/architecture.md#the-response-format-and-its-skill-carrier):
+   the absent hooks field in `agent.schema.json`, the four capability-lattice grant families, the
+   absent Factory `settings.json` hooks key, the tool-call-versus-prose distinction, the accepted
+   partial determinism, and the deferred deterministic gate.
 3. **`intake` stays unset in this repository.** Enabling it here is a separate deliberate act
    (A6). Nothing in this change enabled it.
 4. **`N2` from the second council: no test pins the adopt branch.** The deployer records a file
@@ -588,13 +588,17 @@ Documentation-impact review over the change, not over this plan's intent.
 - `DOCS_REVIEW: update` — asked: does a Config Reg entry kind that is not a path change the
   registry's documented promise? Decided: yes. Why: the every-value-resolves guarantee is stated
   architecture, and exempting mode entries changes it. Files: `docs/docgraph/architecture.md`.
-- `DOCS_REVIEW: missing` — asked: is the per-harness session-title matrix (`A4`) in any governed
-  document? Decided: no, and it must be created or the skill is the only home. Why: the corpus
-  states the title line but not the matrix. Recorded as open item 1 because the closeout scope did
-  not include a corpus edit.
-- `DOCS_REVIEW: missing` — asked: does any governed document record why deterministic prose
-  enforcement (hooks) was rejected (`A2`)? Decided: no. Why: enforcement-mechanism rationale is
-  architecture, and none states it. Recorded as open item 2.
+- `DOCS_REVIEW: update` (was `missing`) — asked: is the per-harness session-title matrix (`A4`) in
+  any governed document? Decided: it was not, and it is not the skill's to keep alone. Why: a
+  corpus reader could not learn that Factory has no agent-settable title or that the rule applies
+  only on confirmed mechanisms. Resolved 2026-10-28: landed in `docs/kyber-squad/architecture.md`
+  §8, *session titles are set only where a mechanism is confirmed*, which names the skill's matrix
+  as the operative copy.
+- `DOCS_REVIEW: update` (was `missing`) — asked: does any governed document record why deterministic
+  prose enforcement (hooks) was rejected (`A2`)? Decided: no, and enforcement rationale is
+  architecture. Why: the capacity of the release model to intercept prose is a boundary someone will
+  question again. Resolved 2026-10-28: landed in `docs/kyber-squad/architecture.md` §8,
+  *enforcement is instruction-based, by necessity*.
 
 **Correction after the second council (2026-10-28).** The first pass of this closeout reviewed the
 change as it stood and the harvest it produced described the deploy ordering the `F1` fix then
@@ -607,6 +611,15 @@ and [onboarding](../../kyber-squad/onboarding.md#user-home-response-guidance) in
 pass. `DOCS_REVIEW: update` — the documentation was behind the implementation, so the
 implementation's contract is now what the corpus states, including the fourth refresh rule and
 the failure mode the ordering creates.
+
+**Missing-documentation items closed (2026-10-28).** Open items 1 and 2 and their two
+`DOCS_REVIEW: missing` rows were the only documentation the second council found absent. Both
+landed in [architecture §8](../../kyber-squad/architecture.md#the-response-format-and-its-skill-carrier)
+beside the rest of the response-format contract, the section a reader already consults for this
+feature: the session-title feasibility matrix and rule (`A4`), and the instruction-based
+enforcement rationale including the deferred deterministic gate (`A2`). The rows above are
+updated from `missing` to `update` rather than deleted, so the record shows the gap was real and
+where it closed.
 
 ## Closeout mapping
 

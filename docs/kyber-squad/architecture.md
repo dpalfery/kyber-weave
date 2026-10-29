@@ -74,7 +74,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares twelve target coding harnesses; all twelve have
+atomic, recoverable deployments. Its catalog declares thirteen target coding harnesses; all thirteen have
 implemented and registered renderers today.
 
 ---
@@ -867,7 +867,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. The repository carries no project-level self-deployment: root `.github/agents/`,
@@ -935,6 +935,29 @@ lives in the skill's `user-guidance.md`; the override is the user's own file at
 [home-owned files](#home-owned-files-and-the-user-home-response-guidance). Where that file
 exists it replaces the skill's default wording — one file the operator edits, rather than a
 deployed skill the next update would replace.
+
+**Enforcement is instruction-based, by necessity.** Nothing in the squad's release model can
+intercept an assistant's prose, so the contract is carried by the skill and the two agent
+bodies that bind it. `schemas/agent.schema.json` has no hooks field — its properties are
+identity, invocation, model and capability profiles, tool lists, delegation, fallback, and
+aliases — the capability lattice in `profiles/capabilities.yml` declares only `filesystem.*`,
+`process.execute`, `network.*`, and `delegate` grants, and a Factory `settings.json` has no
+hooks key. Hooks observed on other harnesses (`PreToolUse` and its peers) intercept tool calls,
+not assistant prose, so none of them can carry this contract even where they exist. Instruction
+adherence is therefore probabilistic. What keeps it checkable is the ordered shape itself: a
+title line, a bounded bottom line, and an explicit decisions section are structure a reviewer can
+see is present or absent, and that reviewability is the determinism accepted here. A
+deterministic prose-format gate is deferred future work, not a delivered claim.
+
+**Session titles are set only where a mechanism is confirmed.** The skill carries a conditional
+session-title rule and a per-harness feasibility matrix, and that matrix in
+`products/kyber-squad/skills/response-format/SKILL.md` is the operative copy; this section
+records the decision behind it. On `factory` a title is not agent-settable — it derives from the
+conversation's first message, and no agent-facing mechanism to set one was found.
+On every other target the rule is to set the title to reflect the work only where that target
+exposes a confirmed mechanism, and never to fabricate one. A target whose mechanism is
+unverified is treated as infeasible rather than guessed at, which is why the matrix starts with
+a target that cannot be set too.
 
 ---
 
