@@ -341,14 +341,23 @@ export class IngestWriter implements OtlpSpanStore {
    * unmeasurable input must not be ledgered weightless.
    */
   private accountedBytes(items: readonly unknown[], hint?: OtlpWriteHint): number {
-    let decoded: number
+    let raw: number
     try {
-      decoded = Math.max(0, Math.floor(this.measure(items)))
+      raw = this.measure(items)
     } catch (err) {
       throw new Error(
         `cannot admit batch: byte measurement failed (${err instanceof Error ? err.message : String(err)}); refusing unmeasurable input`,
       )
     }
+    // A custom measure that answers NaN or Infinity would poison the ledger:
+    // every later comparison goes false and admission stops bounding. A
+    // non-finite measure is a broken seam, refused as loudly as a throwing one.
+    if (!Number.isFinite(raw)) {
+      throw new Error(
+        `cannot admit batch: byte measurement returned non-finite ${String(raw)}; refusing unmeasurable input`,
+      )
+    }
+    const decoded = Math.max(0, Math.floor(raw))
     const hinted = hint?.bytes
     const wire =
       typeof hinted === 'number' && Number.isFinite(hinted) && hinted > 0 ? Math.floor(hinted) : 0
@@ -409,20 +418,29 @@ export class IngestWriter implements OtlpSpanStore {
    * Queue spans with backpressure (R2.5): the returned promise resolves
    * only once the spans are queued *and* the backlog has been flushed back
    * under the high-water mark, so a producer outrunning persistence is
-   * slowed to the store's pace. A store failure rejects here — with the
-   * batch re-queued at the head of the queue, not dropped. A batch that
-   * alone exceeds either ceiling is permanently oversize
-   * (`BatchTooLargeError`): blocking cannot drain what never fits.
+   * slowed to the store's pace. Admission runs before the batch is added:
+   * an oversize batch is permanent, a saturated backlog is transiently
+   * refused. A store failure rejects here — with the batch re-queued at the
+   * head of the queue, not dropped.
    */
   async enqueue(spans: readonly OtlpSpan[], hint?: OtlpWriteHint): Promise<void> {
     if (this.stopped) {
       throw new Error('IngestWriter is stopped; enqueueing more spans would silently drop them')
     }
     if (spans.length > 0) {
+      // Admission BEFORE adding (F3): concurrent enqueues behind a held sink
+      // must not pile past the ceilings while each waits its turn. The
+      // blocking wait below covers the soft high-water region only.
       const bytes = this.accountedBytes(spans, hint)
-      if (spans.length > this.maxPendingSpans || bytes > this.maxPendingBytes) {
+      const verdict = this.verdict(spans.length, bytes)
+      if (verdict === 'oversize') {
         throw new BatchTooLargeError(
           `batch of ${spans.length} spans (${bytes} bytes) exceeds the backlog ceiling; shrink or split the batch`,
+        )
+      }
+      if (verdict === 'saturated') {
+        throw new WriterBackpressureError(
+          `ingest backlog is full (${this.backlogCount()} records, ${this.backlogBytes()} bytes retained); retry the batch`,
         )
       }
       this.queuedBytes += bytes
