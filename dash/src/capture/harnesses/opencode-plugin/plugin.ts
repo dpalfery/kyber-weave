@@ -323,8 +323,15 @@ function normalizeFailureError(error: unknown): OpencodeFailureDiagnostics {
   }
   if (typeof error === 'string') return diagnosed('Error', error)
   if (error instanceof Error) {
-    const name = typeof error.name === 'string' && error.name !== '' ? error.name : 'Error'
-    return diagnosed(name, String(error.message ?? ''))
+    try {
+      const name = typeof error.name === 'string' && error.name !== '' ? error.name : 'Error'
+      return diagnosed(name, String(error.message ?? ''))
+    } catch {
+      // A throwing name/message getter must not break the never-fail-host
+      // contract: deliver normalizes inside its own catch, so a throw here
+      // would reject the host hook the plugin was hired to protect.
+      return diagnosed('Error', 'unrenderable failure value')
+    }
   }
   try {
     return diagnosed('Error', String(error))

@@ -168,6 +168,30 @@ describe('Opencode plugin diagnostics are bounded (F2)', () => {
     expect(JSON.stringify(plugin.failures).length).toBeLessThan(1_000)
   })
 
+  it('survivesAThrowingErrorGetterWithoutFailingTheHost', async () => {
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      emit: () => {
+        const error = new Error('unreadable') as Error & { booby?: unknown }
+        // A getter that throws must not break the never-fail-host contract:
+        // reading .message inside deliver's catch would otherwise reject
+        // the host hook the plugin was hired to protect.
+        Object.defineProperty(error, 'message', {
+          get() {
+            throw new Error('getter exploded')
+          },
+        })
+        throw error
+      },
+    })
+    // Resolves quietly — the swallowed delivery stays swallowed.
+    await expect(plugin.hooks['turn.start']({ sessionId: 'session-f2-getter', turnIndex: 1 })).resolves.toBeUndefined()
+
+    expect(plugin.failures).toHaveLength(1)
+    expect(plugin.failures[0]).toMatchObject({ kind: 'turn.start', sessionId: 'session-f2-getter' })
+    expect(plugin.failures[0]?.error).toMatchObject({ name: 'Error', message: 'unrenderable failure value' })
+  })
+
   it('keepsOfflinePendingDeliveryWholeAcrossSessionEndCleanup', async () => {
     let receiverUp = false
     const bodies: string[] = []
