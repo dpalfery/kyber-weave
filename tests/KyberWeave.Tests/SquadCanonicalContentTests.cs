@@ -129,6 +129,18 @@ public sealed class SquadCanonicalContentTests
     private const string VerbatimRelaySentence =
         "Change the presentation only: keep every status marker, id, path, count, gap, open question and evidence value exactly as the specialist returned it, and never drop, merge or paraphrase an item.";
 
+    /// <summary>
+    /// A diagnosed defect with no stated artifact choice reaches the architect's intake recommendation
+    /// only when the repository opted in. The diagnosis route is a second door into the same assessment,
+    /// so it carries the same gate as the assessment itself.
+    /// </summary>
+    private const string GatedDiagnosisRecommendationSentence =
+        "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.";
+
+    /// <summary>Without the opt-in, the same request takes the plan path with its diagnosis attached.</summary>
+    private const string DefaultedDiagnosisRouteSentence =
+        "If choice is UNSTATED and that property is absent, skip the intake recommendation and proceed to Promotion with the plan choice and the diagnosis attached, saying so as the Assessment section directs.";
+
     /// <summary>An absent intake property skips the assessment and takes the plan path directly.</summary>
     private static readonly Regex IntakeAbsentRule = new(
         @"\b(?:absent|not present|missing|omitted)\b[^.]{0,240}\b(?:skip|no assessment|without an assessment|plan path)\b",
@@ -731,6 +743,71 @@ public sealed class SquadCanonicalContentTests
             "'agents/conductor/references/intake-path.md' must announce a plan path taken because the " +
             "assessment is off, so it does not disagree with 'agents/conductor.md': " +
             $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path states the default-off assessment twice: once as the rule, and once on the route
+    /// a diagnosed defect takes. The second must not send an unstated choice to the architect's intake
+    /// recommendation unconditionally, or a repository that never opted in gets the assessment anyway.
+    /// </summary>
+    [Fact]
+    public void DefectDiagnosisSendsAnUnstatedChoiceToTheAssessmentOnlyWhenTheRepositoryOptedIn()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string route = BlockContaining(intakePath, "Without existing Ready authority");
+
+        Assert.True(
+            route.Length > 0,
+            "'agents/conductor/references/intake-path.md' must state the route a diagnosed defect takes " +
+            "without Ready authority in one block, so the opt-in gate can be pinned to that route.");
+        Assert.True(
+            SentenceLine(route, GatedDiagnosisRecommendationSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must send an unstated choice to the architect's " +
+            "intake recommendation only when the repository publishes the property: " +
+            $"\"{GatedDiagnosisRecommendationSentence}\"");
+        Assert.True(
+            SentenceLine(route, DefaultedDiagnosisRouteSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must say what an unstated choice does when the " +
+            $"property is absent: \"{DefaultedDiagnosisRouteSentence}\"");
+        Assert.DoesNotContain(
+            "If choice is UNSTATED, send the diagnosis",
+            WithoutEmphasis(route),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The gate pins are worth having only if they can fail. The ungated route they replaced, a gate
+    /// sentence wrapped across two lines, and a gate sentence carried outside the route all have to
+    /// leave them red.
+    /// </summary>
+    [Fact]
+    public void TheDiagnosisRoutePinsRejectTheUngatedWrappedOrMisplacedRoute()
+    {
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "The route without the opt-in gate must not satisfy the gated pin.");
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect\n" +
+                "for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence wrapped across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + GatedDiagnosisRecommendationSentence + "\n",
+                    "Without existing Ready authority"),
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence outside the route a diagnosed defect takes must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(GatedDiagnosisRecommendationSentence + "\n", GatedDiagnosisRecommendationSentence) is not null,
+            "The pin must still accept the gate sentence exactly as the intake path states it.");
+        Assert.True(
+            SentenceLine(DefaultedDiagnosisRouteSentence + "\n", DefaultedDiagnosisRouteSentence) is not null,
+            "The pin must still accept the default sentence exactly as the intake path states it.");
     }
 
     /// <summary>
