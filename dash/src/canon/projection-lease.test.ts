@@ -227,6 +227,35 @@ describe('tryClaimProjectionLease', () => {
     const winner = a ?? b
     expect(winner?.lease.owner).toMatch(/^[ab]$/)
   })
+
+  it('throws the floor-write error when the compensating release also fails', () => {
+    const store = openMemoryStore()
+    const floorFailure = new Error('floor write failed')
+    const releaseFailure = new Error('compensating release failed')
+    // A store that breaks after the lease CAS: the floor write fails, and
+    // the compensating release hits the same broken store. The caller must
+    // see the floor failure, never the cleanup one.
+    let compareAndSets = 0
+    const broken: CanonStore = new Proxy(store, {
+      get(target, property, receiver) {
+        if (property === 'setMetadata') {
+          return () => {
+            throw floorFailure
+          }
+        }
+        if (property === 'compareAndSetMetadata') {
+          return (...args: [string, string | undefined, string | null]) => {
+            compareAndSets += 1
+            if (compareAndSets > 1) throw releaseFailure
+            return (target.compareAndSetMetadata as (...call: [string, string | undefined, string | null]) => boolean)(...args)
+          }
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === 'function' ? (value as (...call: never[]) => unknown).bind(target) : value
+      },
+    })
+    expect(() => tryClaimProjectionLease(broken, { owner: 'maintenance', nowMs: T0 })).toThrow(floorFailure)
+  })
 })
 
 describe('heartbeatProjectionLease', () => {

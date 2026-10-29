@@ -218,7 +218,13 @@ export function tryClaimProjectionLease(
   try {
     store.setMetadata(PROJECTION_LAST_START_KEY, String(nowMs))
   } catch (err) {
-    releaseProjectionLease(store, { lease, raw: next })
+    try {
+      releaseProjectionLease(store, { lease, raw: next })
+    } catch {
+      // Best effort: the store that failed the floor write can fail the
+      // compensating release too. Never mask the original error with the
+      // cleanup one; the lease ages out through the staleness gate.
+    }
     throw err
   }
   return { lease, raw: next }
