@@ -64,15 +64,30 @@ async function openHarness(
   await expect(page.getByTestId('page-harness')).toContainText(harnessId)
   const response = await responsePromise
   const body = await response.text()
-  let runs: unknown[] = []
+  const contentType = response.headers()['content-type'] ?? ''
+  // The zero-record test asserts an EMPTY list, so an empty list has to mean
+  // "the server reported no runs" and never "the body was not JSON". A 200 HTML
+  // body is exactly what this server sends for an unknown path (the SPA
+  // fallback serves index.html), so a swallowed parse error would let this
+  // suite stay green while the dashboard served fiction. Both cases fail here,
+  // naming what actually arrived.
+  expect(
+    contentType,
+    `the runs answer for ${harnessId} was not JSON (content-type ${contentType}): ${body.slice(0, 300)}`,
+  ).toContain('application/json')
+  let parsed: { runs?: unknown }
   try {
-    const parsed = JSON.parse(body) as { runs?: unknown[] }
-    runs = parsed.runs ?? []
+    parsed = JSON.parse(body) as { runs?: unknown }
   } catch {
-    // A non-JSON body (the SPA fallback, an error page) is reported by the caller's
-    // status/body assertion; leaving `runs` empty keeps this helper total.
+    throw new Error(
+      `the runs answer for ${harnessId} did not parse as JSON: ${body.slice(0, 300)}`,
+    )
   }
-  return { status: response.status(), body, runs }
+  expect(
+    Array.isArray(parsed.runs),
+    `the runs answer for ${harnessId} carried no runs array: ${body.slice(0, 300)}`,
+  ).toBe(true)
+  return { status: response.status(), body, runs: parsed.runs as unknown[] }
 }
 
 test.beforeAll(async () => {
