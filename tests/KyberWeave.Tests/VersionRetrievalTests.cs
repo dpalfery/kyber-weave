@@ -89,6 +89,13 @@ public class VersionRetrievalTests
     /// Pins the exact line the CLI prints for its version flags, which is the line the install
     /// runbook and distribution.md document. A `+sha` build suffix reaching that line would be a
     /// user-visible regression that the looser assertions above cannot see.
+    /// <remarks>
+    /// Scope: this runs <c>dotnet &lt;dll&gt; --version</c>, so it pins the assembly's version-line formatting
+    /// (Spectre SetApplicationVersion and the <c>+</c> stripping in GetVersion), not the published single-file binary.
+    /// That binary is pinned by scripts/update-loop.sh, which asserts <c>kyber-weave --version</c> and
+    /// <c>kyber-weave-mcp --version</c> on the release-local.sh single-file publish. CI runs it in the
+    /// update-loop job of .github/workflows/ci.yml.
+    /// </remarks>
     /// </summary>
     [Theory]
     [InlineData("--version")]
