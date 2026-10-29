@@ -47,7 +47,7 @@ import {
   observedNamespaces,
   recordValidationProblems,
 } from './adapters/quarantine.js'
-import type { CanonStore } from './store.js'
+import { DEFAULT_PENDING_PAGE_BYTES, type CanonStore } from './store.js'
 import {
   contentFromParts,
   isNotMeasurable,
@@ -58,6 +58,13 @@ import {
 } from './types.js'
 import type { OtlpLog, OtlpSpan } from '../otel/receiver.js'
 import { DEFAULT_PENDING_TTL_MS, ingestLogBatch, PENDING_INTERACTION_PROMPT } from './log-ingest.js'
+
+/**
+ * Rows per replay page (F8): the byte cap (`DEFAULT_PENDING_PAGE_BYTES`)
+ * is the binding bound for heavy bodies; the row cap bounds round-trips
+ * for swarms of tiny rows.
+ */
+const PENDING_REPLAY_PAGE_ROWS = 1_000
 
 /** The harness adapters attribution votes over, in registration (tie-break) order. */
 export const ADAPTERS: readonly HarnessAdapter[] = [
@@ -295,19 +302,20 @@ function keepInteractionPrompt(store: CanonStore, span: RawSpan): void {
  * it does not earn the prompt a second home in `quarantined_logs`.
  */
 function settlePendingInteractionPrompts(store: CanonStore, now: number, ttlMs: number): void {
-  for (const log of store.getPendingLogs() as PendingInteractionPrompt[]) {
-    const value = log.attributes[PENDING_INTERACTION_PROMPT]
-    if (value === undefined || log.traceId === null || log.spanId === null) continue
-    const prompt = claudeUserPrompt(value)
+  // Targeted by marker (F8): only parked-prompt rows are read — the
+  // settle pass no longer parses every unrelated pending payload.
+  for (const row of store.pendingInteractionPrompts()) {
+    if (row.traceId === null || row.spanId === null) continue
+    const prompt = claudeUserPrompt(row.prompt)
     if (prompt === undefined) {
       // The parked value is our own write: unclassifiable means done rather
       // than left to ride the TTL.
-      store.deletePendingLog(log.logId)
+      store.deletePendingLog(row.logId)
       continue
     }
-    deliverInteractionPrompt(store, log.traceId, log.spanId, prompt)
-    const pendingSince = log.pendingSince ?? now
-    if (now - pendingSince >= ttlMs) store.deletePendingLog(log.logId)
+    deliverInteractionPrompt(store, row.traceId, row.spanId, prompt)
+    const pendingSince = row.pendingSince ?? now
+    if (now - pendingSince >= ttlMs) store.deletePendingLog(row.logId)
   }
 }
 
@@ -514,9 +522,20 @@ export function ingestBatchWithAdapters(
   // just timing: an api_request_body parse landing in the same replay must
   // replace the prompt-derived part, not be replaced by it (Q4).
   settlePendingInteractionPrompts(store, Date.now(), DEFAULT_PENDING_TTL_MS)
-  const pendingLogs = store.getPendingLogs()
-  if (pendingLogs.length > 0) {
-    ingestLogBatch(pendingLogs as Parameters<typeof ingestLogBatch>[0], store)
+  // Byte-bounded replay (F8): pending logs are replayed page by page in
+  // `log_id` order instead of snapshotting every payload at once. Each page
+  // is enriched, consumed, or re-pended before the next is read, so the
+  // working set stays near one page however heavy the backlog is. Deletions
+  // during a page advance the `log_id` cursor safely: consumed rows sort
+  // below every row the next page reads.
+  for (let after = ''; ;) {
+    const page = store.pendingLogsPage(after, PENDING_REPLAY_PAGE_ROWS, DEFAULT_PENDING_PAGE_BYTES)
+    if (page.length === 0) break
+    ingestLogBatch(
+      page.map((row) => row.log) as Parameters<typeof ingestLogBatch>[0],
+      store,
+    )
+    after = page[page.length - 1]!.logId
   }
 
   // `rejected` counts both validation rejections and normalize failures: neither produced

@@ -10,7 +10,6 @@ import {
   type Measurability,
 } from './types.js'
 import { CanonStore, type ModelCallCandidate } from './store.js'
-
 export type { OtlpLog }
 
 export type LogIngestOutcome = {
@@ -381,8 +380,11 @@ export function ingestLogBatch(
   let enriched = 0
   let pending = 0
   let quarantined = reconcileExpiredPending(store, now(), pendingTtlMs)
+  // Dedup reads metadata only (F8): the arrival time rides the row, so the
+  // duplicate decision needs no payload — a large backlog of heavy bodies
+  // costs a small-column scan, not a parse-everything snapshot.
   const existingPending = new Map(
-    (store.getPendingLogs() as PendingLog[]).map((log) => [log.logId, log]),
+    store.pendingLogMetadata().map((row) => [row.logId, row.pendingSince]),
   )
   for (const log of logs) {
     if (store.isLogEnriched(log.logId)) continue
@@ -408,7 +410,7 @@ export function ingestLogBatch(
     } else {
       const pendingLog = {
         ...log,
-        pendingSince: existingPending.get(log.logId)?.pendingSince ?? now(),
+        pendingSince: existingPending.get(log.logId) ?? now(),
       }
       store.addPendingLog(pendingLog, harness)
       pending += 1
@@ -421,17 +423,15 @@ export function ingestLogBatch(
  * Quarantine identified logs that have waited longer than the enrichment TTL.
  *
  * This is exported so the collector lifecycle can reconcile pending logs even
- * when no later OTLP batch arrives.
+ * when no later OTLP batch arrives. Expiry is SQL-selected (F8): only expired
+ * rows' payloads are parsed — a backlog of live bodies is never decoded for
+ * this decision.
  */
 export function reconcileExpiredPending(store: CanonStore, now: number, ttlMs: number): number {
   let quarantined = 0
-  for (const log of store.getPendingLogs() as PendingLog[]) {
-    // Older rows predate pendingSince; treating reconciliation as their arrival
-    // keeps upgrades from unexpectedly quarantining a backlog immediately.
-    const pendingSince = log.pendingSince ?? now
-    const logTtlMs = isClaudeRequestBodyLog(log) ? Math.max(ttlMs, CLAUDE_REQUEST_BODY_PENDING_TTL_MS) : ttlMs
-    if (now - pendingSince < logTtlMs) continue
-    if (log.attributes[PENDING_INTERACTION_PROMPT] !== undefined) {
+  for (const entry of store.takeExpiredPendingLogs(now, ttlMs, CLAUDE_REQUEST_BODY_PENDING_TTL_MS)) {
+    const log = entry as PendingLog
+    if (log.attributes?.[PENDING_INTERACTION_PROMPT] !== undefined) {
       // A parked interaction prompt is not a log waiting for its span —
       // the span is already quarantined, and its quarantine packet is
       // already the prompt's evidence copy — so expiry retires the row
@@ -447,7 +447,7 @@ export function reconcileExpiredPending(store: CanonStore, now: number, ttlMs: n
     store.quarantineLog(
       log,
       'identified log remained unmatched past pending expiry',
-      log.harness ?? (isClaudeLog(log) ? 'claude-code' : undefined),
+      log.harness ?? (isClaudeLog(log as OtlpLog) ? 'claude-code' : undefined),
     )
     quarantined += 1
   }
