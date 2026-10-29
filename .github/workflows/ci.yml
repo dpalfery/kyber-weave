@@ -392,6 +392,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.codeql != '[]'
+    # A pull request that touches no .NET files legitimately skips the csharp leg, and a
+    # docs-only pull request skips this job entirely. GitHub code scanning identifies a
+    # configuration by (workflow, category) and diffs the set between main and the PR head,
+    # so the missing leg surfaces as a NEUTRAL "1 configuration not found" check naming
+    # /language:csharp. That check is expected here, informational, and cannot fail CI
+    # Summary — the only required check. Anything that is not a pull request, and any edit
+    # to this workflow or .github/codeql/, takes the changes job's all() fallback and runs
+    # every language, so main's C# analysis never goes stale. Do not restore a static
+    # matrix to silence it; see docs/ci-pipelines/workflows-runbook.md.
     strategy:
       fail-fast: false
       matrix:
