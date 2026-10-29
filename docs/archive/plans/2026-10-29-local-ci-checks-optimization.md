@@ -296,7 +296,7 @@ impact-components: [ReviewCouncil]
 | H5 | ReviewCouncil | architecture | [`docs/code-review/architecture.md`](../../code-review/architecture.md) | Cross-file test asset dependencies (`products/**`, `REVIEW.md` in `net-test-paths`) |
 
 **ADR Waiver**:
-No new ADR required — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../adr/0005-task-level-fast-review.md)), utilizing the already implemented `CouncilGateSelection` include-matching engine without altering architectural boundaries, storage models, or public external schemas.
+No new ADR required — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../../adr/0005-task-level-fast-review.md)), utilizing the already implemented `CouncilGateSelection` include-matching engine without altering architectural boundaries, storage models, or public external schemas.
 
 ---
 
@@ -338,7 +338,7 @@ dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/
 
 ## Closeout mapping
 
-ADR waiver for the whole plan: `no ADR — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../adr/0005-task-level-fast-review.md)), utilizing the already implemented CouncilGateSelection include-matching engine without altering architectural boundaries, storage models, or public external schemas.`
+ADR waiver for the whole plan: `no ADR — ADR waiver: This optimization refines existing gate selection contracts ([ADR 0005](../../adr/0005-task-level-fast-review.md)), utilizing the already implemented CouncilGateSelection include-matching engine without altering architectural boundaries, storage models, or public external schemas.`
 
 | ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
 |---|---|---|---|---|---|
