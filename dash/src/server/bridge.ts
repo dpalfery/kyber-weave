@@ -6292,21 +6292,29 @@ export class KyberBridge {
       }
       const outcome = await this.capturedSpanParts(db, unit.spanId, signal)
       if ('corrupt' in outcome) {
-        streamGaps.push({
+        const gap = {
           code: 'corrupt_column',
           reason: 'A retained column could not be decoded.',
           sessionId: unit.sessionId,
           ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
           spanId: unit.spanId,
-        })
+        }
+        streamGaps.push(gap)
+        // WHY counted: the served envelope carries every discovered gap, so
+        // an unbudgeted gap pushes the sealed page past the page budget.
+        // Gaps are small but unbounded in count; count each one's envelope
+        // bytes (plus its array comma) as discovered.
+        currentBytes += Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
         continue
       }
       if (outcome.parts.length === 0) {
-        streamGaps.push(
-          outcome.purged
-            ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
-            : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId },
-        )
+        const gap = outcome.purged
+          ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
+          : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId }
+        streamGaps.push(gap)
+        // WHY counted: same envelope accounting as the corrupt-column gap
+        // above — served coverage carries these bytes too.
+        currentBytes += Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
         continue
       }
       const chunks = this.splitCapturedParts([{ unit, parts: outcome.parts }], byteLimit)

@@ -169,6 +169,96 @@ describe('captured context bounded paging (F4)', () => {
     }
   })
 
+  it('budgets discovered stream gaps so the sealed page holds the envelope', async () => {
+    const fixture = createContextFixture()
+    try {
+      // Sixty part-less turns ahead of five ~14KB content turns: every
+      // part-less unit rides the served coverage as a stream gap whose
+      // envelope bytes the page budget must account for as discovered.
+      // Uncounted, the gaps push the sealed page ~10KB past the 60KB
+      // page budget; counted, the chunks seal earlier and the envelope
+      // holds.
+      const sessionId = 'gap-budget-session'
+      const base = '2026-10-24T11:00:00.000Z'
+      const at = (index: number): string =>
+        new Date(Date.parse(base) + index * 1_000).toISOString()
+      const partless = Array.from({ length: 60 }, (_, index) => {
+        const spanId = `gap-budget-empty-${index}`
+        return {
+          spanId,
+          traceId: 'trace-gap-budget',
+          parentSpanId: null,
+          source: 'claude-code',
+          harness: 'claude-code',
+          sessionId,
+          name: 'llm_request',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: at(index),
+          durationMs: 5,
+          status: 'ok',
+          tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 5, reportedInput: 10, reportedOutput: 5 },
+          content: {},
+          parts: [],
+          cost: { basis: 'unknown', status: 'no_rate' },
+        }
+      })
+      const texted = Array.from({ length: 5 }, (_, index) => {
+        const spanId = `gap-budget-text-${index}`
+        return {
+          spanId,
+          traceId: 'trace-gap-budget',
+          parentSpanId: null,
+          source: 'claude-code',
+          harness: 'claude-code',
+          sessionId,
+          name: 'llm_request',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: at(60 + index),
+          durationMs: 5,
+          status: 'ok',
+          tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 5, reportedInput: 10, reportedOutput: 5 },
+          content: {},
+          parts: [{ part: 'conversation_history', text: `BUDGET_TEXT_${'x'.repeat(14_000)}`, role: 'assistant', order: 0 }],
+          cost: { basis: 'unknown', status: 'no_rate' },
+        }
+      })
+      fixture.store.upsertMany([...partless, ...texted] as never[])
+      fixture.store.upsertSession({
+        sessionId,
+        harness: 'claude-code',
+        label: 'Gap budget',
+        isSubagent: false,
+        parentSession: null,
+        agentName: 'test-agent',
+        repo: 'fixture-repo',
+        branch: 'fixture-branch',
+        started: '2026-10-24T11:00:00.000Z',
+        ended: '2026-10-24T11:05:00.000Z',
+        payload: {
+          id: sessionId,
+          session_id: sessionId,
+          harness: 'claude-code',
+          label: 'Gap budget',
+          turns: [...partless, ...texted].map((record, index) => ({ index, spanId: record.spanId })),
+        },
+      })
+
+      const first = (await fixture.bridge.analyticsCapturedContext({
+        mode: 'content',
+        target: { kind: 'session', sessionId },
+        representation: 'captured_parts',
+        byteLimit: 16_384,
+        projectionGeneration: 'projection-1',
+      })) as Record<string, unknown>
+      expect((first as { error?: unknown }).error).toBeUndefined()
+      expect(Buffer.byteLength(JSON.stringify(first), 'utf8')).toBeLessThanOrEqual(60_000)
+    } finally {
+      fixture.close()
+    }
+  })
+
   it('answers cancelled for manifest and content without partial data', async () => {
     const fixture = createContextFixture()
     try {
