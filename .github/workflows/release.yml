@@ -66,6 +66,9 @@ jobs:
   authorize:
     name: Authorize
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Restrict to dpalfery on an allowed ref
         env:
@@ -85,6 +88,36 @@ jobs:
           then
             echo "::error::Run the workflow from main. The release environment rejects any other branch."
             exit 1
+          fi
+
+      # GitHub creates an environment with no protection the first time a job names
+      # one that does not exist, so a deleted or renamed `release-approval` would let
+      # the approve job pass with no human. This runs in a job that names no
+      # environment, so it can stop the run before that happens.
+      - name: Require the release-approval gate to be protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          env_json="$(gh api "repos/${REPO}/environments/release-approval" 2>/dev/null)" || {
+            echo "::error::Environment release-approval does not exist. Create it (required reviewer, main-only) before releasing."
+            exit 1
+          }
+          jq -e '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)' \
+            <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval has no required reviewer, so approve would pass with no approval."
+            exit 1
+          }
+          jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval is not limited to custom deployment branches (main)."
+            exit 1
+          }
+          # build-tray still names `release` for the signing secrets, so a reviewer left
+          # there is a second prompt, not a missing gate.
+          release_json="$(gh api "repos/${REPO}/environments/release")"
+          if jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length > 0' <<<"${release_json}" >/dev/null; then
+            echo "::warning::Environment release still has a required reviewer; build-tray will prompt a second time. Remove it to get one approval."
           fi
 
   version:
