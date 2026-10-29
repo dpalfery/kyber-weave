@@ -277,7 +277,7 @@ function addCostToStream(state: StreamingCostState, block: CostBlock): void {
   const byModel = (block as { byModel?: Record<string, unknown> }).byModel
   if (typeof byModel === 'object' && byModel !== null) {
     for (const [model, amount] of Object.entries(byModel)) {
-      if (typeof amount !== 'number') continue
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) continue
       state.byModel.set(model, (state.byModel.get(model) ?? 0) + amount)
     }
   }
