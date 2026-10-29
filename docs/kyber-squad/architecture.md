@@ -955,9 +955,9 @@ session-title rule and a per-harness feasibility matrix, and that matrix in
 records the decision behind it. On `factory` a title is not agent-settable — it derives from the
 conversation's first message, and no agent-facing mechanism to set one was found.
 On every other target the rule is to set the title to reflect the work only where that target
-exposes a confirmed mechanism, and never to fabricate one. A target whose mechanism is
-unverified is treated as infeasible rather than guessed at, which is why the matrix starts with
-a target that cannot be set too.
+exposes a confirmed mechanism, and never to fabricate one. A target that cannot set a title, or
+whose mechanism is unconfirmed, is treated as infeasible rather than guessed at — which is why
+the matrix opens with a target that cannot be set at all.
 
 ---
 
