@@ -273,7 +273,24 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     throw err
   }
 
+  // Named so `close()` can remove exactly these registrations (F10):
+  // anonymous handlers could never be unregistered, so every in-process
+  // restart leaked listeners toward MaxListenersExceededWarning.
+  let closedService = false
+  const onServiceSigint = (): void => {
+    void close().finally(() => process.exit(0))
+  }
+  const onServiceSigterm = (): void => {
+    void close().finally(() => process.exit(0))
+  }
   const close = async () => {
+    // Idempotent (F10): the signal handlers above and a second caller can
+    // both reach this, and a half-torn-down service must not throw out of
+    // its own close — `canon.close()` on an already-closed handle does.
+    if (closedService) return
+    closedService = true
+    process.removeListener('SIGINT', onServiceSigint)
+    process.removeListener('SIGTERM', onServiceSigterm)
     if (pendingReconcileTimer !== null) {
       clearInterval(pendingReconcileTimer)
       pendingReconcileTimer = null
@@ -298,12 +315,8 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   console.log(chalk.dim('\n  Ready to collect OTel telemetry from all harnesses.'))
   console.log(chalk.dim('  Press Ctrl+C to stop.\n'))
 
-  process.on('SIGINT', () => {
-    void close().finally(() => process.exit(0))
-  })
-  process.on('SIGTERM', () => {
-    void close().finally(() => process.exit(0))
-  })
+  process.on('SIGINT', onServiceSigint)
+  process.on('SIGTERM', onServiceSigterm)
 
   return { receiver, writer, canon, scheduler, close }
 }
