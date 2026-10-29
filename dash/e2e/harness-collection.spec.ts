@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -35,6 +35,45 @@ let app = ''
 let dbPath = ''
 
 test.describe.configure({ mode: 'serial' })
+
+/**
+ * Open one harness from the dashboard root, the app's own client-side route.
+ *
+ * Returns the `/api/kyber/runs` answer as well as navigating: the rows the tests
+ * assert on come from that payload, so a failure names what the server actually
+ * replied instead of only "element not found". The payload is also the isolation
+ * proof — it must carry the fixture run, never whatever the operator's own
+ * `~/.kyberdash/canon.db` happens to hold.
+ */
+async function openHarness(
+  page: Page,
+  harnessId: string,
+): Promise<{ status: number; body: string; runs: unknown[] }> {
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().includes('/api/kyber/runs'),
+    { timeout: 30_000 },
+  )
+  await page.goto(app)
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
+  await page.evaluate((id) => {
+    const stack = [{ level: 'context-doctor' }, { level: 'harness', harnessId: id }]
+    window.history.pushState({ stack }, '', `/harness/${id}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, harnessId)
+  await expect(page.getByTestId('page-harness')).toBeVisible()
+  await expect(page.getByTestId('page-harness')).toContainText(harnessId)
+  const response = await responsePromise
+  const body = await response.text()
+  let runs: unknown[] = []
+  try {
+    const parsed = JSON.parse(body) as { runs?: unknown[] }
+    runs = parsed.runs ?? []
+  } catch {
+    // A non-JSON body (the SPA fallback, an error page) is reported by the caller's
+    // status/body assertion; leaving `runs` empty keeps this helper total.
+  }
+  return { status: response.status(), body, runs }
+}
 
 test.beforeAll(async () => {
   test.setTimeout(180_000)
@@ -114,18 +153,9 @@ test.afterAll(async () => {
 
 test('measured harness renders measured dimensions and no lying zero', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, MEASURED_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(MEASURED_HARNESS)
+  const runs = await openHarness(page, MEASURED_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-measured-run-1')
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
 
@@ -149,18 +179,9 @@ test('measured harness renders measured dimensions and no lying zero', async ({ 
 
 test('honest-empty harness renders a visible session as unmeasurable with reason', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, HONEST_EMPTY_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(HONEST_EMPTY_HARNESS)
+  const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-honest-run-1')
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
 
@@ -178,18 +199,11 @@ test('honest-empty harness renders a visible session as unmeasurable with reason
 
 test('zero-record harness renders honest-empty and is never complete', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto(app)
-  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
-  await page.evaluate((harnessId) => {
-    const stack = [
-      { level: 'context-doctor' },
-      { level: 'harness', harnessId },
-    ]
-    window.history.pushState({ stack }, '', `/harness/${harnessId}`)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, ZERO_RECORD_HARNESS)
-  await expect(page.getByTestId('page-harness')).toBeVisible()
-  await expect(page.getByTestId('page-harness')).toContainText(ZERO_RECORD_HARNESS)
+  const runs = await openHarness(page, ZERO_RECORD_HARNESS)
+  expect(runs.status, runs.body).toBe(200)
+  // A zero-record harness answers with an empty list from the fixture store; a
+  // non-empty one here means the run leaked into another store, or out of it.
+  expect(runs.runs).toEqual([])
   await expect(page.getByTestId('harness-runs-table')).toContainText('No runs recorded')
 
   // Nothing measured, so the completeness predicate cannot be satisfied here.

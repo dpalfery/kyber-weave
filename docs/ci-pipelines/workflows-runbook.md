@@ -197,7 +197,13 @@ enforces the per-harness completeness predicate continuously:
   zero-record harness stays honest-empty and is never claimable as complete.
 - **Scope:** Playwright-only on `ubuntu-latest`. No macOS runner, no funded
   model call, no new secret. The spec boots its own isolated dashboard from a
-  self-seeded temp `canon.db` and never touches the live `4747` host.
+  self-seeded temp `canon.db` and never touches the live `4747` host. The boot
+  keeps its `stateDir` inside that temp root and disables the JobHost
+  maintenance pass: the fixture seeds the derived session and run rows directly,
+  so a first-tick projection would rebuild them from an empty `records` table
+  and serve an empty dashboard. Each test also asserts the runs payload carries
+  the fixture run, which is what proves the served data came from the temp
+  store rather than the operator's own `~/.kyberdash/canon.db`.
 - **Steps:** install dash deps (`npm ci`), `npx playwright install
   --with-deps`, then the conformance spec. The spec runs from the repository
   root with the pinned `dash` Playwright (`npx --prefix dash playwright test
