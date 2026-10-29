@@ -1,8 +1,9 @@
 # Release — self-contained binaries and GitHub Release
 #
 # Kick off from Actions → Release → Run workflow on main. Only dpalfery may
-# start it. Builds run immediately. Publish waits on the `release` environment
-# until David Palfery clicks Review deployments on that same run and approves.
+# start it. The run stops once, at the `approve` job, until David Palfery clicks
+# Review deployments on that run and approves. Every build and publish job
+# runs after that single approval; none of them asks again.
 # Leave "Make production release" unchecked to publish the next RC
 # (0.1.7-rc.9 → 0.1.7-rc.10). Check it to publish the next stable
 # (0.1.7-rc.9 → 0.1.7). scripts/next-release-version.sh picks the number.
@@ -164,9 +165,27 @@ jobs:
           echo "notes_start_tag=${NOTES_START_TAG}" >> "${GITHUB_OUTPUT}"
           echo "Release version=${VERSION} tag=${TAG} create_release=${CREATE_RELEASE} notes_start_tag=${NOTES_START_TAG:-none}"
 
+  # The one human approval for the whole run. It lives on its own environment,
+  # `release-approval` (required reviewer + main-only branch policy), so the
+  # `release` environment, which holds the signing secrets, can have no reviewers
+  # and the later jobs that use it do not prompt again. Do not point any other job
+  # at `release-approval`: each job that names an environment with reviewers is a
+  # separate approval.
+  approve:
+    name: Approve release (David Palfery must approve)
+    needs: version
+    if: needs.version.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    environment: release-approval
+    steps:
+      - name: Approved
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: echo "Release ${VERSION} approved to build and publish."
+
   build:
     name: Publish ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -260,7 +279,7 @@ jobs:
     # docs/plans/2026-09-28-kyberdash-sea-release-integrity.md carries the
     # design; scripts/release-local.sh mirrors these same steps.
     name: Build KyberDash ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -469,7 +488,7 @@ jobs:
 
   pack-squad:
     name: Package Kyber-Squad
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -517,7 +536,7 @@ jobs:
     # closed would publish an unnotarized app, so the presence check below runs
     # first and the assertions after the build check the result independently.
     name: Build tray ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:
@@ -731,7 +750,7 @@ jobs:
     # packages.lock.json files, which under-report .NET because
     # src/KyberWeave.Mcp has no lock file.
     name: Generate SBOM
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -1010,11 +1029,10 @@ jobs:
           sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
 
   release:
-    name: Publish GitHub Release (David Palfery must approve)
+    name: Publish GitHub Release
     needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: write
     steps:
@@ -1312,11 +1330,10 @@ jobs:
           echo "All published archives carry a verified CycloneDX SBOM attestation"
 
   gh-packages:
-    name: Publish GitHub Packages (David Palfery must approve)
+    name: Publish GitHub Packages
     needs: [version, build]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: read
       packages: write
