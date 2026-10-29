@@ -170,4 +170,160 @@ describe('Outbox bounded flush (F5)', () => {
     expect(outbox.status().sent_spans).toBe(5)
     await outbox.close()
   })
+
+  it('sendsEventsEvictedWhileTheirPostWasInFlight', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const bodies: string[] = []
+    let calls = 0
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      calls += 1
+      if (calls === 1) await gate
+      bodies.push(String(init?.body ?? ''))
+      return okResponse()
+    })
+    const outbox = createOutbox({
+      capacity: 1,
+      batchSize: 1,
+      fetchFn,
+      sleepFn: async () => {},
+      requestTimeoutMs: 10_000,
+    })
+    outbox.enqueue(hookEvent('span.start', 'span-a'))
+    for (let i = 0; i < 1_000 && fetchFn.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    // Evicts span-a (dropped_spans 1) while its POST is still held.
+    outbox.enqueue(hookEvent('span.start', 'span-b'))
+    release()
+    await outbox.drain()
+
+    // span-a was dropped and counted; span-b was never removed unsent and is
+    // delivered by the retry — no event vanishes without accounting.
+    expect(outbox.status()).toMatchObject({ queued: 0, dropped_spans: 1, sent_spans: 1 })
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toContain('span-a')
+    expect(bodies[1]).toContain('span-b')
+    await outbox.close()
+  })
+
+  it('parksAtMostOneCloseWaiterAcrossRepeatedFailures', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error('receiver down')
+    })
+    const outbox = createOutbox({
+      capacity: 4,
+      batchSize: 4,
+      fetchFn,
+      sleepFn: async () => {},
+    })
+    for (let i = 0; i < 20; i += 1) {
+      outbox.enqueue(hookEvent('span.start', `span-wait-${i}`))
+    }
+    await outbox.flushSettled()
+    expect(outbox.status().failed_attempts).toBeGreaterThanOrEqual(1)
+    expect(outbox.status().pending_waits).toBeLessThanOrEqual(1)
+
+    let releaseSleep!: () => void
+    const parked = createOutbox({
+      capacity: 2,
+      batchSize: 2,
+      fetchFn,
+      sleepFn: () =>
+        new Promise<void>((resolve) => {
+          releaseSleep = resolve
+        }),
+    })
+    parked.enqueue(hookEvent('span.start', 'span-parked'))
+    for (let i = 0; i < 1_000 && parked.status().pending_waits === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(parked.status().pending_waits).toBe(1)
+
+    const startedAt = Date.now()
+    await parked.close()
+    expect(Date.now() - startedAt).toBeLessThan(2_000)
+    expect(parked.status().pending_waits).toBe(0)
+    // The abandoned sleep resolves without an unobserved rejection.
+    releaseSleep()
+    await outbox.close()
+  })
+
+  it('settlesAcceptedDeliveryWhenBodyCancelNeverResolves', async () => {
+    const fetchFn = vi.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{}'))
+          // Never closes and never settles its cancel: without bounded
+          // disposal the worker would hang on an accepted delivery.
+        },
+        cancel() {
+          return new Promise<void>(() => {})
+        },
+      })
+      return new Response(stream, { status: 200 })
+    })
+    const outbox = createOutbox({ capacity: 2, batchSize: 2, fetchFn, sleepFn: async () => {} })
+    outbox.enqueue(hookEvent('span.start', 'span-hang-cancel'))
+    await outbox.drain()
+    expect(outbox.status().sent_spans).toBe(1)
+    expect(outbox.status().queued).toBe(0)
+    await outbox.close()
+  })
+
+  it('disposesLateResponsesAfterAnAbortedAttempt', async () => {
+    let cancelled = 0
+    let resolveLate!: (response: Response) => void
+    const lateGate = new Promise<Response>((resolve) => {
+      resolveLate = resolve
+    })
+    const fetchFn = vi.fn(async () => lateGate)
+    const outbox = createOutbox({
+      capacity: 2,
+      batchSize: 2,
+      fetchFn,
+      sleepFn: async () => {},
+      requestTimeoutMs: 20,
+    })
+    outbox.enqueue(hookEvent('span.start', 'span-late'))
+    await outbox.flushSettled()
+    expect(outbox.status().failed_attempts).toBeGreaterThanOrEqual(1)
+
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{}'))
+      },
+      cancel() {
+        cancelled += 1
+      },
+    })
+    resolveLate(new Response(stream, { status: 200 }))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(cancelled).toBe(1)
+    await outbox.close()
+  })
+
+  it('accountsSynchronouslyThrowingTransportsAndRecovers', async () => {
+    let calls = 0
+    const fetchFn = vi.fn((_url: string, _init?: RequestInit): Promise<Response> => {
+      calls += 1
+      if (calls <= 2) throw new Error('sync boom')
+      return Promise.resolve(okResponse())
+    })
+    const outbox = createOutbox({ capacity: 4, batchSize: 4, fetchFn, sleepFn: async () => {} })
+    outbox.enqueue(hookEvent('span.start', 'span-sync-throw'))
+    await outbox.flushSettled()
+
+    const mid = outbox.status()
+    expect(mid.failed_attempts).toBeGreaterThanOrEqual(1)
+    expect(mid.lastError).toMatch(/sync boom/)
+
+    await outbox.drain()
+    expect(outbox.status()).toMatchObject({ queued: 0, sent_spans: 1 })
+    await outbox.close()
+  })
 })

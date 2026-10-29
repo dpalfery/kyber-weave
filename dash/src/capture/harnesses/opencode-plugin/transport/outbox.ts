@@ -35,6 +35,8 @@ export type OutboxStatus = {
   sent_spans: number
   /** Lifetime count of failed POST attempts (network or non-2xx). */
   failed_attempts: number
+  /** Backoff waits currently parked on `close()`; at most one — the worker is single-flight. */
+  pending_waits: number
   lastError: string | null
   lastStatusCode: number | null
   endpoint: string
@@ -75,7 +77,7 @@ export type Outbox = {
   flushSettled: () => Promise<void>
   /** Pass until the queue is empty; resolves once the receiver caught up. */
   drain: () => Promise<void>
-  /** Stop scheduling further work; in-flight POSTs are left to settle. */
+  /** Stop scheduling further work; aborts the in-flight POST and settles every waiter. */
   close: () => Promise<void>
 }
 
@@ -84,6 +86,8 @@ const DEFAULT_BATCH_SIZE = 50
 const DEFAULT_BASE_BACKOFF_MS = 250
 const DEFAULT_MAX_BACKOFF_MS = 5000
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
+/** Bound on one response-body teardown: disposal must never wedge the worker. */
+const BODY_DISPOSE_TIMEOUT_MS = 250
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -127,11 +131,13 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   let scheduled = false
   /** Abort handle of the in-flight POST, if any; `close()` fires it. */
   let inflight: AbortController | null = null
-  /** Resolved by `close()` so interruptible sleeps settle promptly. */
-  let closedResolve = (): void => undefined
-  let closedPromise = new Promise<void>((resolve) => {
-    closedResolve = resolve
-  })
+  /**
+   * Cancelable backoff waits (F5 review): each parked `sleepOrClosed` registers
+   * exactly one listener here and removes it on settle, so retries accumulate
+   * no continuations against a lifetime promise. Single-flight work means at
+   * most one entry; `close()` fires and clears them.
+   */
+  const closeWaiters = new Set<() => void>()
 
   /** Exponential backoff with full-range jitter around the nominal delay. */
   const backoffDelayMs = (): number => {
@@ -140,65 +146,102 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     return Math.max(1, Math.floor(jittered))
   }
 
+  /**
+   * Fire-and-forget response-body disposal. Cancel releases the socket; a
+   * cancellation that never settles must not wedge the worker, so the wait
+   * itself is bounded and unobserved. Late arrivals (a POST that resolves
+   * after its attempt already aborted) go through the same path, so no
+   * socket or body leaks while nobody awaits them.
+   */
+  const disposeBody = (response: Response): void => {
+    try {
+      const cancelled = response.body?.cancel()
+      if (cancelled !== undefined) {
+        void Promise.race([
+          cancelled.catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, BODY_DISPOSE_TIMEOUT_MS)),
+        ])
+      }
+    } catch {
+      // Body teardown must never fail a delivery the receiver accepted.
+    }
+  }
+
   const postBatch = async (batch: readonly OutboxEvent[]): Promise<number> => {
     const controller = new AbortController()
     inflight = controller
     const timer = setTimeout(() => {
       controller.abort(new Error(`OTLP POST timed out after ${requestTimeoutMs}ms`))
     }, requestTimeoutMs)
-    // The deadline must settle the attempt even when the transport ignores
-    // the signal: race the POST against the abort instead of merely handing
-    // the signal over. The abandoned POST is guarded so a late rejection
-    // never escapes as an unhandled rejection past the host session.
-    const pending = fetchFn(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(buildOtlpTracesBody(batch)),
-      signal: controller.signal,
-    })
-    void pending.catch(() => undefined)
-    const aborted = new Promise<never>((_, reject) => {
-      if (controller.signal.aborted) {
-        reject(controller.signal.reason ?? new Error('OTLP POST aborted'))
-      } else {
-        controller.signal.addEventListener(
-          'abort',
-          () => reject(controller.signal.reason ?? new Error('OTLP POST aborted')),
-          { once: true },
+    let response: Response | undefined
+    try {
+      // The deadline must settle the attempt even when the transport ignores
+      // the signal: race the POST against the abort instead of merely handing
+      // the signal over. Everything the port touches — body construction, the
+      // fetch call itself — runs inside the guarded region, so a synchronous
+      // throw cleans up the timer and the in-flight handle like any failure.
+      const pending = fetchFn(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(buildOtlpTracesBody(batch)),
+        signal: controller.signal,
+      })
+      const aborted = new Promise<never>((_, reject) => {
+        if (controller.signal.aborted) {
+          reject(controller.signal.reason ?? new Error('OTLP POST aborted'))
+        } else {
+          controller.signal.addEventListener(
+            'abort',
+            () => reject(controller.signal.reason ?? new Error('OTLP POST aborted')),
+            { once: true },
+          )
+        }
+      })
+      void aborted.catch(() => undefined)
+      try {
+        response = await Promise.race([pending, aborted])
+      } catch (error) {
+        // The attempt aborted but the POST may still resolve late: release
+        // its body without blocking this failure. The race already counts
+        // the POST as handled, so this is disposal only.
+        void pending.then(
+          (late) => disposeBody(late),
+          () => undefined,
         )
+        throw error instanceof Error ? error : new Error(String(error))
       }
-    })
-    void aborted.catch(() => undefined)
-    let response: Response
-    try {
-      response = await Promise.race([pending, aborted])
-    } catch (error) {
-      throw error instanceof Error ? error : new Error(String(error))
-    } finally {
-      clearTimeout(timer)
-      if (inflight === controller) inflight = null
-    }
-    try {
       if (!response.ok) {
         throw new OtlpDeliveryError(response.status, response.statusText)
       }
       return response.status
     } finally {
-      // Disposal, not consumption: a faulty transport answering an endless
-      // body must not grow this worker. Cancel releases the socket; a
-      // well-behaved loopback body is already complete, so this is free.
-      try {
-        await response.body?.cancel()
-      } catch {
-        // Body teardown must never fail a delivery the receiver accepted.
-      }
+      clearTimeout(timer)
+      if (inflight === controller) inflight = null
+      // Disposal, not consumption, and never awaited: a faulty transport
+      // answering an endless body — or a cancellation that never settles —
+      // must not hold the worker or `close()` past the deadline.
+      if (response !== undefined) disposeBody(response)
     }
   }
 
-  /** Backoff that also settles when `close()` runs, so shutdown never waits out a delay. */
-  const sleepOrClosed = async (ms: number): Promise<void> => {
-    if (closed) return
-    await Promise.race([sleepFn(ms), closedPromise])
+  /**
+   * Backoff that also settles when `close()` runs, so shutdown never waits out
+   * a delay. One listener per parked wait, removed on settle — no per-retry
+   * continuations accumulate against a lifetime promise.
+   */
+  const sleepOrClosed = (ms: number): Promise<void> => {
+    if (closed) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let settled = false
+      const done = (): void => {
+        if (settled) return
+        settled = true
+        closeWaiters.delete(done)
+        resolve()
+      }
+      closeWaiters.add(done)
+      sleepFn(ms).then(done, done)
+    })
   }
 
   /**
@@ -218,6 +261,12 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
    * records the accounting, sleeps the backoff once, and reports the
    * outcome — the queue itself never exceeds `capacity`, and in-flight
    * events stay visible in `queued` until they are accepted.
+   *
+   * Removal is by queue ownership identity (F5 review): an event evicted
+   * oldest-first while its POST was still in flight is already counted in
+   * `dropped_spans` and is gone, so only batch members still present are
+   * removed — and only those count as sent. A count-based splice would
+   * delete a never-sent replacement without counting it anywhere.
    */
   const attemptBatch = async (): Promise<'sent' | 'failed' | 'empty'> => {
     if (queue.length === 0 || closed) return 'empty'
@@ -237,8 +286,15 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       await sleepOrClosed(backoffDelayMs())
       return 'failed'
     }
-    queue.splice(0, batch.length)
-    sentSpans += batch.length
+    const inBatch = new Set<OutboxEvent>(batch)
+    let sent = 0
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      if (inBatch.has(queue[index]!)) {
+        queue.splice(index, 1)
+        sent += 1
+      }
+    }
+    sentSpans += sent
     consecutiveFailures = 0
     lastStatusCode = acceptedStatus
     // A recovered receiver takes full batches again.
@@ -250,27 +306,34 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
    * The one worker loop. It runs while there is flagged work; a background
    * trigger stops after the first failed attempt (the backoff already slept,
    * and the next `enqueue` or `drain` continues), while a `drain()` retries
-   * through failures. The loop never rejects: failures are recorded and kept
-   * in the queue.
+   * through failures. Unexpected failures are accounted, never swallowed: a
+   * last-resort catch records them like any failed attempt instead of
+   * hiding a new failure mode.
    */
   const workerLoop = async (): Promise<void> => {
-    for (;;) {
-      if (closed) return
-      wake = false
-      const keepGoing = draining
+    try {
       for (;;) {
-        if (closed || queue.length === 0) break
-        const outcome = await attemptBatch()
-        if (outcome === 'sent') continue
-        if (outcome === 'empty') break
-        if (!keepGoing) return
-        // Drain retries through failures: yield between attempts so a hot
-        // failure cannot starve the event loop (see `yieldEventLoop`).
-        await yieldEventLoop()
+        if (closed) return
+        wake = false
+        const keepGoing = draining
+        for (;;) {
+          if (closed || queue.length === 0) break
+          const outcome = await attemptBatch()
+          if (outcome === 'sent') continue
+          if (outcome === 'empty') break
+          if (!keepGoing) return
+          // Drain retries through failures: yield between attempts so a hot
+          // failure cannot starve the event loop (see `yieldEventLoop`).
+          await yieldEventLoop()
+        }
+        if (closed) return
+        if (draining && queue.length === 0) draining = false
+        if (!wake && !(draining && queue.length > 0)) return
       }
-      if (closed) return
-      if (draining && queue.length === 0) draining = false
-      if (!wake && !(draining && queue.length > 0)) return
+    } catch (error) {
+      failedAttempts += 1
+      consecutiveFailures += 1
+      lastError = messageOf(error)
     }
   }
 
@@ -283,7 +346,12 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     void Promise.resolve().then(() => {
       scheduled = false
       if (closed || active !== null) return
-      const running = workerLoop().catch(() => undefined)
+      // `workerLoop` accounts its own unexpected failures; this outer catch
+      // is unreachable by construction, and still accounts rather than hides.
+      const running = workerLoop().catch((error: unknown) => {
+        failedAttempts += 1
+        lastError = messageOf(error)
+      })
       active = running
       void running.finally(() => {
         if (active === running) active = null
@@ -368,7 +436,10 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   const close = async (): Promise<void> => {
     if (!closed) {
       closed = true
-      closedResolve()
+      // Settle every parked backoff wait, then forget them: no per-retry
+      // continuation survives shutdown.
+      for (const done of [...closeWaiters]) done()
+      closeWaiters.clear()
     }
     wake = false
     draining = false
@@ -384,6 +455,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     dropped_spans: droppedSpans,
     sent_spans: sentSpans,
     failed_attempts: failedAttempts,
+    pending_waits: closeWaiters.size,
     lastError,
     lastStatusCode,
     endpoint,
