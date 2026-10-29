@@ -27,10 +27,10 @@ using YamlDotNet.Core;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// The <c>review.task-gates</c> section decides what a developer agent runs against its own
-/// working tree before a reviewer sees the change. A malformed gate is refused where the operator
-/// writes it, because a gate that only fails when it runs would surface as a mystery in the middle
-/// of someone else's task.
+///     The <c>review.task-gates</c> section decides what a developer agent runs against its own
+///     working tree before a reviewer sees the change. A malformed gate is refused where the operator
+///     writes it, because a gate that only fails when it runs would surface as a mystery in the middle
+///     of someone else's task.
 /// </summary>
 public sealed class ReviewTaskGatesConfigTests
 {
@@ -46,8 +46,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Builds a document with a single gate under <paramref name="agent"/>. The first field is the
-    /// gate's leading key (<c>id: ...</c>); each further field is a sibling key of the same gate.
+    ///     Builds a document with a single gate under <paramref name="agent" />. The first field is the
+    ///     gate's leading key (<c>id: ...</c>); each further field is a sibling key of the same gate.
     /// </summary>
     private static string OneGate(string agent, params string[] fields)
     {
@@ -55,8 +55,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Builds a valid gate whose <paramref name="field"/> (<c>run</c> or <c>fix</c>) carries the
-    /// given argv, with the other argv field kept valid so only the tested field can be at fault.
+    ///     Builds a valid gate whose <paramref name="field" /> (<c>run</c> or <c>fix</c>) carries the
+    ///     given argv, with the other argv field kept valid so only the tested field can be at fault.
     /// </summary>
     private static string GateWithArgv(string field, string argv)
     {
@@ -66,18 +66,16 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Asserts the load is refused and that the rejection names each fragment. Naming the offender
-    /// is what lets an operator find the line to fix without reading the whole file again.
+    ///     Asserts the load is refused and that the rejection names each fragment. Naming the offender
+    ///     is what lets an operator find the line to fix without reading the whole file again.
     /// </summary>
     private static void AssertRejected(string yaml, params string[] mustName)
     {
         YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
         foreach (string fragment in mustName)
-        {
             Assert.True(
                 ex.Message.Contains(fragment, StringComparison.Ordinal),
                 $"Expected the rejection to name '{fragment}', but it said: {ex.Message}");
-        }
     }
 
     [Fact]
@@ -111,8 +109,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// A gate that omits <c>blocking</c> and <c>timeout</c> must still block and must still be
-    /// bounded; silently defaulting either to something else would change what a failing gate means.
+    ///     A gate that omits <c>blocking</c> and <c>timeout</c> must still block and must still be
+    ///     bounded; silently defaulting either to something else would change what a failing gate means.
     /// </summary>
     [Fact]
     public void AGateOmittingBlockingAndTimeoutBlocksWithAFifteenMinuteLimit()
@@ -166,8 +164,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The anchor exists so one gate definition can be shared; the alias must resolve to the same
-    /// argv, not to an empty or partially read gate.
+    ///     The anchor exists so one gate definition can be shared; the alias must resolve to the same
+    ///     argv, not to an empty or partially read gate.
     /// </summary>
     [Fact]
     public void AnAnchoredGateAliasedByAnotherAgentResolvesToTheSameGate()
@@ -194,9 +192,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Gate ids are only required to be unique within an agent, because each agent's gates are
-    /// reported as that agent's list. Refusing the same id under two agents would forbid the most
-    /// natural shared shape.
+    ///     Gate ids are only required to be unique within an agent, because each agent's gates are
+    ///     reported as that agent's list. Refusing the same id under two agents would forbid the most
+    ///     natural shared shape.
     /// </summary>
     [Fact]
     public void TheSameGateIdUnderTwoDifferentAgentsIsAccepted()
@@ -281,9 +279,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// <c>{changed}</c> is substituted with the changed file list only when it is a whole argument.
-    /// Embedded in a larger argument, the substitution would splice paths into a string the runner
-    /// cannot reason about, so it is refused in both <c>run</c> and <c>fix</c>.
+    ///     <c>{changed}</c> is substituted with the changed file list only when it is a whole argument.
+    ///     Embedded in a larger argument, the substitution would splice paths into a string the runner
+    ///     cannot reason about, so it is refused in both <c>run</c> and <c>fix</c>.
     /// </summary>
     [Theory]
     [InlineData("run")]
@@ -316,8 +314,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The program name is never expanded. A token there would let a changed file or a task slug choose
-    /// what executes, so <c>run</c> and <c>fix</c> must name a literal program and take tokens only as arguments.
+    ///     The program name is never expanded. A token there would let a changed file or a task slug choose
+    ///     what executes, so <c>run</c> and <c>fix</c> must name a literal program and take tokens only as arguments.
     /// </summary>
     [Theory]
     [InlineData("run", "\"{task}\", \"x\"")]
@@ -354,9 +352,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The checked-in configuration is what this repository's own developer agents run. Declaring
-    /// the gates there is the point of the section, so the set is pinned: a missing agent is a
-    /// silent gap, and an extra one is a gate nobody reviewed for that role.
+    ///     The checked-in configuration is what this repository's own developer agents run. Declaring
+    ///     the gates there is the point of the section, so the set is pinned: a missing agent is a
+    ///     silent gap, and an extra one is a gate nobody reviewed for that role.
     /// </summary>
     [Fact]
     public void RepositoryConfigDeclaresDeveloperTaskGates()
@@ -385,9 +383,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// Python developers and the non-developer roles do not run a fix-and-verify gate against their
-    /// own change, so declaring one for them would make the task gate run where it was never
-    /// reviewed.
+    ///     Python developers and the non-developer roles do not run a fix-and-verify gate against their
+    ///     own change, so declaring one for them would make the task gate run where it was never
+    ///     reviewed.
     /// </summary>
     [Fact]
     public void RepositoryConfigDeclaresNoTaskGatesForPythonOrNonDeveloperAgents()
@@ -408,9 +406,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The Go developer runs no task gate of its own; python-dev is pinned in the test above. A Go
-    /// gate added without its own review would run the dash or tray suites on a change that never
-    /// touched them.
+    ///     The Go developer runs no task gate of its own; python-dev is pinned in the test above. A Go
+    ///     gate added without its own review would run the dash or tray suites on a change that never
+    ///     touched them.
     /// </summary>
     [Fact]
     public void GoDeveloperDeclaresNoTaskGates()
@@ -426,9 +424,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// TypeScript and Rust developers reuse the same gates their react-dev and tauri-dev siblings
-    /// run. A copy that drifted (a different include list or command) would let the two roles
-    /// check different things against the same dash and tray code.
+    ///     TypeScript and Rust developers reuse the same gates their react-dev and tauri-dev siblings
+    ///     run. A copy that drifted (a different include list or command) would let the two roles
+    ///     check different things against the same dash and tray code.
     /// </summary>
     [Fact]
     public void TypeScriptAndRustDevelopersReuseTheSharedDashAndTrayGates()
@@ -471,9 +469,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The test developer changes the tray's Rust tests as well as the .NET and dash ones, so it
-    /// runs the tray's format and lint gates alongside its existing set. Without them a Rust
-    /// formatting or clippy failure in a test-only change reaches the reviewer unchecked.
+    ///     The test developer changes the tray's Rust tests as well as the .NET and dash ones, so it
+    ///     runs the tray's format and lint gates alongside its existing set. Without them a Rust
+    ///     formatting or clippy failure in a test-only change reaches the reviewer unchecked.
     /// </summary>
     [Fact]
     public void TestDevRunsTheTrayRustFormatAndLintGates()
@@ -496,9 +494,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The review council runs the tray's Rust suite the same way CI does: format check, clippy
-    /// with warnings denied, then tests, all after the TypeScript gates and all blocking. Clippy
-    /// and tests carry a 1800-second limit, so a slow Cargo build is not cut off at the default.
+    ///     The review council runs the tray's Rust suite the same way CI does: format check, clippy
+    ///     with warnings denied, then tests, all after the TypeScript gates and all blocking. Clippy
+    ///     and tests carry a 1800-second limit, so a slow Cargo build is not cut off at the default.
     /// </summary>
     [Fact]
     public void ReviewGatesRunTheTrayRustSuiteThatCiRuns()
@@ -540,10 +538,10 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// A change to the solution file, a NuGet.config, or an .editorconfig changes what the build
-    /// compiles and how the analyzers read it, so the build gate must run for it. The format gates
-    /// must not match those files: <c>dotnet format</c> given a solution in <c>--include</c> checks
-    /// nothing and exits 0, so a format gate that matched the solution would pass without checking.
+    ///     A change to the solution file, a NuGet.config, or an .editorconfig changes what the build
+    ///     compiles and how the analyzers read it, so the build gate must run for it. The format gates
+    ///     must not match those files: <c>dotnet format</c> given a solution in <c>--include</c> checks
+    ///     nothing and exits 0, so a format gate that matched the solution would pass without checking.
     /// </summary>
     [Fact]
     public void SolutionAndBuildConfigChangesRunTheBuildGateButNotTheFormatGates()
@@ -560,27 +558,23 @@ public sealed class ReviewTaskGatesConfigTests
 
         ReviewTaskGate build = Assert.Single(gates, gate => gate.Id == "dotnet-build");
         foreach (string path in buildInputs)
-        {
             Assert.True(
                 build.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
                 $"dotnet-build should run for a change to '{path}'.");
-        }
 
         foreach (ReviewTaskGate format in gates.Where(gate => gate.Id.StartsWith("format-", StringComparison.Ordinal)))
-        {
             Assert.DoesNotContain(
                 buildInputs,
                 path => format.Include.Any(pattern => PathGlob.IsMatch(pattern, path)));
-        }
     }
 
     /// <summary>
-    /// T5 RED (issue #386 item E): concurrent workers share nothing when no MSBuild node is
-    /// reused and no Roslyn server is shared across them. Every <c>dotnet-build</c> task gate
-    /// therefore carries <c>-nr:false -p:UseSharedCompilation=false</c>. Only the build gates
-    /// are pinned: the format gates do not compile, so node reuse and shared compilation do not
-    /// apply to them. The repository gates below name neither flag yet, so this fails until T5
-    /// GREEN adds both flags to the task-gate build argv.
+    ///     T5 RED (issue #386 item E): concurrent workers share nothing when no MSBuild node is
+    ///     reused and no Roslyn server is shared across them. Every <c>dotnet-build</c> task gate
+    ///     therefore carries <c>-nr:false -p:UseSharedCompilation=false</c>. Only the build gates
+    ///     are pinned: the format gates do not compile, so node reuse and shared compilation do not
+    ///     apply to them. The repository gates below name neither flag yet, so this fails until T5
+    ///     GREEN adds both flags to the task-gate build argv.
     /// </summary>
     [Fact]
     public void DotnetBuildTaskGatesCarryNoNodeReuseAndNoSharedCompilation()
@@ -590,7 +584,6 @@ public sealed class ReviewTaskGatesConfigTests
         List<string> offenders = [];
         int total = 0;
         foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
-        {
             foreach (ReviewTaskGate gate in entry.Value)
             {
                 if (gate.Id != "dotnet-build")
@@ -600,7 +593,6 @@ public sealed class ReviewTaskGatesConfigTests
                 if (!HasFlag(gate.Run, "nr:false") || !HasFlag(gate.Run, "p:UseSharedCompilation=false"))
                     offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
             }
-        }
 
         Assert.True(total > 0, "Expected at least one dotnet-build task gate in the repository config.");
         Assert.True(offenders.Count == 0,
@@ -609,8 +601,8 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The review <c>build</c> gate compiles the same solution the task gates compile, so it
-    /// carries the same two flags. The checked-in gate below names neither yet.
+    ///     The review <c>build</c> gate compiles the same solution the task gates compile, so it
+    ///     carries the same two flags. The checked-in gate below names neither yet.
     /// </summary>
     [Fact]
     public void ReviewBuildGateCarriesNoNodeReuseAndNoSharedCompilation()
@@ -621,16 +613,17 @@ public sealed class ReviewTaskGatesConfigTests
         ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
 
         Assert.True(HasFlag(build.Run, "nr:false"), "Review build gate lacks -nr:false (or /nr:false).");
-        Assert.True(HasFlag(build.Run, "p:UseSharedCompilation=false"), "Review build gate lacks -p:UseSharedCompilation=false.");
+        Assert.True(HasFlag(build.Run, "p:UseSharedCompilation=false"),
+            "Review build gate lacks -p:UseSharedCompilation=false.");
     }
 
     /// <summary>
-    /// T5 RED (issue #386 item E): every task gate that runs <c>dotnet</c> isolates its build
-    /// output under a per-task path, so two agents building at once never share one
-    /// <c>obj/</c> tree. A gate qualifies with <c>--artifacts-path</c> naming <c>{task}</c>, or
-    /// with <c>-p:BaseOutputPath=</c> / <c>-p:BaseIntermediateOutputPath=</c> naming
-    /// <c>{task}</c> where the command takes no <c>--artifacts-path</c>. The format gates below
-    /// name neither yet, so this fails until T5 GREEN isolates them.
+    ///     T5 RED (issue #386 item E): every task gate that runs <c>dotnet</c> isolates its build
+    ///     output under a per-task path, so two agents building at once never share one
+    ///     <c>obj/</c> tree. A gate qualifies with <c>--artifacts-path</c> naming <c>{task}</c>, or
+    ///     with <c>-p:BaseOutputPath=</c> / <c>-p:BaseIntermediateOutputPath=</c> naming
+    ///     <c>{task}</c> where the command takes no <c>--artifacts-path</c>. The format gates below
+    ///     name neither yet, so this fails until T5 GREEN isolates them.
     /// </summary>
     [Fact]
     public void EveryDotnetTaskGateUsesAPerTaskArtifactsPath()
@@ -640,7 +633,6 @@ public sealed class ReviewTaskGatesConfigTests
         List<string> offenders = [];
         int total = 0;
         foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
-        {
             foreach (ReviewTaskGate gate in entry.Value)
             {
                 if (gate.Run.Count == 0 || !IsDotnetCommand(gate.Run[0]))
@@ -650,7 +642,6 @@ public sealed class ReviewTaskGatesConfigTests
                 if (!HasPerTaskIsolation(gate))
                     offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
             }
-        }
 
         Assert.True(total > 0, "Expected at least one dotnet task gate in the repository config.");
         Assert.True(
@@ -661,9 +652,9 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    /// The build gate already isolates: it writes under the task scratchpad with the
-    /// <c>{task}</c> token the runner expands per task. This pins that contract so the flag
-    /// work above cannot regress it.
+    ///     The build gate already isolates: it writes under the task scratchpad with the
+    ///     <c>{task}</c> token the runner expands per task. This pins that contract so the flag
+    ///     work above cannot regress it.
     /// </summary>
     [Fact]
     public void DotnetBuildTaskGatesIsolateUnderTheTaskScratchpad()
@@ -672,7 +663,6 @@ public sealed class ReviewTaskGatesConfigTests
 
         List<string> offenders = [];
         foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> entry in taskGates)
-        {
             foreach (ReviewTaskGate gate in entry.Value)
             {
                 if (gate.Id != "dotnet-build")
@@ -680,13 +670,11 @@ public sealed class ReviewTaskGatesConfigTests
 
                 int artifacts = -1;
                 for (int i = 0; i < gate.Run.Count; i++)
-                {
                     if (gate.Run[i] == "--artifacts-path")
                     {
                         artifacts = i;
                         break;
                     }
-                }
 
                 bool isolated = artifacts >= 0 &&
                                 artifacts + 1 < gate.Run.Count &&
@@ -696,24 +684,157 @@ public sealed class ReviewTaskGatesConfigTests
                 if (!isolated)
                     offenders.Add($"{entry.Key}/{gate.Id}: [{string.Join(", ", gate.Run)}]");
             }
-        }
 
         Assert.True(offenders.Count == 0,
             "dotnet-build task gates must keep --artifacts-path under .agent_scratchpad/{task}:\n" +
             string.Join("\n", offenders));
     }
 
+    /// <summary>
+    ///     Every council gate in the repository configuration must declare non-empty include globs,
+    ///     ensuring each gate is scoped to the changes that actually affect it.
+    /// </summary>
+    [Fact]
+    public void RepositoryReviewGatesDeclareIncludeGlobs()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+
+        Assert.Equal(27, gates.Count);
+        List<string> missing = [];
+        foreach (ReviewGate gate in gates)
+            if (gate.Include.Count == 0)
+                missing.Add(gate.Id);
+
+        Assert.True(
+            missing.Count == 0,
+            $"Expected all 27 review gates to declare non-empty include globs, but these {missing.Count} did not: {string.Join(", ", missing)}");
+    }
+
+    /// <summary>
+    ///     The .NET build and test council gates must run for changes to embedded products, review guidance,
+    ///     repository config, skills, and fast-loop script, but must not run for dash or general docs.
+    /// </summary>
+    [Fact]
+    public void NetTestPathsIncludeProductsAndReviewGuidance()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        ReviewGate buildGate = Assert.Single(gates, gate => gate.Id == "build");
+        ReviewGate testGate = Assert.Single(gates, gate => gate.Id == "test");
+
+        string[] shouldMatch =
+        [
+            "src/KyberWeave.Cli/Program.cs",
+            "KyberWeave.sln",
+            "products/kyber-squad/agents/conductor.md",
+            "REVIEW.md",
+            ".kyber-weave/kyber-weave.yml",
+            "apm.yml",
+            ".apm/skills/kyber-docs-authoring/SKILL.md",
+            "scripts/fast-loop.sh"
+        ];
+
+        string[] shouldNotMatch =
+        [
+            "dash/src/index.ts",
+            "docs/README.md"
+        ];
+
+        foreach (ReviewGate gate in new[] { buildGate, testGate })
+        {
+            foreach (string path in shouldMatch)
+                Assert.True(
+                    gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
+                    $"Gate '{gate.Id}' include should match '{path}'.");
+
+            foreach (string path in shouldNotMatch)
+                Assert.False(
+                    gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
+                    $"Gate '{gate.Id}' include should NOT match '{path}'.");
+        }
+    }
+
+    /// <summary>
+    ///     The .NET source-only gates (format-whitespace, format-style, inspectcode, duplicates) must match C#
+    ///     and solution files, but must not match embedded markdown products, review guidance, general docs, or dash.
+    /// </summary>
+    [Fact]
+    public void NetSourcePathsExcludeProductsAndDocs()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        string[] gateIds = ["format-whitespace", "format-style", "inspectcode", "duplicates"];
+
+        string[] shouldMatch =
+        [
+            "src/KyberWeave.Cli/Program.cs",
+            "KyberWeave.sln"
+        ];
+
+        string[] shouldNotMatch =
+        [
+            "products/kyber-squad/agents/conductor.md",
+            "REVIEW.md",
+            "docs/README.md",
+            "dash/src/index.ts"
+        ];
+
+        foreach (string id in gateIds)
+        {
+            ReviewGate gate = Assert.Single(gates, g => g.Id == id);
+
+            foreach (string path in shouldMatch)
+                Assert.True(
+                    gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
+                    $"Gate '{gate.Id}' include should match '{path}'.");
+
+            foreach (string path in shouldNotMatch)
+                Assert.False(
+                    gate.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
+                    $"Gate '{gate.Id}' include should NOT match '{path}'.");
+        }
+    }
+
+    /// <summary>
+    ///     The inspectcode review gate must pin --caches-home=artifacts/inspectcode-cache so analysis caches
+    ///     are kept within the task/run artifacts directory and reused across runs.
+    /// </summary>
+    [Fact]
+    public void InspectCodeGateCarriesCachesHome()
+    {
+        IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
+        ReviewGate inspectCode = Assert.Single(gates, gate => gate.Id == "inspectcode");
+
+        Assert.Contains(
+            "--caches-home=artifacts/inspectcode-cache",
+            inspectCode.Run);
+    }
+
+    /// <summary>
+    ///     Format analyzers is redundant with inspectcode and Roslyn build analyzers, so no developer agent
+    ///     in review.task-gates may declare a format-analyzers gate.
+    /// </summary>
+    [Fact]
+    public void TaskGatesDoNotContainRedundantFormatAnalyzers()
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+
+        List<string> offenders = [];
+        foreach (KeyValuePair<string, IReadOnlyList<ReviewTaskGate>> agentGates in taskGates)
+            foreach (ReviewTaskGate gate in agentGates.Value)
+                if (gate.Id == "format-analyzers")
+                    offenders.Add(agentGates.Key);
+
+        Assert.True(
+            offenders.Count == 0,
+            $"Expected no agent in review.task-gates to declare 'format-analyzers', but these agents did: {string.Join(", ", offenders)}");
+    }
+
     private static bool HasFlag(IReadOnlyList<string> run, string flag)
     {
         foreach (string element in run)
-        {
             if (element.Length > 1 &&
                 (element[0] == '-' || element[0] == '/') &&
                 element[1..].Equals(flag, StringComparison.OrdinalIgnoreCase))
-            {
                 return true;
-            }
-        }
 
         return false;
     }
@@ -737,16 +858,12 @@ public sealed class ReviewTaskGatesConfigTests
             if (element == "--artifacts-path" &&
                 i + 1 < gate.Run.Count &&
                 gate.Run[i + 1].Contains("{task}", StringComparison.Ordinal))
-            {
                 return true;
-            }
 
             if ((element.StartsWith("-p:BaseOutputPath=", StringComparison.Ordinal) ||
                  element.StartsWith("-p:BaseIntermediateOutputPath=", StringComparison.Ordinal)) &&
                 element.Contains("{task}", StringComparison.Ordinal))
-            {
                 return true;
-            }
         }
 
         return false;

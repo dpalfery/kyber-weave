@@ -5,10 +5,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <see cref="CouncilGateSelection.Plan"/> decides which repository-wide council gates run for one
-/// change. A gate whose <c>include</c> matches no changed file is skipped rather than reported as
-/// passed; a gate for another platform is skipped; and an unknown changed set never skips a gate
-/// for <c>include</c>, because a gate skipped on a guess would hide the evidence it exists to give.
+///     <see cref="CouncilGateSelection.Plan" /> decides which repository-wide council gates run for one
+///     change. A gate whose <c>include</c> matches no changed file is skipped rather than reported as
+///     passed; a gate for another platform is skipped; and an unknown changed set never skips a gate
+///     for <c>include</c>, because a gate skipped on a guess would hide the evidence it exists to give.
 /// </summary>
 public sealed class CouncilGateSelectionTests
 {
@@ -74,9 +74,9 @@ public sealed class CouncilGateSelectionTests
     }
 
     /// <summary>
-    /// When git cannot list the changed files the caller passes <c>null</c>. Every gate must still run
-    /// for its platform, including a gate whose <c>include</c> would match nothing: a guess that skips
-    /// evidence is the failure this rule exists to prevent.
+    ///     When git cannot list the changed files the caller passes <c>null</c>. Every gate must still run
+    ///     for its platform, including a gate whose <c>include</c> would match nothing: a guess that skips
+    ///     evidence is the failure this rule exists to prevent.
     /// </summary>
     [Fact]
     public void AnUnknownChangedSetSkipsNothingForIncludeButStillSkipsOnPlatform()
@@ -101,5 +101,26 @@ public sealed class CouncilGateSelectionTests
 
         Assert.Equal("web-lint", Assert.Single(plan.Run).Id);
         Assert.Empty(plan.Skipped);
+    }
+
+    /// <summary>
+    ///     When the <c>--all</c> flag is specified, the caller passes <c>null</c> for changed files.
+    ///     Every gate on the host OS must run unscoped even if its <c>include</c> would not otherwise
+    ///     match, while gates for other operating systems remain skipped.
+    /// </summary>
+    [Fact]
+    public void WhenChangedFilesNull_PlanRunsAllGatesUnscoped()
+    {
+        ReviewGate dotNetGate = new("build", ["dotnet", "build"]) { Include = ["**/*.cs"] };
+        ReviewGate webGate = new("web-lint", ["npx", "eslint"]) { Include = ["**/*.ts"] };
+        ReviewGate windowsOnlyGate = new("windows-only", ["dotnet", "build"], Os: "windows");
+
+        // changed: null represents unscoped planning (CLI --all flag wiring is tested end-to-end in ReviewGatesCouncilCommandTests.ReviewGates_WithAllFlag_RunsAllGatesEvenWhenDiffMatchesSubset)
+        CouncilGatePlan plan = CouncilGateSelection.Plan([dotNetGate, webGate, windowsOnlyGate], null, "unix");
+
+        Assert.Equal(["build", "web-lint"], plan.Run.Select(gate => gate.Id).ToArray());
+        SkippedTaskGate skipped = Assert.Single(plan.Skipped);
+        Assert.Equal("windows-only", skipped.Id);
+        Assert.Contains("runs only on windows", skipped.Reason, StringComparison.Ordinal);
     }
 }

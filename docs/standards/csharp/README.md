@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-10-29
 ---
 
 # C# coding standard
@@ -23,12 +23,19 @@ repository has made and would otherwise have to re-argue in review.
 warning fails the build, which means the analyzers — not a reviewer — are what catch the
 mechanical problems.
 
-Two consequences worth stating:
+Consequences worth stating:
 
 - **Fix the cause, not the symptom.** Adding an id to `NoWarn` in `Directory.Build.props` is
   a decision about the whole repository, and it needs a reason you can state in the file.
 - **NuGet audit failures at high or critical severity fail the build.** Low and moderate stay
   warnings so advisory noise does not block unrelated work.
+- **Analyzers run during build, not in a separate task gate.** Because `dotnet build`
+  runs all Roslyn analyzers with `TreatWarningsAsErrors=true` under `AnalysisMode=all`,
+  developer task-gates (`review.task-gates`) omit `dotnet format analyzers`, saving ~24s
+  per task with zero loss of analyzer coverage.
+- **Persistent InspectCode AST caching.** Whole-solution ReSharper InspectCode
+  (`inspectcode`) runs with `--caches-home=artifacts/inspectcode-cache` to persist AST
+  caches across runs, cutting warm inspection duration by ~35% wall-clock and ~68% CPU.
 
 ## Style the analyzers already enforce
 

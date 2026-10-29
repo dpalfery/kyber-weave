@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-29
 ---
 
 # CLI command surface
@@ -280,7 +280,7 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 
 | Verb | Flags (beyond `[path]`) | What it does |
 |---|---|---|
-| [`review gates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates`; with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
+| [`review gates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>`, `--stop-on-failure`, `--all`, `--agent <NAME>`, `--paths <PATH>` (repeatable), `--base <REF>`, `--task <SLUG>`, `--fix` | Run the deterministic gates declared under `review.gates` (with `--all`, run all declared gates unscoped); with `--agent`, run that developer agent's `review.task-gates` against its change instead. |
 | `review catalogue` | `[PATH]`, `--technology <SLUG>` (repeatable) | Print the catalogue `review:` block for the declared (or named) technologies to stdout, without writing any file. Exit `0` on success (including `no gates shipped for <tech>`), `1` on a configuration failure, `2` for an unknown `--technology`. |
 | [`review duplicates`](code-review/README.md#three-commands) | `-f\|--format`, `--no-info`, `-c\|--config`, `-o\|--out <PATH>` | Find duplicated symbol bodies from the CodeGraph index. |
 | [`review verdict`](code-review/architecture.md#how-the-verdict-is-computed) | `-f\|--format`, `--no-info`, `-c\|--config`, `--findings <PATH>`, `--gates <PATH>` | Compute approve / request-changes / needs-human from findings and gates. |
@@ -289,6 +289,9 @@ verdict engine under [Review council architecture](code-review/architecture.md#h
 declared for that agent under `review.task-gates` and runs them against the files that agent
 changed, instead of running the repository-wide `review.gates`:
 
+- `--all` runs all declared repository gates for the current OS unconditionally without
+  include path filtering. Combining `--all` with `--agent`, `--base`, or `--paths` is a
+  client-input error (exit `2`, `KW-REVIEW-028`).
 - `--paths <PATH>` names a changed file, relative to the repository root, and repeats for
   several. Without `--agent` the paths are the council gates' changed set; with `--agent`
   they are the agent's changed files. Without it the changed set is the diff against
@@ -388,7 +391,7 @@ risk. The three rules below mirror the contract in
 | `docs integrity-check` | a finding at or above `--fail-on` (default `none` gates nothing) |
 | `review verdict` | `0` approve, `1` request-changes, `2` needs-human |
 | `review gates`, `review duplicates` | `1` on report errors, else `0` |
-| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts |
+| `review gates` | `--base` and `--paths` are accepted without `--agent`; an unsafe value refuses the run (`KW-REVIEW-028`, exit `1`) before any gate starts. `--all` runs all declared gates unscoped; combining `--all` with `--agent`, `--base`, or `--paths` is a client-input error (`KW-REVIEW-028`, exit `2`). |
 | `review gates --agent` | `1` on a blocking gate failure or a refused changed set, task slug or token (`KW-REVIEW-028`); `2` for `--task` or `--fix` without `--agent`; else `0` |
 | `review catalogue` | `0` on success, `1` on a configuration failure, `2` for an unknown `--technology` |
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
