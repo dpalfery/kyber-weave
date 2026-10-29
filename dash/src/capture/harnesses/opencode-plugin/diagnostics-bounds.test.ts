@@ -161,7 +161,9 @@ describe('Opencode plugin diagnostics are bounded (F2)', () => {
     expect(plugin.failures).toHaveLength(1)
     const failure = plugin.failures[0]
     expect(failure).toMatchObject({ kind: 'turn.start', sessionId: 'session-f2-errshape' })
-    expect(failure?.error).toEqual({ name: 'Error', message: 'receiver down' })
+    expect(failure?.error).toMatchObject({ name: 'Error', message: 'receiver down' })
+    // The message still stringifies, preserving the long-standing shape.
+    expect(String(failure?.error)).toBe('receiver down')
     // No buffer, cause, or custom field survives on the retained record.
     expect(JSON.stringify(plugin.failures).length).toBeLessThan(1_000)
   })
@@ -199,5 +201,80 @@ describe('Opencode plugin diagnostics are bounded (F2)', () => {
     expect(installed.outbox.status().queued).toBe(0)
     expect(bodies.length).toBeGreaterThan(0)
     expect(bodies.join('')).toContain(PROMPT)
+  })
+
+  it('deductsOnlyReleasedBytesOnRepeatedSessionEnds', async () => {
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      diagnostics: { eventLimit: 1_000, maxEventBytes: 3_000 },
+    })
+    const prompt = 'q'.repeat(500)
+    await plugin.hooks['session.start']({ sessionId: 'a' })
+    await plugin.context({ sessionId: 'a', systemPrompt: prompt })
+    // Ending one session must not undercount the ledger: the surviving
+    // identity still retains bytes, a repeated end deducts nothing further,
+    // and later input must still evict once the bound is truly exceeded.
+    await plugin.hooks['session.end']({ sessionId: 'a' })
+    await plugin.hooks['session.end']({ sessionId: 'a' })
+    await plugin.context({ sessionId: 'b', systemPrompt: prompt })
+    await plugin.context({ sessionId: 'b', systemPrompt: prompt })
+    await plugin.context({ sessionId: 'b', systemPrompt: prompt })
+
+    const estimated = plugin.events.reduce(
+      (sum, event) =>
+        sum +
+        128 +
+        (event.kind.length + event.sessionId.length + event.timestamp.length) * 2 +
+        (event.systemPrompt !== undefined ? event.systemPrompt.length * 2 : 0) +
+        (event.toolsText !== undefined ? event.toolsText.length * 2 : 0),
+      0,
+    )
+    expect(estimated).toBeLessThanOrEqual(3_000)
+    expect(plugin.droppedEvents).toBeGreaterThan(0)
+  })
+
+  it('boundsFailuresWithHugeSessionIdentities', async () => {
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      diagnostics: { failureLimit: 10, maxFailureBytes: 1_000 },
+      emit: () => {
+        throw new Error('receiver down')
+      },
+    })
+    await plugin.hooks['turn.start']({ sessionId: `s-${'s'.repeat(10_000)}`, turnIndex: 1 })
+    await plugin.hooks['turn.start']({ sessionId: 'small', turnIndex: 2 })
+
+    // The oversize identity cannot bypass the byte budget: it is evicted and
+    // counted, while the small failure survives with its identity intact.
+    expect(plugin.droppedFailures).toBe(1)
+    expect(plugin.failures).toHaveLength(1)
+    expect(plugin.failures[0]).toMatchObject({ kind: 'turn.start', sessionId: 'small' })
+    expect(JSON.stringify(plugin.failures).length).toBeLessThan(1_000)
+  })
+
+  it('givesTheOnErrorTapTheOriginalTransientError', async () => {
+    const seen: unknown[] = []
+    const attached = { buffer: Buffer.alloc(1_000) }
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      emit: () => {
+        const error = new Error('boom') as Error & { attachment?: unknown }
+        error.attachment = attached
+        throw error
+      },
+      onError: (tap) => {
+        seen.push(tap.error)
+      },
+    })
+    await plugin.hooks['turn.start']({ sessionId: 'session-f2-tap', turnIndex: 0 })
+
+    // The tap receives the original thrown value, attachments and all ...
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBeInstanceOf(Error)
+    expect((seen[0] as Error & { attachment?: unknown }).attachment).toBe(attached)
+    // ... while the retained tail keeps only the normalized diagnostics.
+    expect(plugin.failures).toHaveLength(1)
+    expect(plugin.failures[0]?.error).toMatchObject({ name: 'Error', message: 'boom' })
+    expect(JSON.stringify(plugin.failures)).not.toContain('attachment')
   })
 })

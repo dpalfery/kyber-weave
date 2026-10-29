@@ -131,18 +131,36 @@ export type OpencodeHookEvent = OpencodeHookPayload & {
   timestamp: string
 }
 
+/**
+ * Bounded normalized failure diagnostics (F2): the error name and a capped
+ * message only. The original thrown value is never retained — an error
+ * object can carry arbitrarily large attached buffers, causes, and custom
+ * fields that a string rendering would conceal. `String()` of this record
+ * renders the message, preserving the long-standing assertion shape that a
+ * retained failure stringifies to its message.
+ */
+export type OpencodeFailureDiagnostics = {
+  name: string
+  message: string
+  toString(): string
+}
+
 export type OpencodeHookFailure = {
   kind: OpencodeHookKind
   /** The session the failed delivery belonged to; absent when the payload named none. */
   sessionId?: string
-  /**
-   * Bounded normalized failure diagnostics (F2): the error name and a capped
-   * message only. The original thrown value is never retained — an error
-   * object can carry arbitrarily large attached buffers, causes, and custom
-   * fields that a string rendering would conceal. The `onError` tap receives
-   * this same normalized record; nothing retains the raw value.
-   */
-  error: { name: string; message: string }
+  /** Bounded normalized diagnostics; the original thrown value is not retained. */
+  error: OpencodeFailureDiagnostics
+}
+
+/**
+ * The `onError` tap payload. Unlike the retained `OpencodeHookFailure`, the
+ * tap receives the original thrown value transiently (caller-owned, never
+ * stored by the plugin) under the pre-existing `{ kind, error }` contract.
+ */
+export type OpencodeHookErrorTap = {
+  kind: OpencodeHookKind
+  error: unknown
 }
 
 /** Delivery port; production posts to the local OTLP receiver through the T5 transport outbox, tests inject a fake. */
@@ -167,8 +185,11 @@ export type OpencodePluginOptions = {
   now?: () => string
   /** Delivery budget per hook; expiry is swallowed, never thrown. Defaults to 250ms. */
   timeoutMs?: number
-  /** Observability tap for swallowed failures; itself runs swallowed. */
-  onError?: (failure: OpencodeHookFailure) => void
+  /**
+   * Observability tap for swallowed failures; itself runs swallowed. Receives
+   * the original thrown value transiently — the plugin never stores it.
+   */
+  onError?: (failure: OpencodeHookErrorTap) => void
   /**
    * Bounds on the in-memory delivery-attempt history (F2). The skeleton is a
    * diagnostics tail, not an event store: the transport (outbox) is the
@@ -272,26 +293,43 @@ function eventRetainedBytes(event: OpencodeHookEvent): number {
 /**
  * Normalize a thrown value to bounded diagnostics. Only the error name and a
  * capped message are kept; attached buffers, causes, and custom fields are
- * never retained, however small their string rendering looks.
+ * never retained, however small their string rendering looks. `String()` of
+ * the result renders the message.
  */
-function normalizeFailureError(error: unknown): { name: string; message: string } {
+function normalizeFailureError(error: unknown): OpencodeFailureDiagnostics {
   const cap = (text: string): string =>
     text.length > MAX_FAILURE_MESSAGE_CHARS ? text.slice(0, MAX_FAILURE_MESSAGE_CHARS) : text
-  if (typeof error === 'string') return { name: 'Error', message: cap(error) }
+  const diagnosed = (name: string, message: string): OpencodeFailureDiagnostics => {
+    const capped = cap(message)
+    return { name, message: capped, toString: () => capped }
+  }
+  if (typeof error === 'string') return diagnosed('Error', error)
   if (error instanceof Error) {
     const name = typeof error.name === 'string' && error.name !== '' ? error.name : 'Error'
-    return { name, message: cap(String(error.message ?? '')) }
+    return diagnosed(name, String(error.message ?? ''))
   }
   try {
-    return { name: 'Error', message: cap(String(error)) }
+    return diagnosed('Error', String(error))
   } catch {
-    return { name: 'Error', message: 'unrenderable failure value' }
+    return diagnosed('Error', 'unrenderable failure value')
   }
 }
 
-/** Estimated retained bytes of one normalized failure record. */
+/**
+ * Estimated retained bytes of one normalized failure record. Every retained
+ * string counts — kind and session id alongside the normalized name and
+ * message — so a large or highly distinct failure identity cannot bypass
+ * the byte budget.
+ */
 function failureRetainedBytes(failure: OpencodeHookFailure): number {
-  return 64 + failure.error.name.length * 2 + failure.error.message.length * 2 + 16
+  return (
+    64 +
+    failure.kind.length * 2 +
+    (failure.sessionId === undefined ? 0 : failure.sessionId.length * 2 + 16) +
+    failure.error.name.length * 2 +
+    failure.error.message.length * 2 +
+    32
+  )
 }
 
 /**
@@ -376,17 +414,22 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
   /**
    * Release an ended session's retained payload bodies. Identity (kind,
    * session, timestamp) stays so the boundary record remains queryable, but
-   * the content strings — the megabytes — are freed. This touches only the
-   * diagnostic copies: the transport's queued originals are separate objects
-   * and still carry full content for a pending offline delivery.
+   * the content strings — the megabytes — are freed. The ledger deducts only
+   * the released before-minus-after difference: the surviving identity still
+   * retains bytes and stays counted, so repeated session ends can neither
+   * drive the ledger negative nor admit content past the configured bound.
+   * This touches only the diagnostic copies: the transport's queued
+   * originals are separate objects and still carry full content for a
+   * pending offline delivery.
    */
   const releaseSessionPayloads = (sessionId: string): void => {
     for (const retained of plugin.events) {
       if (retained.sessionId !== sessionId) continue
-      retainedEventBytes -= eventRetainedBytes(retained)
+      const before = eventRetainedBytes(retained)
       delete retained.systemPrompt
       delete retained.toolsText
       delete retained.skills
+      retainedEventBytes -= before - eventRetainedBytes(retained)
     }
     if (retainedEventBytes < 0) retainedEventBytes = 0
     const kept = plugin.failures.filter((failure) => failure.sessionId !== sessionId)
