@@ -361,6 +361,7 @@ export function sumCosts(blocks: CostBlock[]): CostTotal {
   const byModel: Record<string, number> = {}
   for (const block of valued) {
     for (const [model, amount] of Object.entries(block.byModel ?? {})) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) continue
       byModel[model] = (byModel[model] ?? 0) + amount
     }
   }

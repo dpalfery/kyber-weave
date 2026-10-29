@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-29
 status: current
 ---
 
@@ -177,7 +177,8 @@ only where it looks — an explicit `--server-url http://127.0.0.1:<port>` wins,
 flag: the running engine owns the datastore choice. Only literal loopback origins
 (`127.0.0.1` or `[::1]`, with an explicit port) are contacted; anything else is refused.
 Stopping the client (EOF, SIGTERM, or closing its read end) ends the MCP session within
-a bounded deadline and never stops the shared engine.
+a bounded deadline and never stops the shared engine. A failed `server.connect`
+releases the keep-alive, signal handlers, and stdout guard instead of leaking them.
 
 ### 2. Register the client yourself
 

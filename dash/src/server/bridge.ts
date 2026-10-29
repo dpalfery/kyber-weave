@@ -22,6 +22,7 @@ import {
   problemsHarnessWhere,
   quarantineHarnessWhere,
   readSessionSummaryFigures,
+  releaseRecordParts,
   systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
@@ -59,9 +60,10 @@ import {
   type PredictionRecord,
 } from '../analysis/calibration.js'
 import {
-  compareHarnesses,
+  compareIterableRecords,
   compareRuns as compareStoredRuns,
   type ComparisonSummary,
+  type ComparisonTable,
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
@@ -4030,64 +4032,83 @@ export class KyberBridge {
 
   /**
    * Return cross-harness comparison matrix across all active harnesses.
+   *
+   * WHY streaming, not `listAll`: the comparison folds every canonical
+   * record, including compressed payload columns. `listAll` roots the whole
+   * corpus (every raw/parts payload live at once) while the aggregate runs.
+   * The streaming walk below holds one live record plus bounded counters:
+   * the store's `iterateAll` yields timestamp-ordered records one at a
+   * time, and the direct-DB walk pages the same way without selecting the
+   * `raw` column at all. Each record's parts are released before the next
+   * arrives, so peak working set never grows with corpus size. Figures match
+   * the batch path exactly via `compareIterableRecords`.
    */
-  private canonicalRecords(): CanonicalRecord[] {
-    if (this.store) return this.store.listAll()
-    const db = this.getDb()
-    if (!this.hasTable(db, 'records')) return []
+  getComparisonTable(): ComparisonTableResult {
     try {
-      const rows = db!
-        .prepare('SELECT * FROM records ORDER BY timestamp')
-        .all() as unknown as import('../canon/store.js').RecordRow[]
-      return rows.map(toRecord)
-    } catch {
-      return []
+      const table =
+        this.store !== undefined
+          ? compareIterableRecords(
+              this.store.iterateAll(),
+              {},
+              (record) => releaseRecordParts(record),
+            )
+          : this.compareDirectDb()
+      if (table.harnesses.length === 0) {
+        return { harnesses: [], rows: [], problems: [] }
+      }
+      return {
+        harnesses: table.harnesses,
+        problems: table.problems,
+        rows: table.rows.map((row) => ({
+          ...row,
+          cells: Object.fromEntries(
+            Object.entries(row.cells).map(([harness, cell]) => [
+              harness,
+              {
+                ...cell,
+                availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
+              },
+            ]),
+          ),
+        })),
+      }
+    } catch (err) {
+      if (this.store !== undefined) throw err
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
   /**
-   * Return cross-harness comparison matrix derived only from canonical records.
+   * Direct-DB streaming walk for bridges without an injected store: the same
+   * one-record-at-a-time fold as the store path, over a cursor that never
+   * selects the `raw` column (comparison never reads it) and never buffers
+   * the corpus. Any read or decode failure yields the empty table, matching
+   * the previous `SELECT *` path's catch-all.
    */
-  getComparisonTable(): ComparisonTableResult {
-    const canonicalRecords = this.canonicalRecords()
-    if (canonicalRecords.length === 0) {
+  private compareDirectDb(): ComparisonTable {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) {
       return { harnesses: [], rows: [], problems: [] }
     }
-
-    const byHarness = new Map<string, CanonicalRecord[]>()
-    for (const record of canonicalRecords) {
-      const records = byHarness.get(record.harness) ?? []
-      records.push(record)
-      byHarness.set(record.harness, records)
-    }
-
-    const preferredOrder = ['copilot', 'gemini', 'pi']
-    const availableHarnesses = [...byHarness.keys()]
-    const harnesses = [
-      ...preferredOrder.filter((harness) => byHarness.has(harness)),
-      ...availableHarnesses
-        .filter((harness) => !preferredOrder.includes(harness))
-        .sort(),
-    ]
-    const table = compareHarnesses(
-      harnesses.map((harness) => byHarness.get(harness) ?? []),
-      harnesses,
-    )
-    return {
-      harnesses: table.harnesses,
-      problems: table.problems,
-      rows: table.rows.map((row) => ({
-        ...row,
-        cells: Object.fromEntries(
-          Object.entries(row.cells).map(([harness, cell]) => [
-            harness,
-            {
-              ...cell,
-              availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
-            },
-          ]),
-        ),
-      })),
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, trace_id, parent_span_id, source, harness, session_id, name, op, kind, timestamp, duration_ms, status, tokens_json, content_json, cost_json, measurability_json, parts_json FROM records ORDER BY timestamp',
+        )
+        .iterate() as unknown as IterableIterator<import('../canon/store.js').RecordRow>
+      const records = (function* (): Generator<CanonicalRecord> {
+        for (const row of rows) {
+          const record = toRecord(row)
+          try {
+            yield record
+          } finally {
+            releaseRecordParts(record)
+          }
+        }
+      })()
+      return compareIterableRecords(records, {}, (record) => releaseRecordParts(record))
+    } catch {
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
@@ -5865,6 +5886,162 @@ export class KyberBridge {
   }
 
   /**
+   * Identity-only scan of a `parts_json` array: kind/role/order/resident
+   * without retaining any text bodies. The streaming decoder still walks the
+   * column (inflation + parse), but text chunks are dropped on arrival, so
+   * peak retention is identities only — never the multi-megabyte bodies the
+   * manifest previously materialized to emit the same ids.
+   */
+  private async streamPartsIdentities(
+    reader: ColumnChunkReader,
+    signal?: AbortSignal,
+  ): Promise<'corrupt' | Array<{ kind: string; role: string | null; order: number | null; resident: boolean }> | null> {
+    type Slot = { kind: string; role: string; order: unknown; resident: unknown }
+    const slots = new Map<number, Slot>()
+    const slotFor = (index: number): Slot => {
+      const existing = slots.get(index)
+      if (existing !== undefined) return existing
+      const slot: Slot = { kind: '', role: '', order: undefined, resident: undefined }
+      slots.set(index, slot)
+      return slot
+    }
+    let sawIndexed = false
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          const head = event.path[0]
+          if (typeof head === 'number') sawIndexed = true
+          if (event.type === 'string-chunk') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'part') slot.kind += event.text
+              else if (event.path[1] === 'role') slot.role += event.text
+              // Text bodies are intentionally dropped: identities never
+              // retain them, so manifests stay bounded no matter the size.
+            }
+          } else if (event.type === 'scalar') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'order' && typeof event.value === 'number') slot.order = event.value
+              else if (event.path[1] === 'resident' && typeof event.value === 'boolean') slot.resident = event.value
+            }
+          }
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    if (!sawIndexed) return null
+    const ordered: Array<{ kind: string; role: string | null; order: number | null; resident: boolean }> = []
+    for (const index of [...slots.keys()].sort((a, b) => a - b)) {
+      const slot = slots.get(index)
+      if (slot === undefined) continue
+      const kind = slot.kind === '' ? 'unknown' : slot.kind
+      ordered.push({
+        kind,
+        role: capturedRoleOf(kind, slot.role === '' ? null : slot.role),
+        order: typeof slot.order === 'number' && Number.isFinite(slot.order) ? slot.order : null,
+        resident: slot.resident === false ? false : true,
+      })
+    }
+    ordered.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    return ordered
+  }
+
+  /**
+   * Identity-only scan of a legacy `content_json` object: which canonical
+   * buckets carry any text, without retaining the text. Presence is a byte
+   * count, not a body, so the manifest learns the same part list the content
+   * pages chunk under while holding only counters.
+   */
+  private async streamContentIdentities(
+    reader: ColumnChunkReader,
+    signal?: AbortSignal,
+  ): Promise<'corrupt' | Array<{ kind: string; role: string | null; order: number | null }>> {
+    const lengths = new Map<string, number>()
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          if (event.type !== 'string-chunk' || event.path.length !== 1) return
+          const key = event.path[0]
+          if (typeof key !== 'string' || !(CANONICAL_CONTENT_KEYS as readonly string[]).includes(key)) return
+          lengths.set(key, (lengths.get(key) ?? 0) + event.text.length)
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    const identities: Array<{ kind: string; role: string | null; order: number | null }> = []
+    for (const [position, key] of CANONICAL_CONTENT_KEYS.entries()) {
+      if ((lengths.get(key) ?? 0) === 0) continue
+      identities.push({ kind: key, role: key === 'system_prompt' ? 'system' : null, order: position })
+    }
+    return identities
+  }
+
+  /**
+   * Identity-only counterpart of `capturedSpanParts` for manifests: part
+   * identities without text bodies, plus the same purged/corrupt signals so
+   * a purged span stays absent from the part list rather than inventing an
+   * identity. Never calls the text-retaining column readers.
+   */
+  private async capturedSpanIdentities(
+    db: DatabaseSync,
+    spanId: string,
+    signal?: AbortSignal,
+  ): Promise<{ identities: Array<{ kind: string; role: string | null; order: number | null }>; purged: boolean } | { corrupt: true }> {
+    const partsReader = this.capturedColumnReader(db, 'records', 'parts_json', spanId)
+    if (partsReader !== undefined) {
+      const streamed = await this.streamPartsIdentities(partsReader, signal)
+      if (streamed === 'corrupt') return { corrupt: true }
+      if (streamed !== null && streamed.length > 0) {
+        return {
+          identities: streamed.map((entry) => ({ kind: entry.kind, role: entry.role, order: entry.order })),
+          purged: false,
+        }
+      }
+    }
+    const contentReader = this.capturedColumnReader(db, 'records', 'content_json', spanId)
+    if (contentReader === undefined) return { identities: [], purged: partsReader === undefined }
+    const legacy = await this.streamContentIdentities(contentReader, signal)
+    if (legacy === 'corrupt') return { corrupt: true }
+    if (legacy.length > 0) return { identities: legacy, purged: false }
+    return { identities: [], purged: partsReader === undefined }
+  }
+
+  /** Identity-only scope walk for manifests; corrupt/purged spans are omitted, never fabricated. */
+  private async streamScopeIdentities(
+    db: DatabaseSync,
+    units: readonly CapturedContextUnit[],
+    signal?: AbortSignal,
+  ): Promise<Array<{ unit: CapturedContextUnit; identities: Array<{ kind: string; role: string | null; order: number | null }> }>> {
+    const streamed: Array<{ unit: CapturedContextUnit; identities: Array<{ kind: string; role: string | null; order: number | null }> }> = []
+    for (const unit of units) {
+      const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+      if ('corrupt' in outcome) continue
+      if (outcome.identities.length === 0) continue
+      streamed.push({ unit, identities: outcome.identities })
+    }
+    return streamed
+  }
+
+  /**
    * Split streamed parts into page-sized chunks. Part identity is the span
    * plus the streamed position, so the manifest and the content pages agree;
    * repeated identical texts stay repeated — one chunk per occurrence — and
@@ -6018,6 +6195,9 @@ export class KyberBridge {
     generation: string,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+      throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+    }
     const db = this.sessionHandle()
     if (db === undefined) return { error: 'content_unavailable' }
     const resolved = this.resolveCapturedScope(db, target)
@@ -6030,27 +6210,200 @@ export class KyberBridge {
       traversal.touchedAt = this.now()
       offset = parsed
     }
-    // WHY re-derived, not retained: the page list below is transient working
-    // memory, dropped on return. The registry keeps only the binding's
-    // liveness, so serving page N of a large transcript never holds pages
-    // 0..N — retention stays flat no matter how many pages are served.
-    const { streamed, gaps: streamGaps } = await this.streamScopeParts(db, resolved.units, signal)
-    const gaps = [...resolved.gaps, ...streamGaps]
-    const chunks =
-      representation === 'assembled_turn' && target.kind === 'turn'
-        ? this.assembleCapturedTurn(target.sessionId, target.turnIndex, streamed.find((entry) => entry.unit.origin === 'turn')?.unit.spanId ?? '', streamed, byteLimit)
-        : this.splitCapturedParts(streamed, byteLimit)
-    const pages = this.splitContentPages(target, representation, chunks, gaps)
-    const page = pages[offset]
-    if (page === undefined) return { error: 'stale_cursor' }
-    const last = offset === pages.length - 1
-    if (pages.length > 1) {
+    // Assembled turn views are single-turn reconstructions; their scope is at
+    // most one turn plus shared context, so the bounded prefix walk below
+    // would add complexity without corpus-scale benefit. Keep the existing
+    // full derivation for them to preserve byte-exact labels.
+    if (representation === 'assembled_turn' && target.kind === 'turn') {
+      // WHY re-derived, not retained: the page list below is transient working
+      // memory, dropped on return. The registry keeps only the binding's
+      // liveness, so serving page N of a large transcript never holds pages
+      // 0..N — retention stays flat no matter how many pages are served.
+      const { streamed, gaps: streamGaps } = await this.streamScopeParts(db, resolved.units, signal)
+      const gaps = [...resolved.gaps, ...streamGaps]
+      const chunks = this.assembleCapturedTurn(target.sessionId, target.turnIndex, streamed.find((entry) => entry.unit.origin === 'turn')?.unit.spanId ?? '', streamed, byteLimit)
+      const pages = this.splitContentPages(target, representation, chunks, gaps)
+      const page = pages[offset]
+      if (page === undefined) return { error: 'stale_cursor' }
+      const last = offset === pages.length - 1
+      if (pages.length > 1) {
+        if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
+          return { error: 'budget_exceeded' }
+        }
+        this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      }
+      return this.serveContentPage(binding, generation, target, representation, gaps, page, offset, last)
+    }
+    // WHY cursor-driven, not materialized: units stream in scope order and
+    // stop once the requested page plus one proving chunk is known. Only the
+    // target page is retained; prefix pages are counted and dropped, and tail
+    // units are never decoded. Packing uses the resolved gaps for its budget
+    // so every page partitions the same way whether or not later stream gaps
+    // exist — stream gaps are small, and the happy path (no stream gaps) packs
+    // byte-identically to the full walk it replaces.
+    const prefix = await this.collectCapturedPartsPrefix(db, target, representation, resolved.units, [...resolved.gaps], byteLimit, offset, signal)
+    const gaps = [...resolved.gaps, ...prefix.streamGaps]
+    if (prefix.page === undefined) return { error: 'stale_cursor' }
+    const last = !prefix.hasMore
+    if (!last || offset > 0) {
       if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
         return { error: 'budget_exceeded' }
       }
-      this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      if (!last) this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      else this.capturedContextTraversals.delete(binding)
     }
-    return this.serveContentPage(binding, generation, target, representation, gaps, page, offset, last)
+    return this.serveContentPage(binding, generation, target, representation, gaps, prefix.page, offset, last)
+  }
+
+  /**
+   * Prefix-bounded content walk for `captured_parts`: decodes units in scope
+   * order, splits each unit's parts into byte-limited chunks, and greedily
+   * packs 60 KB pages exactly like `splitContentPages` — but retains only the
+   * requested page, counts prefix pages, and stops once the next page proves
+   * more content exists or the scope ends. Tail units are never touched, so a
+   * first page never pays for a late multi-megabyte block. Gaps surface on
+   * the page whose units produced them and never ride later pages, so every
+   * sealed envelope holds the page budget no matter how gap-heavy the scope
+   * is; undecoded tail gaps surface on their own pages, keeping eventual
+   * traversal complete without holding the corpus.
+   */
+  private async collectCapturedPartsPrefix(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    units: readonly CapturedContextUnit[],
+    resolvedGaps: ReadonlyArray<Record<string, unknown>>,
+    byteLimit: number,
+    offset: number,
+    signal?: AbortSignal,
+  ): Promise<{ page: CapturedContextChunk[] | undefined; streamGaps: Array<Record<string, unknown>>; hasMore: boolean }> {
+    const prefixLength = Buffer.byteLength(
+      `{"data":{"target":${JSON.stringify(target)},"representation":${JSON.stringify(representation)},"chunks":[`,
+      'utf8',
+    )
+    const suffixLength = Buffer.byteLength(
+      `],"coverage":${JSON.stringify({ completeness: 'captured_only', gaps: [...resolvedGaps] })},"pagination":${JSON.stringify({ nextCursor: CAPTURED_CONTEXT_CURSOR_PLACEHOLDER, hasMore: true })}}`,
+      'utf8',
+    )
+    // Gaps of the requested page only: earlier pages were already served
+    // theirs, and later pages re-walk to their own. Counting stays global
+    // so page boundaries never depend on the requested offset.
+    let targetGaps: Array<Record<string, unknown>> = []
+    let pageGaps: Array<Record<string, unknown>> = []
+    // Gaps counted on the page being filled, on every offset — unlike the
+    // retained pageGaps above, which stay empty off-target. Seal decisions
+    // must read this, or gap-only prefix pages never split when offset > 0
+    // and page boundaries diverge across offsets.
+    let pageGapCount = 0
+    let pageIndex = 0
+    let currentCount = 0
+    let currentBytes = prefixLength + suffixLength
+    let current: CapturedContextChunk[] = []
+    let targetPage: CapturedContextChunk[] | undefined = undefined
+    const pageHasContent = (): boolean => currentCount > 0 || pageGapCount > 0
+    const sealPage = (): void => {
+      if (pageIndex === offset) {
+        targetPage = current
+        targetGaps = pageGaps
+      }
+      pageIndex += 1
+      currentCount = 0
+      currentBytes = prefixLength + suffixLength
+      current = []
+      pageGaps = []
+      pageGapCount = 0
+    }
+    const pushGap = (gap: Record<string, unknown>): boolean => {
+      const gapBytes = Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
+      // A page that already holds content seals before a gap would push it
+      // past the budget — gaps alone can fill a page, so a part-less-heavy
+      // scope still pages instead of serving one unbounded envelope. An
+      // empty page keeps the gap: gaps are indivisible. The seal reads
+      // counted content, not retained content, so prefix pages split exactly
+      // as the target walk would split them.
+      if (pageHasContent() && currentBytes + gapBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+        sealPage()
+      }
+      if (pageIndex === offset) {
+        pageGaps.push(gap)
+      }
+      pageGapCount += 1
+      currentBytes += gapBytes
+      // Past the target means the sealed target plus proof of more — the
+      // pushed gap itself proves the walk continues.
+      return pageIndex > offset
+    }
+    for (const unit of units) {
+      if (signal?.aborted) {
+        throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+      }
+      const outcome = await this.capturedSpanParts(db, unit.spanId, signal)
+      if ('corrupt' in outcome) {
+        const gap = {
+          code: 'corrupt_column',
+          reason: 'A retained column could not be decoded.',
+          sessionId: unit.sessionId,
+          ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+          spanId: unit.spanId,
+        }
+        // The pushed gap proves more content when the sealed target is
+        // behind us — stop without touching the tail.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+        continue
+      }
+      if (outcome.parts.length === 0) {
+        const gap = outcome.purged
+          ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
+          : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId }
+        // Same early stop as the corrupt-column gap above.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+        continue
+      }
+      const chunks = this.splitCapturedParts([{ unit, parts: outcome.parts }], byteLimit)
+      for (const chunk of chunks) {
+        const chunkBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8')
+        // The first content of a page joins unconditionally; once the page
+        // holds chunks or gaps, a further chunk that would push it past the
+        // budget seals it first — including the first chunk after a
+        // gap-heavy run, which the old count-only gate let through.
+        if (pageHasContent() && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+          // Current page is full: seal it, then start the next with this chunk.
+          sealPage()
+          // The overflow chunk is the first of the next page. If that next
+          // page is past the target, the target is sealed and more is proven
+          // — stop without touching the tail.
+          if (pageIndex > offset) {
+            return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+          }
+        }
+        if (pageIndex === offset) {
+          current.push(chunk)
+          currentBytes += (currentCount > 0 ? 1 : 0) + chunkBytes
+          currentCount += 1
+        } else if (pageIndex < offset) {
+          currentBytes += (currentCount > 0 ? 1 : 0) + chunkBytes
+          currentCount += 1
+        } else {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+      }
+    }
+    // Scope ended: finalize the current page as the target or a prefix.
+    // Only the closing page's own gaps ride it — earlier pages already
+    // served theirs, so the envelope never re-pays them.
+    if (pageIndex === offset) {
+      targetPage = current
+      targetGaps = pageGaps
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
+    }
+    if (targetPage !== undefined) {
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
+    }
+    return { page: undefined, streamGaps: targetGaps, hasMore: false }
   }
 
   private serveManifestPage(
@@ -6079,6 +6432,9 @@ export class KyberBridge {
     generation: string,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+      throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+    }
     const db = this.sessionHandle()
     if (db === undefined) return { error: 'content_unavailable' }
     const resolved = this.resolveCapturedScope(db, target)
@@ -6091,23 +6447,30 @@ export class KyberBridge {
       traversal.touchedAt = this.now()
       offset = parsed
     }
-    const items = await this.buildManifestItems(db, target, resolved.units, resolved.declared, signal)
     const gaps = [...resolved.gaps]
-    const pages: Array<Array<Record<string, unknown>>> = []
-    for (let start = 0; start < items.length; start += limit) {
-      pages.push(items.slice(start, start + limit))
-    }
-    const page = pages[offset] ?? (offset === 0 ? [] : undefined)
-    if (page === undefined) return { error: 'stale_cursor' }
-    const last = offset === pages.length - 1 || (pages.length === 0 && offset === 0)
-    // WHY re-derived, not retained: same rule as the content path — the
-    // item pages above are transient, and the registry keeps only liveness.
-    if (pages.length > 1) {
+    // WHY cursor-driven, not materialized: part identities stream unit by
+    // unit and stop once the requested page plus one proving item is known.
+    // A run manifest previously decoded every retained text body to emit the
+    // same ids; it now holds only identities for the prefix it needs.
+    const needed = (offset + 1) * limit + 1
+    const items = await this.buildManifestPageItems(db, target, resolved.units, resolved.declared, needed, signal)
+    const hasMore = items.length > (offset + 1) * limit
+    const page = items.slice(offset * limit, offset * limit + limit)
+    if (offset > 0 && page.length === 0) return { error: 'stale_cursor' }
+    const last = !hasMore
+    if (!last || offset > 0) {
       if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
         return { error: 'budget_exceeded' }
       }
-      this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      if (!last) this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      else this.capturedContextTraversals.delete(binding)
     }
+    // Preserve the previous empty-manifest paging contract: zero items is a
+    // single empty page, not a stale cursor.
+    if (items.length === 0 && offset === 0) {
+      return this.serveManifestPage(binding, generation, target, representation, gaps, [], 0, true)
+    }
+    if (page.length === 0 && items.length !== 0) return { error: 'stale_cursor' }
     return this.serveManifestPage(binding, generation, target, representation, gaps, page, offset, last)
   }
 
@@ -6116,15 +6479,40 @@ export class KyberBridge {
    * the session/turn/span identity; part items carry the streamed
    * part/block/origin/role identity the content pages chunk under, so a
    * caller can plan traversal from the manifest alone.
+   *
+   * WHY prefix-bounded: identities stream unit by unit and stop once `needed`
+   * items are known. A run manifest previously decoded every retained text
+   * body to emit the same ids; it now holds only the prefix identities it
+   * needs, so a first page never pays for the tail of the scope.
    */
-  private async buildManifestItems(
+  private async buildManifestPageItems(
     db: DatabaseSync,
     target: CapturedContextTarget,
     units: readonly CapturedContextUnit[],
     declared: ReadonlyArray<{ sessionId: string; turnIndex: number; spanId: string | null }>,
+    needed: number,
     signal?: AbortSignal,
   ): Promise<Array<Record<string, unknown>>> {
     const items: Array<Record<string, unknown>> = []
+    const pushPart = (
+      unit: CapturedContextUnit,
+      kind: string,
+      role: string | null,
+      order: number | null,
+      position: number,
+    ): void => {
+      items.push({
+        kind: 'part',
+        partId: `${unit.spanId}:part:${position}`,
+        blockId: capturedBlockIdOf(kind),
+        sessionId: unit.sessionId,
+        ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+        spanId: unit.spanId,
+        origin: unit.origin,
+        role,
+        order: order ?? position,
+      })
+    }
     if (target.kind === 'run') {
       const executions = this.listExecutions(target.runId)
       const sessionExecution = new Map<string, string>()
@@ -6140,6 +6528,7 @@ export class KyberBridge {
           isSubagent: !execution.isRoot,
         })
         if (sessionId !== null && !sessionExecution.has(sessionId)) sessionExecution.set(sessionId, execution.executionId)
+        if (items.length >= needed) return items
       }
       for (const turn of declared) {
         items.push({
@@ -6150,22 +6539,19 @@ export class KyberBridge {
           turnIndex: turn.turnIndex,
           spanId: turn.spanId,
         })
+        if (items.length >= needed) return items
       }
-      const { streamed } = await this.streamScopeParts(db, units, signal)
-      for (const { unit, parts } of streamed) {
-        parts.forEach((part, position) => {
-          items.push({
-            kind: 'part',
-            partId: `${unit.spanId}:part:${position}`,
-            blockId: capturedBlockIdOf(part.kind),
-            sessionId: unit.sessionId,
-            ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
-            spanId: unit.spanId,
-            origin: unit.origin,
-            role: part.role,
-            order: part.order ?? position,
-          })
+      for (const unit of units) {
+        if (signal?.aborted) {
+          throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+        }
+        const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+        if ('corrupt' in outcome) continue
+        if (outcome.identities.length === 0) continue
+        outcome.identities.forEach((part, position) => {
+          pushPart(unit, part.kind, part.role, part.order, position)
         })
+        if (items.length >= needed) return items
       }
       return items
     }
@@ -6182,23 +6568,34 @@ export class KyberBridge {
       }
       return items
     }
-    const { streamed } = await this.streamScopeParts(db, units, signal)
-    for (const { unit, parts } of streamed) {
-      parts.forEach((part, position) => {
-        items.push({
-          kind: 'part',
-          partId: `${unit.spanId}:part:${position}`,
-          blockId: capturedBlockIdOf(part.kind),
-          sessionId: unit.sessionId,
-          ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
-          spanId: unit.spanId,
-          origin: unit.origin,
-          role: part.role,
-          order: part.order ?? position,
-        })
+    for (const unit of units) {
+      if (signal?.aborted) {
+        throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+      }
+      const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+      if ('corrupt' in outcome) continue
+      if (outcome.identities.length === 0) continue
+      outcome.identities.forEach((part, position) => {
+        pushPart(unit, part.kind, part.role, part.order, position)
       })
+      if (items.length >= needed) return items
     }
     return items
+  }
+
+  /**
+   * Full manifest items retained for compatibility: delegates to the
+   * prefix-bounded walk with no bound. No production path calls this with
+   * large scopes; the manifest route always bounds by page.
+   */
+  private async buildManifestItems(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+    units: readonly CapturedContextUnit[],
+    declared: ReadonlyArray<{ sessionId: string; turnIndex: number; spanId: string | null }>,
+    signal?: AbortSignal,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.buildManifestPageItems(db, target, units, declared, Number.MAX_SAFE_INTEGER, signal)
   }
 
   /**

@@ -273,7 +273,27 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     throw err
   }
 
-  const close = async () => {
+  // Named so `close()` can remove exactly these registrations (F10):
+  // anonymous handlers could never be unregistered, so every in-process
+  // restart leaked listeners toward MaxListenersExceededWarning.
+  const onServiceSigint = (): void => {
+    void close().finally(() => process.exit(0))
+  }
+  const onServiceSigterm = (): void => {
+    void close().finally(() => process.exit(0))
+  }
+  // One shared teardown promise (F10): a second concurrent close joins the
+  // in-flight teardown instead of resolving early. Returning immediately
+  // would let a signal's `process.exit` chain fire before the first flush
+  // finished and terminate the service mid-drain.
+  let closePromise: Promise<void> | null = null
+  const close = (): Promise<void> => {
+    closePromise ??= teardown()
+    return closePromise
+  }
+  const teardown = async (): Promise<void> => {
+    process.removeListener('SIGINT', onServiceSigint)
+    process.removeListener('SIGTERM', onServiceSigterm)
     if (pendingReconcileTimer !== null) {
       clearInterval(pendingReconcileTimer)
       pendingReconcileTimer = null
@@ -298,12 +318,8 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   console.log(chalk.dim('\n  Ready to collect OTel telemetry from all harnesses.'))
   console.log(chalk.dim('  Press Ctrl+C to stop.\n'))
 
-  process.on('SIGINT', () => {
-    void close().finally(() => process.exit(0))
-  })
-  process.on('SIGTERM', () => {
-    void close().finally(() => process.exit(0))
-  })
+  process.on('SIGINT', onServiceSigint)
+  process.on('SIGTERM', onServiceSigterm)
 
   return { receiver, writer, canon, scheduler, close }
 }

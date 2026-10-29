@@ -63,6 +63,9 @@ const SCOPE_NAME = 'kyberdash.opencode-plugin'
 const SCOPE_VERSION = '1.0.0'
 const SERVICE_NAME = 'kyberdash-opencode-plugin'
 
+/** Bound on one response-body teardown: disposal must never wedge the sender. */
+const BODY_DISPOSE_TIMEOUT_MS = 250
+
 function hash32(input: string, seed: number): number {
   let hash = seed >>> 0
   for (let index = 0; index < input.length; index += 1) {
@@ -179,6 +182,13 @@ export function buildOtlpTracesBody(events: readonly OpencodeHookEvent[]): OtlpT
 export type OtlpSenderOptions = {
   endpoint?: string
   fetchFn?: OtlpFetch
+  /**
+   * Abort deadline per POST. The direct path has no outbox retrying it, so a
+   * hung transport must still settle — callers bound delivery with the
+   * plugin hook timeout, and this deadline frees the socket underneath.
+   * Defaults to 10s.
+   */
+  timeoutMs?: number
 }
 
 export type OtlpSender = {
@@ -190,22 +200,66 @@ export type OtlpSender = {
 export function createOtlpSender(options: OtlpSenderOptions = {}): OtlpSender {
   const endpoint = options.endpoint ?? DEFAULT_OTLP_ENDPOINT
   const fetchFn = options.fetchFn ?? ((url, init) => fetch(url, init))
+  const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000))
+
+  /** Fire-and-forget body disposal, bounded so a hanging cancel never wedges the sender. */
+  const disposeBody = (response: Response): void => {
+    try {
+      const cancelled = response.body?.cancel()
+      if (cancelled !== undefined) {
+        void Promise.race([
+          cancelled.catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, BODY_DISPOSE_TIMEOUT_MS)),
+        ])
+      }
+    } catch {
+      // Body teardown must never fail a delivery the receiver accepted.
+    }
+  }
 
   const send = async (events: readonly OpencodeHookEvent[]): Promise<void> => {
     if (events.length === 0) return
-    let response: Response
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`OTLP POST timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+    let response: Response | undefined
     try {
-      response = await fetchFn(endpoint, {
+      const pending = fetchFn(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(buildOtlpTracesBody(events)),
+        signal: controller.signal,
       })
-    } catch (error) {
-      // A refused loopback connection surfaces here; the outbox retries it.
-      throw error instanceof Error ? error : new Error(String(error))
-    }
-    if (!response.ok) {
-      throw new OtlpDeliveryError(response.status, response.statusText)
+      const aborted = new Promise<never>((_, reject) => {
+        if (controller.signal.aborted) {
+          reject(controller.signal.reason ?? new Error('OTLP POST aborted'))
+        } else {
+          controller.signal.addEventListener(
+            'abort',
+            () => reject(controller.signal.reason ?? new Error('OTLP POST aborted')),
+            { once: true },
+          )
+        }
+      })
+      void aborted.catch(() => undefined)
+      try {
+        response = await Promise.race([pending, aborted])
+      } catch (error) {
+        // A refused loopback connection surfaces here; the outbox retries it.
+        // A POST that resolves after the abort still gets its body released.
+        void pending.then(
+          (late) => disposeBody(late),
+          () => undefined,
+        )
+        throw error instanceof Error ? error : new Error(String(error))
+      }
+      if (!response.ok) {
+        throw new OtlpDeliveryError(response.status, response.statusText)
+      }
+    } finally {
+      clearTimeout(timer)
+      if (response !== undefined) disposeBody(response)
     }
   }
 

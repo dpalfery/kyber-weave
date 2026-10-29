@@ -11,11 +11,16 @@
 //
 // Every hook is best-effort and never fails the host — the CommandCode
 // `statusbar.ts` swallow-and-continue precedent. An emitter throw, an async
-// rejection, or a delivery timeout is recorded on `failures` (and offered to
-// `onError`) while the hook itself resolves quietly, so the session always
-// continues. The default emitter records in memory only; production
-// delivery arrives through the injected `emit` port, backed by the T5
-// transport outbox (`transport/outbox.ts`, OTLP/HTTP to 127.0.0.1:4318).
+// rejection, or a delivery timeout is recorded on the bounded `failures`
+// tail (and offered to `onError`) while the hook itself resolves quietly, so
+// the session always continues. The default emitter records in memory only;
+// production delivery arrives through the injected `emit` port, backed by
+// the T5 transport outbox (`transport/outbox.ts`, OTLP/HTTP to 127.0.0.1:4318).
+// The in-memory `events`/`failures` tails are count- and byte-bounded
+// (oldest-first, with drop counters) and an ended session's payload bodies
+// are released at its `session.end` — a long session must not grow host
+// memory without bound (F2); the transport, not this tail, is the delivery
+// record.
 //
 // T8 assembles the full pipeline in this installed entry: every hook boundary
 // runs hook→mapper→turn→outbox→sender in order. The hook stamps a
@@ -126,7 +131,34 @@ export type OpencodeHookEvent = OpencodeHookPayload & {
   timestamp: string
 }
 
+/**
+ * Bounded normalized failure diagnostics (F2): the error name and a capped
+ * message only. The original thrown value is never retained — an error
+ * object can carry arbitrarily large attached buffers, causes, and custom
+ * fields that a string rendering would conceal. `String()` of this record
+ * renders the message, preserving the long-standing assertion shape that a
+ * retained failure stringifies to its message.
+ */
+export type OpencodeFailureDiagnostics = {
+  name: string
+  message: string
+  toString(): string
+}
+
 export type OpencodeHookFailure = {
+  kind: OpencodeHookKind
+  /** The session the failed delivery belonged to; absent when the payload named none. */
+  sessionId?: string
+  /** Bounded normalized diagnostics; the original thrown value is not retained. */
+  error: OpencodeFailureDiagnostics
+}
+
+/**
+ * The `onError` tap payload. Unlike the retained `OpencodeHookFailure`, the
+ * tap receives the original thrown value transiently (caller-owned, never
+ * stored by the plugin) under the pre-existing `{ kind, error }` contract.
+ */
+export type OpencodeHookErrorTap = {
   kind: OpencodeHookKind
   error: unknown
 }
@@ -153,8 +185,36 @@ export type OpencodePluginOptions = {
   now?: () => string
   /** Delivery budget per hook; expiry is swallowed, never thrown. Defaults to 250ms. */
   timeoutMs?: number
-  /** Observability tap for swallowed failures; itself runs swallowed. */
-  onError?: (failure: OpencodeHookFailure) => void
+  /**
+   * Observability tap for swallowed failures; itself runs swallowed. Receives
+   * the original thrown value transiently — the plugin never stores it.
+   */
+  onError?: (failure: OpencodeHookErrorTap) => void
+  /**
+   * Bounds on the in-memory delivery-attempt history (F2). The skeleton is a
+   * diagnostics tail, not an event store: the transport (outbox) is the
+   * delivery record. Every bound evicts oldest-first and counts the eviction,
+   * and `session.end` releases the ended session's retained payload bodies.
+   */
+  diagnostics?: OpencodeDiagnosticsBounds
+}
+
+/**
+ * Count and byte bounds for the skeleton's retained diagnostics. Byte budgets
+ * are enforced against a defensible retained-size estimate (UTF-16 storage is
+ * two bytes per unit across every retained string, plus per-value overhead),
+ * not a character count — a multibyte payload and a large identity cost what
+ * they actually retain.
+ */
+export type OpencodeDiagnosticsBounds = {
+  /** Maximum retained delivery-attempt records. Defaults to 200. */
+  eventLimit?: number
+  /** Maximum retained failure records. Defaults to 100. */
+  failureLimit?: number
+  /** Maximum estimated retained bytes across events. Defaults to 1 MiB. */
+  maxEventBytes?: number
+  /** Maximum estimated retained bytes across failures. Defaults to 256 KiB. */
+  maxFailureBytes?: number
 }
 
 /**
@@ -177,13 +237,157 @@ export type OpencodePlugin = {
   context: OpencodeHookHandler
   /** B1 tool lifecycle handlers; same never-fail-host contract as hooks. */
   toolHooks: Record<OpencodeToolHookKind, OpencodeHookHandler>
-  /** Every boundary attempted, in firing order, whether or not delivery succeeded. */
+  /**
+   * Freshest delivery attempts, in firing order, at most the diagnostics
+   * event bound — a debugging tail, never a session archive. Payload bodies
+   * of an ended session are released at its `session.end`.
+   */
   events: OpencodeHookEvent[]
-  /** Every swallowed delivery failure, in order. */
+  /** Freshest swallowed delivery failures, in order, at most the diagnostics failure bound. */
   failures: OpencodeHookFailure[]
+  /** Lifetime delivery-attempt records evicted oldest-first by the diagnostics bounds. */
+  droppedEvents: number
+  /** Lifetime failure records evicted oldest-first by the diagnostics bounds. */
+  droppedFailures: number
 }
 
 const DEFAULT_TIMEOUT_MS = 250
+
+/** Default diagnostics bounds (F2): a tail for debugging, not a session archive. */
+const DEFAULT_DIAGNOSTIC_EVENT_LIMIT = 200
+const DEFAULT_DIAGNOSTIC_FAILURE_LIMIT = 100
+const DEFAULT_DIAGNOSTIC_MAX_EVENT_BYTES = 1_048_576
+const DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES = 262_144
+/** Cap on one normalized failure message: failures stay small by construction. */
+const MAX_FAILURE_MESSAGE_CHARS = 2_048
+
+/**
+ * Copy a string into independent storage. `slice`/`substring` on a long
+ * string keeps the parent's backing allocation alive (a V8 SlicedString), so
+ * a capped tail can retain megabytes behind a short length. A JSON
+ * round-trip allocates a fresh sequential string with identical UTF-16 code
+ * units — including lone surrogates, which a UTF-8 round-trip would replace.
+ */
+export function detachedCopy(text: string): string {
+  return JSON.parse(JSON.stringify(text)) as string
+}
+
+/**
+ * Estimated retained bytes of one diagnostic event record. Every retained
+ * string costs two bytes per UTF-16 unit plus a per-value overhead, and the
+ * record itself carries object/array overhead — identity and metadata
+ * (session id, span id, timestamps, model names) count alongside content, so
+ * a large identity cannot hide beside a small prompt.
+ */
+function eventRetainedBytes(event: OpencodeHookEvent): number {
+  const stringBytes = (value: string | undefined): number =>
+    value === undefined ? 0 : value.length * 2 + 16
+  let bytes = 96
+  bytes += stringBytes(event.kind)
+  bytes += stringBytes(event.sessionId)
+  bytes += stringBytes(event.spanId)
+  bytes += stringBytes(event.messageId)
+  bytes += stringBytes(event.timestamp)
+  bytes += stringBytes(event.systemPrompt)
+  bytes += stringBytes(event.toolsText)
+  bytes += stringBytes(event.model)
+  bytes += stringBytes(event.provider)
+  bytes += stringBytes(event.agent)
+  bytes += stringBytes(event.tool)
+  bytes += stringBytes(event.callId)
+  bytes += 32
+  if (event.skills !== undefined) {
+    bytes += 32
+    for (const skill of event.skills) bytes += stringBytes(skill)
+  }
+  return bytes
+}
+
+/**
+ * Normalize a thrown value to bounded diagnostics. Only the error name and a
+ * capped message are kept; attached buffers, causes, and custom fields are
+ * never retained, however small their string rendering looks. Every kept
+ * string is detached into independent storage — even an already-short value
+ * can be a slice holding a huge parent alive. `String()` of the result
+ * renders the message.
+ */
+function normalizeFailureError(error: unknown): OpencodeFailureDiagnostics {
+  const cap = (text: string): string =>
+    text.length > MAX_FAILURE_MESSAGE_CHARS
+      ? detachedCopy(text.slice(0, MAX_FAILURE_MESSAGE_CHARS))
+      : detachedCopy(text)
+  const diagnosed = (name: string, message: string): OpencodeFailureDiagnostics => {
+    const cappedMessage = cap(message)
+    const cappedName = cap(name)
+    return { name: cappedName, message: cappedMessage, toString: () => cappedMessage }
+  }
+  if (typeof error === 'string') return diagnosed('Error', error)
+  if (error instanceof Error) {
+    try {
+      const name = typeof error.name === 'string' && error.name !== '' ? error.name : 'Error'
+      return diagnosed(name, String(error.message ?? ''))
+    } catch {
+      // A throwing name/message getter must not break the never-fail-host
+      // contract: deliver normalizes inside its own catch, so a throw here
+      // would reject the host hook the plugin was hired to protect.
+      return diagnosed('Error', 'unrenderable failure value')
+    }
+  }
+  try {
+    return diagnosed('Error', String(error))
+  } catch {
+    return diagnosed('Error', 'unrenderable failure value')
+  }
+}
+
+/**
+ * Estimated retained bytes of one normalized failure record. Every retained
+ * string counts — kind and session id alongside the normalized name and
+ * message — so a large or highly distinct failure identity cannot bypass
+ * the byte budget.
+ */
+function failureRetainedBytes(failure: OpencodeHookFailure): number {
+  return (
+    64 +
+    failure.kind.length * 2 +
+    (failure.sessionId === undefined ? 0 : failure.sessionId.length * 2 + 16) +
+    failure.error.name.length * 2 +
+    failure.error.message.length * 2 +
+    32
+  )
+}
+
+/**
+ * The diagnostic copy of an event. The transport owns the original object it
+ * was handed; the tail retains only this copy, so session-end cleanup can
+ * never mutate an event still queued for delivery. Every retained string is
+ * detached into independent storage — even an already-short value can be a
+ * slice holding a huge parent alive. Absent keys stay absent (a
+ * consent-dropped field must never become `key: undefined`).
+ */
+function diagnosticCopyOf(event: OpencodeHookEvent): OpencodeHookEvent {
+  const copy: OpencodeHookEvent = {
+    kind: event.kind,
+    sessionId: detachedCopy(event.sessionId),
+    timestamp: detachedCopy(event.timestamp),
+  }
+  if (event.turnIndex !== undefined) copy.turnIndex = event.turnIndex
+  if (event.spanId !== undefined) copy.spanId = detachedCopy(event.spanId)
+  if (event.messageId !== undefined) copy.messageId = detachedCopy(event.messageId)
+  if (event.tool !== undefined) copy.tool = detachedCopy(event.tool)
+  if (event.callId !== undefined) copy.callId = detachedCopy(event.callId)
+  if (event.success !== undefined) copy.success = event.success
+  if (event.durationMs !== undefined) copy.durationMs = event.durationMs
+  if (event.resultSizeBytes !== undefined) copy.resultSizeBytes = event.resultSizeBytes
+  if (event.systemPrompt !== undefined) copy.systemPrompt = detachedCopy(event.systemPrompt)
+  if (event.toolsText !== undefined) copy.toolsText = detachedCopy(event.toolsText)
+  if (event.skills !== undefined) copy.skills = event.skills.map((skill) => detachedCopy(skill))
+  if (event.model !== undefined) copy.model = detachedCopy(event.model)
+  if (event.provider !== undefined) copy.provider = detachedCopy(event.provider)
+  if (event.contextLimit !== undefined) copy.contextLimit = event.contextLimit
+  if (event.agent !== undefined) copy.agent = detachedCopy(event.agent)
+  return copy
+}
 
 /**
  * Create the skeleton plugin. Pure construction: no host is touched until
@@ -194,6 +398,10 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
   const now = options.now ?? ((): string => new Date().toISOString())
   const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? DEFAULT_TIMEOUT_MS))
   const onError = options.onError
+  const eventLimit = Math.max(1, Math.floor(options.diagnostics?.eventLimit ?? DEFAULT_DIAGNOSTIC_EVENT_LIMIT))
+  const failureLimit = Math.max(1, Math.floor(options.diagnostics?.failureLimit ?? DEFAULT_DIAGNOSTIC_FAILURE_LIMIT))
+  const maxEventBytes = Math.max(1, Math.floor(options.diagnostics?.maxEventBytes ?? DEFAULT_DIAGNOSTIC_MAX_EVENT_BYTES))
+  const maxFailureBytes = Math.max(1, Math.floor(options.diagnostics?.maxFailureBytes ?? DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES))
 
   const plugin: OpencodePlugin = {
     hooks: undefined as never,
@@ -201,21 +409,96 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     toolHooks: undefined as never,
     events: [],
     failures: [],
+    droppedEvents: 0,
+    droppedFailures: 0,
+  }
+  let retainedEventBytes = 0
+  let retainedFailureBytes = 0
+
+  /**
+   * WHY oldest-first: the tail answers "what just happened" for the live
+   * session; the transport already delivered the head. A single record
+   * larger than the whole byte budget is omitted outright (counted as
+   * dropped) instead of evicting the entire tail — delivery still receives
+   * the full original, which the transport owns untouched.
+   */
+  const recordEvent = (event: OpencodeHookEvent): void => {
+    // Measure the original first: an oversize record is omitted without
+    // paying for a detached copy that would be dropped immediately.
+    if (eventRetainedBytes(event) > maxEventBytes) {
+      plugin.droppedEvents += 1
+      return
+    }
+    const diagnostic = diagnosticCopyOf(event)
+    plugin.events.push(diagnostic)
+    retainedEventBytes += eventRetainedBytes(diagnostic)
+    while (plugin.events.length > eventLimit || retainedEventBytes > maxEventBytes) {
+      const evicted = plugin.events.shift()
+      if (evicted === undefined) break
+      retainedEventBytes -= eventRetainedBytes(evicted)
+      plugin.droppedEvents += 1
+    }
+  }
+
+  const recordFailure = (kind: OpencodeHookKind, sessionId: string | undefined, error: unknown): void => {
+    const failure: OpencodeHookFailure =
+      sessionId === undefined
+        ? { kind, error: normalizeFailureError(error) }
+        : { kind, sessionId: detachedCopy(sessionId), error: normalizeFailureError(error) }
+    // Normalized records are capped by construction, so one failure can
+    // never exceed the budget the way one event can — no omit path needed.
+    plugin.failures.push(failure)
+    retainedFailureBytes += failureRetainedBytes(failure)
+    while (plugin.failures.length > failureLimit || retainedFailureBytes > maxFailureBytes) {
+      const evicted = plugin.failures.shift()
+      if (evicted === undefined) break
+      retainedFailureBytes -= failureRetainedBytes(evicted)
+      plugin.droppedFailures += 1
+    }
+  }
+
+  /**
+   * Release an ended session's retained payload bodies. Identity (kind,
+   * session, timestamp) stays so the boundary record remains queryable, but
+   * the content strings — the megabytes — are freed. The ledger deducts only
+   * the released before-minus-after difference: the surviving identity still
+   * retains bytes and stays counted, so repeated session ends can neither
+   * drive the ledger negative nor admit content past the configured bound.
+   * This touches only the diagnostic copies: the transport's queued
+   * originals are separate objects and still carry full content for a
+   * pending offline delivery.
+   */
+  const releaseSessionPayloads = (sessionId: string): void => {
+    for (const retained of plugin.events) {
+      if (retained.sessionId !== sessionId) continue
+      const before = eventRetainedBytes(retained)
+      delete retained.systemPrompt
+      delete retained.toolsText
+      delete retained.skills
+      retainedEventBytes -= before - eventRetainedBytes(retained)
+    }
+    if (retainedEventBytes < 0) retainedEventBytes = 0
+    const kept = plugin.failures.filter((failure) => failure.sessionId !== sessionId)
+    if (kept.length !== plugin.failures.length) {
+      plugin.failures = kept
+      retainedFailureBytes = kept.reduce((sum, failure) => sum + failureRetainedBytes(failure), 0)
+    }
   }
 
   const deliver = async (kind: OpencodeHookKind, payload: OpencodeHookPayload): Promise<void> => {
     const event: OpencodeHookEvent = { kind, ...payload, timestamp: now() }
-    plugin.events.push(event)
+    recordEvent(event)
     try {
       await withTimeout(() => emit(event), timeoutMs)
     } catch (error) {
-      plugin.failures.push({ kind, error })
+      recordFailure(kind, payload.sessionId, error)
       try {
         onError?.({ kind, error })
       } catch {
         // Swallow — a diagnostics tap must never fail the host either.
       }
     }
+    if (kind === 'session.end') releaseSessionPayloads(payload.sessionId)
   }
 
   const hook =
@@ -307,6 +590,11 @@ export type InstalledOpencodePluginTransport = {
   baseBackoffMs?: number
   /** Backoff ceiling. */
   maxBackoffMs?: number
+  /**
+   * Abort deadline per transport POST, shared by the outbox and the direct
+   * sender (F5). Defaults to 10s.
+   */
+  requestTimeoutMs?: number
   /** Injectable clock for tests; defaults to a real timer. */
   sleepFn?: (ms: number) => Promise<void>
   /** Injectable entropy for tests; defaults to `Math.random`. */
@@ -456,6 +744,7 @@ export function createInstalledOpencodePlugin(
     batchSize,
     baseBackoffMs,
     maxBackoffMs,
+    requestTimeoutMs,
     sleepFn,
     randomFn,
     evidenceLimit: evidenceLimitOption,
@@ -469,10 +758,11 @@ export function createInstalledOpencodePlugin(
     batchSize,
     baseBackoffMs,
     maxBackoffMs,
+    requestTimeoutMs,
     sleepFn,
     randomFn,
   })
-  const sender = createOtlpSender({ endpoint, fetchFn })
+  const sender = createOtlpSender({ endpoint, fetchFn, timeoutMs: requestTimeoutMs })
 
   const evidenceLimit = Math.max(1, Math.floor(evidenceLimitOption ?? DEFAULT_EVIDENCE_LIMIT))
 

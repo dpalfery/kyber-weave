@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -97,13 +97,18 @@ flowchart TD
 - **Who hosts what**: the tray spawns (or attaches to) `web --no-open` and nothing else — it
   never starts `kyber otel`. The OTLP receiver is a `ReceiverHost` child of the
   `kyberdash web` server, run only while `settings.receiverHosted` is on, and the scheduled
-  refresh/import jobs run in that server's `JobHost`.
+  refresh/import jobs run in that server's `JobHost`. `ReceiverHost` keeps at most one
+  child: a poll never spawns while a child is owned (starting or running), a probe that
+  resolves after close creates nothing, and `close()` seals the host — no later poll
+  probes or spawns — killing every owned child.
 - **One shared projection**: whichever entry fills the store — `dash refresh`, live OTLP
   ingest, or a manual `kyber build` — the derived data every surface reads is produced by the
   same `projectCanonicalStore()` projection over `buildSessions()`. There is no second
   derivation and no raw-record reporting path. The live collector's scheduler runs that
   projection on a debounced cadence (10s idle window, 10min staleness cap, 10min minimum
-  pass interval; `drain()`/`close()` bypass it) — see
+  pass interval shared across processes through `projection_last_start_ms`, one pass at
+  a time through the atomic `projection_lease` with 90s stale reclaim and 10s
+  heartbeats; `drain()`/`close()` bypass the schedule but still take the lease) — see
   [The shared canonical projection](architecture.md#the-shared-canonical-projection).
 - **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did
   may still carry the `codeburn` git remote; nothing uses it, so remove it with
@@ -139,6 +144,16 @@ There is exactly one KyberDash engine per user ([ADR 0039](../adr/0039-single-in
 and the OTLP receiver is its child, listening for OTLP over HTTP on `127.0.0.1:4318` at
 `POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. Logs enrich their
 correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)).
+
+Queue admission is bounded before anything is queued: a batch that alone exceeds the
+count or byte ceiling is refused permanently (HTTP 413 — shrink or split it, retrying
+cannot succeed), and a full backlog is shed transiently (HTTP 503 + Retry-After — the
+exporter must retry). Request bodies are capped at 64 MiB per request.
+
+Shutdown is ordered and idempotent: receiver stop, writer stop, projection drain, then
+store close. The service registers named SIGINT/SIGTERM handlers that `close()`
+removes, and concurrent closes join one shared teardown promise instead of resolving
+early, so a signal's exit chain cannot terminate the service mid-drain.
 
 The engine holds a local IPC endpoint (`~/.kyberdash/engine.sock`, a named pipe on Windows)
 and records itself in `~/.kyberdash/engine.json` (pid, executable, version, URL). The CLI and

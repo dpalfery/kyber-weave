@@ -34,6 +34,7 @@ import { promisify } from 'node:util'
 
 import { stripIdentityAttributes } from './identity.js'
 import { deriveLogId } from './log-id.js'
+import { BatchTooLargeError, WriterBackpressureError } from './writer.js'
 
 // Kept exported from here: callers outside the plugin bundle import it from the receiver.
 export { deriveLogId }
@@ -98,6 +99,28 @@ export const DEFAULT_MAX_BODY_BYTES = 64 * 1024 * 1024
 
 export type OtlpStatusCode = 'unset' | 'ok' | 'error'
 
+/**
+ * Measurement the caller already holds about the batch it hands over (F3).
+ * The receiver knows each request's wire bytes without re-serializing, so it
+ * passes them down and the writer's byte ledger stays exact on the hot path.
+ */
+export type OtlpWriteHint = {
+  bytes?: number
+}
+
+export interface OtlpSpanStore {
+  write(spans: readonly OtlpSpan[], hint?: OtlpWriteHint): void
+}
+
+export interface OtlpSignalStore extends OtlpSpanStore {
+  writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void
+}
+
+export type OtlpReceiverStore =
+  | OtlpSpanStore
+  | OtlpSignalStore
+  | { spans: OtlpSpanStore; logs: { writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void } }
+
 /** A span's OTLP status; `message` is present only when the source set one. */
 export type OtlpStatus = {
   code: OtlpStatusCode
@@ -154,18 +177,6 @@ export type OtlpLog = {
  * batching, backpressure, canonical mapping — belongs to `IngestWriter`
  * (task 6.2), which implements this against `CanonStore`.
  */
-export interface OtlpSpanStore {
-  write(spans: readonly OtlpSpan[]): void
-}
-
-export interface OtlpSignalStore extends OtlpSpanStore {
-  writeLogs(logs: readonly OtlpLog[]): void
-}
-
-export type OtlpReceiverStore =
-  | OtlpSpanStore
-  | OtlpSignalStore
-  | { spans: OtlpSpanStore; logs: { writeLogs(logs: readonly OtlpLog[]): void } }
 
 /** Default sink: keeps every decoded span in memory. */
 export class InMemorySpanStore implements OtlpSpanStore {
@@ -1400,12 +1411,29 @@ export class OtlpReceiver {
     const body = await this.readBody(req)
     if (path === OTLP_LOGS_PATH) {
       const logs = encoding === 'json' ? decodeOtlpLogJson(body.toString('utf8')) : decodeOtlpLogProtobuf(body)
-      const nested = this.store as unknown as { logs?: { writeLogs(logs: readonly OtlpLog[]): void } }
+      const nested = this.store as unknown as { logs?: { writeLogs(logs: readonly OtlpLog[], hint?: OtlpWriteHint): void } }
       const sink = nested.logs ?? (this.store as Partial<OtlpSignalStore>)
       if (typeof sink.writeLogs !== 'function') {
         throw new Error('OTLP logs require a signal-aware receiver store')
       }
-      sink.writeLogs(logs)
+      // Admission before acceptance (F3): when the backlog behind a failing
+      // store is full, shed with a precise status so the exporter backs off —
+      // never a 200 that quietly retains the batch without bound, and never
+      // a retry for a batch that could never fit.
+      if (!this.admitOrShed(res, sink, logs, { bytes: body.length })) return
+      try {
+        sink.writeLogs(logs, { bytes: body.length })
+      } catch (err) {
+        if (err instanceof BatchTooLargeError) {
+          this.shedTooLarge(res, logs.length, err)
+          return
+        }
+        if (err instanceof WriterBackpressureError) {
+          this.shed(res, logs.length, err)
+          return
+        }
+        throw err
+      }
       respondJson(res, 200, { acceptedLogs: logs.length })
       return
     }
@@ -1414,8 +1442,85 @@ export class OtlpReceiver {
     const spanSink = nested.spans !== undefined && typeof nested.spans.write === 'function'
       ? nested.spans
       : this.store as OtlpSpanStore
-    spanSink.write(spans)
+    if (!this.admitOrShed(res, spanSink, spans, { bytes: body.length })) return
+    try {
+      spanSink.write(spans, { bytes: body.length })
+    } catch (err) {
+      if (err instanceof BatchTooLargeError) {
+        this.shedTooLarge(res, spans.length, err)
+        return
+      }
+      if (err instanceof WriterBackpressureError) {
+        this.shed(res, spans.length, err)
+        return
+      }
+      throw err
+    }
     respondJson(res, 200, { acceptedSpans: spans.length })
+  }
+
+  /**
+   * The F3 pre-acceptance gate: when the store reports it cannot take the
+   * batch, answer before acceptance — 413 when the batch alone exceeds a
+   * ceiling (permanent: retrying it could never succeed), 503 + Retry-After
+   * when the backlog is transiently full. Stores without admission reporting
+   * (the in-memory default) always pass. The check and the write below run
+   * in one synchronous block with no await between them, so no other request
+   * can slip into the gap.
+   */
+  private admitOrShed(res: ServerResponse, sink: unknown, items: readonly unknown[], hint: OtlpWriteHint): boolean {
+    const admission = admissionOf(sink)
+    if (admission === null) return true
+    const verdict = admission.checkAdmission(items, hint)
+    if (verdict === 'oversize') {
+      this.shedTooLarge(
+        res,
+        items.length,
+        new BatchTooLargeError(
+          `batch of ${items.length} records exceeds the ingest backlog ceiling; shrink or split the batch`,
+        ),
+      )
+      return false
+    }
+    if (verdict === 'saturated') {
+      this.shed(
+        res,
+        items.length,
+        new WriterBackpressureError(
+          `ingest backlog is full; shedding ${items.length} records — retry the batch`,
+        ),
+      )
+      return false
+    }
+    return true
+  }
+
+  /** Shed an over-cap batch with the retryable status exporters back off on. */
+  private shed(res: ServerResponse, count: number, error: WriterBackpressureError): void {
+    this.recordOtlpFailure('OTLP_BACKPRESSURE', error.message)
+    res.setHeader('retry-after', String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))))
+    respondJson(res, 503, {
+      error: {
+        code: 'OTLP_BACKPRESSURE',
+        message: `ingest backlog is full; retry the batch (${count} records refused before acceptance)`,
+      },
+    })
+  }
+
+  /**
+   * Refuse a permanently oversize batch: retrying it could never succeed, so
+   * — unlike the transient 503 above — no Retry-After is advertised. Recorded
+   * in the error window like the 413 body-cap refusal, so an exporter with
+   * an oversized batch size is visible to the operator.
+   */
+  private shedTooLarge(res: ServerResponse, count: number, error: BatchTooLargeError): void {
+    this.recordOtlpFailure('OTLP_BATCH_TOO_LARGE', error.message)
+    respondJson(res, 413, {
+      error: {
+        code: 'OTLP_BATCH_TOO_LARGE',
+        message: `batch is larger than the ingest backlog ceiling (${count} records refused before acceptance); shrink or split the batch`,
+      },
+    })
   }
 
   private readBody(req: IncomingMessage): Promise<Buffer> {
@@ -1496,6 +1601,21 @@ export class OtlpReceiver {
       return DEFAULT_PAUSE_LEASE_MS
     }
   }
+}
+
+/**
+ * The admission-reporting subset of a receiver store (F3). `IngestWriter`
+ * implements it; stores that do not (the in-memory default, test fakes)
+ * impose no bound and always admit.
+ */
+type AdmissionChecked = {
+  checkAdmission(items: readonly unknown[], hint?: OtlpWriteHint): 'ok' | 'saturated' | 'oversize'
+}
+
+function admissionOf(store: unknown): AdmissionChecked | null {
+  if (typeof store !== 'object' || store === null) return null
+  const candidate = (store as { checkAdmission?: unknown }).checkAdmission
+  return typeof candidate === 'function' ? (store as AdmissionChecked) : null
 }
 
 function respondJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
