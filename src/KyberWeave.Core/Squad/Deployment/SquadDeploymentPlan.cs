@@ -116,6 +116,24 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
+    ///     Records the home-owned files this run wrote, for a plan that has already passed every
+    ///     preflight check.
+    /// </summary>
+    /// <param name="homeFiles">The records to persist, each digest read back from the path it names.</param>
+    /// <remarks>
+    ///     Home-owned files sit outside this plan's file mutations, so they are written by the caller
+    ///     between planning and committing. Attaching here — rather than taking them as a planning
+    ///     input — is what keeps a plan that fails preflight from describing a file the run never
+    ///     delivered: a caller only has a record to attach once a write has landed, which can only
+    ///     happen after the plan is validated.
+    /// </remarks>
+    internal void AttachHomeFiles(IReadOnlyList<SquadHomeFile> homeFiles)
+    {
+        ArgumentNullException.ThrowIfNull(homeFiles);
+        Receipt = Receipt with { HomeFiles = homeFiles };
+    }
+
+    /// <summary>
     ///     Resolves the absolute physical path where <c>file.RelativePath</c> will be written,
     ///     based on the deployment scope: for <see cref="SquadDeploymentScope.Project" /> that is
     ///     <c>PhysicalRootPath</c> (the project root) combined with the relative path unchanged;
@@ -539,7 +557,12 @@ public sealed class SquadDeploymentPlan
 
         SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, nextOwnedFiles) with
         {
-            Layout = nextLayout
+            // Carried forward, never decided here: home-owned files are written outside this plan, so
+            // attaching a record during planning would let a plan that later fails preflight describe
+            // a file no run delivered. The caller attaches what it actually wrote, and only after this
+            // plan has passed every check.
+            Layout = nextLayout,
+            HomeFiles = previousReceipt.HomeFiles
         };
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),

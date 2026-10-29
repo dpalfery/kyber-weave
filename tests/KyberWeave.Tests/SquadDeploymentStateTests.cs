@@ -19,6 +19,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 {
+    private const string GuidanceFile = SquadResponseGuidanceDeployer.FileName;
+
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
@@ -331,6 +333,230 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
 
         Assert.Contains(invalidField.Split('-')[^1], exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A global receipt records the files Squad owns in the user's home beside the files it owns in each
+    /// harness root. The record has to survive a write and a read: a receipt that lost it would make the
+    /// next update treat Squad's own guidance file as unowned and stop refreshing it.
+    /// </summary>
+    [Fact]
+    public void GlobalReceiptHomeFilesRoundTrip()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt receipt = GlobalReceiptWithHomeFiles(GuidanceHomeFile());
+
+        string json = store.SerializeReceipt(receipt);
+
+        Assert.Contains("\"homeFiles\"", json, StringComparison.Ordinal);
+        Assert.Equal(receipt.HomeFiles, store.DeserializeReceipt(json).HomeFiles);
+    }
+
+    /// <summary>
+    /// The field is additive. A receipt written before home-owned files existed has none, and a receipt
+    /// that owns none writes none, so neither an earlier CLI's receipts nor an existing deployment is
+    /// disturbed by the field's arrival.
+    /// </summary>
+    [Fact]
+    public void GlobalReceiptHomeFilesAreOmittedWhenThereAreNoneAndReadAsEmpty()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+
+        string json = store.SerializeReceipt(GlobalReceiptWithHomeFiles());
+
+        Assert.DoesNotContain("homeFiles", json, StringComparison.Ordinal);
+        Assert.Empty(store.DeserializeReceipt(json).HomeFiles);
+    }
+
+    /// <summary>
+    /// A home-file record is an ownership claim over a path beneath the user's home, so it is held to the
+    /// standard a harness file is: a global receipt to carry it, a portable path that stays inside the
+    /// root, a lowercase SHA-256 digest, and a path that appears once. Each case is refused on its own
+    /// ground, which the message names, so a check that stops running cannot hide behind another.
+    /// </summary>
+    [Theory]
+    [InlineData("project-scope", "only on a global receipt")]
+    [InlineData("instance-scope", "only on a global receipt")]
+    [InlineData("null-list", "home files are required")]
+    [InlineData("null-entry", "empty home file entry")]
+    [InlineData("parent-traversal", "is not portable")]
+    [InlineData("rooted-path", "is not portable")]
+    [InlineData("reserved-device-name", "is not portable")]
+    [InlineData("backslash-separator", "is not portable")]
+    [InlineData("short-digest", "home file digest")]
+    [InlineData("uppercase-digest", "home file digest")]
+    [InlineData("non-hex-digest", "home file digest")]
+    [InlineData("duplicate-path", "not a unique portable path")]
+    [InlineData("case-variant-duplicate", "not a unique portable path")]
+    public void SerializeReceiptHomeFilesThatBreakTheReceiptContractAreRejected(string invalidCase, string reason)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt invalid = ReceiptWithInvalidHomeFiles(invalidCase);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.SerializeReceipt(invalid));
+
+        Assert.True(
+            exception.Message.Contains(reason, StringComparison.Ordinal),
+            $"'{invalidCase}' was refused, but with '{exception.Message}' rather than a message naming '{reason}'.");
+    }
+
+    public static TheoryData<string, string, string> MalformedHomeFilesJson
+    {
+        get
+        {
+            string digest = Digest("guidance");
+            return new TheoryData<string, string, string>
+            {
+                { "object-instead-of-array", "{}", "homeFiles must be an array" },
+                { "string-instead-of-array", "\"response-guidance.md\"", "homeFiles must be an array" },
+                { "number-instead-of-array", "7", "homeFiles must be an array" },
+                { "null-instead-of-array", "null", "field 'homeFiles' cannot be null" },
+                { "null-entry", "[null]", "home file must be an object" },
+                { "string-entry", "[\"response-guidance.md\"]", "home file must be an object" },
+                { "array-entry", "[[]]", "home file must be an object" },
+                {
+                    "missing-digest",
+                    $$"""[{"relativePath":"response-guidance.md"}]""",
+                    "Missing: sha256"
+                },
+                {
+                    "missing-path",
+                    $$"""[{"sha256":"{{digest}}"}]""",
+                    "Missing: relativePath"
+                },
+                {
+                    "unknown-field",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}","target":"claude"}]""",
+                    "unknown: target"
+                },
+                {
+                    "duplicate-field",
+                    $$"""[{"relativePath":"response-guidance.md","relativePath":"other.md","sha256":"{{digest}}"}]""",
+                    "duplicate field 'relativePath'"
+                },
+                {
+                    "null-digest",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":null}]""",
+                    "field 'sha256' cannot be null"
+                },
+                {
+                    "numeric-path",
+                    $$"""[{"relativePath":5,"sha256":"{{digest}}"}]""",
+                    "JSON is invalid"
+                },
+                {
+                    "escaping-path",
+                    $$"""[{"relativePath":"../response-guidance.md","sha256":"{{digest}}"}]""",
+                    "is not portable"
+                },
+                {
+                    "invalid-digest",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":"not-a-digest"}]""",
+                    "home file digest"
+                },
+                {
+                    "duplicate-path",
+                    $$"""[{"relativePath":"response-guidance.md","sha256":"{{digest}}"},{"relativePath":"Response-Guidance.md","sha256":"{{digest}}"}]""",
+                    "not a unique portable path"
+                }
+            };
+        }
+    }
+
+    /// <summary>
+    /// The raw JSON is checked before any object is bound, so a shape the binder would quietly coerce
+    /// (a missing digest read as null, an unknown field ignored, a repeated field resolved to one value)
+    /// is refused instead of becoming an ownership record nobody wrote.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(MalformedHomeFilesJson))]
+    public void DeserializeReceiptHomeFilesWithAMalformedShapeAreRejected(
+        string malformedCase,
+        string homeFilesJson,
+        string reason)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string json = ReplaceHomeFiles(
+            store.SerializeReceipt(GlobalReceiptWithHomeFiles(GuidanceHomeFile())),
+            homeFilesJson);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(json));
+
+        Assert.True(
+            exception.Message.Contains(reason, StringComparison.Ordinal),
+            $"'{malformedCase}' was refused, but with '{exception.Message}' rather than a message naming '{reason}'.");
+    }
+
+    /// <summary>
+    /// The control for the theory above: swapping in a well-formed value leaves the document valid, so
+    /// each rejection there comes from the value it injects and not from the way the document is rebuilt.
+    /// </summary>
+    [Fact]
+    public void ReceiptHomeFilesReplacementLeavesAWellFormedDocumentValid()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt receipt = GlobalReceiptWithHomeFiles(GuidanceHomeFile());
+        string rewritten = ReplaceHomeFiles(
+            store.SerializeReceipt(receipt),
+            $"[{HomeFileJson(GuidanceFile, Digest("guidance"))}]");
+
+        Assert.Equal(receipt.HomeFiles, store.DeserializeReceipt(rewritten).HomeFiles);
+    }
+
+    /// <summary>
+    /// A property declared twice would be read as whichever occurrence the reader reaches, so an
+    /// ownership claim could hide behind an empty list. The reader refuses the repeat outright.
+    /// </summary>
+    [Fact]
+    public void DeserializeReceiptHomeFilesDeclaredTwiceAreRejected()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string twice = InsertBeforeRootClose(
+            store.SerializeReceipt(GlobalReceiptWithHomeFiles(GuidanceHomeFile())),
+            "  \"homeFiles\": []");
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(twice));
+
+        Assert.Contains("duplicate field 'homeFiles'", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only a global receipt, written on the v2 schema, can own files in the home. A receipt on the v1
+    /// schema, or one that names another scope, was never written by this code with that field, so
+    /// reading it as ownership would let a hand edit give Squad authority it never recorded.
+    /// </summary>
+    [Theory]
+    [InlineData("project-receipt-on-v1", "unknown: homeFiles")]
+    [InlineData("global-receipt-on-v1", "unknown: homeFiles")]
+    [InlineData("project-scope-on-v2", "global scope only")]
+    public void DeserializeReceiptHomeFilesOutsideAGlobalV2ReceiptAreRejected(string carrier, string reason)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string homeFiles = $"  \"homeFiles\": [{HomeFileJson(GuidanceFile, Digest("guidance"))}]";
+        string json = carrier switch
+        {
+            "project-receipt-on-v1" => InsertBeforeRootClose(store.SerializeReceipt(Receipt()), homeFiles),
+            "global-receipt-on-v1" => InsertBeforeRootClose(
+                SerializeAsLegacyV1Json(Receipt() with { Scope = SquadDeploymentScope.Global }),
+                homeFiles),
+            "project-scope-on-v2" => store
+                .SerializeReceipt(GlobalReceiptWithHomeFiles(GuidanceHomeFile()))
+                .Replace("\"scope\": \"global\"", "\"scope\": \"project\"", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(carrier), carrier, null)
+        };
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(json));
+
+        Assert.True(
+            exception.Message.Contains(reason, StringComparison.Ordinal),
+            $"'{carrier}' was refused, but with '{exception.Message}' rather than a message naming '{reason}'.");
     }
 
     /// <summary>
@@ -5931,6 +6157,86 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string newline = json.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         string duplicate = $",{newline}    {{{newline}      \"relativePath\": \".codex/agents/Conductor.toml\",{newline}      \"sha256\": \"{Digest("conductor")}\",{newline}      \"target\": \"codex\",{newline}      \"adopted\": false{newline}    }}";
         return json.Insert(insertion + 3, duplicate);
+    }
+
+    private static SquadHomeFile GuidanceHomeFile() => new(GuidanceFile, Digest("guidance"));
+
+    private static SquadReceipt GlobalReceiptWithHomeFiles(params SquadHomeFile[] homeFiles) =>
+        new SquadReceipt(
+            SquadStateStore.ReceiptSchemaV2,
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [])
+        {
+            HomeFiles = homeFiles
+        };
+
+    private static string HomeFileJson(string relativePath, string sha256) =>
+        $$"""{"relativePath":"{{relativePath}}","sha256":"{{sha256}}"}""";
+
+    /// <summary>
+    /// A receipt that breaks exactly one rule of the home-file record, built from a valid global receipt
+    /// so the only thing wrong with it is the thing the case names.
+    /// </summary>
+    private static SquadReceipt ReceiptWithInvalidHomeFiles(string invalidCase)
+    {
+        SquadHomeFile valid = GuidanceHomeFile();
+        SquadReceipt globalReceipt = GlobalReceiptWithHomeFiles(valid);
+        return invalidCase switch
+        {
+            "project-scope" => Receipt() with { HomeFiles = [valid] },
+            "instance-scope" => Receipt() with { Scope = SquadDeploymentScope.Instance, HomeFiles = [valid] },
+            "null-list" => globalReceipt with { HomeFiles = null! },
+            "null-entry" => globalReceipt with { HomeFiles = [null!] },
+            "parent-traversal" => globalReceipt with
+            {
+                HomeFiles = [valid with { RelativePath = "../response-guidance.md" }]
+            },
+            "rooted-path" => globalReceipt with
+            {
+                HomeFiles = [valid with { RelativePath = "/etc/response-guidance.md" }]
+            },
+            "reserved-device-name" => globalReceipt with
+            {
+                HomeFiles = [valid with { RelativePath = "con.md" }]
+            },
+            "backslash-separator" => globalReceipt with
+            {
+                HomeFiles = [valid with { RelativePath = "guidance\\response-guidance.md" }]
+            },
+            "short-digest" => globalReceipt with { HomeFiles = [valid with { Sha256 = "abc123" }] },
+            "uppercase-digest" => globalReceipt with
+            {
+                HomeFiles = [valid with { Sha256 = valid.Sha256.ToUpperInvariant() }]
+            },
+            "non-hex-digest" => globalReceipt with
+            {
+                HomeFiles = [valid with { Sha256 = new string('g', 64) }]
+            },
+            "duplicate-path" => globalReceipt with
+            {
+                HomeFiles = [valid, valid with { Sha256 = Digest("other") }]
+            },
+            "case-variant-duplicate" => globalReceipt with
+            {
+                HomeFiles = [valid, valid with { RelativePath = "Response-Guidance.md" }]
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(invalidCase), invalidCase, null)
+        };
+    }
+
+    /// <summary>
+    /// Swaps the value of a serialized global receipt's <c>homeFiles</c> property for raw JSON. The store
+    /// writes it as the last property, so everything from its name to the root's closing brace is its value.
+    /// </summary>
+    private static string ReplaceHomeFiles(string json, string homeFilesJson)
+    {
+        int start = json.IndexOf("\"homeFiles\":", StringComparison.Ordinal);
+        int rootClose = json.LastIndexOf('}');
+        Assert.True(start >= 0 && rootClose > start, "The fixture receipt must end with its homeFiles property.");
+        return $"{json[..start]}\"homeFiles\": {homeFilesJson}\n{json[rootClose..]}";
     }
 
     private static SquadStateStore Store(string applicationData) =>

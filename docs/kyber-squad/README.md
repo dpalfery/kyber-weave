@@ -4,12 +4,12 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 
-> **Govern a twelve-target IDE harness catalog and deploy canonical AI agent squads and skills to all twelve targets implemented today, with transactional safety.**
+> **Govern a thirteen-target IDE harness catalog and deploy canonical AI agent squads and skills to all thirteen targets implemented today, with transactional safety.**
 
 Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, Pi, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
 
@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 28 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 29 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and 28 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and 29 skills — each projecting its validated resource closure beside the rendered principal — for all thirteen registered renderers while retaining a governed thirteen-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in the lock and receipt under `~/.kyber-weave/squad/`, with a registry of project installs—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -49,12 +49,13 @@ Modifying local developer environments or repository-level agent configurations 
 
 ## Canonical, packaged, and rendered skill surfaces
 
-The canonical product contains 28 `SKILL.md` files. `code-review-loop` and `kilo-review-loop` are authored in Kyber-Squad;
+The canonical product contains 29 `SKILL.md` files. `code-review-loop`, `kilo-review-loop`, and
+`response-format` are authored in Kyber-Squad;
 every imported skill except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches
-the designated canonical copy byte for byte. It also retains 86 supplemental references, scripts, provider
-instructions, and metadata files, for 114 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 114 files and
+the designated canonical copy byte for byte. It also retains 87 supplemental references, scripts, provider
+instructions, and metadata files, for 116 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 116 files and
 preserve each retained local reference.
 
 The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -68,8 +69,8 @@ instruction, replies with the fix commit hash, resolves only the fixed threads, 
 pull request to ready.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
-24 `.github/agents/<name>.agent.md` files, 28 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 147 files total, with authored relative links resolving in the output. Every
+24 `.github/agents/<name>.agent.md` files, 29 `.github/skills/<name>/SKILL.md` files, and the
+linked resources, 149 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

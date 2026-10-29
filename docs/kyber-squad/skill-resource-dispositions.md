@@ -10,9 +10,9 @@ last-reviewed: 2026-10-27
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 86 supplemental files that sit
-beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 86 resources, a reader can answer three questions: what kind of
+This reference is the content-preservation audit for the 87 supplemental files that sit
+beside the 29 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+that, for every one of those 87 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -125,6 +125,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/python-dev/references/fact-grounded-coding.md` | procedure | retain-in-place | rendered | — | Microsoft Learn / Pylance verification procedure, the same shape as the dal-dev Prime Directive; not a host-reversible policy (D2). |
 | `skills/python-dev/references/pylance-docs.md` | technique | retain-in-place | rendered | — | Pylance tool reference; not a host-reversible policy (D2). |
 | `skills/python-dev/references/pylance-refactoring.md` | technique | retain-in-place | rendered | — | Pylance refactoring how-to; not a host-reversible policy (D2). |
+| `skills/response-format/user-guidance.md` | procedure | retain-in-place | rendered | — | The default wording for a user-facing response, linked from its `SKILL.md` and delivered beside the principal in every harness; a global squad update deploys the same content to the user's `~/.kyber-weave/response-guidance.md`, where an operator's edit overrides it. Not a host-reversible policy (D2). |
 | `skills/rust-dev/references/async-tokio.md` | technique | retain-in-place | rendered | — | Tokio runtime and task-lifecycle technique; async policy lives in `<rust-coding-standard>` (D2). |
 | `skills/rust-dev/references/cross-compilation.md` | technique | retain-in-place | rendered | — | Cross-build, rustls, and git-pinning technique; target and dependency policy lives in `<rust-coding-standard>` (D2). |
 | `skills/rust-dev/references/errors-and-boundaries.md` | technique | retain-in-place | rendered | — | Error-type and crate-boundary technique; the error policy lives in `<rust-coding-standard>` (D2). |

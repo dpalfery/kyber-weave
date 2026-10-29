@@ -26,6 +26,11 @@ two-attempt escalation limit, and the closing report. This body deliberately car
 instructions of its own — two copies of a role drift, and the skill is the copy that ships to
 every harness.
 
+**Load the `response-format` skill and follow it for every user-facing response.** The shape of
+an answer is the one thing this wrapper binds by name instead of restating: a second copy of the
+shape here would drift from the skill that owns it, and a bug-crusher answer has to read like
+every other Squad answer.
+
 The skill assumes a cheap base model on purpose: the tiering it describes works only if this
 root runs small and the investigator it spawns runs smaller. Spawn agents by name and let
 each one's own frontmatter pick its model; do not pass model overrides.

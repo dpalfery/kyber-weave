@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-28
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -113,6 +113,7 @@ docs-analysis:
 | `required-keys` | per-type matrix | Extra keys required by doc-type |
 | `catalog.component-column` | `1` | Index of the Component cell in a catalog row |
 | `catalog.owner-column` | `6` | Index of the Owner cell in a catalog row |
+| `intake` | `false` | Whether this repository opted in to the intake assessment; publishes `<intake-assessment>` in the configuration registry |
 
 ### Catalog path containment
 
@@ -213,6 +214,39 @@ rejected.
 `docs validate` reports a property pointing at nothing as `KW-CONFIG-REG-001` and a rendered
 block that no longer matches configuration as `KW-CONFIG-REG-002`, but only once a repository
 has adopted the registry — see [governance](docgraph/governance.md).
+
+### Intake assessment
+
+An `intake:` key under `ontology:` opts a repository in to the intake assessment:
+
+```yaml
+ontology:
+  intake: true
+```
+
+It publishes a second **mode** property, the way `autonomy` publishes the first. When the flag
+is set, `docs init` renders the property into the generated block of the repository root
+`AGENTS.md`:
+
+```markdown
+- **<intake-assessment>**: `enabled`
+```
+
+When the key is absent or `false`, nothing is rendered, and the property's absence is the off
+state. The default is off, so upgrading the CLI never starts an assessment in a repository that
+never asked for one.
+
+It is a value, not a path, so `docs validate` never resolves it as one
+(`KW-CONFIG-REG-001`), but a missing or wrong `<intake-assessment>` line is a stale block
+(`KW-CONFIG-REG-002`). The name is reserved: declaring `intake-assessment` under `config-reg:`
+is rejected.
+
+The rule both mode properties rest on — why a registry entry carries a kind, and why a mode
+word is exempt from the path check without any other check being relaxed — is documented in
+[mode properties](docgraph/architecture.md#mode-properties-are-not-paths). What the assessment
+asks, and what the conductor does with the property it resolves, is documented in the
+[requirements](kyber-squad/requirements.md#intake-assessment) and the
+[adoption guide](kyber-squad/onboarding.md#intake-assessment-opt-in-per-repository).
 
 ### Several documentation roots
 
