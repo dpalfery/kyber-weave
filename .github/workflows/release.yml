@@ -100,24 +100,41 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          env_json="$(gh api "repos/${REPO}/environments/release-approval" 2>/dev/null)" || {
-            echo "::error::Environment release-approval does not exist. Create it (required reviewer, main-only) before releasing."
+          # Read the environment, telling "missing" (404) from "cannot read" (403 and
+          # others) so the error names the real cause.
+          if ! env_json="$(gh api "repos/${REPO}/environments/release-approval" 2>gh-err.txt)"; then
+            if grep -q 'HTTP 404' gh-err.txt; then
+              echo "::error::Environment release-approval does not exist. Create it (required reviewer, main-only) before releasing."
+            else
+              echo "::error::Could not read environment release-approval: $(cat gh-err.txt)"
+            fi
             exit 1
-          }
+          fi
           jq -e '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)' \
             <<<"${env_json}" >/dev/null || {
             echo "::error::Environment release-approval has no required reviewer, so approve would pass with no approval."
             exit 1
           }
+          # The toggle alone is not enough: the allowed branch list must be exactly main.
           jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"${env_json}" >/dev/null || {
-            echo "::error::Environment release-approval is not limited to custom deployment branches (main)."
+            echo "::error::Environment release-approval does not use a custom deployment branch list."
             exit 1
           }
-          # build-tray still names `release` for the signing secrets, so a reviewer left
-          # there is a second prompt, not a missing gate.
-          release_json="$(gh api "repos/${REPO}/environments/release")"
-          if jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length > 0' <<<"${release_json}" >/dev/null; then
-            echo "::warning::Environment release still has a required reviewer; build-tray will prompt a second time. Remove it to get one approval."
+          policies="$(gh api "repos/${REPO}/environments/release-approval/deployment-branch-policies" \
+            --jq '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(",")')"
+          if [ "${policies}" != "branch:main" ]; then
+            echo "::error::Environment release-approval must allow only the branch main (found: ${policies:-none})."
+            exit 1
+          fi
+          # Advisory only. build-tray still names `release` for the signing secrets, so a
+          # reviewer left there is a second prompt, not a missing gate. Never fail the run
+          # on this read.
+          if release_json="$(gh api "repos/${REPO}/environments/release" 2>/dev/null)"; then
+            if jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length > 0' <<<"${release_json}" >/dev/null; then
+              echo "::warning::Environment release still has a required reviewer; build-tray will prompt a second time. Remove it to get one approval."
+            fi
+          else
+            echo "::warning::Could not read environment release to check for a second reviewer prompt."
           fi
 
   version:
