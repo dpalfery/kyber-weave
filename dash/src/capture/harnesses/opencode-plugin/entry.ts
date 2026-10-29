@@ -21,6 +21,7 @@ import { resolveContentConsent, resolveConsentPath } from './consent.js'
 import {
   OPENCODE_PLUGIN_ID,
   createInstalledOpencodePlugin,
+  detachedCopy,
   type InstalledOpencodePlugin,
   type InstalledOpencodePluginOptions,
   type OpencodeHookPayload,
@@ -43,7 +44,13 @@ export const MAX_CONTENT_CHARS = 262_144
 export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
 
 function capContent(value: string): string {
-  return value.length > MAX_CONTENT_CHARS ? `${value.slice(0, MAX_CONTENT_CHARS)}${CONTENT_TRUNCATION_MARKER}` : value
+  if (value.length <= MAX_CONTENT_CHARS) return value
+  // Detach the capped prefix into independent storage. (Untagged template
+  // results already flatten today, but that is engine behavior, not a
+  // contract: a bare `slice` or `+` keeps the original prompt's backing
+  // allocation alive behind the short length, so a ring of capped prompts
+  // would retain the full originals.)
+  return `${detachedCopy(value.slice(0, MAX_CONTENT_CHARS))}${CONTENT_TRUNCATION_MARKER}`
 }
 
 export type EntryOptions = Omit<InstalledOpencodePluginOptions, 'emit'> & {

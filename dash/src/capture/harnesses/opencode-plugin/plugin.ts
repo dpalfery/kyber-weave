@@ -262,6 +262,17 @@ const DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES = 262_144
 const MAX_FAILURE_MESSAGE_CHARS = 2_048
 
 /**
+ * Copy a string into independent storage. `slice`/`substring` on a long
+ * string keeps the parent's backing allocation alive (a V8 SlicedString), so
+ * a capped tail can retain megabytes behind a short length. A JSON
+ * round-trip allocates a fresh sequential string with identical UTF-16 code
+ * units — including lone surrogates, which a UTF-8 round-trip would replace.
+ */
+export function detachedCopy(text: string): string {
+  return JSON.parse(JSON.stringify(text)) as string
+}
+
+/**
  * Estimated retained bytes of one diagnostic event record. Every retained
  * string costs two bytes per UTF-16 unit plus a per-value overhead, and the
  * record itself carries object/array overhead — identity and metadata
@@ -293,15 +304,20 @@ function eventRetainedBytes(event: OpencodeHookEvent): number {
 /**
  * Normalize a thrown value to bounded diagnostics. Only the error name and a
  * capped message are kept; attached buffers, causes, and custom fields are
- * never retained, however small their string rendering looks. `String()` of
+ * never retained, however small their string rendering looks. Each cap is
+ * detached into independent storage: a bare `slice` would keep the original
+ * message's backing allocation alive behind the short length. `String()` of
  * the result renders the message.
  */
 function normalizeFailureError(error: unknown): OpencodeFailureDiagnostics {
   const cap = (text: string): string =>
-    text.length > MAX_FAILURE_MESSAGE_CHARS ? text.slice(0, MAX_FAILURE_MESSAGE_CHARS) : text
+    text.length > MAX_FAILURE_MESSAGE_CHARS
+      ? detachedCopy(text.slice(0, MAX_FAILURE_MESSAGE_CHARS))
+      : text
   const diagnosed = (name: string, message: string): OpencodeFailureDiagnostics => {
-    const capped = cap(message)
-    return { name, message: capped, toString: () => capped }
+    const cappedMessage = cap(message)
+    const cappedName = cap(name)
+    return { name: cappedName, message: cappedMessage, toString: () => cappedMessage }
   }
   if (typeof error === 'string') return diagnosed('Error', error)
   if (error instanceof Error) {
