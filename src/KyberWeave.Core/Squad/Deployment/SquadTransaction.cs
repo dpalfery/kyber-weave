@@ -102,6 +102,22 @@ public sealed class SquadTransaction
     /// <summary>Executes a plan and rolls it back before propagating any caught failure.</summary>
     public void Execute(SquadDeploymentPlan plan)
     {
+        Execute(plan, underLease: null);
+    }
+
+    /// <summary>Executes a plan, running <paramref name="underLease" /> once the deployment lease is held.</summary>
+    /// <param name="plan">The preflighted plan to commit.</param>
+    /// <param name="underLease">
+    ///     Work that must not interleave with another deployment of the same root. It runs after the lease
+    ///     is taken and the plan's preconditions are re-checked against the live tree, and before the
+    ///     receipt is captured, so whatever it attaches to the plan is what this transaction commits.
+    /// </param>
+    /// <remarks>
+    ///     The callback's own writes sit outside this transaction's rollback. It is for work the caller
+    ///     can classify and verify itself, such as home-owned files a plan cannot carry as file mutations.
+    /// </remarks>
+    internal void Execute(SquadDeploymentPlan plan, Action<SquadDeploymentPlan>? underLease)
+    {
         ArgumentNullException.ThrowIfNull(plan);
 
         SquadPhysicalRootIdentity currentIdentity = SquadPhysicalRootIdentity.Resolve(plan.TargetRoot);
@@ -153,6 +169,16 @@ public sealed class SquadTransaction
             ownsNewTransaction = true;
             Directory.CreateDirectory(journalDirectory);
             ValidatePreconditions(plan);
+
+            // After the preconditions so a refused plan writes nothing, and before the intent captures the
+            // receipt so the callback's attachments are the ones committed. The lease is held throughout:
+            // a second deployment of this root is refused at AcquireLease and never reaches this point.
+            if (underLease is not null)
+            {
+                underLease(plan);
+                receipt = plan.Receipt;
+            }
+
             Directory.CreateDirectory(workDirectory);
             Directory.CreateDirectory(stateDirectory);
 

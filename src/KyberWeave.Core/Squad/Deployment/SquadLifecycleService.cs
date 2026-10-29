@@ -417,21 +417,25 @@ public sealed class SquadLifecycleService
                     ModelChanges: modelChanges,
                     Warnings: RenderWarningMessages(renderResult.Warnings));
 
-            // Before the commit, after preflight. The trade that remains: a failure after this write leaves
-            // the new default in place under the old receipt. A retry of the same release adopts those
-            // bytes; a later release that ships different wording reads them as an operator edit, keeps
-            // them, and warns how to take its default.
+            // The guidance is classified, written and read back inside the transaction, once it holds the
+            // lease and has re-checked the plan against the live tree. Written any earlier, an update that
+            // then lost the lease would already have replaced a file the winner records different bytes
+            // for, and a later release would read the shipped text as an operator edit. What remains: a
+            // failure inside the commit leaves the new default on disk under the old receipt. A retry of
+            // the same release adopts those bytes; a later release that ships different wording reads them
+            // as an operator edit, keeps them, and warns how to take its default.
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
             SquadResponseGuidanceDeployer? guidanceDeployer =
                 request is { Scope: SquadDeploymentScope.Global, DryRun: false }
                     ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
                     : null;
-            SquadHomeFile? guidance = guidanceDeployer?.Deploy(previousReceipt.HomeFiles, warnings);
-            if (guidance is not null)
-                plan.AttachHomeFiles(ReplaceHomeFile(previousReceipt.HomeFiles, guidance));
 
             SquadTransaction transaction = new(_stateStore, _observer);
-            transaction.Execute(plan);
+            transaction.Execute(
+                plan,
+                guidanceDeployer is null
+                    ? null
+                    : leasedPlan => DeployGuidance(guidanceDeployer, leasedPlan, previousReceipt.HomeFiles, warnings));
 
             warnings.AddRange(transaction.Warnings);
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
@@ -616,6 +620,21 @@ public sealed class SquadLifecycleService
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Deploys the home guidance and attaches the ownership record to the plan. A guidance that could
+    ///     not be deployed attaches nothing, so the receipt keeps the records it already has.
+    /// </summary>
+    private static void DeployGuidance(
+        SquadResponseGuidanceDeployer deployer,
+        SquadDeploymentPlan plan,
+        IReadOnlyList<SquadHomeFile> previous,
+        ICollection<string> warnings)
+    {
+        SquadHomeFile? guidance = deployer.Deploy(previous, warnings);
+        if (guidance is not null)
+            plan.AttachHomeFiles(ReplaceHomeFile(previous, guidance));
     }
 
     /// <summary>

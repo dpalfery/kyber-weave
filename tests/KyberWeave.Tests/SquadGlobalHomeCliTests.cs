@@ -1095,10 +1095,137 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
+    /// Two updates can overlap, and the deployment lease is what keeps them apart. An update that cannot
+    /// take it has to have written nothing: guidance written ahead of the lease is replaced by whichever
+    /// run loses the race, under a receipt the winner commits for different bytes, and a later release
+    /// then reads the shipped text as an operator edit.
+    /// </summary>
+    [Fact]
+    public void UpdateGlobalThatCannotTakeTheHomeLeaseLeavesTheResponseGuidanceUntouched()
+    {
+        using Harness h = NewHarness("guidance-lease-held");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+
+        // An earlier release's default, recorded as what Squad deployed: the file a run that reached it
+        // would replace. Its last-write time is pinned to a moment no write can share, so a rewrite of
+        // any bytes shows.
+        string path = GuidancePath(h);
+        byte[] current = File.ReadAllBytes(path);
+        byte[] superseded = Encoding.UTF8.GetBytes(
+            "Response guidance from an earlier Kyber-Weave release, which the current release supersedes.\n");
+        RewriteRecordedDigest(h, current, superseded);
+        File.WriteAllBytes(path, superseded);
+        DateTime pinned = new(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(path, pinned);
+        Assert.True(
+            File.GetLastWriteTimeUtc(path) == pinned,
+            "The scenario requires the file system to keep the pinned last-write time.");
+
+        string leaseKey = h.Store.ResolveLeaseIdentity(h.Home, SquadDeploymentScope.Global);
+        CommandExecution refused;
+        using (SquadTransaction.AcquireLease(leaseKey))
+        {
+            refused = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+        }
+
+        AssertExit(refused, 1);
+        Assert.Contains("transaction is active", refused.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            superseded.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
+            $"An update that could not take the lease must not have replaced '{path}'.");
+        Assert.True(
+            File.GetLastWriteTimeUtc(path) == pinned,
+            $"An update that could not take the lease must not have written '{path}' at all.");
+
+        // The refusal costs nothing: with the lease free the same run succeeds and refreshes the file.
+        CommandExecution retried = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(retried, 0);
+        Assert.True(
+            current.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
+            "Once the lease is free the update must refresh the superseded default.");
+    }
+
+    /// <summary>
+    /// The lease has to cover the guidance work itself, not only the commit after it. The callback a
+    /// transaction runs for home-owned files therefore executes with the lease held, so a second
+    /// deployment of the same root is refused while it runs, and what it attaches is what is committed.
+    /// </summary>
+    [Fact]
+    public void HomeFilesAreDeployedWhileTheTransactionHoldsTheHomeLeaseAndTheirRecordIsCommitted()
+    {
+        using Harness h = NewHarness("guidance-under-lease");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadDeploymentPlan plan = PlanGlobalReceiptRewrite(h);
+        SquadHomeFile record = new(SquadResponseGuidanceDeployer.FileName, new string('a', 64));
+        string leaseKey = h.Store.ResolveLeaseIdentity(h.Home, SquadDeploymentScope.Global);
+        bool ran = false;
+
+        new SquadTransaction(h.Store).Execute(plan, leasedPlan =>
+        {
+            ran = true;
+            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+                () => SquadTransaction.AcquireLease(leaseKey).Dispose());
+            Assert.Contains("transaction is active", refused.Message, StringComparison.OrdinalIgnoreCase);
+            leasedPlan.AttachHomeFiles([record]);
+        });
+
+        Assert.True(ran, "The transaction must run the home-file callback.");
+        SquadReceipt committed = h.Store.ReadReceipt(h.Home, SquadDeploymentScope.Global)
+                                 ?? throw new InvalidOperationException("The transaction must leave a global receipt.");
+        Assert.Contains(
+            committed.HomeFiles,
+            file => file.RelativePath == record.RelativePath && file.Sha256 == record.Sha256);
+        using (SquadTransaction.AcquireLease(leaseKey))
+        {
+        }
+    }
+
+    /// <summary>
+    /// A callback that fails sits inside the transaction's cleanup, so it must leave the receipt as it
+    /// was and no half-open transaction behind: a stale journal would refuse every later run.
+    /// </summary>
+    [Fact]
+    public void AHomeFileCallbackThatFailsLeavesTheReceiptAsItWasAndNoTransactionBehind()
+    {
+        using Harness h = NewHarness("guidance-callback-fails");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        byte[] receiptBefore = File.ReadAllBytes(RequireFile(GlobalReceiptPath(h)));
+        SquadDeploymentPlan plan = PlanGlobalReceiptRewrite(h);
+
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+            new SquadTransaction(h.Store).Execute(
+                plan,
+                _ => throw new InvalidOperationException("the callback broke its contract")));
+
+        Assert.Equal("the callback broke its contract", failure.Message);
+        Assert.True(
+            receiptBefore.AsSpan().SequenceEqual(File.ReadAllBytes(GlobalReceiptPath(h))),
+            "A callback that failed before the commit must leave the receipt exactly as it was.");
+
+        // The next run neither finds an unfinished transaction nor a lease still held.
+        new SquadTransaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
+    }
+
+    /// <summary>
     /// Rewrites the global receipt the way the preset verbs do: re-plan the files already deployed
     /// through <c>CreateUpdate</c> and commit the plan, with no guidance deploy anywhere in the path.
     /// </summary>
     private static void RewriteGlobalReceiptWithoutGuidance(Harness h)
+    {
+        new SquadTransaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
+    }
+
+    /// <summary>A plan that re-plans the files already deployed over the global receipt, ready to commit.</summary>
+    private static SquadDeploymentPlan PlanGlobalReceiptRewrite(Harness h)
     {
         SquadReceipt active = h.Store.ReadReceipt(h.Home, SquadDeploymentScope.Global)
                               ?? throw new InvalidOperationException("The scenario requires a global receipt.");
@@ -1109,7 +1236,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 file.Target))
             .ToList();
 
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+        return SquadDeploymentPlan.CreateUpdate(
             h.Home,
             SquadDeploymentScope.Global,
             LockFor(UpdatedVersion),
@@ -1119,7 +1246,6 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             replaceManaged: true,
             TimeProvider.System,
             h.GlobalRoots);
-        new SquadTransaction(h.Store).Execute(plan);
     }
 
     /// <summary>The user-home guidance file, resolved from the fake home the harness owns.</summary>
