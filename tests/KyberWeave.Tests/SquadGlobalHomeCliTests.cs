@@ -665,23 +665,31 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        string path = GuidancePath(h);
 
         CommandExecution update = Capture(() =>
             UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
                 .Execute(null!, GlobalUpdate(anchor)));
 
-        Assert.StartsWith(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())),
-            Path.GetFullPath(path),
-            StringComparison.Ordinal);
+        // Pinned to this harness's own home rather than to the temp directory it happens to sit under:
+        // every fake home in this suite is beneath the temp directory, so a prefix check would pass for
+        // a guidance file deployed beside the wrong home — which is the mistake worth catching. The
+        // expected path is computed here instead of through GuidancePath, so the assertion fails if
+        // that helper and the deployer ever agree on the wrong location.
+        string expected = Path.GetFullPath(Path.Combine(h.Home, ".kyber-weave", "response-guidance.md"));
+
         AssertExit(update, 0);
         Assert.True(
-            File.Exists(path),
-            $"squad update --global must deploy the default response guidance to '{path}'.");
+            File.Exists(expected),
+            $"squad update --global must deploy the default response guidance to exactly '{expected}'.");
         Assert.False(
-            string.IsNullOrWhiteSpace(File.ReadAllText(path)),
-            $"'{path}' must carry the default response guidance, not an empty file.");
+            string.IsNullOrWhiteSpace(File.ReadAllText(expected)),
+            $"'{expected}' must carry the default response guidance, not an empty file.");
+
+        // The location assertion only discriminates if a sibling fake home would not satisfy it.
+        Assert.False(
+            File.Exists(Path.GetFullPath(Path.Combine(
+                _temp.Path, "guidance-deploy-sibling", ".kyber-weave", "response-guidance.md"))),
+            "The expected guidance path must not be satisfied by a sibling fake home.");
     }
 
     /// <summary>
