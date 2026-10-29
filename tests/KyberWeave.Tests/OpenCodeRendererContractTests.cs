@@ -440,7 +440,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         // Concrete lowering snapshots
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertPermissions(
             result,
             "architect",
@@ -601,7 +601,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .ToArray();
 
         Assert.NotEmpty(expectedSafetyNarrowed);
-        Assert.Contains("architect", expectedSafetyNarrowed);
+        Assert.DoesNotContain("architect", expectedSafetyNarrowed);
 
         IReadOnlyList<SquadDegradationRecord> safetyNarrowed = result.Degradations
             .Where(d => string.Equals(d.Code, "safety-narrowed", StringComparison.Ordinal))
