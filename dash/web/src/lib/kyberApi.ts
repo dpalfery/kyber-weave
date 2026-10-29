@@ -1578,8 +1578,35 @@ export interface KyberVersion {
   apiVersion: number
 }
 
-export function fetchKyberVersion(): Promise<KyberVersion> {
-  return fetchJson<KyberVersion>('/api/kyber/version')
+const VERSION_PATH = '/api/kyber/version'
+
+/** A 2xx version body must carry a non-empty version string and a finite API version number. */
+function isKyberVersion(value: unknown): value is KyberVersion {
+  return (
+    isRaw(value) &&
+    typeof value.version === 'string' &&
+    value.version !== '' &&
+    typeof value.apiVersion === 'number' &&
+    Number.isFinite(value.apiVersion)
+  )
+}
+
+/**
+ * Reads the engine's version. A 2xx body that is not the documented shape (or not
+ * JSON at all) is a broken engine, so it is rejected as a `KyberApiError` rather
+ * than passed on for the surface to render as `undefined` or `0.0.0`.
+ */
+export async function fetchKyberVersion(): Promise<KyberVersion> {
+  const res = await fetch(VERSION_PATH)
+  if (!res.ok) throw new KyberApiError(res.status, VERSION_PATH)
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    body = null
+  }
+  if (!isKyberVersion(body)) throw new KyberApiError(res.status, VERSION_PATH)
+  return body
 }
 
 /**

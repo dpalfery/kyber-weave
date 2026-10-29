@@ -92,7 +92,8 @@ function stubFetch(options: {
       if (reply.networkError) throw new TypeError('Failed to fetch')
       if (reply.hold) await reply.hold
       const status = reply.status ?? 200
-      return { ok: status >= 200 && status < 300, status, json: async () => reply.json ?? {} } as Response
+      // An explicit `json` (even `null`) is the body as sent; an absent one is an empty object.
+      return { ok: status >= 200 && status < 300, status, json: async () => ('json' in reply ? reply.json : {}) } as Response
     }),
   )
   return {
@@ -849,6 +850,17 @@ describe('SettingsDrawer: version line', () => {
 
     await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
     expect(versionLine().textContent).not.toContain('0.0.0')
+  })
+
+  it.each([
+    ['an empty object', {}],
+    ['null', null],
+  ])('shows unknown, never undefined, null, or a placeholder version, when the version body is %s', async (_label, body) => {
+    stubFetch({ version: () => ({ json: body }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toMatch(/undefined|null|0\.0\.0/)
   })
 
   it('requests the version exactly once when the drawer content mounts, and a status refresh does not repeat it', async () => {

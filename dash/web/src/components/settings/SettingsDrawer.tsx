@@ -14,6 +14,7 @@ import {
   type KyberCaptureRequest,
   type KyberCaptureResult,
   type KyberCaptureValue,
+  type KyberVersion,
 } from '../../lib/kyberApi.js'
 import { DashboardPortSetting } from './DashboardPortSetting.js'
 import { ATTENTION_TEXT, HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
@@ -160,6 +161,17 @@ function CheckSummary({ check }: { check: KyberCaptureCheck }) {
       {text}
     </p>
   )
+}
+
+/**
+ * The version line's words. The version is shown only when the engine reported a
+ * non-empty string; a failed or unusable answer reads as unknown, never as a
+ * placeholder, and only a request still in flight shows the loading dots.
+ */
+function versionLineText(version: { data: KyberVersion | undefined; isError: boolean }): string {
+  const reported: unknown = version.data?.version
+  if (typeof reported === 'string' && reported !== '') return `KyberDash version ${reported}`
+  return version.data === undefined && !version.isError ? 'KyberDash version …' : 'KyberDash version unknown'
 }
 
 /**
@@ -405,11 +417,7 @@ function SettingsContent() {
       <DashboardPortSetting />
 
       <p data-testid="settings-kyberdash-version" className="text-[11px] text-muted-foreground">
-        {version.data
-          ? `KyberDash version ${version.data.version}`
-          : version.isError
-            ? 'KyberDash version unknown'
-            : 'KyberDash version …'}
+        {versionLineText(version)}
       </p>
     </>
   )
