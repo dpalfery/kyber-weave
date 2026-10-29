@@ -39,12 +39,17 @@ public sealed class SquadCanonicalContentTests
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
-    /// A response never announces the format it follows. The rule is prose rather than a fixed
-    /// sentence, so it is matched as a negation about labelling, naming, or referring to the
-    /// format — not as one exact wording an author must copy.
+    /// The no-label rule: a negation, a labelling verb, and "format", all in one sentence on one line.
     /// </summary>
+    /// <remarks>
+    /// The confinement is the assertion, not a convenience. With a line break inside the window a
+    /// negation in one bullet and the word "format" in the next match each other, so the pin would pass
+    /// on prose that forbids nothing. The windows are sized to the skill's own sentence — "A response
+    /// never labels, names, mentions, or refers to the format it follows." — rather than left wide
+    /// enough to reach a neighbouring one.
+    /// </remarks>
     private static readonly Regex NoFormatLabelRule = new(
-        @"\b(?:never|must not|do not|does not)\b[^.]{0,200}\b(?:label|name|mention|tag|announce|refer)\w*\b[^.]{0,160}\bformat\b",
+        @"\b(?:never|must not|do not|does not)\b[^.!?\n]{0,60}\b(?:labels?|names?|mentions?|tags?|announces?|refers?)\b[^.!?\n]{0,30}\bformat\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>A user-home guidance file overrides the skill's default wording.</summary>
@@ -66,25 +71,25 @@ public sealed class SquadCanonicalContentTests
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
-    /// A session title is never invented. The wording is prose rather than one fixed sentence, so
-    /// it is matched as the negation about fabricating a title.
+    /// The opening of the one bullet that tells an agent it may name a session, verbatim and including
+    /// the Markdown emphasis, so the guard below is read from the instruction it governs.
     /// </summary>
-    private static readonly Regex NeverFabricateTitleRule = new(
-        @"\bnever\s+fabricate\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private const string SessionTitleBulletLead = "- **Name the session after the work**";
 
-    /// <summary>A surface invokes the skill rather than merely mentioning it.</summary>
-    private static readonly Regex LoadVerbRule = new(
-        @"\b(?:load|read|invoke|apply|follow)\w*\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    /// <summary>The condition on naming a session: only a mechanism the harness really exposes.</summary>
+    private const string SessionTitleMechanismGuard = "only where the harness exposes a confirmed way to set it";
+
+    /// <summary>The second condition: an invented title is never acceptable.</summary>
+    private const string SessionTitleFabricationGuard = "never fabricate a title";
 
     /// <summary>
-    /// A one-line invocation of the <c>response-format</c> skill: a load verb and the skill name on
-    /// the same line, so a reader can follow it rather than infer it from prose.
+    /// The invocation every surface that composes a user-facing answer carries, verbatim and with no
+    /// Markdown markers. The conductor, the bug-crusher agent, and the bug-crusher skill all state it,
+    /// and stating it identically is the point: one skill owns the shape, and a surface that paraphrases
+    /// it has started a second copy.
     /// </summary>
-    private static readonly Regex InvocationLineRule = new(
-        @"\b(?:load|read|invoke|apply|follow)\w*\b[^.\n]{0,160}\bresponse-format\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private const string ResponseFormatInvocation =
+        "Load the response-format skill and follow it for every user-facing response.";
 
     /// <summary>
     /// A specialist digest relayed to the human is presented in the response format. Either order
@@ -411,8 +416,35 @@ public sealed class SquadCanonicalContentTests
 
         Assert.True(
             NoFormatLabelRule.IsMatch(skill),
-            "The 'response-format' skill must state that a response never labels, names, or refers " +
-            "to the format it is following.");
+            "The 'response-format' skill must state, in one sentence, that a response never labels, " +
+            "names, or refers to the format it is following.");
+    }
+
+    /// <summary>
+    /// The no-label rule is only a rule if it stays inside one sentence. Prose that forbids nothing —
+    /// a negation in one bullet and the word "format" in the next — must not satisfy it, or the pin
+    /// passes on a skill whose guidance never says the format is invisible.
+    /// </summary>
+    /// <remarks>
+    /// Both controls below are ones a window that admits a line break or an exclamation mark accepts:
+    /// bullets need no full stop, and a sentence may end in "!". They are the shapes that made the
+    /// earlier rule match two unrelated statements.
+    /// </remarks>
+    [Fact]
+    public void NoFormatLabelRuleDoesNotCrossASentenceOrALineBreak()
+    {
+        Assert.False(
+            NoFormatLabelRule.IsMatch("- **Never label the answer**\n- **The format speaks for itself**\n"),
+            "A negation in one bullet and the word 'format' in the next must not satisfy the rule, " +
+            "even though neither bullet ends with a full stop.");
+        Assert.False(
+            NoFormatLabelRule.IsMatch("Never label the answer! The format speaks for itself.\n"),
+            "An exclamation mark ends the sentence as surely as a full stop, so the rule must not " +
+            "reach the next one.");
+        Assert.True(
+            NoFormatLabelRule.IsMatch(
+                "A response never labels, names, mentions, or refers to the format it follows.\n"),
+            "The rule must still match the skill's own sentence, which states it in one line.");
     }
 
     /// <summary>
@@ -465,12 +497,40 @@ public sealed class SquadCanonicalContentTests
     public void ResponseFormatUserGuidanceKeepsTheSessionTitleGuard()
     {
         string guidance = ReadResponseFormatSkill("user-guidance.md");
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
 
         Assert.True(
-            NeverFabricateTitleRule.IsMatch(guidance),
-            "The deployed default 'user-guidance.md' must keep the session-title guard the skill's " +
-            "matrix states: name the session only where a mechanism is confirmed, and never " +
-            "fabricate a title.");
+            bullet.Length > 0,
+            "The deployed default 'user-guidance.md' must carry the session-title bullet, " +
+            $"'{SessionTitleBulletLead}', on one line.");
+        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
+        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The guard is a condition on the session-title instruction, not a phrase anywhere in the file. A
+    /// default whose session-title bullet drops the condition must fail even when another bullet still
+    /// says "never fabricate", which is what the whole-file search this replaced could not tell apart.
+    /// </summary>
+    [Fact]
+    public void TheSessionTitleGuardMustSitOnTheSessionTitleBullet()
+    {
+        string unguarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} where it helps the reader.\n";
+        string guarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} {SessionTitleMechanismGuard}, and {SessionTitleFabricationGuard}.\n";
+
+        Assert.False(
+            CarriesSessionTitleGuard(unguarded),
+            "'never fabricate' in another bullet must not satisfy a session-title bullet that omits it.");
+        Assert.True(
+            CarriesSessionTitleGuard(guarded),
+            "A session-title bullet that carries both conditions must satisfy the pin.");
+        Assert.False(
+            CarriesSessionTitleGuard($"- Name the session after the work {SessionTitleMechanismGuard} and {SessionTitleFabricationGuard}.\n"),
+            "A line that is not the emphasised session-title bullet must not satisfy the pin.");
     }
 
     /// <summary>
@@ -481,21 +541,11 @@ public sealed class SquadCanonicalContentTests
     public void ConductorLoadsResponseFormatForEveryUserFacingResponse()
     {
         string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
-        string loadLine = conductor
-                              .Split('\n')
-                              .FirstOrDefault(line => line.Contains("response-format", StringComparison.Ordinal) &&
-                                                      line.Contains("user-facing",
-                                                          StringComparison.OrdinalIgnoreCase)) ??
-                          string.Empty;
 
         Assert.True(
-            loadLine.Length > 0,
-            "'agents/conductor.md' must carry an instruction line that binds the 'response-format' " +
-            "skill for every user-facing response.");
-        Assert.True(
-            LoadVerbRule.IsMatch(loadLine),
-            "The 'response-format' instruction in 'agents/conductor.md' must load the skill, not merely " +
-            "mention it.");
+            CarriesResponseFormatInvocation(conductor),
+            "'agents/conductor.md' must carry the response-format invocation verbatim, so the conductor " +
+            $"answers in the one shape the skill owns: \"{ResponseFormatInvocation}\"");
     }
 
     /// <summary>
@@ -578,9 +628,32 @@ public sealed class SquadCanonicalContentTests
         string body = File.ReadAllText(path);
 
         Assert.True(
-            InvocationLineRule.IsMatch(body),
-            $"'{relativePath}' must load the 'response-format' skill on one instruction line, so a " +
-            "bug-crusher answer is presented in the canonical shape.");
+            CarriesResponseFormatInvocation(body),
+            $"'{relativePath}' must carry the response-format invocation verbatim, so a bug-crusher " +
+            $"answer is presented in the canonical shape: \"{ResponseFormatInvocation}\"");
+    }
+
+    /// <summary>
+    /// The binding is the sentence, not the co-occurrence of a load verb and the skill name somewhere
+    /// in the same line. A surface that mentions the skill in one sentence and says "load" in another
+    /// must fail, because the instruction a reader follows is the sentence.
+    /// </summary>
+    [Fact]
+    public void TheResponseFormatInvocationMustBeTheWholeSentence()
+    {
+        Assert.False(
+            CarriesResponseFormatInvocation("Load the specialist packet.\nThe response-format skill owns the shape.\n"),
+            "A load verb in one sentence and the skill name in another must not satisfy the invocation pin.");
+        Assert.False(
+            CarriesResponseFormatInvocation("The response-format skill and follow it for every user-facing response.\n"),
+            "A sentence missing the load verb must not satisfy the invocation pin.");
+        Assert.False(
+            CarriesResponseFormatInvocation("load the response-format skill and follow it for every user-facing response.\n"),
+            "The pin is case-sensitive, so a lowercased sentence must not satisfy it.");
+        Assert.True(
+            CarriesResponseFormatInvocation(
+                "- **Load the `response-format` skill and follow it for every user-facing response.** Then continue.\n"),
+            "The sentence inside Markdown emphasis must satisfy the pin.");
     }
 
     [Fact]
@@ -1390,6 +1463,44 @@ public sealed class SquadCanonicalContentTests
             $"'{fileName}' in the canonical 'response-format' skill has no body beneath its frontmatter.");
         return read.Body;
     }
+
+    /// <summary>
+    /// The session-title bullet of a response-guidance document: the single line that opens with the
+    /// instruction to name the session after the work, or null when the document carries none.
+    /// </summary>
+    private static string? SessionTitleBullet(string guidance) =>
+        guidance
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .FirstOrDefault(line => line.TrimStart().StartsWith(SessionTitleBulletLead, StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when the session-title bullet carries both of its conditions. Scoped to that bullet because
+    /// the conditions are what constrain the instruction: a document that says "never fabricate" in
+    /// some other bullet, while its session-title instruction asks for a title unconditionally, has no
+    /// guard where the guard belongs.
+    /// </summary>
+    private static bool CarriesSessionTitleGuard(string guidance)
+    {
+        string? bullet = SessionTitleBullet(guidance);
+        return bullet is not null
+               && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
+               && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+    }
+
+    /// <summary>True when <paramref name="text"/> carries the invocation sentence, ignoring emphasis.</summary>
+    private static bool CarriesResponseFormatInvocation(string text) =>
+        WithoutEmphasis(text).Contains(ResponseFormatInvocation, StringComparison.Ordinal);
+
+    /// <summary>
+    /// <paramref name="text"/> with Markdown emphasis markers removed, so a bold or inline-code rendering
+    /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
+    /// order, the case, and the closing full stop all still have to match.
+    /// </summary>
+    private static string WithoutEmphasis(string text) =>
+        text.Replace("*", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("`", string.Empty, StringComparison.Ordinal);
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
