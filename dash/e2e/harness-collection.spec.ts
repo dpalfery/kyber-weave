@@ -228,8 +228,17 @@ test('honest-empty harness renders a visible session as unmeasurable with reason
   const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
   expect(runs.status, runs.body).toBe(200)
   expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-honest-run-1')
+  // The `opencode` harness deliberately carries both the honest-empty session
+  // and the measured one, so this case pins the coexistence: the honest run
+  // stays visible and unmeasurable while a measured sibling exists. Without
+  // this assertion "the old run is present" would still pass if the measured
+  // seed silently replaced it.
+  expect(runs.body, 'the measured sibling must not replace the honest run').toContain(
+    MEASURED_OPENCODE_RUN_ID,
+  )
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
+  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
 
   const unmeasurable = page.getByTestId('dimension-unmeasurable')
   expect(await unmeasurable.count()).toBeGreaterThan(0)
@@ -263,10 +272,20 @@ test('measured opencode round trip renders model, tokens, tool call and cost', a
   expect(runs.body, 'the measured opencode run must come from the fixture store').toContain(
     MEASURED_OPENCODE_RUN_ID,
   )
+  // The same harness also carries the honest-empty run; a measured seed that
+  // replaced it would silently delete the case the sibling test pins.
+  expect(runs.body, 'the honest-empty sibling must survive the measured seed').toContain(
+    'hc-honest-run-1',
+  )
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
-  // Runs-table Cost cell for the measured run resolves a real figure, not a dash.
-  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toContainText('$')
+  // Runs-table Cost cell for the measured run resolves the fixture's real
+  // figure. A bare `$` would also pass for `$0.00`, which the spec header
+  // forbids for a missing rate, so the exact rendered value is pinned and the
+  // missing-rate rendering is excluded.
+  const costCell = page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)
+  await expect(costCell).toContainText('$0.012')
+  await expect(costCell).not.toContainText('$0.00')
 
   await page.evaluate(
     (args) => {

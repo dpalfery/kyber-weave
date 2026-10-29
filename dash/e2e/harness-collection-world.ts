@@ -20,6 +20,12 @@ export const ZERO_RECORD_HARNESS = 'droid'
 // The honest-empty session stays byte-identical; the harness now holds both,
 // so HarnessDetail still reports unmeasurable dimensions (skill/continuity)
 // while the measured run drills into model/tokens/tools/cost.
+//
+// The shared harness id is deliberate, not an oversight: the plugin row really
+// is `opencode`, and the round trip has to prove that the same harness can
+// hold a measured run beside an honest-empty one. Both the honest-empty and the
+// measured spec cases assert the OTHER run is present, so neither can pass by
+// quietly dropping its sibling.
 export const MEASURED_OPENCODE_SESSION_ID = 'hc-opencode-measured-session-1'
 export const MEASURED_OPENCODE_RUN_ID = 'hc-opencode-measured-run-1'
 export const MEASURED_OPENCODE_EXEC_ID = 'hc-opencode-measured-exec-1'
