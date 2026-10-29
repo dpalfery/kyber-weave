@@ -37,7 +37,7 @@ class FakeSpawner {
   readonly children: FakeChild[] = []
   spawnAttempts = 0
 
-  spawn(): FakeChild {
+  spawn(_program?: string, _args?: readonly string[]): FakeChild {
     this.spawnAttempts += 1
     const child = new FakeChild()
     this.children.push(child)
@@ -52,7 +52,7 @@ class DeferredProber {
     this.resolveProbe = resolve
   })
 
-  async probe(): Promise<ReceiverProbe> {
+  async probe(_url?: string): Promise<ReceiverProbe> {
     this.calls += 1
     return this.gate
   }
