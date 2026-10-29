@@ -196,8 +196,44 @@ describe('CanonStore round trip', () => {
   })
 })
 
-describe('CanonStore Claude model-call candidate lookups', () => {
-  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
+describe('CanonStore iterateAll (streaming corpus walk)', () => {
+  it('yields every record whole, in timestamp order, matching listAll', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record({ spanId: 'span-b', timestamp: '2026-08-29T12:00:01.000Z' }),
+      record({ spanId: 'span-a', timestamp: '2026-08-29T12:00:00.000Z' }),
+      record({ spanId: 'span-c', timestamp: '2026-08-29T12:00:02.000Z' }),
+    ])
+
+    expect([...store.iterateAll()]).toEqual(store.listAll())
+    expect([...store.iterateAll()].map((r) => r.spanId)).toEqual(['span-a', 'span-b', 'span-c'])
+    store.close()
+  })
+
+  it('streams one record at a time rather than materializing the corpus', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record({ spanId: 'span-1', timestamp: '2026-08-29T12:00:00.000Z' }),
+      record({ spanId: 'span-2', timestamp: '2026-08-29T12:00:01.000Z' }),
+      record({ spanId: 'span-3', timestamp: '2026-08-29T12:00:02.000Z' }),
+    ])
+
+    // A caller that stops early leaves the rest of the corpus unread: the
+    // walk is a live cursor, not a snapshot taken up front.
+    const walker = store.iterateAll()
+    expect(walker.next().value?.spanId).toBe('span-1')
+    walker.return?.(undefined)
+    store.close()
+  })
+
+  it('yields nothing on an empty store', () => {
+    const store = new CanonStore(':memory:')
+    expect([...store.iterateAll()]).toEqual([])
+    store.close()
+  })
+})
+
+describe('CanonStore Claude model-call candidate lookups', () => {  const claudeCall = (spanId: string, overrides: Partial<CanonicalRecord> = {}) =>
     record({
       spanId,
       traceId: 'trace-claude',
