@@ -219,10 +219,16 @@ describe('CanonStore iterateAll (streaming corpus walk)', () => {
     ])
 
     // A caller that stops early leaves the rest of the corpus unread: the
-    // walk is a live cursor, not a snapshot taken up front.
+    // walk is a live cursor, not a snapshot taken up front. A snapshot
+    // implementation (e.g. yielding from `listAll`) would fail the spy
+    // below even though it passes the first-row assertion above it.
+    const listAll = vi.spyOn(store, 'listAll')
     const walker = store.iterateAll()
+    expect(Object.prototype.toString.call(walker)).toBe('[object Generator]')
     expect(walker.next().value?.spanId).toBe('span-1')
     walker.return?.(undefined)
+    expect([...store.iterateAll()].map((r) => r.spanId)).toEqual(['span-1', 'span-2', 'span-3'])
+    expect(listAll).not.toHaveBeenCalled()
     store.close()
   })
 
