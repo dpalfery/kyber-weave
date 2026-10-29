@@ -89,7 +89,7 @@ jobs:
           # The release builds and attests the SBOM every time; the PR only needs to prove
           # the generator still works when its inputs (dependency manifests, lockfiles,
           # the scripts) change.
-          sbom="$(has '(package-lock\.json|Cargo\.lock|packages\.lock\.json|\.csproj|Directory\..*\.props|^global\.json|^scripts/(generate|validate)-sbom|^\.github/workflows/release\.yml|^dash/tray/vendor/)')"
+          sbom="$(has '(package-lock\.json|Cargo\.lock|packages\.lock\.json|\.csproj|Directory\..*\.props|^global\.json|^scripts/(generate|validate)-sbom|^scripts/syft-bootstrap\.sh|^\.github/workflows/release\.yml|^dash/tray/vendor/)')"
           langs=()
           [ "${cs}" = true ] && langs+=('"csharp"')
           [ "${js}" = true ] && langs+=('"javascript-typescript"')
