@@ -1259,6 +1259,102 @@ function turnIndexOf(turn: unknown, position: number): number {
   return position
 }
 
+/** Every column `upsertSession` writes, in compared form. */
+type SessionDerivedColumns = {
+  harness: string
+  label: string | null
+  isSubagent: boolean
+  parentSession: string | null
+  agentName: string | null
+  repo: string | null
+  branch: string | null
+  started: string | null
+  ended: string | null
+  summaryJson: string | null
+  problemsCount: number | null
+  contextLimitSource: string | null
+  payload: string
+}
+
+/** A TEXT column read back: the string, null, or undefined when mistyped. */
+function storedText(value: unknown): string | null | undefined {
+  if (value === null) return null
+  return typeof value === 'string' ? value : undefined
+}
+
+/** A numeric column read back, or undefined when mistyped. */
+function storedCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * Whether the stored session row already holds these derived columns. A
+ * column that does not read back in its written shape counts as different:
+ * the guard may only skip a write it can prove redundant.
+ */
+function sessionColumnsMatch(existing: Record<string, unknown>, columns: SessionDerivedColumns): boolean {
+  // problems_count is the one nullable numeric column: NULL in the store
+  // matches only null from the derivation, never a mistyped value that
+  // merely fails to parse as a number.
+  const storedProblems = existing['problems_count']
+  const problemsMatch = storedProblems === null
+    ? columns.problemsCount === null
+    : storedCount(storedProblems) === columns.problemsCount
+  return (
+    storedText(existing['harness']) === columns.harness &&
+    storedText(existing['label']) === columns.label &&
+    storedCount(existing['is_subagent']) === (columns.isSubagent ? 1 : 0) &&
+    storedText(existing['parent_session']) === columns.parentSession &&
+    storedText(existing['agent_name']) === columns.agentName &&
+    storedText(existing['repo']) === columns.repo &&
+    storedText(existing['branch']) === columns.branch &&
+    storedText(existing['started']) === columns.started &&
+    storedText(existing['ended']) === columns.ended &&
+    storedText(existing['summary_json']) === columns.summaryJson &&
+    problemsMatch &&
+    storedText(existing['context_limit_source']) === columns.contextLimitSource &&
+    storedText(existing['payload']) === columns.payload
+  )
+}
+
+/**
+ * One turn in comparable form. Both stored shapes — the deflated bytes new
+ * writes produce and the plain JSON older rows still hold — parse to the
+ * same object, so the comparison normalizes through a re-serialization and
+ * reads those as the same turn instead of rewriting one into the other on
+ * every pass.
+ */
+function normalizedTurnJson(value: unknown): string | undefined {
+  const turn = turnObjectOf(value)
+  return turn === undefined ? undefined : JSON.stringify(turn)
+}
+
+/**
+ * Whether the stored turn rows already hold exactly these turns. Compared
+ * as a multiset keyed by index and content: the table's index is
+ * deliberately not unique and neither side promises an order, so an
+ * order-sensitive comparison would rewrite sessions whose turns merely
+ * arrived in a different sequence. Anything unreadable counts as different.
+ */
+function sessionTurnsMatch(
+  stored: Array<{ turn_index?: unknown; turn_json?: unknown }>,
+  next: Array<{ index: number; stored: CompressedColumn }>,
+): boolean {
+  if (stored.length !== next.length) return false
+  const keyOf = (index: unknown, json: string | undefined): string | undefined =>
+    typeof index === 'number' && Number.isFinite(index) && json !== undefined ? `${index}${json}` : undefined
+  const left = stored.map((row) => keyOf(row.turn_index, normalizedTurnJson(row.turn_json)))
+  const right = next.map((turn) => keyOf(turn.index, normalizedTurnJson(turn.stored)))
+  if (left.includes(undefined) || right.includes(undefined)) return false
+  const a = (left as string[]).sort()
+  const b = (right as string[]).sort()
+  // No separator between the index and the text: both sides stringify
+  // objects, so every text starts with `{`, and an index that is a digit
+  // prefix of another still differs at the first text character (`{` is no
+  // digit). Equal indexes fall through to the texts, which decide.
+  return a.every((value, position) => value === b[position])
+}
+
 /**
  * One session's turns, split out of the blob that carried them.
  *
@@ -1669,6 +1765,18 @@ export function systemPromptTextsFromContentColumns(
 
 function text(value: unknown): string {
   return value as string
+}
+
+/**
+ * How many rows a write statement changed. node:sqlite reports `changes` as
+ * a number or a bigint depending on the build; anything else (a driver that
+ * reports nothing) reads as zero so a conditional write never claims a win
+ * it cannot prove.
+ */
+function metadataChangeCount(info: { changes?: unknown }): number {
+  if (typeof info.changes === 'number') return info.changes
+  if (typeof info.changes === 'bigint') return Number(info.changes)
+  return 0
 }
 
 /**
@@ -4247,6 +4355,33 @@ export class CanonStore {
     // row it would have found in the payload.
     const context_limit_source = materializeContextLimitSource(payload)
 
+    // An unchanged re-projection writes nothing: the row and its turns are
+    // compared against what is stored, and an identical re-upsert returns
+    // before opening a transaction. Every maintenance pass re-upserts every
+    // session, so without this guard each pass rewrote every turn row even
+    // when the corpus had not moved — the dirty-page churn the shared
+    // cadence exists to bound. A mismatch in any column or turn still writes
+    // the whole session, exactly as before.
+    if (
+      this.sessionDerivedRowsAreCurrent(row.sessionId, {
+        harness: row.harness,
+        label: row.label ?? null,
+        isSubagent: row.isSubagent ?? false,
+        parentSession: row.parentSession ?? null,
+        agentName: row.agentName ?? null,
+        repo: row.repo ?? null,
+        branch: row.branch ?? null,
+        started: row.started ?? null,
+        ended: row.ended ?? null,
+        summaryJson: summary_json,
+        problemsCount: problems_count,
+        contextLimitSource: context_limit_source,
+        payload,
+      }, split.turns)
+    ) {
+      return
+    }
+
     this.atomically(() => {
       this.db
         .prepare(
@@ -4312,6 +4447,37 @@ export class CanonStore {
         for (const turn of split.turns) insertTurn.run(row.sessionId, turn.index, turn.stored)
       }
     })
+  }
+
+  /**
+   * Whether the stored derived rows already hold exactly this session.
+   *
+   * Compares every column the upsert writes plus every turn row it owns.
+   * Anything unreadable — a missing row, a mistyped column, an unparseable
+   * turn — reads as different, so the guard only ever skips a write it can
+   * prove redundant and never preserves a row it cannot read. The sync job's
+   * columns are not compared because the upsert never writes them; skipping
+   * the write preserves them exactly as writing would have.
+   */
+  private sessionDerivedRowsAreCurrent(
+    sessionId: string,
+    columns: SessionDerivedColumns,
+    turns: Array<{ index: number; stored: CompressedColumn }>,
+  ): boolean {
+    const existing = this.db
+      .prepare(
+        'SELECT harness, label, is_subagent, parent_session, agent_name, repo, branch, ' +
+          'started, ended, summary_json, problems_count, context_limit_source, payload ' +
+          'FROM session WHERE session_id = ?',
+      )
+      .get(sessionId) as Record<string, unknown> | undefined
+    if (existing === undefined) return false
+    if (!sessionColumnsMatch(existing, columns)) return false
+    const storedTurns = this.db.prepare(SESSION_TURNS_SELECT).all(sessionId) as Array<{
+      turn_index?: unknown
+      turn_json?: unknown
+    }>
+    return sessionTurnsMatch(storedTurns, turns)
   }
 
   /**
@@ -4648,6 +4814,28 @@ export class CanonStore {
             outcome: run.outcome,
           }
         : run.payload
+    const payload = payloadObj === undefined || payloadObj === null ? null : JSON.stringify(payloadObj)
+
+    // Same bargain as the session guard: every projection rebuilds every run,
+    // so an unchanged re-upsert must not dirty the row it already holds.
+    const existing = this.db.prepare(
+      'SELECT harness, label, grouping_basis, grouping_rule, working_directory, started, ended, ' +
+        'execution_count, payload FROM run WHERE run_id = ?',
+    ).get(run.runId) as Record<string, unknown> | undefined
+    if (
+      existing !== undefined &&
+      storedText(existing['harness']) === run.harness &&
+      storedText(existing['label']) === (run.label ?? null) &&
+      storedText(existing['grouping_basis']) === run.groupingBasis &&
+      storedText(existing['grouping_rule']) === (run.groupingRule ?? null) &&
+      storedText(existing['working_directory']) === (run.workingDirectory ?? null) &&
+      storedText(existing['started']) === (run.started ?? null) &&
+      storedText(existing['ended']) === (run.ended ?? null) &&
+      storedCount(existing['execution_count']) === (run.executionCount ?? 0) &&
+      storedText(existing['payload']) === payload
+    ) {
+      return
+    }
 
     this.db
       .prepare(
@@ -4666,7 +4854,7 @@ export class CanonStore {
         run.started ?? null,
         run.ended ?? null,
         run.executionCount ?? 0,
-        payloadObj === undefined || payloadObj === null ? null : JSON.stringify(payloadObj),
+        payload,
       )
   }
 
@@ -4716,6 +4904,31 @@ export class CanonStore {
    * Store one agent execution.
    */
   upsertExecution(execution: ExecutionRow): void {
+    const parentLinkageJson = JSON.stringify(execution.parentLinkage)
+    const payload = execution.payload === undefined ? null : JSON.stringify(execution.payload)
+
+    // Same bargain as the session guard: every projection rebuilds every
+    // execution, so an unchanged re-upsert must not dirty the row it holds.
+    const existing = this.db.prepare(
+      'SELECT run_id, session_id, parent_execution_id, harness, agent_name, is_root, started, ended, ' +
+        'parent_linkage_json, payload FROM execution WHERE execution_id = ?',
+    ).get(execution.executionId) as Record<string, unknown> | undefined
+    if (
+      existing !== undefined &&
+      storedText(existing['run_id']) === execution.runId &&
+      storedText(existing['session_id']) === (execution.sessionId ?? null) &&
+      storedText(existing['parent_execution_id']) === (execution.parentExecutionId ?? null) &&
+      storedText(existing['harness']) === execution.harness &&
+      storedText(existing['agent_name']) === (execution.agentName ?? null) &&
+      storedCount(existing['is_root']) === (execution.isRoot ? 1 : 0) &&
+      storedText(existing['started']) === (execution.started ?? null) &&
+      storedText(existing['ended']) === (execution.ended ?? null) &&
+      storedText(existing['parent_linkage_json']) === parentLinkageJson &&
+      storedText(existing['payload']) === payload
+    ) {
+      return
+    }
+
     this.db
       .prepare(
         `INSERT OR REPLACE INTO execution (
@@ -4733,8 +4946,8 @@ export class CanonStore {
         execution.isRoot ? 1 : 0,
         execution.started ?? null,
         execution.ended ?? null,
-        JSON.stringify(execution.parentLinkage),
-        execution.payload === undefined ? null : JSON.stringify(execution.payload),
+        parentLinkageJson,
+        payload,
       )
   }
 
@@ -5822,6 +6035,38 @@ export class CanonStore {
     this.db
       .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
       .run(key, value)
+  }
+
+  /**
+   * Write a metadata value only when it still holds `expected`.
+   *
+   * The write itself is one conditional statement, so two processes racing
+   * here serialize in SQLite and exactly one wins: the loser's write matches
+   * zero rows. The read before it is only a fast path — a value that moved
+   * between the read and the write still fails the statement's own guard.
+   * `expected: undefined` means the key must be absent; `value: null`
+   * deletes the key instead of writing it. Deleting an absent key and
+   * writing the value already there both read as success — the key ends up
+   * in the requested state either way.
+   *
+   * This is the atomic primitive the shared projection lease is built on;
+   * a read-then-write through `getMetadata`/`setMetadata` could not claim
+   * across processes without letting both sides believe they won.
+   */
+  compareAndSetMetadata(key: string, expected: string | undefined, value: string | null): boolean {
+    const current = this.getMetadata(key)
+    if (current !== expected) return false
+    if (expected === undefined) {
+      if (value === null) return true
+      const inserted = this.db
+        .prepare('INSERT INTO metadata (key, value) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM metadata WHERE key = ?)')
+        .run(key, value, key) as unknown as { changes?: unknown }
+      return metadataChangeCount(inserted) === 1
+    }
+    const written = value === null
+      ? this.db.prepare('DELETE FROM metadata WHERE key = ? AND value = ?').run(key, expected)
+      : this.db.prepare('UPDATE metadata SET value = ? WHERE key = ? AND value = ?').run(value, key, expected)
+    return metadataChangeCount(written as unknown as { changes?: unknown }) === 1
   }
 
   /**
