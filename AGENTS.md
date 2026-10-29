@@ -8,14 +8,21 @@ working in the code.
 
 ### The inner loop
 
-While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It builds
-Release with warnings-as-errors and analyzers on, runs the fast test tier, runs
-`docs validate`, and checks formatting — in a fraction of the time the declared
-suite takes, because it drops coverage collection, the `Category=Scale` envelope, and the
-slowest classes by measured cost. The fast tier is the list in
-`scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
-`scripts/fast-loop.sh --regenerate`. Of the declared gates it runs only `docs validate` and the
-whitespace formatting check.
+While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It automatically
+inspects modified workspace files and routes to targeted fast checks:
+
+- **.NET**: warm incremental build (warnings-as-errors, `AnalysisMode=all`), fast test tier,
+  `docs validate`, and whitespace formatting. Edits to `products/kyber-squad/**`, `REVIEW.md`,
+  config files, scripts, or clean working trees correctly route here. The fast tier is the list in
+  `scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
+  `scripts/fast-loop.sh --regenerate`.
+- **KyberDash (`dash/`)**: `typecheck`, `lint`, and `test:related` targeting changed TypeScript files
+  (plus tray UI `typecheck` and `test` if `dash/tray/ui/` changed).
+- **Tray Rust (`dash/tray/src-tauri/`)**: `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`.
+- **Docs (`docs/`, `*.md`)**: `docs validate .`.
+
+Use `scripts/fast-loop.sh --scoped` to run declared repository gates scoped to changed files, or
+`--full` to run all declared gates unscoped (`review gates . --all`).
 
 It is **not** evidence and must never be cited as such. It answers "did this edit break
 something"; the declared suite below answers "may this change be committed", and a
@@ -45,6 +52,14 @@ suite — the same command a review executes, so what you check is what the revi
 
 ```bash
 dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
+```
+
+Council gates are automatically scoped to changed files (`review gates .`), skipping gates
+whose `include` does not match (`KW-REVIEW-026`). For a full, unscoped repository audit
+running all 27 gates across all ecosystems (the same check `--full` runs), pass `--all`:
+
+```bash
+dotnet run --project src/KyberWeave.Cli -- review gates . --all --out artifacts/gates.json
 ```
 
 InspectCode needs the pinned tool restored once per clone (`dotnet tool restore`). It exits

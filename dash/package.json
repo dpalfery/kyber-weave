@@ -20,6 +20,7 @@
     "build:web": "cd web && npm install --no-audit --no-fund --silent && npm run build",
     "dev": "NODE_OPTIONS=--no-deprecation tsx src/launcher.ts",
     "test": "vitest run src tests scripts web/src --exclude \"src/refresh/lock*\"",
+    "test:related": "vitest related --run",
     "test:cost-isolation": "vitest run src/tools/cost-isolation.test.ts",
     "check:reachable": "node scripts/unreachable.mjs",
     "test:locks": "vitest run src/refresh/lock.test.ts src/refresh/lock-corrupt-body.test.ts src/refresh/lock-process.test.ts --pool=forks --no-file-parallelism",
