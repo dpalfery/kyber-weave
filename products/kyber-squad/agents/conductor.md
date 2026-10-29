@@ -52,6 +52,7 @@ The assessment is opt-in, and the repository decides whether it runs. Resolve it
 - Read **<intake-assessment>** from the repository root `AGENTS.md` Config Reg. The property is published only when the repository opted in.
 - **Present** — run the intake assessment for an unstated request, exactly as the intake path describes it.
 - **Absent** — skip the assessment and take the plan path directly, defaulting to a plan.
+  When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.
 
 Defect-first precedence is unchanged in both cases: a concrete failure is diagnosed before any assessment, and no assessment runs ahead of a diagnosis.
 
@@ -73,7 +74,9 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 ## Structured specialist handoffs
 
-Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. Relay every specialist digest you surface to the human in the `response-format` shape; the digest schemas themselves are unchanged. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
+Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. Relay every specialist digest you surface to the human in the `response-format` shape; the digest schemas themselves are unchanged.
+Change the presentation only: keep every status marker, id, path, count, gap, open question and evidence value exactly as the specialist returned it, and never drop, merge or paraphrase an item.
+When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf; in autonomous mode accept any item that carries a recommendation, per the autonomy contract. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user (in autonomous mode, treat it as an unresolvable `BLOCKED`).
 
 Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work within file-scope constraints, up to `review.max-concurrent-workers` (default 4, host-configurable). (Q4 reversal, issue #386.)
 

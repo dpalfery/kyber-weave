@@ -114,6 +114,21 @@ public sealed class SquadCanonicalContentTests
         @"(?:\brelay\w*\b[^.]{0,240}\bresponse[-\s]format\b)|(?:\bresponse[-\s]format\b[^.]{0,240}\brelay\w*\b)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>
+    /// The plan path taken because the assessment is off is a routing decision the user is entitled
+    /// to see and to redirect. A conductor that routes silently leaves no room for the user to ask
+    /// for a specification instead.
+    /// </summary>
+    private const string PlanPathAnnouncementSentence =
+        "When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.";
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content: every
+    /// marker, id, path, count, gap and open question the specialist returned survives the relay.
+    /// </summary>
+    private const string VerbatimRelaySentence =
+        "Change the presentation only: keep every status marker, id, path, count, gap, open question and evidence value exactly as the specialist returned it, and never drop, merge or paraphrase an item.";
+
     /// <summary>An absent intake property skips the assessment and takes the plan path directly.</summary>
     private static readonly Regex IntakeAbsentRule = new(
         @"\b(?:absent|not present|missing|omitted)\b[^.]{0,240}\b(?:skip|no assessment|without an assessment|plan path)\b",
@@ -672,6 +687,110 @@ public sealed class SquadCanonicalContentTests
             IntakePresentRule.IsMatch(conductor),
             "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that a present " +
             "property runs the assessment.");
+    }
+
+    /// <summary>
+    /// The plan path taken because the assessment is off is still a routing decision, and the user
+    /// is entitled to see it and to redirect it. A conductor that routes silently leaves no room for
+    /// the user to ask for a specification instead.
+    /// </summary>
+    [Fact]
+    public void ConductorAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string resolution = BlockContaining(conductor, "skip the assessment and take the plan path directly");
+
+        Assert.True(
+            resolution.Length > 0,
+            "'agents/conductor.md' must resolve the absent '<intake-assessment>' property in one block, " +
+            "so the announcement can be pinned to the resolution that takes the plan path.");
+        Assert.True(
+            SentenceLine(resolution, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor.md' must announce, next to the intake resolution, that a plan path " +
+            "taken because the assessment is off is said out loud and offers a specification instead: " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path is where the plan path is defined, so the announcement belongs there too: two
+    /// files that describe the same default-off routing must not disagree about telling the user.
+    /// </summary>
+    [Fact]
+    public void IntakePathAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string assessment = BlockContaining(intakePath, "The assessment is default-off.");
+
+        Assert.True(
+            assessment.Length > 0,
+            "'agents/conductor/references/intake-path.md' must record the default-off assessment in one " +
+            "block, so the announcement can be pinned to the paragraph that states the default.");
+        Assert.True(
+            SentenceLine(assessment, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must announce a plan path taken because the " +
+            "assessment is off, so it does not disagree with 'agents/conductor.md': " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content. Every
+    /// marker, id, path, count, gap and open question the specialist returned has to survive the
+    /// relay to the human.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsWithoutChangingTheirContent()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string relay = BlockContaining(conductor, "Relay every specialist digest you surface to the human");
+
+        Assert.True(
+            relay.Length > 0,
+            "'agents/conductor.md' must state the digest relay rule in one block, so the verbatim " +
+            "constraint can be pinned to the rule that governs it.");
+        Assert.True(
+            SentenceLine(relay, VerbatimRelaySentence) is not null,
+            "'agents/conductor.md' must state, in the relay rule, that only the presentation changes " +
+            "and every relayed item survives: " +
+            $"\"{VerbatimRelaySentence}\"");
+    }
+
+    /// <summary>
+    /// The conductor pins are worth having only if they can fail. A sentence wrapped across two
+    /// lines, a sentence that dropped an item, and a sentence carried in a different part of the
+    /// file must each leave the pin red.
+    /// </summary>
+    [Fact]
+    public void TheConductorPinsRejectAWrappedRewordedOrMisplacedSentence()
+    {
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line and tell\n" +
+                "the user they can ask for a specification instead; never route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement split across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line; never " +
+                "route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement that dropped the specification offer must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                "Change the presentation only: keep every status marker, id, path and count exactly as " +
+                "the specialist returned it.\n",
+                VerbatimRelaySentence) is null,
+            "A relay rule that dropped the gap, open question and evidence clauses must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + VerbatimRelaySentence + "\n",
+                    "Relay every specialist digest you surface to the human"),
+                VerbatimRelaySentence) is null,
+            "A relay constraint outside the relay rule must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(VerbatimRelaySentence + "\n", VerbatimRelaySentence) is not null,
+            "The pin must still accept the sentence exactly as the conductor states it.");
     }
 
     /// <summary>

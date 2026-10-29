@@ -24,6 +24,7 @@ Never discard an explicit plan/spec choice because diagnosis ran first. For an e
 ## Assessment
 
 The assessment is default-off. It runs only when the repository publishes **<intake-assessment>** in the Config Reg of its root `AGENTS.md`; when that property is absent, the assessment is skipped and the path continues to Promotion with the plan choice.
+When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.
 
 Only when intent is unstated, send `architect` the request or exact todo path for a read-only intake assessment. It returns:
 
