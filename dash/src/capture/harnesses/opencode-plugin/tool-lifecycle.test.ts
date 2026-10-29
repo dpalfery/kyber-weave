@@ -372,6 +372,69 @@ describe('entry setup registers tool hooks (B1)', () => {
     expect(result).not.toHaveProperty('resultText')
   })
 
+  // Review (Kilo 7): the hook's declared `success` overruled the error bucket,
+  // so a run that reported both `success: true` and an error ingested as a
+  // happy path. Failure wins: an error bucket is evidence the run failed.
+  it('lets an error bucket win over an explicit success: true', async () => {
+    const { createSetup } = await import('./entry.js')
+    const installed = createInstalledOpencodePlugin({ fetchFn: acceptingReceiver, now: () => NOW })
+    const callbacks = new Map<string, (input: never) => Promise<void>>()
+    const ctx = {
+      session: { hook: vi.fn(() => Promise.resolve({ dispose: () => Promise.resolve() })) },
+      tool: {
+        hook: vi.fn((name: string, callback: (input: never) => Promise<void>) => {
+          callbacks.set(name, callback)
+          return Promise.resolve({ dispose: () => Promise.resolve() })
+        }),
+      },
+    }
+    await createSetup({ installed, env: {}, consentPath: '/nonexistent-b1-consent.json' })(ctx as never)
+    await callbacks.get('execute.after')!({
+      sessionID: SESSION_ID,
+      tool: 'bash',
+      callID: 'call_b1_conflict',
+      success: true,
+      errors: { type: 'ExitError', message: 'exit 1' },
+    } as never)
+
+    const result = installed.plugin.events.at(-1)
+    expect(result).toMatchObject({ tool: 'bash', success: false })
+  })
+
+  // Review (Kilo 8): Number.isFinite accepted a negative or fractional turn
+  // index and forwarded it as `opencode.turn.index`. A turn index is a
+  // non-negative integer or it is not a turn index.
+  it('does not forward a negative or fractional turn index', async () => {
+    const { createSetup } = await import('./entry.js')
+    const installed = createInstalledOpencodePlugin({ fetchFn: acceptingReceiver, now: () => NOW })
+    const callbacks = new Map<string, (input: never) => Promise<void>>()
+    const ctx = {
+      session: { hook: vi.fn(() => Promise.resolve({ dispose: () => Promise.resolve() })) },
+      tool: {
+        hook: vi.fn((name: string, callback: (input: never) => Promise<void>) => {
+          callbacks.set(name, callback)
+          return Promise.resolve({ dispose: () => Promise.resolve() })
+        }),
+      },
+    }
+    await createSetup({ installed, env: {}, consentPath: '/nonexistent-b1-consent.json' })(ctx as never)
+
+    await callbacks.get('execute.before')!({
+      sessionID: SESSION_ID, tool: 'read', callID: 'call_b1_neg', turnIndex: -1,
+    } as never)
+    await callbacks.get('execute.before')!({
+      sessionID: SESSION_ID, tool: 'read', callID: 'call_b1_frac', turnIndex: 1.5,
+    } as never)
+    await callbacks.get('execute.before')!({
+      sessionID: SESSION_ID, tool: 'read', callID: 'call_b1_ok', turnIndex: 3,
+    } as never)
+
+    const events = installed.plugin.events
+    expect(events[0]).not.toHaveProperty('turnIndex')
+    expect(events[1]).not.toHaveProperty('turnIndex')
+    expect(events[2]).toMatchObject({ turnIndex: 3 })
+  })
+
   it('drops a tool input that names no session and never fails the host', async () => {
     const { createSetup } = await import('./entry.js')
     const installed = createInstalledOpencodePlugin({ fetchFn: acceptingReceiver, now: () => NOW })

@@ -225,6 +225,15 @@ function isToolErrorStatus(status: unknown): boolean {
 }
 
 /**
+ * A turn index is a non-negative integer. `Number.isFinite` alone admitted
+ * `-1` and `1.5`, which then rode `opencode.turn.index` as if they were turn
+ * numbers.
+ */
+function isTurnIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+/**
  * Map one tool lifecycle input to a hook payload. Keys follow the T0
  * skeleton (`fixtures/span-payload-skeleton.json`: `sessionID`, `messageID`,
  * the `tools` bucket's `tool`/`callID`, the `errors` bucket), tolerating the
@@ -261,7 +270,7 @@ function toToolPayload(
     ...(messageId !== undefined ? { messageId } : {}),
     ...(agent !== undefined ? { agent } : {}),
     ...(spanId !== undefined ? { spanId } : {}),
-    ...(typeof turnIndex === 'number' && Number.isFinite(turnIndex) ? { turnIndex } : {}),
+    ...(isTurnIndex(turnIndex) ? { turnIndex } : {}),
   }
   const key = callId ?? spanId
   if (phase === 'tool.execute.before') {
@@ -289,7 +298,10 @@ function toToolPayload(
     (isToolErrorStatus(errors['status']) ||
       text(errors['type']) !== undefined ||
       text(errors['message']) !== undefined)
-  payload.success = typeof explicit === 'boolean' ? explicit : !failed
+  // Failure wins over the hook's own checkbox: a run that reports both
+  // `success: true` and an error bucket failed. Otherwise an explicit
+  // boolean is the harness's answer, and its absence falls back to the bucket.
+  payload.success = failed ? false : typeof explicit === 'boolean' ? explicit : true
   const output =
     text(raw['output_text']) ?? text(raw['outputText']) ?? text(raw['output']) ?? text(raw['result'])
   if (output !== undefined) payload.resultSizeBytes = new TextEncoder().encode(output).length
