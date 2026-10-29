@@ -817,6 +817,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 .Contains(shippedDigest, StringComparison.OrdinalIgnoreCase),
             "The scenario requires a receipt that no longer records the digest of the bytes on disk.");
 
+        // Rewriting identical bytes would still satisfy a byte comparison, so the last-write time is
+        // pinned to a moment no write can share: adopting has to leave the file exactly there.
+        DateTime pinned = new(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(path, pinned);
+        Assert.True(
+            File.GetLastWriteTimeUtc(path) == pinned,
+            "The scenario requires the file system to keep the pinned last-write time.");
+
         CommandExecution second = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
 
         AssertExit(second, 0);
@@ -824,6 +832,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             shipped.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
             $"'{path}' already holds the shipped default, so the run must adopt those bytes rather than " +
             "rewrite them.");
+        Assert.True(
+            File.GetLastWriteTimeUtc(path) == pinned,
+            $"Adopting '{path}' must not write it: identical bytes written again still move the " +
+            "last-write time, and that is the only trace a rewrite leaves.");
         Assert.DoesNotContain("Kept the edited", second.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("Kept the response guidance", second.Output, StringComparison.Ordinal);
         string receipt = File.ReadAllText(RequireFile(GlobalReceiptPath(h)));
