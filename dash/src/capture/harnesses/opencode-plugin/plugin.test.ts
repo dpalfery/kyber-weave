@@ -125,7 +125,8 @@ describe('Opencode plugin skeleton hook lifecycle', () => {
 
     expect(emitted).toEqual(['span.end', 'turn.end'])
     expect(plugin.failures).toHaveLength(1)
-    expect(String(plugin.failures[0]?.error)).toMatch(/receiver down/)
+    expect(plugin.failures[0]).toMatchObject({ kind: 'span.start' })
+    expect(plugin.failures[0]?.error).toMatchObject({ name: 'Error', message: expect.stringMatching(/receiver down/) })
   })
 
   it('swallows an emitter timeout and lets the host session continue', async () => {

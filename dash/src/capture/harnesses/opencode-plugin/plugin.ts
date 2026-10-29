@@ -135,7 +135,14 @@ export type OpencodeHookFailure = {
   kind: OpencodeHookKind
   /** The session the failed delivery belonged to; absent when the payload named none. */
   sessionId?: string
-  error: unknown
+  /**
+   * Bounded normalized failure diagnostics (F2): the error name and a capped
+   * message only. The original thrown value is never retained — an error
+   * object can carry arbitrarily large attached buffers, causes, and custom
+   * fields that a string rendering would conceal. The `onError` tap receives
+   * this same normalized record; nothing retains the raw value.
+   */
+  error: { name: string; message: string }
 }
 
 /** Delivery port; production posts to the local OTLP receiver through the T5 transport outbox, tests inject a fake. */
@@ -172,19 +179,20 @@ export type OpencodePluginOptions = {
 }
 
 /**
- * Count and (approximate, UTF-16 units) byte bounds for the skeleton's
- * retained diagnostics. Failures carry arbitrary error values, so their byte
- * size is measured from a safely rendered string rather than the retained
- * value itself; the retained value is still the original error.
+ * Count and byte bounds for the skeleton's retained diagnostics. Byte budgets
+ * are enforced against a defensible retained-size estimate (UTF-16 storage is
+ * two bytes per unit across every retained string, plus per-value overhead),
+ * not a character count — a multibyte payload and a large identity cost what
+ * they actually retain.
  */
 export type OpencodeDiagnosticsBounds = {
   /** Maximum retained delivery-attempt records. Defaults to 200. */
   eventLimit?: number
   /** Maximum retained failure records. Defaults to 100. */
   failureLimit?: number
-  /** Maximum retained content bytes across events. Defaults to 1 MiB. */
+  /** Maximum estimated retained bytes across events. Defaults to 1 MiB. */
   maxEventBytes?: number
-  /** Maximum retained failure bytes. Defaults to 256 KiB. */
+  /** Maximum estimated retained bytes across failures. Defaults to 256 KiB. */
   maxFailureBytes?: number
 }
 
@@ -229,27 +237,74 @@ const DEFAULT_DIAGNOSTIC_EVENT_LIMIT = 200
 const DEFAULT_DIAGNOSTIC_FAILURE_LIMIT = 100
 const DEFAULT_DIAGNOSTIC_MAX_EVENT_BYTES = 1_048_576
 const DEFAULT_DIAGNOSTIC_MAX_FAILURE_BYTES = 262_144
+/** Cap on one normalized failure message: failures stay small by construction. */
+const MAX_FAILURE_MESSAGE_CHARS = 2_048
 
-/** Approximate retained content size of one event (UTF-16 units). */
-function eventContentBytes(event: OpencodeHookEvent): number {
-  return (
-    (event.systemPrompt?.length ?? 0) +
-    (event.toolsText?.length ?? 0) +
-    (event.skills?.reduce((sum, skill) => sum + skill.length, 0) ?? 0)
-  )
+/**
+ * Estimated retained bytes of one diagnostic event record. Every retained
+ * string costs two bytes per UTF-16 unit plus a per-value overhead, and the
+ * record itself carries object/array overhead — identity and metadata
+ * (session id, span id, timestamps, model names) count alongside content, so
+ * a large identity cannot hide beside a small prompt.
+ */
+function eventRetainedBytes(event: OpencodeHookEvent): number {
+  const stringBytes = (value: string | undefined): number =>
+    value === undefined ? 0 : value.length * 2 + 16
+  let bytes = 96
+  bytes += stringBytes(event.kind)
+  bytes += stringBytes(event.sessionId)
+  bytes += stringBytes(event.spanId)
+  bytes += stringBytes(event.messageId)
+  bytes += stringBytes(event.timestamp)
+  bytes += stringBytes(event.systemPrompt)
+  bytes += stringBytes(event.toolsText)
+  bytes += stringBytes(event.model)
+  bytes += stringBytes(event.provider)
+  bytes += stringBytes(event.agent)
+  bytes += 32
+  if (event.skills !== undefined) {
+    bytes += 32
+    for (const skill of event.skills) bytes += stringBytes(skill)
+  }
+  return bytes
 }
 
-/** Safely rendered size of a failure value, without retaining the rendering. */
-function failureBytesOf(error: unknown): number {
-  try {
-    if (typeof error === 'string') return error.length
-    if (error instanceof Error) {
-      return error.name.length + error.message.length + (error.stack?.length ?? 0) + 2
-    }
-    return String(error).length
-  } catch {
-    return 64
+/**
+ * Normalize a thrown value to bounded diagnostics. Only the error name and a
+ * capped message are kept; attached buffers, causes, and custom fields are
+ * never retained, however small their string rendering looks.
+ */
+function normalizeFailureError(error: unknown): { name: string; message: string } {
+  const cap = (text: string): string =>
+    text.length > MAX_FAILURE_MESSAGE_CHARS ? text.slice(0, MAX_FAILURE_MESSAGE_CHARS) : text
+  if (typeof error === 'string') return { name: 'Error', message: cap(error) }
+  if (error instanceof Error) {
+    const name = typeof error.name === 'string' && error.name !== '' ? error.name : 'Error'
+    return { name, message: cap(String(error.message ?? '')) }
   }
+  try {
+    return { name: 'Error', message: cap(String(error)) }
+  } catch {
+    return { name: 'Error', message: 'unrenderable failure value' }
+  }
+}
+
+/** Estimated retained bytes of one normalized failure record. */
+function failureRetainedBytes(failure: OpencodeHookFailure): number {
+  return 64 + failure.error.name.length * 2 + failure.error.message.length * 2 + 16
+}
+
+/**
+ * The diagnostic copy of an event. The transport owns the original object it
+ * was handed; the tail retains only this copy, so session-end cleanup can
+ * never mutate an event still queued for delivery.
+ */
+function diagnosticCopyOf(event: OpencodeHookEvent): OpencodeHookEvent {
+  // Spread preserves absent keys as absent (a consent-dropped field must
+  // stay absent, never `key: undefined`); only the shared array is re-owned.
+  const copy: OpencodeHookEvent = { ...event }
+  if (event.skills !== undefined) copy.skills = [...event.skills]
+  return copy
 }
 
 /**
@@ -280,34 +335,40 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
 
   /**
    * WHY oldest-first: the tail answers "what just happened" for the live
-   * session; the transport already delivered the head. At least the newest
-   * record is always kept, so a bound of one still shows the last boundary.
+   * session; the transport already delivered the head. A single record
+   * larger than the whole byte budget is omitted outright (counted as
+   * dropped) instead of evicting the entire tail — delivery still receives
+   * the full original, which the transport owns untouched.
    */
   const recordEvent = (event: OpencodeHookEvent): void => {
-    plugin.events.push(event)
-    retainedEventBytes += eventContentBytes(event)
-    while (
-      (plugin.events.length > eventLimit || retainedEventBytes > maxEventBytes) &&
-      plugin.events.length > 1
-    ) {
+    const diagnostic = diagnosticCopyOf(event)
+    if (eventRetainedBytes(diagnostic) > maxEventBytes) {
+      plugin.droppedEvents += 1
+      return
+    }
+    plugin.events.push(diagnostic)
+    retainedEventBytes += eventRetainedBytes(diagnostic)
+    while (plugin.events.length > eventLimit || retainedEventBytes > maxEventBytes) {
       const evicted = plugin.events.shift()
       if (evicted === undefined) break
-      retainedEventBytes -= eventContentBytes(evicted)
+      retainedEventBytes -= eventRetainedBytes(evicted)
       plugin.droppedEvents += 1
     }
   }
 
   const recordFailure = (kind: OpencodeHookKind, sessionId: string | undefined, error: unknown): void => {
-    const failure: OpencodeHookFailure = sessionId === undefined ? { kind, error } : { kind, sessionId, error }
+    const failure: OpencodeHookFailure =
+      sessionId === undefined
+        ? { kind, error: normalizeFailureError(error) }
+        : { kind, sessionId, error: normalizeFailureError(error) }
+    // Normalized records are capped by construction, so one failure can
+    // never exceed the budget the way one event can — no omit path needed.
     plugin.failures.push(failure)
-    retainedFailureBytes += failureBytesOf(error)
-    while (
-      (plugin.failures.length > failureLimit || retainedFailureBytes > maxFailureBytes) &&
-      plugin.failures.length > 1
-    ) {
+    retainedFailureBytes += failureRetainedBytes(failure)
+    while (plugin.failures.length > failureLimit || retainedFailureBytes > maxFailureBytes) {
       const evicted = plugin.failures.shift()
       if (evicted === undefined) break
-      retainedFailureBytes -= failureBytesOf(evicted.error)
+      retainedFailureBytes -= failureRetainedBytes(evicted)
       plugin.droppedFailures += 1
     }
   }
@@ -315,13 +376,14 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
   /**
    * Release an ended session's retained payload bodies. Identity (kind,
    * session, timestamp) stays so the boundary record remains queryable, but
-   * the content strings — the megabytes — are freed. A later boundary for a
-   * still-open session is untouched.
+   * the content strings — the megabytes — are freed. This touches only the
+   * diagnostic copies: the transport's queued originals are separate objects
+   * and still carry full content for a pending offline delivery.
    */
   const releaseSessionPayloads = (sessionId: string): void => {
     for (const retained of plugin.events) {
       if (retained.sessionId !== sessionId) continue
-      retainedEventBytes -= eventContentBytes(retained)
+      retainedEventBytes -= eventRetainedBytes(retained)
       delete retained.systemPrompt
       delete retained.toolsText
       delete retained.skills
@@ -330,7 +392,7 @@ export function createOpencodePlugin(options: OpencodePluginOptions = {}): Openc
     const kept = plugin.failures.filter((failure) => failure.sessionId !== sessionId)
     if (kept.length !== plugin.failures.length) {
       plugin.failures = kept
-      retainedFailureBytes = kept.reduce((sum, failure) => sum + failureBytesOf(failure.error), 0)
+      retainedFailureBytes = kept.reduce((sum, failure) => sum + failureRetainedBytes(failure), 0)
     }
   }
 

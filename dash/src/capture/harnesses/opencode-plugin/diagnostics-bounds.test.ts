@@ -26,7 +26,11 @@ async function fireContext(
 
 function retainedContentBytes(plugin: ReturnType<typeof createOpencodePlugin>): number {
   return plugin.events.reduce(
-    (sum, event) => sum + (event.systemPrompt?.length ?? 0) + (event.toolsText?.length ?? 0),
+    (sum, event) =>
+      sum +
+      (event.systemPrompt?.length ?? 0) * 2 +
+      (event.toolsText?.length ?? 0) * 2 +
+      (event.skills?.reduce((inner, skill) => inner + skill.length * 2, 0) ?? 0),
     0,
   )
 }
@@ -110,5 +114,90 @@ describe('Opencode plugin diagnostics are bounded (F2)', () => {
     expect(installed.plugin.events.length).toBeLessThanOrEqual(200)
     expect(installed.plugin.failures.length).toBeLessThanOrEqual(100)
     expect(retainedContentBytes(installed.plugin)).toBeLessThanOrEqual(1_048_576)
+  })
+
+  it('countsMultibyteContentAndLargeIdentitiesAsBytes', async () => {
+    const plugin = createOpencodePlugin({ now: () => NOW })
+    const unicode = 'é🎉'.repeat(2_000)
+    await plugin.context({ sessionId: `session-f2-unicode-${'s'.repeat(10_000)}`, systemPrompt: unicode })
+    const event = plugin.events.at(-1)
+    expect(event).toBeDefined()
+    // UTF-16 storage is two bytes per unit: the estimate must cover it.
+    expect(unicode.length * 2).toBeGreaterThan(unicode.length)
+    expect(retainedContentBytes(plugin)).toBeGreaterThanOrEqual(unicode.length * 2)
+    expect(retainedContentBytes(plugin)).toBeLessThanOrEqual(1_048_576)
+  })
+
+  it('omitsASingleOversizeEventButStillDeliversItWhole', async () => {
+    const delivered: Array<{ systemPrompt?: string }> = []
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      emit: (event) => {
+        delivered.push({ systemPrompt: event.systemPrompt })
+      },
+    })
+    const oversize = 'x'.repeat(700_000)
+    await plugin.context({ sessionId: 'session-f2-huge', systemPrompt: oversize })
+
+    // The tail omits the record that alone exceeds the budget ...
+    expect(plugin.events).toHaveLength(0)
+    expect(plugin.droppedEvents).toBe(1)
+    // ... while delivery still received the full original content.
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]?.systemPrompt?.length).toBe(700_000)
+  })
+
+  it('normalizesFailuresInsteadOfRetainingArbitraryErrorObjects', async () => {
+    const plugin = createOpencodePlugin({
+      now: () => NOW,
+      emit: () => {
+        const error = new Error('receiver down') as Error & { detail?: unknown }
+        error.detail = { buffer: Buffer.alloc(1_000_000), nested: { deep: [1, 2, 3] } }
+        throw error
+      },
+    })
+    await plugin.hooks['turn.start']({ sessionId: 'session-f2-errshape', turnIndex: 1 })
+
+    expect(plugin.failures).toHaveLength(1)
+    const failure = plugin.failures[0]
+    expect(failure).toMatchObject({ kind: 'turn.start', sessionId: 'session-f2-errshape' })
+    expect(failure?.error).toEqual({ name: 'Error', message: 'receiver down' })
+    // No buffer, cause, or custom field survives on the retained record.
+    expect(JSON.stringify(plugin.failures).length).toBeLessThan(1_000)
+  })
+
+  it('keepsOfflinePendingDeliveryWholeAcrossSessionEndCleanup', async () => {
+    let receiverUp = false
+    const bodies: string[] = []
+    const installed = createInstalledOpencodePlugin({
+      fetchFn: async (_url: string, init?: RequestInit) => {
+        if (!receiverUp) throw new Error('receiver down')
+        bodies.push(String(init?.body ?? ''))
+        return new Response('{}', { status: 200 })
+      },
+      sleepFn: async () => {},
+      now: () => NOW,
+    })
+    const sessionId = 'session-f2-offline-cleanup'
+    await installed.plugin.hooks['session.start']({ sessionId })
+    await installed.plugin.context({ sessionId, systemPrompt: PROMPT })
+    await installed.outbox.flushSettled()
+    expect(installed.outbox.status().queued).toBe(2)
+
+    // Session-end cleanup strips the diagnostic copies only.
+    await installed.plugin.hooks['session.end']({ sessionId })
+    expect(
+      installed.plugin.events
+        .filter((event) => event.sessionId === sessionId)
+        .every((event) => event.systemPrompt === undefined),
+    ).toBe(true)
+
+    // The pending offline delivery still carries the full original content.
+    receiverUp = true
+    await installed.outbox.drain()
+    await installed.outbox.close()
+    expect(installed.outbox.status().queued).toBe(0)
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies.join('')).toContain(PROMPT)
   })
 })
