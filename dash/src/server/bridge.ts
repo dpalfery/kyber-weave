@@ -6290,11 +6290,17 @@ export class KyberBridge {
     // so page boundaries never depend on the requested offset.
     let targetGaps: Array<Record<string, unknown>> = []
     let pageGaps: Array<Record<string, unknown>> = []
+    // Gaps counted on the page being filled, on every offset — unlike the
+    // retained pageGaps above, which stay empty off-target. Seal decisions
+    // must read this, or gap-only prefix pages never split when offset > 0
+    // and page boundaries diverge across offsets.
+    let pageGapCount = 0
     let pageIndex = 0
     let currentCount = 0
     let currentBytes = prefixLength + suffixLength
     let current: CapturedContextChunk[] = []
     let targetPage: CapturedContextChunk[] | undefined = undefined
+    const pageHasContent = (): boolean => currentCount > 0 || pageGapCount > 0
     const sealPage = (): void => {
       if (pageIndex === offset) {
         targetPage = current
@@ -6305,19 +6311,23 @@ export class KyberBridge {
       currentBytes = prefixLength + suffixLength
       current = []
       pageGaps = []
+      pageGapCount = 0
     }
     const pushGap = (gap: Record<string, unknown>): boolean => {
       const gapBytes = Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
       // A page that already holds content seals before a gap would push it
       // past the budget — gaps alone can fill a page, so a part-less-heavy
       // scope still pages instead of serving one unbounded envelope. An
-      // empty page keeps the gap: gaps are indivisible.
-      if ((currentCount > 0 || pageGaps.length > 0) && currentBytes + gapBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+      // empty page keeps the gap: gaps are indivisible. The seal reads
+      // counted content, not retained content, so prefix pages split exactly
+      // as the target walk would split them.
+      if (pageHasContent() && currentBytes + gapBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
         sealPage()
       }
       if (pageIndex === offset) {
         pageGaps.push(gap)
       }
+      pageGapCount += 1
       currentBytes += gapBytes
       // Past the target means the sealed target plus proof of more — the
       // pushed gap itself proves the walk continues.
@@ -6356,7 +6366,11 @@ export class KyberBridge {
       const chunks = this.splitCapturedParts([{ unit, parts: outcome.parts }], byteLimit)
       for (const chunk of chunks) {
         const chunkBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8')
-        if (currentCount > 0 && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+        // The first content of a page joins unconditionally; once the page
+        // holds chunks or gaps, a further chunk that would push it past the
+        // budget seals it first — including the first chunk after a
+        // gap-heavy run, which the old count-only gate let through.
+        if (pageHasContent() && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
           // Current page is full: seal it, then start the next with this chunk.
           sealPage()
           // The overflow chunk is the first of the next page. If that next
