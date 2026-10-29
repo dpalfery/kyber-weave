@@ -167,6 +167,20 @@ export class ReceiverHost {
   private wasEnabled = false
   /** Latched when a stranger holds the port, so we do not retry in a loop until it changes. */
   private portHeldByOther = false
+  /**
+   * Sealed on `close()`: no later poll probes or spawns, and a probe that
+   * resolves after the seal creates nothing.
+   */
+  private closed = false
+  /** The one in-flight poll, if any; concurrent callers share it (F6). */
+  private inflight: Promise<number | null> | null = null
+  /**
+   * Every spawned child still alive. Normally at most one: a refused probe
+   * never replaces a starting child, so the only tracked handle is never
+   * lost. Entries leave only when that child's `exited` settles — ownership
+   * runs until exit, and `close()` kills the whole set.
+   */
+  private readonly owned = new Set<JobChild>()
 
   constructor(options: ReceiverHostOptions) {
     this.store = options.store
@@ -215,8 +229,23 @@ export class ReceiverHost {
    * Probes, updates the status, and starts or stops the receiver as the setting says.
    * Returns the delay owed before the next hosting attempt, or null when none is pending -
    * which makes "not retrying in a loop" observable.
+   *
+   * Single-flight (F6): concurrent callers share one probe-and-decide pass,
+   * so two polls racing a refused answer start one child, not two.
    */
   async poll(): Promise<number | null> {
+    if (this.closed) return null
+    if (this.inflight !== null) return this.inflight
+    const running = this.doPoll()
+    this.inflight = running
+    try {
+      return await running
+    } finally {
+      if (this.inflight === running) this.inflight = null
+    }
+  }
+
+  private async doPoll(): Promise<number | null> {
     const enabled = readSetting(this.store, SETTING_KEYS.receiverHosted) === 'on'
     if (enabled !== this.wasEnabled) {
       // The user may have just stopped whatever held the port.
@@ -261,11 +290,28 @@ export class ReceiverHost {
     // how two receivers end up fighting for one port.
     if (probe !== 'refused') return null
 
+    // Sealed after close, or a previous child still owned (starting or
+    // exiting): a refused probe never replaces the only tracked handle, and a
+    // probe that resolves after close creates nothing. Startup slower than
+    // the poll interval therefore keeps one child, never a pile of them.
+    if (this.closed || this.owned.size > 0) return null
+
     try {
       const child = this.spawner.spawn(this.program, [...this.programArgs, 'otel', '--serve'])
       this.child = child
-      // A child that exits frees us to start a replacement on the next poll.
-      void child.exited.then(() => { if (this.child === child) this.child = null })
+      this.owned.add(child)
+      // Ownership runs until exit: the handle clears only when this child
+      // settles, so a still-starting child blocks any replacement.
+      void child.exited.then(
+        () => {
+          this.owned.delete(child)
+          if (this.child === child) this.child = null
+        },
+        () => {
+          this.owned.delete(child)
+          if (this.child === child) this.child = null
+        },
+      )
       this.failures = 0
       return 0
     } catch {
@@ -274,13 +320,47 @@ export class ReceiverHost {
     }
   }
 
+  /**
+   * Seal the host and stop every owned child. Kills are sent to the whole
+   * owned set (never just the latest handle), and close waits until each
+   * child exits — no post-close spawn and no orphaned live children.
+   */
   async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
     this.stopChild()
+    // Kill the whole owned set, not just the latest handle: a child that
+    // lost its handle while exiting must still be stopped.
+    for (const child of [...this.owned]) {
+      try {
+        child.kill()
+      } catch {
+        // Already gone; its `exited` settlement still releases ownership.
+      }
+    }
+    await Promise.all(
+      [...this.owned].map((child) => child.exited.then(
+        () => undefined,
+        () => undefined,
+      )),
+    )
   }
 
+  /**
+   * Signal the currently tracked child to stop. The handle clears, but the
+   * child stays in the owned set until its `exited` settles — ownership runs
+   * until exit, and the spawn guard keeps blocking while it does, so a
+   * still-starting child is never replaced or orphaned.
+   */
   private stopChild(): void {
     const child = this.child
     this.child = null
-    child?.kill()
+    if (child === null) return
+    try {
+      child.kill()
+    } catch {
+      // A child that is already gone needs no signal; its `exited`
+      // settlement still releases ownership.
+    }
   }
 }
