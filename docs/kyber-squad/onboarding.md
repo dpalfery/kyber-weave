@@ -1037,9 +1037,11 @@ deployment plan first, then writes the guidance, then commits the receipt; the d
 is one it read back from the file on disk. So a run that is refused before it can deploy — an
 unmanaged file in the way, a failed adoption check, a legacy layout — leaves your guidance exactly
 as it was, and `--dry-run` writes nothing. The one window left is a failure after the guidance was
-written and before the receipt committed: the new default stays in place, and the next
-`squad update --global` adopts that file without rewriting it and records the ownership it was
-missing.
+written and before the receipt committed: the new default stays in place. Run
+`squad update --global` again and it adopts that file without rewriting it and records the
+ownership it was missing. If a newer release has changed the default wording in the meantime,
+Squad cannot tell the file from one you edited, so it keeps it and warns; delete the file to take
+the new default.
 
 | State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
 |---|---|

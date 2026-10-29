@@ -444,8 +444,10 @@ reached with a digest a write has already produced, so a refused plan cannot des
 the run never delivered.
 
 One window remains between the write and the commit: a deployment that fails after the guidance
-write leaves the new default in place with the run failing loudly, and the next run repairs it by
-adopting bytes that already equal the shipped default. A guidance write that degrades leaves the
+write leaves the new default in place with the run failing loudly. A retry of the same release
+repairs it by adopting bytes that already equal the shipped default. A later release that ships
+different wording cannot tell those bytes from an operator edit, so it keeps the file and warns;
+deleting the file takes the new default. A guidance write that degrades leaves the
 run's exit status unchanged. The conditions that degrade rather than throw are the ones a
 filesystem, a platform path form, or a host policy can impose on an otherwise healthy run: an I/O
 failure, a permission denial, a path form the platform cannot represent, and a security policy

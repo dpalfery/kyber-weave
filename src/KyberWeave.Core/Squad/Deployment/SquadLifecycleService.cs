@@ -417,9 +417,10 @@ public sealed class SquadLifecycleService
                     ModelChanges: modelChanges,
                     Warnings: RenderWarningMessages(renderResult.Warnings));
 
-            // Before the commit, after preflight: the remaining trade is that a failure after this write
-            // leaves the new default in place with a failing run; the next run adopts those bytes, so it
-            // repairs itself rather than reporting an edit the operator never made.
+            // Before the commit, after preflight. The trade that remains: a failure after this write leaves
+            // the new default in place under the old receipt. A retry of the same release adopts those
+            // bytes; a later release that ships different wording reads them as an operator edit, keeps
+            // them, and warns how to take its default.
             List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
             SquadResponseGuidanceDeployer? guidanceDeployer =
                 request is { Scope: SquadDeploymentScope.Global, DryRun: false }
