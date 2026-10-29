@@ -1003,6 +1003,115 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             $"Expected the home state to record the SHA-256 of the deployed response guidance ('{before}').");
     }
 
+    /// <summary>
+    /// A global receipt is rewritten by more than the deployment verbs — the preset commands rewrite it
+    /// through the same plan while deploying no guidance at all. If that rewrite dropped the guidance's
+    /// ownership record, the operator's untouched default would look unowned to the next update, which
+    /// would then preserve it forever and report an edit they never made.
+    /// </summary>
+    [Fact]
+    public void GuidanceOwnershipSurvivesAReceiptRewriteThatDeploysNoGuidance()
+    {
+        using Harness h = NewHarness("guidance-preset-rewrite");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+
+        // An earlier release's default on disk, recorded as what Squad deployed: the file a later run is
+        // allowed to replace, and exactly the file a dropped record would strand.
+        string path = GuidancePath(h);
+        byte[] current = File.ReadAllBytes(path);
+        byte[] superseded = Encoding.UTF8.GetBytes(
+            "Response guidance from an earlier Kyber-Weave release, which the current release supersedes.\n");
+        RewriteRecordedDigest(h, current, superseded);
+        File.WriteAllBytes(path, superseded);
+
+        // The preset verbs' own path: rewrite the global receipt through CreateUpdate over the files
+        // already deployed, without deploying guidance.
+        RewriteGlobalReceiptWithoutGuidance(h);
+
+        Assert.True(
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h)))
+                .Contains("response-guidance.md", StringComparison.Ordinal),
+            "A receipt rewrite that deploys no guidance must carry the guidance ownership record " +
+            "forward, so the next update still knows it owns that file.");
+
+        CommandExecution refresh = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
+
+        AssertExit(refresh, 0);
+        Assert.DoesNotContain("Kept the response guidance", refresh.Output, StringComparison.Ordinal);
+        Assert.True(
+            current.AsSpan().SequenceEqual(File.ReadAllBytes(path)),
+            "After a receipt rewrite that deployed no guidance, squad update --global must still " +
+            $"recognize '{path}' as its own unmodified default and refresh it.");
+    }
+
+    /// <summary>
+    /// Uninstall keeps a receipt only when something survives it. A retained receipt must carry the
+    /// guidance record with it: the file outlives the uninstall either way, so a record dropped here
+    /// would strand it as unowned and it would never refresh again.
+    /// </summary>
+    [Fact]
+    public void UninstallGlobalThatRetainsAnEditedFileKeepsTheGuidanceOwnershipRecord()
+    {
+        using Harness h = NewHarness("guidance-uninstall-retained");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
+        string guidance = GuidancePath(h);
+        byte[] guidanceBefore = File.ReadAllBytes(guidance);
+
+        // An edited owned file survives an uninstall, which is what makes the receipt retained rather
+        // than deleted — the only uninstall outcome that writes a receipt to carry anything forward.
+        string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
+        File.WriteAllText(architect, "operator edit that uninstall must keep\n", Encoding.UTF8);
+
+        CommandExecution uninstall = Uninstall(h, renderer, anchor, global: true);
+
+        AssertExit(uninstall, 0);
+        Assert.True(
+            File.Exists(architect),
+            "The scenario requires the edited file to survive, so the receipt is retained.");
+        Assert.True(
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h)))
+                .Contains("response-guidance.md", StringComparison.Ordinal),
+            "A retained receipt must keep the guidance ownership record, or the file it describes is " +
+            "left on disk unowned.");
+        Assert.Equal(guidanceBefore, File.ReadAllBytes(guidance));
+    }
+
+    /// <summary>
+    /// Rewrites the global receipt the way the preset verbs do: re-plan the files already deployed
+    /// through <c>CreateUpdate</c> and commit the plan, with no guidance deploy anywhere in the path.
+    /// </summary>
+    private static void RewriteGlobalReceiptWithoutGuidance(Harness h)
+    {
+        SquadReceipt active = h.Store.ReadReceipt(h.Home, SquadDeploymentScope.Global)
+                              ?? throw new InvalidOperationException("The scenario requires a global receipt.");
+        List<SquadDeploymentFile> deployed = active.Files
+            .Select(file => new SquadDeploymentFile(
+                file.RelativePath,
+                File.ReadAllBytes(SquadDeploymentPlan.ResolveOwnedFilePath(active, h.Home, h.GlobalRoots, file)),
+                file.Target))
+            .ToList();
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            h.Home,
+            SquadDeploymentScope.Global,
+            LockFor(UpdatedVersion),
+            deployed,
+            active,
+            [],
+            replaceManaged: true,
+            TimeProvider.System,
+            h.GlobalRoots);
+        new SquadTransaction(h.Store).Execute(plan);
+    }
+
     /// <summary>The user-home guidance file, resolved from the fake home the harness owns.</summary>
     private static string GuidancePath(Harness h)
     {
