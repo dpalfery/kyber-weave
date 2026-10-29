@@ -6261,9 +6261,11 @@ export class KyberBridge {
    * packs 60 KB pages exactly like `splitContentPages` — but retains only the
    * requested page, counts prefix pages, and stops once the next page proves
    * more content exists or the scope ends. Tail units are never touched, so a
-   * first page never pays for a late multi-megabyte block. Gaps for decoded
-   * units ride along; undecoded tail gaps surface on their own pages, keeping
-   * eventual traversal complete without holding the corpus.
+   * first page never pays for a late multi-megabyte block. Gaps surface on
+   * the page whose units produced them and never ride later pages, so every
+   * sealed envelope holds the page budget no matter how gap-heavy the scope
+   * is; undecoded tail gaps surface on their own pages, keeping eventual
+   * traversal complete without holding the corpus.
    */
   private async collectCapturedPartsPrefix(
     db: DatabaseSync,
@@ -6283,12 +6285,44 @@ export class KyberBridge {
       `],"coverage":${JSON.stringify({ completeness: 'captured_only', gaps: [...resolvedGaps] })},"pagination":${JSON.stringify({ nextCursor: CAPTURED_CONTEXT_CURSOR_PLACEHOLDER, hasMore: true })}}`,
       'utf8',
     )
-    const streamGaps: Array<Record<string, unknown>> = []
+    // Gaps of the requested page only: earlier pages were already served
+    // theirs, and later pages re-walk to their own. Counting stays global
+    // so page boundaries never depend on the requested offset.
+    let targetGaps: Array<Record<string, unknown>> = []
+    let pageGaps: Array<Record<string, unknown>> = []
     let pageIndex = 0
     let currentCount = 0
     let currentBytes = prefixLength + suffixLength
     let current: CapturedContextChunk[] = []
     let targetPage: CapturedContextChunk[] | undefined = undefined
+    const sealPage = (): void => {
+      if (pageIndex === offset) {
+        targetPage = current
+        targetGaps = pageGaps
+      }
+      pageIndex += 1
+      currentCount = 0
+      currentBytes = prefixLength + suffixLength
+      current = []
+      pageGaps = []
+    }
+    const pushGap = (gap: Record<string, unknown>): boolean => {
+      const gapBytes = Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
+      // A page that already holds content seals before a gap would push it
+      // past the budget — gaps alone can fill a page, so a part-less-heavy
+      // scope still pages instead of serving one unbounded envelope. An
+      // empty page keeps the gap: gaps are indivisible.
+      if ((currentCount > 0 || pageGaps.length > 0) && currentBytes + gapBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+        sealPage()
+      }
+      if (pageIndex === offset) {
+        pageGaps.push(gap)
+      }
+      currentBytes += gapBytes
+      // Past the target means the sealed target plus proof of more — the
+      // pushed gap itself proves the walk continues.
+      return pageIndex > offset
+    }
     for (const unit of units) {
       if (signal?.aborted) {
         throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
@@ -6302,22 +6336,21 @@ export class KyberBridge {
           ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
           spanId: unit.spanId,
         }
-        streamGaps.push(gap)
-        // WHY counted: the served envelope carries every discovered gap, so
-        // an unbudgeted gap pushes the sealed page past the page budget.
-        // Gaps are small but unbounded in count; count each one's envelope
-        // bytes (plus its array comma) as discovered.
-        currentBytes += Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
+        // The pushed gap proves more content when the sealed target is
+        // behind us — stop without touching the tail.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
         continue
       }
       if (outcome.parts.length === 0) {
         const gap = outcome.purged
           ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
           : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId }
-        streamGaps.push(gap)
-        // WHY counted: same envelope accounting as the corrupt-column gap
-        // above — served coverage carries these bytes too.
-        currentBytes += Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
+        // Same early stop as the corrupt-column gap above.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
         continue
       }
       const chunks = this.splitCapturedParts([{ unit, parts: outcome.parts }], byteLimit)
@@ -6325,18 +6358,12 @@ export class KyberBridge {
         const chunkBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8')
         if (currentCount > 0 && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
           // Current page is full: seal it, then start the next with this chunk.
-          if (pageIndex === offset) {
-            targetPage = current
-          }
-          pageIndex += 1
-          currentCount = 0
-          currentBytes = prefixLength + suffixLength
-          current = []
+          sealPage()
           // The overflow chunk is the first of the next page. If that next
           // page is past the target, the target is sealed and more is proven
           // — stop without touching the tail.
           if (pageIndex > offset) {
-            return { page: targetPage, streamGaps, hasMore: true }
+            return { page: targetPage, streamGaps: targetGaps, hasMore: true }
           }
         }
         if (pageIndex === offset) {
@@ -6347,19 +6374,22 @@ export class KyberBridge {
           currentBytes += (currentCount > 0 ? 1 : 0) + chunkBytes
           currentCount += 1
         } else {
-          return { page: targetPage, streamGaps, hasMore: true }
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
         }
       }
     }
     // Scope ended: finalize the current page as the target or a prefix.
+    // Only the closing page's own gaps ride it — earlier pages already
+    // served theirs, so the envelope never re-pays them.
     if (pageIndex === offset) {
       targetPage = current
-      return { page: targetPage, streamGaps, hasMore: false }
+      targetGaps = pageGaps
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
     }
     if (targetPage !== undefined) {
-      return { page: targetPage, streamGaps, hasMore: false }
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
     }
-    return { page: undefined, streamGaps, hasMore: false }
+    return { page: undefined, streamGaps: targetGaps, hasMore: false }
   }
 
   private serveManifestPage(

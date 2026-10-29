@@ -283,6 +283,125 @@ describe('captured context bounded paging (F4)', () => {
     }
   })
 
+  it('serves each stream gap on exactly one page with every page in budget', async () => {
+    const fixture = createContextFixture()
+    try {
+      // The gap-budget session from the envelope test above: sixty
+      // part-less units ahead of five content turns. Walk every page:
+      // gaps must partition across pages (no redundant re-serving, no
+      // gap lost) and every sealed envelope must hold the 60KB budget.
+      const sessionId = 'gap-budget-session'
+      const base = '2026-10-24T11:00:00.000Z'
+      const at = (index: number): string =>
+        new Date(Date.parse(base) + index * 1_000).toISOString()
+      const partless = Array.from({ length: 60 }, (_, index) => {
+        const spanId = `gap-budget-empty-${index}`
+        return {
+          spanId,
+          traceId: 'trace-gap-budget-pages',
+          parentSpanId: null,
+          source: 'claude-code',
+          harness: 'claude-code',
+          sessionId,
+          name: 'llm_request',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: at(index),
+          durationMs: 5,
+          status: 'ok',
+          tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 5, reportedInput: 10, reportedOutput: 5 },
+          content: {},
+          parts: [],
+          cost: { basis: 'unknown', status: 'no_rate' },
+        }
+      })
+      const texted = Array.from({ length: 5 }, (_, index) => {
+        const spanId = `gap-budget-paged-text-${index}`
+        return {
+          spanId,
+          traceId: 'trace-gap-budget-pages',
+          parentSpanId: null,
+          source: 'claude-code',
+          harness: 'claude-code',
+          sessionId,
+          name: 'llm_request',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: at(60 + index),
+          durationMs: 5,
+          status: 'ok',
+          tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 5, reportedInput: 10, reportedOutput: 5 },
+          content: {},
+          parts: [{ part: 'conversation_history', text: `PAGED_TEXT_${'y'.repeat(14_000)}`, role: 'assistant', order: 0 }],
+          cost: { basis: 'unknown', status: 'no_rate' },
+        }
+      })
+      fixture.store.upsertMany([...partless, ...texted] as never[])
+      fixture.store.upsertSession({
+        sessionId,
+        harness: 'claude-code',
+        label: 'Gap pages',
+        isSubagent: false,
+        parentSession: null,
+        agentName: 'test-agent',
+        repo: 'fixture-repo',
+        branch: 'fixture-branch',
+        started: '2026-10-24T11:00:00.000Z',
+        ended: '2026-10-24T11:05:00.000Z',
+        payload: {
+          id: sessionId,
+          session_id: sessionId,
+          harness: 'claude-code',
+          label: 'Gap pages',
+          turns: [...partless, ...texted].map((record, index) => ({ index, spanId: record.spanId })),
+        },
+      })
+
+      const seenGapSpans: string[] = []
+      const seenTexts: string[] = []
+      let cursor: string | undefined
+      let pages = 0
+      do {
+        const response = (await fixture.bridge.analyticsCapturedContext({
+          mode: 'content',
+          target: { kind: 'session', sessionId },
+          representation: 'captured_parts',
+          byteLimit: 16_384,
+          projectionGeneration: 'projection-1',
+          ...(cursor === undefined ? {} : { cursor }),
+        })) as {
+          data?: { chunks?: Array<Record<string, unknown>> }
+          coverage?: { gaps?: Array<Record<string, unknown>> }
+          pagination?: { nextCursor?: string | null; hasMore?: boolean }
+          error?: unknown
+        }
+        expect(response.error).toBeUndefined()
+        expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThanOrEqual(60_000)
+        for (const chunk of response.data?.chunks ?? []) {
+          if (typeof chunk['text'] === 'string') seenTexts.push(chunk['text'] as string)
+        }
+        for (const gap of response.coverage?.gaps ?? []) {
+          if (typeof gap['spanId'] === 'string') seenGapSpans.push(gap['spanId'] as string)
+        }
+        cursor = typeof response.pagination?.nextCursor === 'string' ? response.pagination.nextCursor : undefined
+        pages += 1
+        expect(pages).toBeLessThan(20)
+      } while (cursor !== undefined)
+      expect(pages).toBeGreaterThan(1)
+      // No gap is served twice and none is lost: the union over pages
+      // names every part-less span exactly once.
+      expect(new Set(seenGapSpans).size).toBe(seenGapSpans.length)
+      for (let index = 0; index < 60; index += 1) {
+        expect(seenGapSpans).toContain(`gap-budget-empty-${index}`)
+      }
+      // Chunks still round-trip whole across the walk.
+      expect(seenTexts.join('')).toContain('PAGED_TEXT_')
+      expect(seenTexts.join('').length).toBeGreaterThan(5 * 14_000)
+    } finally {
+      fixture.close()
+    }
+  })
+
   it('answers cancelled for manifest and content without partial data', async () => {
     const fixture = createContextFixture()
     try {
