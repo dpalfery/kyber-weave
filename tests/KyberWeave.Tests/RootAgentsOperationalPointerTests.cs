@@ -3,9 +3,10 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins three operational facts the root <c>AGENTS.md</c> slim must keep: the .NET gate argv
-/// lives in the review catalogue, InspectCode's exit code is not the report, and CodeGraph
-/// init is preceded by both staged and unstaged diffs.
+/// Pins the operational facts the root <c>AGENTS.md</c> slim must keep: the .NET gate argv
+/// lives in the review catalogue, InspectCode's exit code is not the report, CodeGraph
+/// init is preceded by both staged and unstaged diffs, and every KyberDash row names the
+/// display layer.
 /// </summary>
 /// <remarks>
 /// Assertions match stable tokens in the hand-authored sections, not the generated Config Reg
@@ -81,6 +82,39 @@ public sealed class RootAgentsOperationalPointerTests
         Assert.True(
             exploration.Contains("git status --short", StringComparison.Ordinal),
             "The CodeGraph init instructions must still record git status --short before init.");
+    }
+
+    /// <summary>
+    /// A <c>dash/web</c> edit that follows only the architecture row never reads the
+    /// display-layer rule, so isolated feature logic can ship in the display layer.
+    /// </summary>
+    [Fact]
+    public void EveryKyberDashRowNamesTheDisplayLayer()
+    {
+        string next = Section(ReadAgents(), "## Where to go next", "## House style");
+        int rows = 0;
+        foreach (string line in next.Split('\n'))
+        {
+            if (!line.StartsWith("| KyberDash", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            rows++;
+            Assert.True(
+                line.Contains("`dash/web`", StringComparison.Ordinal)
+                    && line.Contains("`dash/tray`", StringComparison.Ordinal)
+                    && line.Contains("display layers", StringComparison.Ordinal),
+                "Each KyberDash row must say dash/web and dash/tray are display layers: " + line);
+            Assert.True(
+                line.Contains("docs/rules/kyberdash-display-layer.md", StringComparison.Ordinal),
+                "Each KyberDash row must point at docs/rules/kyberdash-display-layer.md: " + line);
+            Assert.True(
+                line.Contains("dash/AGENTS.md", StringComparison.Ordinal),
+                "Each KyberDash row must point at dash/AGENTS.md: " + line);
+        }
+
+        Assert.True(rows >= 1, "The Where to go next table has no KyberDash row.");
     }
 
     private static string ReadAgents()
