@@ -107,6 +107,19 @@ public sealed class SquadCanonicalContentTests
         "Load the response-format skill and follow it for every user-facing response.";
 
     /// <summary>
+    /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
+    /// the rule that the format is never named. A surface that uses these words to say how an answer is
+    /// arranged has started a second copy of what the <c>response-format</c> skill owns.
+    /// </summary>
+    /// <remarks>
+    /// The gaps are <c>\s+</c> so a phrase wrapped across two lines is still seen, and the text is read
+    /// without Markdown emphasis so a phrase split by <c>**</c> or backticks is seen too.
+    /// </remarks>
+    private static readonly Regex RestatedShapeRule = new(
+        @"\btitle\s+line\b|\bbottom\s+line\b|\bat\s+most\s+(?:3|three)\s+sentences\b|\bmention\s+the\s+format\b|\bannouncing\s+which\s+shape\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
     /// A specialist digest relayed to the human is presented in the response format. Either order
     /// of the two clauses in a sentence satisfies it.
     /// </summary>
@@ -931,6 +944,77 @@ public sealed class SquadCanonicalContentTests
             CarriesResponseFormatInvocation(
                 "- **Load the `response-format` skill and follow it for every user-facing response.** Then continue.\n"),
             "The sentence inside Markdown emphasis must satisfy the pin.");
+    }
+
+    /// <summary>
+    /// The shape has one home (requirement R5). A surface that spells it out again carries a second copy
+    /// that the user's own guidance file cannot reach, so an operator who replaces the wording still gets
+    /// the old shape from whichever surface restated it. A surface binds the skill by name and says only
+    /// what each response has to contain; how it is arranged is the skill's, and the operator's, to say.
+    /// </summary>
+    [Fact]
+    public void NoAgentOrSkillOutsideTheResponseFormatSkillRestatesItsShape()
+    {
+        string ownerRoot = Path.Combine(ProductRoot, "skills", "response-format") + Path.DirectorySeparatorChar;
+        string[] surfaces = Directory
+            .EnumerateFiles(Path.Combine(ProductRoot, "agents"), "*.md", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(ProductRoot, "skills"),
+                "*.md",
+                SearchOption.AllDirectories))
+            .Where(path => !path.StartsWith(ownerRoot, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] restatements = surfaces
+            .SelectMany(path => RestatedShapeHits(RelativeSourcePath(path), File.ReadAllText(path)))
+            .ToArray();
+
+        Assert.NotEmpty(surfaces);
+        Assert.True(
+            restatements.Length == 0,
+            "These agent and skill bodies restate the shape the 'response-format' skill owns, so a user's " +
+            "own guidance file cannot change it there. Keep the invocation sentence and what the response " +
+            $"must contain, and leave the arrangement to the skill:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, restatements));
+    }
+
+    /// <summary>
+    /// The restatement pin is worth having only if it can fail. It has to see the shape in the skill that
+    /// owns it, in each way the bug-crusher skill once spelled it out, and across a line wrap, and it has
+    /// to let through a surface that only binds the skill by name.
+    /// </summary>
+    [Fact]
+    public void TheRestatedShapePinSeesEveryWayTheShapeIsSpelledOut()
+    {
+        Assert.True(
+            RestatesTheShape(ReadResponseFormatSkill("SKILL.md")),
+            "The pin must see the shape in the skill that owns it; a detector blind to its owner is blind everywhere.");
+        Assert.True(
+            RestatesTheShape(
+                "Each opens with a title line naming the work, states the bottom line in at most 3 sentences."),
+            "The title line and the sentence cap are the shape and must be seen.");
+        Assert.True(
+            RestatesTheShape("Close with a bottom line of at most three sentences."),
+            "A cap spelled out in words must be seen as well as one written as a digit.");
+        Assert.True(
+            RestatesTheShape("The grouped questions are bullets, with the title and bottom\nline above them."),
+            "A phrase wrapped across two lines must still be seen.");
+        Assert.True(
+            RestatesTheShape("Never tag, header, or otherwise mention the **format** in the report."),
+            "The never-name-it rule is the skill's too, and emphasis inside it must not hide it.");
+        Assert.True(
+            RestatesTheShape("The reader should see a well-shaped answer, not an agent announcing which shape it chose."),
+            "The reason given for the never-name-it rule is a restatement of it.");
+        Assert.False(
+            RestatesTheShape("Load the `response-format` skill and follow it for every user-facing response."),
+            "The invocation sentence is the binding and must not be flagged.");
+        Assert.False(
+            RestatesTheShape(
+                "The shape of an answer is the one thing this wrapper binds by name instead of restating."),
+            "A surface that says it does not restate the shape must not be flagged for saying so.");
+        Assert.False(
+            RestatesTheShape("- **Summary**: the problem and the outcome, in one to three sentences; why more than how."),
+            "The length of a pull request summary is another artifact's rule, not the shape of a response.");
     }
 
     [Fact]
@@ -1768,6 +1852,25 @@ public sealed class SquadCanonicalContentTests
     /// <summary>True when <paramref name="text"/> carries the invocation sentence, ignoring emphasis.</summary>
     private static bool CarriesResponseFormatInvocation(string text) =>
         WithoutEmphasis(text).Contains(ResponseFormatInvocation, StringComparison.Ordinal);
+
+    /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
+    private static bool RestatesTheShape(string text) =>
+        RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+
+    /// <summary>
+    /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
+    /// Emphasis markers are removed without touching a newline, so the line numbers still count the
+    /// lines of the file as written.
+    /// </summary>
+    private static IEnumerable<string> RestatedShapeHits(string relativePath, string text)
+    {
+        string plain = WithoutEmphasis(text);
+        foreach (Match match in RestatedShapeRule.Matches(plain))
+        {
+            int line = plain.AsSpan(0, match.Index).Count('\n') + 1;
+            yield return $"{relativePath}:{line}: \"{match.Value}\"";
+        }
+    }
 
     /// <summary>
     /// The line of <paramref name="text"/> that states <paramref name="sentence"/> in full, or null

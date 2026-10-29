@@ -947,7 +947,11 @@ Markdown link in an agent or skill body resolves only to a file inside that owne
 directory, and the closure those links form is what a renderer projects beside the principal. A
 skill invoked by name is not reached by a link at all, so binding the standard by name asks
 nothing of the conductor's body — and one canonical skill can carry the standard for every agent
-instead of each body restating it. The `response-format` skill links its own default wording,
+instead of each body restating it. A content test holds that line: no agent or skill body outside
+`response-format` may use the shape's own vocabulary — the title line, the bottom line, its
+sentence cap, or the rule against naming the format — so a restated copy fails a test instead of
+drifting, and an operator's override is never contradicted by a second copy. The `response-format`
+skill links its own default wording,
 `user-guidance.md`, so that file travels with the skill and stays inside that one closure.
 
 **The user-home override.** The shipped wording has a default and an override. The default
