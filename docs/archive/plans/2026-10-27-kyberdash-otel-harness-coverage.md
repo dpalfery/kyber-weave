@@ -7,6 +7,8 @@ component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-27
 development-mode: test-first
+documentation-impact: extends-component
+impact-components: [KyberDash]
 ---
 
 # KyberDash OTel harness coverage — project counter-less, content-less model-call sessions honestly
@@ -60,7 +62,7 @@ defect reachable from this checkout:
    gap sits (receiver / adapter / projection / capture), so the human's expectation is met with
    honest facts rather than empty UI. Causes (a) and (c) are documented, not faked.
 
-## 2. Decisions
+## Decisions
 
 This table is permanent state, preserved across all lifecycle transitions.
 
@@ -73,6 +75,17 @@ This table is permanent state, preserved across all lifecycle transitions.
 | D5 | architecture.md states "counters always flow" for opencode — is the plugin actually capable of emitting token usage? | **Correct the doc.** The plugin envelope carries no counters today: `OpencodeHookPayload` has no `tokens` field and `stampMapperPayload` never sets it (`plugin.ts:66-82,300-328`); usage is only on the native OpenInference path. Capturing real usage (a completion/session.generate hook) is a follow-up, unverified against a live opencode hook. | Verified in code: the T0 `tokens` bucket exists in `mapper.ts`'s type but the plugin never populates it. Doc correction is a governance fix; the capture enhancement is a separate, live-gated todo. | `autonomous` (covered by code reading). |
 
 No hard-block escalations: every open decision had a recommendable option (autonomy checks 1-3 all resolved).
+
+## Design harvest
+
+Scale: `extends-component`; impact component `KyberDash`.
+
+| ID | Target component | Target doc type | Target doc | Durable item |
+|---|---|---|---|---|
+| H1 | KyberDash | architecture | [`docs/dash/architecture.md`](../../dash/architecture.md) §"The shared canonical projection" | Recognized model call builds a visible session with stated absent dimensions; unattributed turns keep the evidence test; the content-bearing counter-less limitation. |
+| H2 | KyberDash | reference | [`docs/dash/telemetry-inventory.md`](../../dash/telemetry-inventory.md) §"Per-harness OTel collection matrix" | Ingested → projected → visible per OTLP adapter; native Effect quarantine; capture-side stops for pi, Copilot, Antigravity and Codex. |
+| H3 | KyberDash | architecture | [`docs/dash/architecture.md`](../../dash/architecture.md) opencode envelope section | The plugin envelope carries no counters today; usage exists only on the native OpenInference path (corrects the "counters always flow" claim). |
+| H4 | KyberDash | reference | [`docs/todo/opencode-plugin-token-usage-capture.md`](../../todo/opencode-plugin-token-usage-capture.md) | The capture-side follow-ups (real token usage, per-source last-emitted diagnostic, counter-less content projection). |
 
 ## 3. Investigation findings
 
@@ -203,15 +216,21 @@ No other file scopes overlap. One worker can run T0→T1 sequentially; T2 is a s
 - `docs validate .` and `docs drift .` → zero findings.
 - Whole-change review via the code-review council before merge, per repository gates.
 
-## 10. docs-dev closeout mapping
+## Closeout mapping
 
-| Durable decision/invariant | Destination |
-|---|---|
-| D1 (counter-less, content-less model-call session projects with `not_measurable`) | `docs/dash/architecture.md` §"The shared canonical projection" (recognized model call builds a session; absent dimensions stated, not fabricated; content-bearing counter-less limitation); `docs/dash/telemetry-inventory.md` OpenCode plugin row; no ADR — refines the existing projection/ASAD contract and honest-unobservability rule (ADR 0011 / rule) with no new boundary, schema, dependency, or public surface. |
-| D2 (ambient-telemetry protection: `turnsOf` unchanged; unattributed turns keep the evidence test) | `docs/dash/architecture.md` §"The shared canonical projection" (unattributed turn with counters still builds, bare ambient stays non-session, HTTP/structural spans never become turns); no ADR — the protection is an existing `turnsOf` invariant this change leaves untouched. |
-| D3 (scope: patch only the projection defect; per-harness end-to-end matrix is durable truth) | `docs/dash/telemetry-inventory.md` §"Per-harness OTel collection matrix" (ingested → projected → visible, native Effect quarantine, capture-side stops for pi/Copilot/Antigravity/Codex); no ADR — capture-side gaps are environment facts, not an architectural boundary. |
-| D5 (plugin carries no counters; usage only on native OpenInference) | `docs/dash/architecture.md` opencode envelope section correction + `docs/dash/telemetry-inventory.md`; follow-up todo `docs/todo/opencode-plugin-token-usage-capture.md`. |
-| D4 (capture-side "last emitted" diagnostic + usage capture) | follow-up todo `docs/todo/opencode-plugin-token-usage-capture.md`. |
+Scale: `extends-component`; impact component `KyberDash`.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [architecture, the shared canonical projection](../../dash/architecture.md#the-shared-canonical-projection); [telemetry inventory, OpenCode plugin row](../../dash/telemetry-inventory.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| D2 | [architecture, the shared canonical projection](../../dash/architecture.md#the-shared-canonical-projection) (unattributed turn with counters still builds; bare ambient stays non-session) | extends-component | KyberDash | 2026-10-28 | archived |
+| D3 | [telemetry inventory, per-harness OTel collection matrix](../../dash/telemetry-inventory.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| D4 | [todo, OpenCode plugin token usage capture](../../todo/opencode-plugin-token-usage-capture.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| D5 | [architecture, the opencode envelope section](../../dash/architecture.md); [telemetry inventory](../../dash/telemetry-inventory.md); [todo, OpenCode plugin token usage capture](../../todo/opencode-plugin-token-usage-capture.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| H1 | [architecture, the shared canonical projection](../../dash/architecture.md#the-shared-canonical-projection) | extends-component | KyberDash | 2026-10-28 | archived |
+| H2 | [telemetry inventory, per-harness OTel collection matrix](../../dash/telemetry-inventory.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| H3 | [architecture, the opencode envelope section](../../dash/architecture.md) | extends-component | KyberDash | 2026-10-28 | archived |
+| H4 | [todo, OpenCode plugin token usage capture](../../todo/opencode-plugin-token-usage-capture.md) | extends-component | KyberDash | 2026-10-28 | archived |
 
 No ADR — ADR waiver: this fixes a projection defect and corrects a doc claim within the existing
 session-projection, ASAD, and honest-unobservability contracts; nothing new is boundary-, schema-,
