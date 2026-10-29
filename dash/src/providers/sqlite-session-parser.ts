@@ -13,7 +13,14 @@ import {
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
 } from '../ingest/sqlite.js'
-import { buildAssistantCall, parseTimestamp, sanitize, type MessageData, type PartData } from './session-message.js'
+import {
+  buildAssistantCall,
+  parseTimestamp,
+  qualifyProviderModel,
+  sanitize,
+  type MessageData,
+  type PartData,
+} from './session-message.js'
 import type {
   SessionSource,
   SessionParser,
@@ -68,10 +75,11 @@ function parseSessionModel(value: Uint8Array | string | undefined): string | und
     return undefined
   } catch {
     // Current-shape rows may store the model as a plain string rather than a
-    // JSON {id,providerID} object. A non-empty string still identifies the
-    // model for the session-level fallback; only an empty/unparseable value
-    // stays unknown, never a fabricated zero.
-    return text
+    // JSON {id,providerID} object, and a bare token is not valid JSON. Only a
+    // token can take this branch: anything JSON-shaped that failed to parse is
+    // unparseable, and stays unknown rather than becoming a model name the
+    // rate table is then asked to price.
+    return /^[^\s{}[\]"]+$/.test(text) ? text : undefined
   }
 }
 
@@ -80,12 +88,7 @@ function parseSessionModel(value: Uint8Array | string | undefined): string | und
 // the pair before the shared builder so pricing keys off the full identity
 // instead of a bare model that never matches the rate table.
 function withQualifiedModel(data: MessageData): MessageData {
-  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
-  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
-  const providerID = carrier.providerID.trim()
-  const modelID = carrier.modelID.trim()
-  if (!providerID || !modelID || modelID.includes('/')) return data
-  return { ...data, modelID: `${providerID}/${modelID}` }
+  return qualifyProviderModel(data)
 }
 
 function tryQuerySessionTokens(db: SqliteDatabase, sessionId: string): {
