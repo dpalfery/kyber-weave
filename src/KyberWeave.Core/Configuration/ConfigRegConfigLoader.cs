@@ -22,16 +22,21 @@ public static class ConfigRegConfigLoader
                 : new ConfigRegConfig { Additions = defaults.Additions, Autonomy = setting };
         }
 
-        List<ConfigRegEntry> additions = new List<ConfigRegEntry>(section.Count);
+        List<ConfigRegEntry> additions = new(section.Count);
         foreach ((string name, string value) in section)
         {
             string property = name?.Trim() ?? string.Empty;
-            if (string.Equals(property, ConfigRegConfig.AutonomyProperty, StringComparison.Ordinal))
+            string? owningSetting = property switch
+            {
+                ConfigRegConfig.AutonomyProperty => "the top-level 'autonomy:' setting",
+                ConfigRegConfig.IntakeAssessmentProperty => "the 'ontology.intake:' setting",
+                _ => null
+            };
+            if (owningSetting is not null)
             {
                 throw new YamlException(
-                    $"{SectionKey} property '{property}' is reserved: it is the top-level " +
-                    $"'{ConfigRegConfig.AutonomyProperty}:' setting, a value rather than a path. " +
-                    "Set it there, or choose another name.");
+                    $"{SectionKey} property '{property}' is reserved: it is {owningSetting}, " +
+                    "a mode word rather than a path. Set it there, or choose another name.");
             }
 
             if (!ConfigSlug.IsValid(property))

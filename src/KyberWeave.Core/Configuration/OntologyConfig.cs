@@ -72,6 +72,20 @@ public sealed class OntologyConfig
     public IReadOnlyList<string> DocsRoots { get; init; } = DefaultDocsRoots;
 
     /// <summary>
+    /// Whether this repository opted in to the intake assessment. Off by default, and read
+    /// through the configuration registry rather than directly: a portable skill needs the
+    /// answer as it stands in the host repository it is running in, and it has no way to
+    /// parse <c>kyber-weave.yml</c>.
+    /// </summary>
+    /// <remarks>
+    /// The default is off so that upgrading the CLI does not start an assessment in a
+    /// repository that never asked for one. The setting is a boolean rather than a mode
+    /// word because there are two states here, not a closed vocabulary, and a flag an
+    /// operator can turn off again is the thing they will reach for.
+    /// </remarks>
+    public bool Intake { get; init; }
+
+    /// <summary>
     /// The primary documentation root: where <c>docs init</c> scaffolds, and the root
     /// named in the diagnostics that point an author at the ontology reference.
     /// </summary>
@@ -152,7 +166,8 @@ public sealed class OntologyConfig
         IReadOnlyList<string>? statuses = null,
         IReadOnlyList<string>? technologies = null,
         IReadOnlyList<string>? baseRequiredKeys = null,
-        IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeysByType = null) =>
+        IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeysByType = null,
+        bool? intake = null) =>
         new()
         {
             DocsRoots = docsRoots ?? DocsRoots,
@@ -165,7 +180,8 @@ public sealed class OntologyConfig
             Statuses = statuses ?? Statuses,
             Technologies = technologies ?? Technologies,
             BaseRequiredKeys = baseRequiredKeys ?? BaseRequiredKeys,
-            RequiredKeysByType = requiredKeysByType ?? RequiredKeysByType
+            RequiredKeysByType = requiredKeysByType ?? RequiredKeysByType,
+            Intake = intake ?? Intake
         };
 
     private static Dictionary<DocType, IReadOnlyList<string>> CreateDefaultRequiredKeysByType() =>

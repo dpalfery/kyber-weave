@@ -390,6 +390,10 @@ public sealed class SquadLifecycleService
                 ? effectiveGlobalRoots
                 : _globalRoots;
 
+            // The plan is built first, so preflight — conflicts, adoption checks, legacy-layout refusal —
+            // decides whether this run may write at all before anything outside the transaction is
+            // touched. The home guidance is written after that decision and before the commit, so the
+            // receipt carries only a digest read back from the deployed path.
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
                 targetRoot,
                 request.Scope,
@@ -413,10 +417,27 @@ public sealed class SquadLifecycleService
                     ModelChanges: modelChanges,
                     Warnings: RenderWarningMessages(renderResult.Warnings));
 
-            SquadTransaction transaction = new(_stateStore, _observer);
-            transaction.Execute(plan);
+            // The guidance is classified, written and read back inside the transaction, once it holds the
+            // lease and has re-checked the plan against the live tree. Written any earlier, an update that
+            // then lost the lease would already have replaced a file the winner records different bytes
+            // for, and a later release would read the shipped text as an operator edit. What remains: a
+            // failure inside the commit leaves the new default on disk under the old receipt. A retry of
+            // the same release adopts those bytes; a later release that ships different wording reads them
+            // as an operator edit, keeps them, and warns how to take its default.
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            SquadResponseGuidanceDeployer? guidanceDeployer =
+                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
+                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    : null;
 
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings), .. transaction.Warnings];
+            SquadTransaction transaction = new(_stateStore, _observer);
+            transaction.Execute(
+                plan,
+                guidanceDeployer is null
+                    ? null
+                    : leasedPlan => DeployGuidance(guidanceDeployer, leasedPlan, previousReceipt.HomeFiles, warnings));
+
+            warnings.AddRange(transaction.Warnings);
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
 
             return new SquadLifecycleResult(
@@ -599,6 +620,46 @@ public sealed class SquadLifecycleService
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Deploys the home guidance and attaches the ownership record to the plan. A guidance that could
+    ///     not be deployed attaches nothing, so the receipt keeps the records it already has.
+    /// </summary>
+    private static void DeployGuidance(
+        SquadResponseGuidanceDeployer deployer,
+        SquadDeploymentPlan plan,
+        IReadOnlyList<SquadHomeFile> previous,
+        ICollection<string> warnings)
+    {
+        SquadHomeFile? guidance = deployer.Deploy(previous, warnings);
+        if (guidance is not null)
+            plan.AttachHomeFiles(ReplaceHomeFile(previous, guidance));
+    }
+
+    /// <summary>
+    ///     Returns the home-owned files to record, with <paramref name="replacement" /> taking the place
+    ///     of any record for the same path. A null replacement means this run changed nothing, so the
+    ///     previous records stand as they are.
+    /// </summary>
+    /// <remarks>
+    ///     Matched on the relative path rather than appended, because the receipt's validation requires
+    ///     one record per home path: a second entry for the guidance would be an ownership claim the
+    ///     store rejects on the next read.
+    /// </remarks>
+    private static IReadOnlyList<SquadHomeFile> ReplaceHomeFile(
+        IReadOnlyList<SquadHomeFile> previous,
+        SquadHomeFile? replacement)
+    {
+        if (replacement is null)
+            return previous;
+
+        return
+        [
+            .. previous.Where(file =>
+                !string.Equals(file.RelativePath, replacement.RelativePath, StringComparison.Ordinal)),
+            replacement
+        ];
     }
 
     /// <summary>

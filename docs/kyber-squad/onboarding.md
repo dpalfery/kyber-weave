@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -28,8 +28,8 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**28 canonical skills**, with transactional recovery and state governance. Twelve harness targets
-are declared; all twelve are currently implemented and registered.
+**29 canonical skills**, with transactional recovery and state governance. Thirteen harness targets
+are declared; all thirteen are currently implemented and registered.
 
 ---
 
@@ -90,7 +90,7 @@ given with `--global` is ignored with a warning. `--projects` applies to
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares twelve coding-harness targets:
+Kyber-Squad declares thirteen coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
@@ -118,7 +118,7 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 12 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 13 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms. Under `--global` the root is the home directory and this selection is ignored, with a warning.
@@ -714,7 +714,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
+Run diagnostic checks on renderer coverage (which of the thirteen declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
 
 ```bash
 kyber-weave squad doctor
@@ -1019,6 +1019,102 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 
 ---
 
+## User-home response guidance
+
+Every user-facing reply from the deployed `conductor` and `bug-crusher` agents follows one shape:
+a title line, a bottom line of at most three sentences, and the open decisions. The standard
+lives in the canonical `response-format` skill, and the operator can replace its wording with a
+file of their own.
+
+**Where it lands.** `squad update --global` deploys the shipped default guidance to
+`~/.kyber-weave/response-guidance.md`, beside the `squad/` state directory under the user's
+home. The file belongs to no harness: every agent reaches the one path through the
+`response-format` skill, which reads the user's file in place of its own default wording when
+the file exists.
+
+**How it is installed and refreshed.** `squad update --global` builds and validates the
+deployment plan first, takes the deployment lease, then writes the guidance and commits the receipt
+while it still holds the lease; the digest it records is one it read back from the file on disk.
+So a run that is refused before it can deploy — an unmanaged file in the way, a failed adoption
+check, a legacy layout, or another update already holding the lease — leaves your guidance exactly
+as it was, and `--dry-run` writes nothing. The one window left is a failure after the guidance was
+written and before the receipt committed: the new default stays in place. Run
+`squad update --global` again and it adopts that file without rewriting it and records the
+ownership it was missing. If a newer release has changed the default wording in the meantime,
+Squad cannot tell the file from one you edited, so it keeps it and warns; delete the file to take
+the new default.
+
+| State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
+|---|---|
+| Absent | Installs the shipped default and records it in the receipt. |
+| Present, and its bytes already equal the shipped default | Records it in the receipt without writing anything, and reports nothing. This covers a file left by a run that failed before its receipt was committed. |
+| Present, and its bytes still match the default the receipt recorded | Replaces it with the current default, and records the new digest. |
+| Present, and edited by you | Preserves it and reports that it was kept. Your wording is never overwritten. |
+| Present, with no record that Squad wrote it and bytes of your own | Preserves it and reports that it was kept. Delete the file if you want the shipped default back. |
+
+The receipt that records this is the global `squad.receipt.json` under
+`~/.kyber-weave/squad/global/`, in an additive `homeFiles` array: one `relativePath` and the
+SHA-256 of the bytes Squad wrote. A file that cannot be read or written produces a warning and
+does not fail the deployment or change its exit code: the run continues, and the warning names the
+remedy — rerun `squad update --global` — for an I/O failure, a permission denial, a path form your
+platform cannot represent, or a security policy that refuses the write. If the build itself ships
+no readable default, nothing is written or recorded and the warning says to reinstall from a
+release that ships the guidance, because a rerun of the same build cannot fix it.
+
+**What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
+Squad agent answers; you do not edit a deployed skill, which the next update would replace.
+Delete the file to return to the shipped default. The default wording is the canonical
+`products/kyber-squad/skills/response-format/user-guidance.md`.
+
+**What the file may say.** It changes how an agent writes and nothing else. If the file is
+missing, empty, unreadable, or longer than about 8 KB, agents ignore it and use the shipped
+wording, so a stray file cannot leave every answer shapeless. Anything in it that asks an agent to
+run commands, call tools, read or send data, or change permissions or safety rules is ignored: it
+is a style override, not a way to grant an agent more than its canonical body allows.
+
+---
+
+## Intake assessment (opt-in, per repository)
+
+The intake assessment is the routing question the conductor asks when a request names neither a
+plan nor a specification. It is **off by default** and a repository opts in.
+
+**How to enable it.** In the repository's `.kyber-weave/kyber-weave.yml`, set the flag under
+`ontology`:
+
+```yaml
+ontology:
+  intake: true
+```
+
+Then run `kyber-weave docs init .` in that repository. The flag publishes an
+`<intake-assessment>` property into the generated Config Reg block of the repository root
+`AGENTS.md`, with the value `enabled`:
+
+```markdown
+- **<intake-assessment>**: `enabled`
+```
+
+The property is a *mode* entry rather than a path entry: `docs validate` does not try to resolve
+`enabled` as a file on disk, but it still fails the build when the rendered block no longer
+matches the configuration. See
+[mode properties](../docgraph/architecture.md#mode-properties-are-not-paths).
+
+**What changes when it is on.** The conductor reads the property from the repository root
+`AGENTS.md`. Present → for a request whose intent is unstated, the conductor asks `architect` for
+a read-only intake recommendation and takes the plan or specification path from it. Absent →
+the assessment is skipped and the path continues directly to the plan choice, and the conductor
+says so in one line and tells you that you can ask for a specification instead: taking the plan
+path is announced, never silent, so a request that never asked for a plan does not quietly become
+one. A concrete failure that has not been diagnosed still outranks the artifact-choice question:
+the diagnosis runs first either way.
+
+**How to turn it off.** Remove `intake: true` from `.kyber-weave/kyber-weave.yml` and re-run
+`kyber-weave docs init .`; the property leaves the block and the assessment stops running. A
+repository that never set the flag never publishes the property, so nothing to undo.
+
+---
+
 ## Packaging (`squad pack`)
 
 `kyber-weave squad pack` is a maintainer-only command for building release archives. It requires execution from the root of the Kyber-Weave repository containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`:
@@ -1036,12 +1132,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 28 canonical
-`SKILL.md` files plus the 86 retained supplemental resources, and retained local skill references
+Both archive formats recurse through each skill directory. They contain all 29 canonical
+`SKILL.md` files plus the 87 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 147 files on Copilot today — with authored relative links resolving inside
+beside its principal — 149 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

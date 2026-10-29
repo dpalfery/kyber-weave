@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-28
 ---
 
 # Distribution and release flow
@@ -99,8 +99,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 28 skills with 82 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 28 portable skills, their 82 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 29 skills with 87 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 29 portable skills, their 87 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -119,12 +119,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 28 `SKILL.md` files plus 82 retained resources, for
-110 skill-tree files. Every retained resource has a reviewed disposition in the
+Both formats package `skills/` recursively: 29 `SKILL.md` files plus 87 retained resources, for
+116 skill-tree files. Every retained resource has a reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted; their omission from a
-fixed 24-file Copilot skill surface is not a package
+fixed 29-file Copilot skill surface is not a package
 contract.
 
 `products/kyber-squad/` is canonical and package authority. The repository no longer carries a
