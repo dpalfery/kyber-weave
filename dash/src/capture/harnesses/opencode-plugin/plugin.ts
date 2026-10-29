@@ -293,6 +293,8 @@ function eventRetainedBytes(event: OpencodeHookEvent): number {
   bytes += stringBytes(event.model)
   bytes += stringBytes(event.provider)
   bytes += stringBytes(event.agent)
+  bytes += stringBytes(event.tool)
+  bytes += stringBytes(event.callId)
   bytes += 32
   if (event.skills !== undefined) {
     bytes += 32
@@ -365,6 +367,11 @@ function diagnosticCopyOf(event: OpencodeHookEvent): OpencodeHookEvent {
   if (event.turnIndex !== undefined) copy.turnIndex = event.turnIndex
   if (event.spanId !== undefined) copy.spanId = detachedCopy(event.spanId)
   if (event.messageId !== undefined) copy.messageId = detachedCopy(event.messageId)
+  if (event.tool !== undefined) copy.tool = detachedCopy(event.tool)
+  if (event.callId !== undefined) copy.callId = detachedCopy(event.callId)
+  if (event.success !== undefined) copy.success = event.success
+  if (event.durationMs !== undefined) copy.durationMs = event.durationMs
+  if (event.resultSizeBytes !== undefined) copy.resultSizeBytes = event.resultSizeBytes
   if (event.systemPrompt !== undefined) copy.systemPrompt = detachedCopy(event.systemPrompt)
   if (event.toolsText !== undefined) copy.toolsText = detachedCopy(event.toolsText)
   if (event.skills !== undefined) copy.skills = event.skills.map((skill) => detachedCopy(skill))
