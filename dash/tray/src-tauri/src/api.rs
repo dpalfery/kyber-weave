@@ -58,6 +58,11 @@ const API_PATHS: [&str; 8] = [
 /// hung request would otherwise stall the poll loop past its own interval.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The version route reads no store, so a healthy server answers at once; a
+/// short deadline bounds the worst-case poll so one slow read cannot push the
+/// poll loop past its own interval.
+pub const VERSION_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub fn poll_interval(popover_open: bool) -> Duration {
     if popover_open {
         POLL_WHILE_OPEN
@@ -266,6 +271,10 @@ pub trait LoopbackClient {
     /// `GET` a document; any non-success status is an error.
     fn get(&mut self, url: &str) -> Result<Value>;
 
+    /// `GET` a document with a per-request deadline in place of the default.
+    /// Required, not defaulted, so no double can silently ignore the deadline.
+    fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value>;
+
     /// A `GET` whose status is reported rather than turned into an error.
     ///
     /// The capability probe needs to tell "this server does not have that
@@ -304,16 +313,31 @@ impl LoopbackFetcher {
     }
 }
 
-impl LoopbackClient for LoopbackFetcher {
-    fn get(&mut self, url: &str) -> Result<Value> {
-        // Checked again here, not just by the caller: this is the only place
-        // that opens a socket, so it is the only place the guarantee holds.
+impl LoopbackFetcher {
+    /// Checked again here, not just by the caller: this is the only place
+    /// that opens a socket, so it is the only place the guarantee holds.
+    fn read_document(&self, url: &str, timeout: Option<Duration>) -> Result<Value> {
         let checked = api_request_url(url)?;
-        let response = self.client.get(&checked).send()?;
+        let request = self.client.get(&checked);
+        let request = match timeout {
+            Some(timeout) => request.timeout(timeout),
+            None => request,
+        };
+        let response = request.send()?;
         if !response.status().is_success() {
             bail!("server returned {}", response.status());
         }
         Ok(response.json()?)
+    }
+}
+
+impl LoopbackClient for LoopbackFetcher {
+    fn get(&mut self, url: &str) -> Result<Value> {
+        self.read_document(url, None)
+    }
+
+    fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value> {
+        self.read_document(url, Some(timeout))
     }
 
     fn get_with_status(&mut self, url: &str) -> Result<ApiResponse> {
@@ -394,6 +418,10 @@ mod tests {
                 bail!("connection refused");
             }
             self.responses.remove(0)
+        }
+
+        fn get_with_timeout(&mut self, url: &str, _timeout: Duration) -> Result<Value> {
+            self.get(url)
         }
     }
 

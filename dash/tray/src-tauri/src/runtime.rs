@@ -11,7 +11,7 @@
 //! without a network connection or a child process.
 
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
@@ -21,7 +21,7 @@ use crate::api::{
     REFRESH_PATH, SETTINGS_PATH, VERSION_PATH,
 };
 use crate::cli::{self, Resolution, SetupReason, SetupState};
-use crate::ipc::{self, ViewState};
+use crate::ipc::{self, ServerDocs, ViewState};
 use crate::settings::{self, TraySettings};
 use crate::supervisor::{self, Attempt, Clock, Spawner, Supervisor};
 
@@ -308,10 +308,12 @@ impl Runtime {
             self.setup.clone(),
             server,
             &self.cache.report,
-            self.cache.jobs.clone(),
-            self.cache.shared_settings.clone(),
-            self.cache.coverage.clone(),
-            self.cache.kyberdash_version.clone(),
+            ServerDocs {
+                jobs: self.cache.jobs.clone(),
+                shared_settings: self.cache.shared_settings.clone(),
+                coverage: self.cache.coverage.clone(),
+                kyberdash_version: self.cache.kyberdash_version.clone(),
+            },
             &self.settings,
         )
     }
@@ -597,24 +599,43 @@ impl Runtime {
                 return;
             }
         };
-        match self.dependencies.fetcher.get(&report_url) {
+        match self
+            .dependencies
+            .fetcher
+            .get_with_timeout(&report_url, api::REQUEST_TIMEOUT)
+        {
             Ok(report) => self.cache.report.record_success(report, now),
-            Err(error) => self.cache.report.record_error(error.to_string()),
+            Err(error) => {
+                self.cache.report.record_error(error.to_string());
+                // A server that cannot answer the report will not answer the
+                // rest, and the poll must stay inside its 15 s interval.
+                // Unknown stays unknown: nothing old is left on screen.
+                self.cache.jobs = None;
+                self.cache.shared_settings = None;
+                self.cache.coverage = None;
+                self.cache.kyberdash_version = None;
+                return;
+            }
         }
         // Unknown stays unknown: a failed fetch clears the value instead of
         // leaving old (or inventing default) job and settings state on screen.
-        self.cache.jobs = self.fetch_document(&server_url, JOBS_PATH);
-        self.cache.shared_settings = self.fetch_document(&server_url, SETTINGS_PATH);
+        self.cache.jobs = self.fetch_document(&server_url, JOBS_PATH, api::REQUEST_TIMEOUT);
+        self.cache.shared_settings =
+            self.fetch_document(&server_url, SETTINGS_PATH, api::REQUEST_TIMEOUT);
         // Same rule for coverage: the saber reads it on the existing poll
         // loop, and a failed read renders red rather than a stale green.
-        self.cache.coverage = self.fetch_document(&server_url, COVERAGE_PATH);
+        self.cache.coverage = self.fetch_document(&server_url, COVERAGE_PATH, api::REQUEST_TIMEOUT);
         // Same rule for the version: a failed read must not keep an old one.
-        self.cache.kyberdash_version = self.fetch_document(&server_url, VERSION_PATH);
+        self.cache.kyberdash_version =
+            self.fetch_document(&server_url, VERSION_PATH, api::VERSION_REQUEST_TIMEOUT);
     }
 
-    fn fetch_document(&mut self, server_url: &str, path: &str) -> Option<Value> {
+    fn fetch_document(&mut self, server_url: &str, path: &str, timeout: Duration) -> Option<Value> {
         let url = api::endpoint_url(server_url, path).ok()?;
-        self.dependencies.fetcher.get(&url).ok()
+        self.dependencies
+            .fetcher
+            .get_with_timeout(&url, timeout)
+            .ok()
     }
 
     fn publish(&mut self) -> Result<()> {
@@ -648,10 +669,13 @@ mod tests {
     /// order the runtime fetches them in.
     type Routes = Arc<Mutex<HashMap<String, Value>>>;
     type Fetched = Arc<Mutex<Vec<String>>>;
+    /// Each timed read, with the deadline the runtime asked the client for.
+    type Timeouts = Arc<Mutex<Vec<(String, Duration)>>>;
 
     struct RoutedFetcher {
         routes: Routes,
         fetched: Fetched,
+        timeouts: Timeouts,
     }
 
     impl LoopbackClient for RoutedFetcher {
@@ -672,6 +696,14 @@ mod tests {
                 Some(document) => Ok(document.clone()),
                 None => bail!("connection refused"),
             }
+        }
+
+        fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value> {
+            self.timeouts
+                .lock()
+                .expect("timeouts lock")
+                .push((url.to_string(), timeout));
+            self.get(url)
         }
     }
 
@@ -755,6 +787,11 @@ mod tests {
     /// A runtime whose supervisor is already attached to the fake server, so a
     /// poll has a server URL to read from without launching anything.
     fn attached_runtime(routes: Routes, fetched: Fetched) -> Runtime {
+        attached_runtime_recording(routes, fetched, Timeouts::default())
+    }
+
+    /// As [`attached_runtime`], also recording the deadline of each timed read.
+    fn attached_runtime_recording(routes: Routes, fetched: Fetched, timeouts: Timeouts) -> Runtime {
         let settings_dir = unique_settings_dir();
         let mut runtime = Runtime::new(
             RuntimeConfig {
@@ -764,7 +801,11 @@ mod tests {
             },
             RuntimeDependencies {
                 server_spawner: Box::new(NoLaunch),
-                fetcher: Box::new(RoutedFetcher { routes, fetched }),
+                fetcher: Box::new(RoutedFetcher {
+                    routes,
+                    fetched,
+                    timeouts,
+                }),
                 clock: Box::new(NoopClock),
                 event_sink: Box::new(SilentEvents),
                 opener: Box::new(SilentOpener),
@@ -827,6 +868,111 @@ mod tests {
             snapshot(&runtime)["kyberdashVersion"].is_null(),
             "a failed version read must clear the earlier version"
         );
+    }
+
+    /// The version route is store-free and answers fast, so its read has a
+    /// short deadline of its own. Sharing the 10 s request timeout would let a
+    /// hung version read hold the poll past its 15 s interval.
+    #[test]
+    fn the_version_read_uses_its_own_short_timeout() {
+        let fetched: Fetched = Arc::default();
+        let timeouts: Timeouts = Arc::default();
+        let mut runtime = attached_runtime_recording(server_routes(), fetched, timeouts.clone());
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        let version_url = format!("{SERVER}{}", api::VERSION_PATH);
+        let version_deadlines: Vec<Duration> = timeouts
+            .lock()
+            .expect("timeouts lock")
+            .iter()
+            .filter(|(url, _)| *url == version_url)
+            .map(|(_, deadline)| *deadline)
+            .collect();
+        assert_eq!(
+            version_deadlines,
+            vec![api::VERSION_REQUEST_TIMEOUT],
+            "the poll must read {version_url} with VERSION_REQUEST_TIMEOUT"
+        );
+        assert_ne!(
+            api::VERSION_REQUEST_TIMEOUT,
+            api::REQUEST_TIMEOUT,
+            "the version read must not share the general request deadline"
+        );
+    }
+
+    /// When the report read fails the server is unreachable, so the poll must
+    /// not wait out a further timeout on each secondary document. Those
+    /// documents are not attempted, and their cached values read as unknown.
+    #[test]
+    fn a_failed_report_read_skips_the_secondary_documents_and_clears_them() {
+        let routes = server_routes();
+        let fetched: Fetched = Arc::default();
+        let mut runtime = attached_runtime(routes.clone(), fetched.clone());
+        runtime.poll_report(at(1_700_000_000)).expect("first poll");
+        let before = snapshot(&runtime);
+        assert!(
+            !before["jobs"].is_null() && !before["coverage"].is_null(),
+            "precondition: the first poll reads the secondary documents"
+        );
+
+        routes.lock().expect("routes lock").remove(api::REPORT_PATH);
+        fetched.lock().expect("fetched lock").clear();
+        runtime.poll_report(at(1_700_000_300)).expect("second poll");
+
+        let requested = fetched.lock().expect("fetched lock").clone();
+        assert_eq!(
+            requested.len(),
+            1,
+            "a failed report read must be the only request in that poll, got {requested:?}"
+        );
+        assert!(
+            requested[0].starts_with(&format!("{SERVER}{}", api::REPORT_PATH)),
+            "the one request must be the report, got {requested:?}"
+        );
+
+        let after = snapshot(&runtime);
+        assert!(
+            after["error"].is_string(),
+            "the report failure must be shown"
+        );
+        for key in ["jobs", "sharedSettings", "coverage", "kyberdashVersion"] {
+            assert!(
+                after[key].is_null(),
+                "{key} must read as unknown after a failed report read, got {}",
+                after[key]
+            );
+        }
+    }
+
+    /// A healthy poll reads each of the five documents exactly once. This pins
+    /// the success path, which the bail-out above must leave untouched.
+    #[test]
+    fn a_healthy_poll_fetches_each_of_the_five_documents_once() {
+        let fetched: Fetched = Arc::default();
+        let mut runtime = attached_runtime(server_routes(), fetched.clone());
+
+        runtime.poll_report(at(1_700_000_000)).expect("poll");
+
+        let mut paths: Vec<String> = fetched
+            .lock()
+            .expect("fetched lock")
+            .iter()
+            .map(|url| {
+                let rest = url.strip_prefix(SERVER).unwrap_or(url);
+                rest.split('?').next().unwrap_or_default().to_string()
+            })
+            .collect();
+        paths.sort();
+        let mut expected = vec![
+            api::REPORT_PATH,
+            api::JOBS_PATH,
+            api::SETTINGS_PATH,
+            api::COVERAGE_PATH,
+            api::VERSION_PATH,
+        ];
+        expected.sort_unstable();
+        assert_eq!(paths, expected);
     }
 
     #[test]

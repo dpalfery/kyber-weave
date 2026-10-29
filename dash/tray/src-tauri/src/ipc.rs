@@ -63,23 +63,27 @@ pub struct ViewState {
     pub settings: TraySettings,
 }
 
+/// The server documents the poll carries verbatim into [`ViewState`]. Each is
+/// `None` when its fetch failed: unknown must not be shown as a default.
+#[derive(Clone, Debug, Default)]
+pub struct ServerDocs {
+    pub jobs: Option<serde_json::Value>,
+    pub shared_settings: Option<serde_json::Value>,
+    pub coverage: Option<serde_json::Value>,
+    pub kyberdash_version: Option<serde_json::Value>,
+}
+
 /// Assembles the state the popover reads.
 ///
 /// The phase is decided here rather than by any one module because it is a
 /// statement about the whole tray: setup outranks everything (there is nothing
 /// to show), then the supervisor's own phase, and a cache holding an error over
 /// an old document is stale however healthy the server looks.
-// One parameter per server document the poll carries verbatim; a parameter
-// struct would only restate ViewState.
-#[allow(clippy::too_many_arguments)]
 pub fn view_state(
     setup: Option<SetupState>,
     server: ServerPhase,
     cache: &ReportCache,
-    jobs: Option<serde_json::Value>,
-    shared_settings: Option<serde_json::Value>,
-    coverage: Option<serde_json::Value>,
-    kyberdash_version: Option<serde_json::Value>,
+    docs: ServerDocs,
     settings: &TraySettings,
 ) -> ViewState {
     let phase = match (&setup, server) {
@@ -96,10 +100,10 @@ pub fn view_state(
         report: cache.report.clone(),
         report_fetched_at: cache.report_fetched_at.clone(),
         error: cache.error.clone(),
-        jobs,
-        shared_settings,
-        coverage,
-        kyberdash_version,
+        jobs: docs.jobs,
+        shared_settings: docs.shared_settings,
+        coverage: docs.coverage,
+        kyberdash_version: docs.kyberdash_version,
         settings: settings.clone(),
     }
 }
@@ -226,10 +230,7 @@ mod tests {
             setup,
             server,
             cache,
-            None,
-            None,
-            None,
-            None,
+            ServerDocs::default(),
             &TraySettings::default(),
         )
     }
@@ -320,10 +321,12 @@ mod tests {
             None,
             ServerPhase::Ready,
             &cache_with_report(),
-            Some(jobs.clone()),
-            Some(shared.clone()),
-            Some(coverage.clone()),
-            Some(version.clone()),
+            ServerDocs {
+                jobs: Some(jobs.clone()),
+                shared_settings: Some(shared.clone()),
+                coverage: Some(coverage.clone()),
+                kyberdash_version: Some(version.clone()),
+            },
             &TraySettings::default(),
         ))
         .unwrap();
