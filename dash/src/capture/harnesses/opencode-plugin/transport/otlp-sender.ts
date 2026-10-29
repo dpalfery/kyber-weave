@@ -179,6 +179,13 @@ export function buildOtlpTracesBody(events: readonly OpencodeHookEvent[]): OtlpT
 export type OtlpSenderOptions = {
   endpoint?: string
   fetchFn?: OtlpFetch
+  /**
+   * Abort deadline per POST. The direct path has no outbox retrying it, so a
+   * hung transport must still settle — callers bound delivery with the
+   * plugin hook timeout, and this deadline frees the socket underneath.
+   * Defaults to 10s.
+   */
+  timeoutMs?: number
 }
 
 export type OtlpSender = {
@@ -190,22 +197,52 @@ export type OtlpSender = {
 export function createOtlpSender(options: OtlpSenderOptions = {}): OtlpSender {
   const endpoint = options.endpoint ?? DEFAULT_OTLP_ENDPOINT
   const fetchFn = options.fetchFn ?? ((url, init) => fetch(url, init))
+  const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 10_000))
 
   const send = async (events: readonly OpencodeHookEvent[]): Promise<void> => {
     if (events.length === 0) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`OTLP POST timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+    const pending = fetchFn(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(buildOtlpTracesBody(events)),
+      signal: controller.signal,
+    })
+    void pending.catch(() => undefined)
+    const aborted = new Promise<never>((_, reject) => {
+      if (controller.signal.aborted) {
+        reject(controller.signal.reason ?? new Error('OTLP POST aborted'))
+      } else {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(controller.signal.reason ?? new Error('OTLP POST aborted')),
+          { once: true },
+        )
+      }
+    })
+    void aborted.catch(() => undefined)
     let response: Response
     try {
-      response = await fetchFn(endpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(buildOtlpTracesBody(events)),
-      })
+      response = await Promise.race([pending, aborted])
     } catch (error) {
       // A refused loopback connection surfaces here; the outbox retries it.
       throw error instanceof Error ? error : new Error(String(error))
+    } finally {
+      clearTimeout(timer)
     }
-    if (!response.ok) {
-      throw new OtlpDeliveryError(response.status, response.statusText)
+    try {
+      if (!response.ok) {
+        throw new OtlpDeliveryError(response.status, response.statusText)
+      }
+    } finally {
+      try {
+        await response.body?.cancel()
+      } catch {
+        // Body teardown must never fail a delivery the receiver accepted.
+      }
     }
   }
 

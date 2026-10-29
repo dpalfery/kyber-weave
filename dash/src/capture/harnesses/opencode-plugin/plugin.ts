@@ -501,6 +501,11 @@ export type InstalledOpencodePluginTransport = {
   baseBackoffMs?: number
   /** Backoff ceiling. */
   maxBackoffMs?: number
+  /**
+   * Abort deadline per transport POST, shared by the outbox and the direct
+   * sender (F5). Defaults to 10s.
+   */
+  requestTimeoutMs?: number
   /** Injectable clock for tests; defaults to a real timer. */
   sleepFn?: (ms: number) => Promise<void>
   /** Injectable entropy for tests; defaults to `Math.random`. */
@@ -650,6 +655,7 @@ export function createInstalledOpencodePlugin(
     batchSize,
     baseBackoffMs,
     maxBackoffMs,
+    requestTimeoutMs,
     sleepFn,
     randomFn,
     evidenceLimit: evidenceLimitOption,
@@ -663,10 +669,11 @@ export function createInstalledOpencodePlugin(
     batchSize,
     baseBackoffMs,
     maxBackoffMs,
+    requestTimeoutMs,
     sleepFn,
     randomFn,
   })
-  const sender = createOtlpSender({ endpoint, fetchFn })
+  const sender = createOtlpSender({ endpoint, fetchFn, timeoutMs: requestTimeoutMs })
 
   const evidenceLimit = Math.max(1, Math.floor(evidenceLimitOption ?? DEFAULT_EVIDENCE_LIMIT))
 
