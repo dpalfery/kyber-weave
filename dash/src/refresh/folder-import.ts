@@ -13,6 +13,13 @@
 // never happened.
 
 import { projectCanonicalStore, projectionIsCurrent } from '../canon/projection.js'
+import {
+  SHARED_PROJECTION_MIN_INTERVAL_MS,
+  sharedProjectionDue,
+  startLeaseHeartbeat,
+  releaseProjectionLease,
+  tryClaimProjectionLease,
+} from '../canon/projection-lease.js'
 import type { RefreshTrigger } from '../canon/refresh-run.js'
 import { purgeExpiredContent } from '../canon/retention.js'
 import type { CanonStore } from '../canon/store.js'
@@ -96,7 +103,24 @@ export async function runMaintenancePass(store: CanonStore, now: Date): Promise<
   purgeExpiredContent(store, now)
 
   if (projectionIsCurrent(store)) return
-  await projectCanonicalStore(store)
+  const nowMs = now.getTime()
+  // The shared floor (F1): automatic projections are spaced at least
+  // SHARED_PROJECTION_MIN_INTERVAL_MS apart no matter which process ran the
+  // last one, so a 30 s maintenance tick cannot bypass the receiver's
+  // 10-minute cadence by projecting whenever the corpus merely looks dirty.
+  if (!sharedProjectionDue(store, nowMs, SHARED_PROJECTION_MIN_INTERVAL_MS)) return
+  // The shared lease (F1): at most one automatic projection runs at a time
+  // across processes. Losing is routine contention — the next tick retries —
+  // so a held lease skips quietly rather than projecting over a live pass.
+  const claim = tryClaimProjectionLease(store, { owner: 'maintenance', nowMs })
+  if (claim === null) return
+  const heartbeat = startLeaseHeartbeat(store, claim)
+  try {
+    await projectCanonicalStore(store)
+  } finally {
+    heartbeat.stop()
+    releaseProjectionLease(store, heartbeat.current())
+  }
 }
 
 function resolveDescriptors(harnesses: readonly string[] | undefined): readonly HarnessSourceDescriptor[] {

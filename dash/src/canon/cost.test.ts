@@ -260,6 +260,19 @@ describe('sumCosts', () => {
     expect(result.total.byModel).toEqual({ 'claude-sonnet-4-5': 0.1, 'gpt-5.2-mini': 0.2 })
   })
 
+  it('drops non-finite by-model amounts instead of poisoning the breakdown', () => {
+    const result = sumCosts([
+      pricedBlock('published', 0.1, {
+        byModel: { 'claude-sonnet-4-5': 0.1, 'nan-model': Number.NaN, 'inf-model': Number.POSITIVE_INFINITY },
+      }),
+      pricedBlock('published', 0.2, { byModel: { 'gpt-5.2-mini': 0.2 } }),
+    ])
+    if (!result.ok) throw new Error('expected a total')
+    // The finite amounts still accumulate exactly; NaN/Infinity never ride
+    // the sums they would otherwise poison (NaN + x stays NaN).
+    expect(result.total.byModel).toEqual({ 'claude-sonnet-4-5': 0.1, 'gpt-5.2-mini': 0.2 })
+  })
+
   it.each([
     {
       // The unpriced block contributes nothing — not zero — and the total

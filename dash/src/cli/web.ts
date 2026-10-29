@@ -1276,10 +1276,21 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // against `/meta`, so a tray can decide whether it understands this server before it
   // renders anything.
   const url = `http://127.0.0.1:${port}`
+  // Named per-start engine-signal handlers (F10): the server's `close`
+  // handler below removes exactly these, so repeated in-process starts do
+  // not accumulate `exit`/SIGTERM listeners. Null when this start owns no
+  // engine (the in-process suites), in which case there is nothing to detach.
+  let detachEngineSignals: (() => void) | null = null
   if (engine !== null) {
     // A kill the process cannot intercept leaves a stale endpoint, which the next start
     // clears. Everything the process can intercept (SIGTERM, exit) cleans up after itself.
-    process.once('exit', () => engine.releaseSync())
+    const onEngineExit = (): void => {
+      engine.releaseSync()
+    }
+    const onEngineSigterm = (): void => {
+      requestStop()
+    }
+    process.once('exit', onEngineExit)
     engine.update({ url })
     requestStop = () => {
       server.closeAllConnections?.()
@@ -1289,7 +1300,11 @@ export async function runWebDashboard(opts: WebDashboardServices & {
     }
     // SIGTERM takes the same teardown as a peer's shutdown request: the server's close handler below
     // gives back the hosts, server.json and the bridge before the process exits.
-    process.once('SIGTERM', () => requestStop())
+    process.once('SIGTERM', onEngineSigterm)
+    detachEngineSignals = () => {
+      process.removeListener('exit', onEngineExit)
+      process.removeListener('SIGTERM', onEngineSigterm)
+    }
     if (stopRequestedEarly) requestStop()
   }
   // Publish the attach point. Only over a file that is not a live other server's: the
@@ -1339,6 +1354,8 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // the other's attach point. An unreadable, missing or foreign body is left alone.
   server.on('close', () => {
     process.off('SIGINT', onSigint)
+    detachEngineSignals?.()
+    detachEngineSignals = null
     void engine?.release().catch(() => {})
     const published = readServerRecord(serverFilePath)
     if (published !== null && published.pid === process.pid && (published.url === undefined || published.url === url)) {

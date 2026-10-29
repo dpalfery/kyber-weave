@@ -48,9 +48,19 @@ function safely(fn) {
 
 // Node applies a mode only when it creates a path, so a store that already exists with wider
 // permissions would keep them. Tighten each path once per process, never widen.
+//
+// WHY bounded: every distinct prompt blob adds a path, so an unbounded set
+// grows with the session count of a long-lived Kilo process. Past the cap
+// the oldest entry is evicted FIFO; a re-tighten then only re-runs a stat
+// and a conditional chmod — idempotent and cheap — never a prompt copy.
+const MAX_TIGHTENED_PATHS = 512
 const tightened = new Set()
 function tighten(path, mode) {
   if (tightened.has(path)) return
+  if (tightened.size >= MAX_TIGHTENED_PATHS) {
+    var oldest = tightened.values().next().value
+    if (oldest !== undefined) tightened.delete(oldest)
+  }
   tightened.add(path)
   try {
     if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode)
@@ -83,19 +93,44 @@ function text(value) {
 const systemBySession = new Map()
 const toolHashes = new Map()
 
+// WHY bounded (F11): both maps grow with distinct sessions and tools, so an
+// unbounded pair retains identifiers for the life of a long-lived Kilo
+// process. Past the cap the oldest entry is evicted FIFO. Eviction loses
+// nothing durable: the next hook for that session or tool recomputes the
+// same content hash (dedup is by hash, so the blob is never rewritten) and
+// re-caches it. Full prompt bodies stay in blob files, never in these maps.
+const MAX_SYSTEM_SESSIONS = 256
+const MAX_TOOL_HASHES = 256
+
+function rememberSystem(sessionID, hash) {
+  if (!systemBySession.has(sessionID) && systemBySession.size >= MAX_SYSTEM_SESSIONS) {
+    var oldestSession = systemBySession.keys().next().value
+    if (oldestSession !== undefined) systemBySession.delete(oldestSession)
+  }
+  systemBySession.set(sessionID, hash)
+}
+
+function rememberTool(id, hash) {
+  if (!toolHashes.has(id) && toolHashes.size >= MAX_TOOL_HASHES) {
+    var oldestTool = toolHashes.keys().next().value
+    if (oldestTool !== undefined) toolHashes.delete(oldestTool)
+  }
+  toolHashes.set(id, hash)
+}
+
 async function server() {
   return {
     'experimental.chat.system.transform': async (input, output) =>
       safely(() => {
         const parts = Array.isArray(output && output.system) ? output.system : []
-        systemBySession.set(String((input && input.sessionID) || ''), blob(parts.join('\\n')))
+        rememberSystem(String((input && input.sessionID) || ''), blob(parts.join('\\n')))
       }),
     'tool.definition': async (input, output) =>
       safely(() => {
         const id = String((input && input.toolID) || '')
         if (!id) return
         const schema = output && (output.jsonSchema !== undefined ? output.jsonSchema : output.parameters)
-        toolHashes.set(id, blob(text({ id, description: output && output.description, schema })))
+        rememberTool(id, blob(text({ id, description: output && output.description, schema })))
       }),
     'chat.params': async (input, output) =>
       safely(() => {

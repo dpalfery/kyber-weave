@@ -196,7 +196,7 @@ the table above is the whole layout.
 | `Synthesizer` | `dash/src/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). Implements child `tool.invoke` span extraction, 64KiB result truncation, and structured error status (contracts below). |
 | `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. The session key is read from `session_id`, falling back to `session.id` (the key Claude Code sends), in both the JSON and protobuf decoders. |
 | `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
-| `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
+| `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes behind bounded admission (R2.5): the accepted backlog holds at most four times the high-water mark in spans plus logs and 256 MiB of conservatively measured bytes (decoded JSON ×2 overhead, so the ledger over-estimates retained bytes). A batch that alone exceeds a ceiling is permanently oversize — the receiver answers 413 and queues nothing; a full backlog is shed transiently — the receiver answers 503 + Retry-After (1 s) and the exporter must retry. Batches handed to the sink but not yet settled stay ledgered as in-flight counts and bytes, `enqueue` admits before adding, and a non-finite custom byte measure refuses the batch instead of ledgering it weightless. Request bodies are capped at 64 MiB per request (oversize answers 413); the receiver keeps at most 100 recent error samples. |
 
 ### Collection-mechanism hierarchy and completeness contract
 
@@ -275,7 +275,10 @@ scopes by trace, or by session for a body with no trace id, and never by parent.
 
 No schema changed: state lives in the existing `pending_logs`, `quarantined_logs`, `enriched_logs`,
 `records.raw`, and `metadata` tables. The matcher decides from the trace or session candidates and the log timestamp alone, and it never
-attaches a body to a call that had already ended.
+attaches a body to a call that had already ended. Expiry and replay are metadata-only
+and paged: pending rows are listed without their payloads, and replay pages hold at
+most 4 MiB of payload (16 MiB quarantine pages on the startup relink), so a large
+pending backlog replays page by page within bounded working memory.
 
 ```mermaid
 flowchart TD
@@ -301,9 +304,17 @@ Measured behaviour, residuals, and the counts behind them are in the
 The dash-CLI-managed plugin (`dash/src/capture/harnesses/opencode-plugin/`, one codebase
 for opencode Desktop and CLI v2 installed by file into opencode's plugin dirs) is a
 **sender**, not a surface: it emits span-anchored OTLP/HTTP spans to the loopback receiver
-(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline
-spool with retry, backoff, and drop-oldest accounting), and every hook is best-effort with
-a 250 ms delivery budget, so a delivery failure never fails the host session. It writes no
+(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline spool for at most 500 events, at most 50 events
+per POST halved on 429 down to 1, 250 ms to 5 s backoff with jitter, a 10 s abort
+deadline per POST with a 250 ms response-body disposal bound, one single-flight
+worker, drop-oldest accounting; `close()` aborts the in-flight POST and settles
+every waiter), and every hook is best-effort with
+a 250 ms delivery budget, so a delivery failure never fails the host session. Diagnostics
+are a bounded tail, not an archive: at most 200 delivery-attempt records within
+1 MiB and 100 failure records within 256 KiB, failure messages capped at 2,048
+characters, every retained string detached into independent storage so a capped tail
+cannot pin a large parent allocation, and an ended session's payload bodies released
+at its `session.end`. It writes no
 database directly and serves no API: rows reach `canon.db` only through the receiver →
 `ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
 `/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
@@ -652,6 +663,33 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   10 minutes, so derived sessions trail the last accepted batch by roughly the idle
   window after the stream quiets, and worst-case by the 10-minute caps.
 
+Automatic projection is coordinated across processes through two metadata keys in the
+store itself (`dash/src/canon/projection-lease.ts`), so the web maintenance tick and the
+receiver scheduler — different processes over separate handles on the same `canon.db` —
+share one cadence and never project at once:
+
+- `projection_last_start_ms` records when the last automatic pass started. Every
+  automatic path delays its next pass until at least the shared 10-minute floor
+  (`SHARED_PROJECTION_MIN_INTERVAL_MS`) after that instant, so maintenance cannot
+  bypass the receiver's floor. Manual paths (`kyber build`, `dash refresh`, the
+  model-catalog rebuild) never consult it: an explicit request always projects.
+- `projection_lease` names which claimant owns the current pass. A pass starts only
+  after winning an atomic compare-and-set on this key. A crashed holder is reclaimed
+  through the recorded pid, else through the 90 s staleness gate
+  (`PROJECTION_LEASE_STALE_MS`); a running pass refreshes its claim every 10 s
+  (`PROJECTION_LEASE_HEARTBEAT_MS`). `drain()`/`close()` bypass the floor but still
+  take the lease, so shutdown rebuilds retained work without racing a live foreign
+  pass. A pass that loses the lease is deferred, not failed: the work stays dirty
+  for the next request, `drain()`, or timer.
+
+Unchanged work writes nothing at either level: the maintenance pass skips the
+projection when the corpus-level change gate reads unchanged (below), and the store's
+`upsertSession`/`upsertRun`/`upsertExecution` skip provably-identical row rewrites,
+so re-projecting a stable corpus settles with no derived writes.
+
+Waiter state is O(1) per cycle: every `request()` made before the next quiescence
+shares one cycle-completion promise, however many requests arrive mid-pass.
+
 The scheduled maintenance pass — the retention purge followed by the shared
 projection — once held the main thread for ~26 s every 30 s: a full corpus
 re-projection blocking every HTTP handler, so a request's latency was `max(handler
@@ -670,7 +708,11 @@ bounded on-disk artifact.
 
 The projection holds one decompressed payload and one decompressed parts set at a
 time; the per-run readers are the exception — they still hold a run's parts while
-serving it.
+serving it. Corpus-wide comparison follows the same discipline: it folds the store
+through `CanonStore.iterateAll()` one record at a time into per-harness streaming
+accumulators — bounded counters plus cost-stream state, never record or parts
+arrays — so the working set is one live record plus figures rather than the whole
+corpus, with figures identical to the batch path.
 
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
 `session` cache — and only the twelve columns the `session_denorm_idx` covering index
