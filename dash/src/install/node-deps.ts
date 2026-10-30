@@ -111,7 +111,13 @@ export const nodeFs: InstallFs = {
         destination = join(trashDir, `${stem} ${n}${ext}`)
       }
     }
-    await rename(path, destination)
+    try {
+      await rename(path, destination)
+    } catch (error) {
+      // The name was only a claim; do not leave an empty `.app` in the Trash.
+      await rm(destination, { recursive: true, force: true }).catch(() => undefined)
+      throw error
+    }
     return destination
   },
   unzip: async (archive, into) => {
