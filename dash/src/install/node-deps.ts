@@ -9,7 +9,7 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve } from 'node:path'
 
@@ -114,8 +114,17 @@ export const nodeFs: InstallFs = {
     try {
       await rename(path, destination)
     } catch (error) {
-      // The name was only a claim; do not leave an empty `.app` in the Trash.
-      await rm(destination, { recursive: true, force: true }).catch(() => undefined)
+      // The name was only a claim: drop the empty placeholder (`rmdir` refuses a
+      // non-empty one), and say so if that fails rather than leaving it silently.
+      const moveError = error instanceof Error ? error.message : String(error)
+      try {
+        await rmdir(destination)
+      } catch (cleanup) {
+        if ((cleanup as NodeJS.ErrnoException).code !== 'ENOENT') {
+          const reason = cleanup instanceof Error ? cleanup.message : String(cleanup)
+          throw new Error(`${moveError} (and the empty placeholder ${destination} could not be removed: ${reason})`)
+        }
+      }
       throw error
     }
     return destination

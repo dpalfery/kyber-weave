@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { nodeFs } from './node-deps.js'
 
+// Passthrough wrappers so one test can make the cleanup step fail.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rmdir: vi.fn(actual.rmdir) }
+})
+
 describe('nodeFs.trash', () => {
   let home: string
 
@@ -45,6 +51,17 @@ describe('nodeFs.trash', () => {
   it('leaves no placeholder behind when the move fails', async () => {
     await expect(nodeFs.trash(join(home, 'missing.app'), home)).rejects.toThrow()
     expect(await readdir(join(home, '.Trash'))).toEqual([])
+  })
+
+  it('reports a placeholder it cannot remove instead of swallowing the error', async () => {
+    const fsp = await import('node:fs/promises')
+    vi.mocked(fsp.rmdir).mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: denied'), { code: 'EACCES' }),
+    )
+    // A source that is not there makes the real rename fail.
+    await expect(nodeFs.trash(join(home, 'gone.app'), home)).rejects.toThrow(
+      /ENOENT.*could not be removed.*EACCES/,
+    )
   })
 
   it('refuses an empty home', async () => {

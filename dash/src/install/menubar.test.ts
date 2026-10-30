@@ -20,6 +20,7 @@ function fakeFs() {
   const dirs = new Set<string>(['/Applications'])
   const writable = new Set<string>(['/Applications'])
   let tempCounter = 0
+  const faults: { trashMove?: string; keepPlaceholder?: boolean } = {}
 
   const fs: InstallFs = {
     exists: async (path) => files.has(path) || dirs.has(path),
@@ -54,9 +55,18 @@ function fakeFs() {
       const stem = `${basename(path, ext)} 1`
       let to = `${homeDir}/.Trash/${stem}${ext}`
       for (let n = 2; files.has(to) || dirs.has(to); n += 1) to = `${homeDir}/.Trash/${stem} ${n}${ext}`
+      // The real one claims the name with an empty directory before the move.
+      dirs.add(to)
+      if (faults.trashMove !== undefined) {
+        const reason = faults.trashMove
+        // ...and removes the claim when the move fails.
+        if (!faults.keepPlaceholder) dirs.delete(to)
+        throw new Error(reason)
+      }
       const payload = files.get(path) ?? '<dir>'
       files.delete(path)
       dirs.delete(path)
+      dirs.delete(to)
       files.set(to, payload)
       return to
     },
@@ -71,13 +81,13 @@ function fakeFs() {
     },
   }
 
-  return { fs, files, dirs, writable }
+  return { fs, files, dirs, writable, faults }
 }
 
 type Harness = ReturnType<typeof harness>
 
 function harness(overrides: Partial<InstallDeps> = {}) {
-  const { fs, files, dirs, writable } = fakeFs()
+  const { fs, files, dirs, writable, faults } = fakeFs()
   const payload = new TextEncoder().encode('tray-artifact-bytes')
   // Linux has no artifact; the harness still needs a name to script the fetch.
   const platform = overrides.platform ?? 'darwin'
@@ -125,7 +135,7 @@ function harness(overrides: Partial<InstallDeps> = {}) {
     ...overrides,
   }
 
-  return { deps, files, dirs, writable, logs, commands, payload, artifact, manifest }
+  return { deps, files, dirs, writable, faults, logs, commands, payload, artifact, manifest }
 }
 
 /** Where a default-writable /Applications install lands. */
@@ -399,6 +409,16 @@ describe('kyberdash menubar on macOS', () => {
     expect(trashed).toHaveLength(2)
     expect(trashed.every(([path]) => path.endsWith('.app'))).toBe(true)
     expect(trashed.map(([, payload]) => payload).sort()).toEqual(['<old app bundle>', '<stale bundle>'])
+  })
+
+  it('leaves no placeholder in the Trash and names the install step when the trash move fails', async () => {
+    const h5 = harness()
+    h5.files.set(installedApp(), '<old app bundle>')
+    h5.faults.trashMove = 'EXDEV: cross-device link'
+
+    await expect(installTray(h5.deps, { force: true })).rejects.toThrow(/install: EXDEV/)
+    expect(h5.files.get(installedApp())).toBe('<old app bundle>')
+    expect([...h5.dirs].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual([])
   })
 
   it('refuses to replace a tray that will not stop', async () => {
