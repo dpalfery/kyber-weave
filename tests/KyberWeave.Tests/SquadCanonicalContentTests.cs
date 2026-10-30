@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -617,19 +618,99 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// The shipped default file exists at its product path and carries content. It is the one file
+    /// the build embeds and a global install deploys, so an empty or missing default leaves every
+    /// Squad answer without its shape.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultGuidanceFileExistsAndIsNonEmpty()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}'.");
+        Assert.False(
+            string.IsNullOrWhiteSpace(File.ReadAllText(defaultPath)),
+            $"The shipped response-guidance default at '{defaultPath}' must not be empty.");
+    }
+
+    /// <summary>
+    /// The default file is the owner the build reads from, not a copy that can drift. The drift guard
+    /// must name it as canonical, and the copy embedded as <c>Squad.response-guidance.md</c> must be
+    /// byte-identical to it. Otherwise the deployed default and the documented default can disagree
+    /// while both still build.
+    /// </summary>
+    [Fact]
+    public void TheBuildEmbedsTheDefaultGuidanceAsTheCanonicalProductFile()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
+        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
+        XDocument project = XDocument.Load(Path.Combine(corePath, "KyberWeave.Core.csproj"));
+
+        string? canonical = project
+            .Descendants("CanonicalResponseGuidance")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+        string? embedded = project
+            .Descendants("EmbeddedResource")
+            .Where(element => element.Attribute("LogicalName")?.Value == "Squad.response-guidance.md")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+
+        Assert.NotNull(canonical);
+        Assert.NotNull(embedded);
+        Assert.Equal(
+            defaultPath,
+            Path.GetFullPath(ResolveProjectPath(corePath, canonical)));
+        Assert.True(
+            File.ReadAllBytes(Path.GetFullPath(ResolveProjectPath(corePath, embedded)))
+                .AsSpan()
+                .SequenceEqual(File.ReadAllBytes(defaultPath)),
+            "The copy embedded as 'Squad.response-guidance.md' must be byte-identical to the shipped default " +
+            $"at '{defaultPath}'.");
+    }
+
+    /// <summary>
+    /// The shipped default states the session-title rule itself: name the session after the work,
+    /// and only where the harness exposes a confirmed mechanism, and never fabricate one. The rule
+    /// lives in the default now that the skill that used to carry it is being removed.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultStatesTheSessionTitleRule()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            $"The shipped default must state the session-title rule as the bullet '{SessionTitleBulletLead}'.");
+        Assert.True(
+            bullet.Contains("title", StringComparison.OrdinalIgnoreCase) &&
+            bullet.Contains("work", StringComparison.OrdinalIgnoreCase),
+            "The session-title bullet must say the title reflects the work.");
+        Assert.True(
+            CarriesSessionTitleGuard(guidance),
+            "The session-title rule in the shipped default must carry both its mechanism and fabrication guards.");
+    }
+
+    /// <summary>
     /// The deployed default replaces the skill's wording wherever it exists, so it carries the
     /// session-title guard the matrix states. Without the guard, the default tells an agent to
     /// name a session on a target that exposes no way to set one.
     /// </summary>
     [Fact]
-    public void ResponseFormatUserGuidanceKeepsTheSessionTitleGuard()
+    public void TheShippedDefaultKeepsTheSessionTitleGuard()
     {
-        string guidance = ReadResponseFormatSkill("user-guidance.md");
+        string guidance = ReadResponseGuidanceDefault();
         string bullet = SessionTitleBullet(guidance) ?? string.Empty;
 
         Assert.True(
             bullet.Length > 0,
-            "The deployed default 'user-guidance.md' must carry the session-title bullet, " +
+            "The shipped default must carry the session-title bullet, " +
             $"'{SessionTitleBulletLead}', on one line.");
         Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
         Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
@@ -1039,29 +1120,61 @@ public sealed class SquadCanonicalContentTests
     /// what each response has to contain; how it is arranged is the skill's, and the operator's, to say.
     /// </summary>
     [Fact]
-    public void NoAgentOrSkillOutsideTheResponseFormatSkillRestatesItsShape()
+    public void NoAgentOrSkillRestatesTheResponseShapeOutsideTheDefaultGuidance()
     {
-        string ownerRoot = Path.Combine(ProductRoot, "skills", "response-format") + Path.DirectorySeparatorChar;
+        string defaultGuidance = ReadResponseGuidanceDefault();
         string[] surfaces = Directory
             .EnumerateFiles(Path.Combine(ProductRoot, "agents"), "*.md", SearchOption.AllDirectories)
             .Concat(Directory.EnumerateFiles(
                 Path.Combine(ProductRoot, "skills"),
                 "*.md",
                 SearchOption.AllDirectories))
-            .Where(path => !path.StartsWith(ownerRoot, StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] restatements = surfaces
             .SelectMany(path => RestatedShapeHits(RelativeSourcePath(path), File.ReadAllText(path)))
             .ToArray();
 
+        Assert.True(
+            RestatesTheShape(defaultGuidance),
+            "The shipped default guidance must be the one owner of the response shape, so it must carry the shape's vocabulary.");
         Assert.NotEmpty(surfaces);
         Assert.True(
             restatements.Length == 0,
-            "These agent and skill bodies restate the shape the 'response-format' skill owns, so a user's " +
-            "own guidance file cannot change it there. Keep the invocation sentence and what the response " +
-            $"must contain, and leave the arrangement to the skill:{Environment.NewLine}" +
+            "These agent and skill bodies restate the response shape the shipped default guidance owns, so a " +
+            "user's own guidance file cannot change it there. Keep the invocation sentence and what the response " +
+            $"must contain, and leave the arrangement to the default guidance:{Environment.NewLine}" +
             string.Join(Environment.NewLine, restatements));
+    }
+
+    /// <summary>
+    /// The retired skill-copy path must not survive in source or test code. A build target or a
+    /// doc comment that still names it points at a file the skill removal deletes, so the build
+    /// and the tests would fail for a reason no reader can see from the code.
+    /// </summary>
+    [Fact]
+    public void NoSourceOrTestFileNamesTheRetiredResponseGuidancePath()
+    {
+        Regex retired = new(
+            @"skills[\\/]response-format[\\/]user-guidance\.md",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        string[] extensions = [".cs", ".csproj", ".props", ".targets"];
+        string[] offenders =
+        [
+            .. Directory
+                .EnumerateFiles(Path.Combine(KyberWeaveTestPaths.ToolRoot, "src"), "*", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(
+                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests"),
+                    "*",
+                    SearchOption.AllDirectories))
+                .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.Ordinal))
+                .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment =>
+                    segment is "bin" or "obj" or ".agent_scratchpad"))
+                .Where(path => retired.IsMatch(File.ReadAllText(path)))
+                .Order(StringComparer.Ordinal)
+        ];
+
+        Assert.Empty(offenders);
     }
 
     /// <summary>
@@ -1771,6 +1884,32 @@ public sealed class SquadCanonicalContentTests
 
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    /// <summary>The shipped default response guidance: the one owner of the response shape.</summary>
+    private static string ResponseGuidanceDefaultPath =>
+        Path.Combine(ProductRoot, "response-guidance.default.md");
+
+    /// <summary>
+    /// Reads the shipped default guidance, asserting its absence first so a missing file reports the
+    /// missing artifact rather than an I/O exception.
+    /// </summary>
+    private static string ReadResponseGuidanceDefault()
+    {
+        Assert.True(
+            File.Exists(ResponseGuidanceDefaultPath),
+            $"The shipped response-guidance default must live at '{ResponseGuidanceDefaultPath}'.");
+        return File.ReadAllText(ResponseGuidanceDefaultPath);
+    }
+
+    /// <summary>
+    /// Resolves an MSBuild item path relative to the project directory, expanding the
+    /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
+    /// </summary>
+    private static string ResolveProjectPath(string projectDirectory, string item) =>
+        Path.Combine(
+            projectDirectory,
+            item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
+                .Replace('\\', Path.DirectorySeparatorChar));
 
     private static bool IsVersionedIdentity(string name)
     {
