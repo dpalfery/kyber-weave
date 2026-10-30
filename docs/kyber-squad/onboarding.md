@@ -960,7 +960,7 @@ REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```
 
-Conductor rejects digests only when a required field is absent or when `STATUS: FAIL` is reported.
+Conductor rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`.
 Standardizing this schema eliminates rejection rework caused by formatting variations.
 
 ---
