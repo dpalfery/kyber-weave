@@ -160,6 +160,31 @@ public class ReviewConfigTests
     }
 
     [Fact]
+    public void AnExplicitMajorThresholdOverridesTheStrictnessPreset()
+    {
+        ReviewPolicy policy = Load(
+            "review:\n  policy:\n    strictness: strict\n    major-count-blocks: 2\n").Policy;
+
+        Assert.Equal(2, policy.MajorCountBlocks);
+        Assert.Equal(5, policy.MinConfidence);
+    }
+
+    [Fact]
+    public void ThePaddedStrictnessValueIsAccepted() =>
+        Assert.Equal(
+            ReviewStrictness.Strict,
+            Load("review:\n  policy:\n    strictness: \" strict \"\n").Policy.Strictness);
+
+    [Fact]
+    public void TheBalancedPresetMatchesTheProductDefaults()
+    {
+        ReviewPolicy balanced = ReviewPolicy.ForStrictness(ReviewStrictness.Balanced);
+
+        Assert.Equal(ReviewPolicy.ProductDefaults.MinConfidence, balanced.MinConfidence);
+        Assert.Equal(ReviewPolicy.ProductDefaults.MajorCountBlocks, balanced.MajorCountBlocks);
+    }
+
+    [Fact]
     public void AnUnknownStrictnessIsRejectedAndNamesTheValidValues()
     {
         string message = Invalid("review:\n  policy:\n    strictness: paranoid\n").Message;

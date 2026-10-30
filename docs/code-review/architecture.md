@@ -394,7 +394,7 @@ review:
 `strict` (`5`, `1`, so one surviving major requests changes). An explicit `min-confidence` or
 `major-count-blocks` in the same block overrides the preset. The code-review skill passes the
 strictness to every lens so a strict host receives lower-confidence findings rather than having
-them withheld at the source. Minor and info findings never block at any level, which keeps the
+them withheld at the source. Minor findings never block at any level, which keeps the
 autonomous-gate rule that only critical and major findings gate a change.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a

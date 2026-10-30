@@ -111,7 +111,7 @@ public sealed record ReviewSuppression(string Id, string Reason, DateOnly Expire
 /// <remarks>
 /// A named preset over two thresholds, not a third mechanism: <see cref="ReviewPolicy.MinConfidence"/>
 /// and <see cref="ReviewPolicy.MajorCountBlocks"/> remain the only numbers the engine reads, and a
-/// host that declares either explicitly overrides the preset. Minor and info findings never block
+/// host that declares either explicitly overrides the preset. Minor findings never block
 /// at any level; strictness changes how many findings are heard and how few majors it takes to
 /// request changes.
 /// </remarks>
@@ -162,7 +162,7 @@ public sealed class ReviewPolicy
     public static ReviewPolicy ForStrictness(ReviewStrictness strictness) => strictness switch
     {
         ReviewStrictness.Lenient => new ReviewPolicy { Strictness = strictness, MinConfidence = 8, MajorCountBlocks = 5 },
-        ReviewStrictness.Balanced => new ReviewPolicy { Strictness = strictness },
+        ReviewStrictness.Balanced => new ReviewPolicy { Strictness = strictness, MinConfidence = 7, MajorCountBlocks = 3 },
         ReviewStrictness.Strict => new ReviewPolicy { Strictness = strictness, MinConfidence = 5, MajorCountBlocks = 1 },
         _ => throw new ArgumentOutOfRangeException(nameof(strictness), strictness, "Unknown strictness.")
     };

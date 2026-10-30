@@ -195,7 +195,7 @@ Below it is dropped. The engine compares `Confidence < MinConfidence`.
 third mechanism. `balanced` (the default) is `min-confidence: 7`, `major-count-blocks: 3`;
 `lenient` is `8` and `5`; `strict` is `5` and `1`, so one surviving major requests changes. A
 host that also declares `min-confidence` or `major-count-blocks` overrides the preset for that
-number. Minor and info findings never block at any level. Pass the strictness and the effective
+number. Minor findings never block at any level. Pass the strictness and the effective
 `min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
 findings instead of having them dropped at the source and a lenient host is not flooded.
 

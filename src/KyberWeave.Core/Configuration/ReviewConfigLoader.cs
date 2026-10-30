@@ -578,30 +578,25 @@ public static class ReviewConfigLoader
         // threshold in the same block still wins over the preset, so a host can say "strict,
         // but a floor of 6".
         ReviewStrictness strictness = defaults.Strictness;
+        int baseMajorBlocks = defaults.MajorCountBlocks;
+        int baseMinConfidence = defaults.MinConfidence;
         if (policy.Strictness is not null)
         {
             strictness = ParseStrictness(policy.Strictness);
             ReviewPolicy preset = ReviewPolicy.ForStrictness(strictness);
-            defaults = new ReviewPolicy
-            {
-                Strictness = strictness,
-                AlwaysHuman = defaults.AlwaysHuman,
-                MaxReviewableLines = defaults.MaxReviewableLines,
-                MajorCountBlocks = preset.MajorCountBlocks,
-                MinConfidence = preset.MinConfidence,
-                Suppressions = defaults.Suppressions
-            };
+            baseMajorBlocks = preset.MajorCountBlocks;
+            baseMinConfidence = preset.MinConfidence;
         }
 
         int maxLines = policy.MaxReviewableLines ?? defaults.MaxReviewableLines;
         if (maxLines <= 0)
             throw new YamlException("review.policy.max-reviewable-lines must be greater than zero.");
 
-        int majorBlocks = policy.MajorCountBlocks ?? defaults.MajorCountBlocks;
+        int majorBlocks = policy.MajorCountBlocks ?? baseMajorBlocks;
         if (majorBlocks <= 0)
             throw new YamlException("review.policy.major-count-blocks must be greater than zero.");
 
-        int minConfidence = policy.MinConfidence ?? defaults.MinConfidence;
+        int minConfidence = policy.MinConfidence ?? baseMinConfidence;
         if (minConfidence is < 1 or > 10)
             throw new YamlException("review.policy.min-confidence must be between 1 and 10.");
 
@@ -619,8 +614,8 @@ public static class ReviewConfigLoader
     }
 
     private static ReviewStrictness ParseStrictness(string value) =>
-        value.Length > 0 && char.IsLetter(value[0]) &&
-        Enum.TryParse(value, ignoreCase: true, out ReviewStrictness parsed) &&
+        value.Trim() is { Length: > 0 } trimmed && char.IsLetter(trimmed[0]) &&
+        Enum.TryParse(trimmed, ignoreCase: true, out ReviewStrictness parsed) &&
         Enum.IsDefined(parsed)
             ? parsed
             : throw new YamlException(

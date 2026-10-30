@@ -269,11 +269,6 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
-    /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
-    /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
-    /// every named lens must match a file under <c>references/lenses/</c>.
-    /// </summary>
-    /// <summary>
     /// Prevents the council strictness setting from reaching the verdict engine but not the lenses:
     /// the code-review skill must pass <c>review.policy.strictness</c> to every seat, so a strict
     /// host gets lower-confidence findings reported instead of silently dropped at source.
@@ -285,13 +280,26 @@ public sealed class ReviewGuidanceCouncilContractTests
         Assert.True(
             skill.Contains("review.policy.strictness", StringComparison.Ordinal),
             "The code-review skill must document review.policy.strictness.");
+        Assert.True(
+            Regex.IsMatch(
+                skill,
+                @"Pass the strictness and the effective\s+`min-confidence` to \*\*every seat\*\*",
+                RegexOptions.CultureInvariant),
+            "The code-review skill must tell the reviewer to pass the strictness and effective floor to every seat.");
 
         string lens = File.ReadAllText(Path.Combine(ProductRoot, "agents", "review-lens.md"));
         Assert.True(
-            lens.Contains("strictness", StringComparison.OrdinalIgnoreCase),
-            "The review-lens agent must say how it applies the strictness it is given.");
+            lens.Contains("`lenient`", StringComparison.Ordinal) &&
+            lens.Contains("`balanced`", StringComparison.Ordinal) &&
+            lens.Contains("`strict`", StringComparison.Ordinal),
+            "The review-lens agent must say how it applies each strictness level it is given.");
     }
 
+    /// <summary>
+    /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
+    /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
+    /// every named lens must match a file under <c>references/lenses/</c>.
+    /// </summary>
     [Fact]
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {
