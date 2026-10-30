@@ -219,7 +219,7 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
     // nothing to update. Say so rather than reporting a plain install failure.
     throw new InstallError(
       'record',
-      `${describe(error)} (the new tray is installed at ${target} but ${TRAY_RECORD_FILE} was not written; re-run with --force)`,
+      `${describe(error)} (the new tray is installed at ${target} but ${TRAY_RECORD_FILE} was not written; re-run with --force${trashed === null ? '' : `; the previous app is in the Trash at ${trashed}`})`,
     )
   }
 

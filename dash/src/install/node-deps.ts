@@ -97,7 +97,13 @@ export const nodeFs: InstallFs = {
     await mkdir(trashDir, { recursive: true })
     // Keep the `.app` extension so Finder still treats the trashed copy as an app.
     const ext = extname(path)
-    const destination = join(trashDir, `${basename(path, ext)} ${Date.now()}${ext}`)
+    const stem = `${basename(path, ext)} ${Date.now()}`
+    // `rename` replaces an existing file, so never pick a name that is taken:
+    // two same-named apps trashed in one millisecond must both survive.
+    let destination = join(trashDir, `${stem}${ext}`)
+    for (let n = 2; await nodeFs.exists(destination); n += 1) {
+      destination = join(trashDir, `${stem} ${n}${ext}`)
+    }
     await rename(path, destination)
     return destination
   },

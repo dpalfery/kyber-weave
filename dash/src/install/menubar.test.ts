@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,7 +20,6 @@ function fakeFs() {
   const dirs = new Set<string>(['/Applications'])
   const writable = new Set<string>(['/Applications'])
   let tempCounter = 0
-  let trashCounter = 0
 
   const fs: InstallFs = {
     exists: async (path) => files.has(path) || dirs.has(path),
@@ -51,9 +50,10 @@ function fakeFs() {
       // Mirrors nodeFs.trash: needs a home, creates the Trash, never overwrites.
       if (homeDir === '') throw new Error('no home directory to find the Trash in')
       dirs.add(`${homeDir}/.Trash`)
-      const name = path.split('/').pop() ?? path
-      const dot = name.lastIndexOf('.')
-      const to = `${homeDir}/.Trash/${name.slice(0, dot)} ${(trashCounter += 1)}${name.slice(dot)}`
+      const ext = extname(path)
+      const stem = `${basename(path, ext)} 1`
+      let to = `${homeDir}/.Trash/${stem}${ext}`
+      for (let n = 2; files.has(to); n += 1) to = `${homeDir}/.Trash/${stem} ${n}${ext}`
       const payload = files.get(path) ?? '<dir>'
       files.delete(path)
       dirs.delete(path)
@@ -386,6 +386,17 @@ describe('kyberdash menubar on macOS', () => {
     await expect(installTray(h3.deps, { force: true })).rejects.toThrow(
       /record: read-only \(the new tray is installed at/,
     )
+  })
+
+  it('keeps both copies when two same-named apps are trashed', async () => {
+    const h4 = harness()
+    h4.files.set(installedApp(), '<old app bundle>')
+    h4.files.set(join('/Users/dev/Applications', MACOS_APP_NAME), '<stale bundle>')
+
+    await installTray(h4.deps, { force: true })
+
+    const trashed = [...h4.files.keys()].filter((path) => path.startsWith('/Users/dev/.Trash/'))
+    expect(trashed).toHaveLength(2)
   })
 
   it('refuses to replace a tray that will not stop', async () => {
