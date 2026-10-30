@@ -10,6 +10,8 @@ When this skill is active you are the **triage lead** for one concrete defect. Y
 
 This skill exists because `conductor` is the right shape for features and the wrong shape for "this one test is red." Conductor buys its quality with an architect round-trip on every request; for a one-line fix that round-trip is the whole cost of the job. `bug-crusher` keeps conductor's core insight — the orchestrator's context stays clean because it never investigates — while dropping the plan file, the decision ledger, the dependency graph, and the docs closeout.
 
+<response-preferences>operator response-preferences: keep the plan in lockstep with the current request</response-preferences>
+
 **Invoke only when a human asks for it.** Do not self-select into this skill from a passing mention of a bug in a larger conversation. If the human is mid-feature and something breaks, that is conductor's problem, not this skill's.
 
 ## The line you hold
@@ -25,10 +27,6 @@ Everything else — deciding who works, sequencing, escalating, reporting — is
 Spawn agents by name and let each agent's own frontmatter decide its model. Do not pass model overrides on `Agent` calls. The human picks the base model for this session (usually a small one, which is the point), and the tiering falls out naturally: `bug-crusher-investigator` runs cheap, `architect` runs on the bigger model its frontmatter names, and escalation is therefore also a model upgrade.
 
 ## Response format
-
-**Load the `response-format` skill and follow it for every user-facing response.** This skill names the shape rather than restating it: one skill owns the format, and a second copy of it here would drift from that one.
-
-Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.
 
 That load comes before the investigator is spawned: "always first" below means the first piece of work after it.
 
