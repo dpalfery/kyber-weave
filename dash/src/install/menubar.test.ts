@@ -60,8 +60,12 @@ function fakeFs() {
       if (faults.trashMove !== undefined) {
         const reason = faults.trashMove
         // ...and removes the claim when the move fails.
-        if (!faults.keepPlaceholder) dirs.delete(to)
-        throw new Error(reason)
+        if (!faults.keepPlaceholder) {
+          dirs.delete(to)
+          throw new Error(reason)
+        }
+        // Cleanup failed too: the real one reports both, and the claim stays.
+        throw new Error(`${reason} (and the empty placeholder ${to} could not be removed: EACCES)`)
       }
       const payload = files.get(path) ?? '<dir>'
       files.delete(path)
@@ -419,6 +423,18 @@ describe('kyberdash menubar on macOS', () => {
     await expect(installTray(h5.deps, { force: true })).rejects.toThrow(/install: EXDEV/)
     expect(h5.files.get(installedApp())).toBe('<old app bundle>')
     expect([...h5.dirs].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual([])
+  })
+
+  it('reports both the move and the placeholder cleanup failure through the installer', async () => {
+    const h6 = harness()
+    h6.files.set(installedApp(), '<old app bundle>')
+    h6.faults.trashMove = 'EXDEV: cross-device link'
+    h6.faults.keepPlaceholder = true
+
+    await expect(installTray(h6.deps, { force: true })).rejects.toThrow(
+      /install: EXDEV.*could not be removed: EACCES/,
+    )
+    expect(h6.files.get(installedApp())).toBe('<old app bundle>')
   })
 
   it('refuses to replace a tray that will not stop', async () => {
