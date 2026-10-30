@@ -74,7 +74,7 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void Inject_ReplacesTheBlockVerbatim_NoCapNoEscapingNoTrimming()
     {
-        string largeText = new('A', 9 * 1024) + "\n- [tool-call] do_work --force\n- verify result\n";
+        string largeText = new string('A', 9 * 1024) + "\n- [tool-call] do_work --force\n- verify result\n";
         string original = "prefix\n<response-preferences>old text</response-preferences>\nsuffix";
         SquadRenderResult render = RenderResult(
             ("agents/conductor.md", original),
