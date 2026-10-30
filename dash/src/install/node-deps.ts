@@ -98,11 +98,18 @@ export const nodeFs: InstallFs = {
     // Keep the `.app` extension so Finder still treats the trashed copy as an app.
     const ext = extname(path)
     const stem = `${basename(path, ext)} ${Date.now()}`
-    // `rename` replaces an existing file, so never pick a name that is taken:
-    // two same-named apps trashed in one millisecond must both survive.
+    // `rename` replaces an existing file, so claim a free name first: a plain
+    // `mkdir` fails atomically with EEXIST if another process holds the name,
+    // and `rename` of a directory may replace the empty one we just made.
     let destination = join(trashDir, `${stem}${ext}`)
-    for (let n = 2; await nodeFs.exists(destination); n += 1) {
-      destination = join(trashDir, `${stem} ${n}${ext}`)
+    for (let n = 2; ; n += 1) {
+      try {
+        await mkdir(destination)
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        destination = join(trashDir, `${stem} ${n}${ext}`)
+      }
     }
     await rename(path, destination)
     return destination

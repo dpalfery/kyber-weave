@@ -53,7 +53,7 @@ function fakeFs() {
       const ext = extname(path)
       const stem = `${basename(path, ext)} 1`
       let to = `${homeDir}/.Trash/${stem}${ext}`
-      for (let n = 2; files.has(to); n += 1) to = `${homeDir}/.Trash/${stem} ${n}${ext}`
+      for (let n = 2; files.has(to) || dirs.has(to); n += 1) to = `${homeDir}/.Trash/${stem} ${n}${ext}`
       const payload = files.get(path) ?? '<dir>'
       files.delete(path)
       dirs.delete(path)
@@ -395,8 +395,10 @@ describe('kyberdash menubar on macOS', () => {
 
     await installTray(h4.deps, { force: true })
 
-    const trashed = [...h4.files.keys()].filter((path) => path.startsWith('/Users/dev/.Trash/'))
+    const trashed = [...h4.files.entries()].filter(([path]) => path.startsWith('/Users/dev/.Trash/'))
     expect(trashed).toHaveLength(2)
+    expect(trashed.every(([path]) => path.endsWith('.app'))).toBe(true)
+    expect(trashed.map(([, payload]) => payload).sort()).toEqual(['<old app bundle>', '<stale bundle>'])
   })
 
   it('refuses to replace a tray that will not stop', async () => {
