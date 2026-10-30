@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -57,6 +57,22 @@ Self-contained packets and recovery briefs remain mandatory for unsupported or l
 sessions and for context that has become unreliable. The conductor records actual
 session handles or the reason they are unavailable; unrelated tasks do not share a
 task session. See [task session continuity](architecture.md#task-session-continuity).
+
+---
+
+## Conductor execution and worker invariants
+
+This is product behavior of the deployed `conductor`, `csharp-dev`, and `test-dev` agents,
+not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered. Mechanics live in
+[architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and
+[onboarding](onboarding.md#task-execution-runbook-inlined-packets-fast-testing-and-completion-digests).
+
+| Invariant | Requirement |
+|---|---|
+| **Build-once, test-many iteration** | Workers build the test project once before iteration (`dotnet build KyberWeave.sln -c Release`) and use `--no-build` or direct assembly runner invocations (`dotnet <dll> -class ... -reporter quiet`) during inner-loop RED/GREEN cycles. Running the full test suite during inner iteration is forbidden; full-suite execution is reserved for task exit gates (`task-gate`) and final council review. |
+| **Zero-stash RED proofs** | Capturing honest RED proof evidence must never use `git stash` or `git stash pop` on dirty working trees. RED proofs are captured by running newly authored tests against a clean base checkout, a throwaway working tree copy, or an isolated `git worktree` before production implementation begins. |
+| **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests missing any mandatory field or reporting failure. |
+| **Adversarial RED/GREEN role separation** | The two-agent adversarial boundary between `test-dev` (RED) and the implementation specialist (GREEN) is strictly preserved; collapsing RED and GREEN into a single worker dispatch is forbidden. Small adjacent task bundling is permitted strictly for same-role micro-tasks, and an independent verification pass (`task-gate` deterministic exit check and final council review) is mandatory on the integrated working tree. |
 
 ---
 

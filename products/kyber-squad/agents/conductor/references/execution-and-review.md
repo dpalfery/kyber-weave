@@ -6,7 +6,11 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Dispatch ready tasks up to `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); when file scope is uncertain, favor parallelism within the cap and accept the conflict risk. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive, which predated per-task artifacts-path isolation.) Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
-Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope; a plan or spec path in the packet is routing metadata marked not for reading.
+Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope: inlined entry-file table, acceptance criteria, dependencies, selected development mode, required contract, required skills, and pre-computed test commands. Keep plan and spec files out of the worker context: a plan or spec path in the packet is routing metadata marked not for reading; never instruct a worker to open the plan or spec to learn its task.
+
+When dispatching concurrent workers up to `review.max-concurrent-workers`, isolate parallel workers using separate git worktree checkouts or isolated working contexts with dedicated per-task artifact paths (`--artifacts-path` or `artifacts/task-gate-<task-id>.json`). Serialize final branch-head integration on the main working tree before git push.
+
+Bundle same-role micro-tasks within a single dispatch where appropriate to minimize dispatch latency, while strictly preserving adversarial separation between RED test authorship and GREEN implementation. RED and GREEN micro-tasks must never be merged into one worker dispatch: `test-dev` authors the failing test contract and proves it RED; the implementation specialist delivers GREEN and automated verification without weakening that contract.
 
 ## Task session continuity
 
@@ -22,9 +26,13 @@ Discover continuation support from the current harness's exposed tools; do not a
 
 `test-first` is the default. Every implementation task carries a Test contract naming the test surface, runner, and observable behavior.
 
-1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists.
+1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists. Never use `git stash` to record RED proof runs: zero-stash RED proofs are strictly mandated (forbid git stash). Proofs must run against a clean base checkout, throwaway copy, or isolated worktree.
 2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence.
 3. **REFACTOR:** cleanup and the developer exit gate preserve GREEN.
+
+Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner:
+`dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClass>" -reporter quiet`
+or `dotnet test --no-build` for fast loops. Reserve full test suite execution for task end or the final review council.
 
 If changing requirements would require weakening or replacing the approved Test contract, return the artifact to its author and reopen approval for that contract.
 
@@ -42,9 +50,16 @@ Changing the verification contract after approval reopens its approval gate.
 
 Every developer worker ends its task by running the deterministic `task-gate` and reports the result in its completion digest. No agent audits a single task, and the conductor does not judge technical correctness.
 
-The digest must carry one line:
+The completion digest must follow this exact six-field schema:
 
-`TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…`
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: NONE
+REMOTE_HEAD: UNPUSHED
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
+```
 
 - **Missing line or `FAIL`:** reject the digest. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.

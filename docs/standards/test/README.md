@@ -123,3 +123,15 @@ not a test to adjust.
 ```bash
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ```
+
+### Fast Assembly Runner and Iteration Workflow
+
+During task execution and active development, do not invoke the full `dotnet test` suite repeatedly. MSBuild project evaluation and incremental dependency checks introduce multi-second overhead per invocation. Instead, use the direct xUnit assembly runner with class filtering and the quiet reporter:
+
+```bash
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+```
+
+- **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
+- **Reserve full suite for task end / final council**: Running the complete test suite across all classes is reserved for final task completion or pre-push review council gates. Never run the full test suite on inner iteration loops.
+- **Zero-stash RED proofs**: When proving a test fails before implementation (RED proof in TDD), never use `git stash` to toggle between dirty working tree states. `git stash` creates uncommitted stash commits that conflict with parallel task execution and risk race conditions across agents. Instead, run RED proofs against a clean base checkout, throwaway working tree copy, or isolated `git worktree`.

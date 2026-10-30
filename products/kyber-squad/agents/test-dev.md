@@ -40,6 +40,11 @@ You do **not** own:
 
 Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
 
+### Role boundaries and task bundling
+
+- **Adversarial RED/GREEN separation:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Test authors author tests and verify failures; implementers make them pass. Never author application code, domain logic, or repository implementations.
+- **Same-role task bundling:** Conductor dispatches tasks in same-role micro-task bundles to amortize context and build costs. When assigned a bundle, author tests systematically across the bundled scope.
+
 ## Workflow
 
 1. Read the path declared as **<test-coding-standard>** before writing any test. When the test is C#, also read **<csharp-coding-standard>**. When the host has declared another language for the files under test, apply that language's coding-standard property the same way.
@@ -47,15 +52,19 @@ Your packet is your whole scope. Do not open files under the directories named b
 3. Read the relevant implementation and its acceptance criteria from the packet. Identify the test boundaries: unit, integration, E2E.
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
+   - **Build once, test many with direct assembly runner:** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly with quiet output:
+     `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
+     Reserve full-suite runs for final task gate verification.
+   - **Zero-stash RED proof rule:** Forbid `git stash` for RED proofs; never run `git stash` to simulate clean state. To establish an untainted zero-stash RED proof, execute tests against a clean base checkout, throwaway copy, or isolated worktree before implementation edits exist.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
    - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If tests do not pass after 3 iterations, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm test edits remain strictly within assigned test files and fixture scope. If fixing a test requires cascading edits into out-of-scope fixtures or touching application code, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
    - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one fixture breaks previously passing fixtures) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the regressed fixtures re-breaks the first cluster (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If a legacy fixture asserts implementation details that contradict the intended task contract or acceptance criteria, do not weaken tests or add contradictory assertions. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
 7. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS` rather than silently skipping them.
-8. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a passing test run.
+8. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build or a passing test run.
 
-   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, `dotnet test`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
+   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, `dotnet test`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` for per-task review-gate isolation. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Do not redirect the repository's declared coverage output.** The isolation above covers *your* build and gate artifacts. Coverage the review gate suite consumes is written where the repository declares it, and pointing it at a task-scoped path hides it from the gate that reads it. Isolate the intermediates; leave the declared outputs where they are declared.
    - **Watch for shared state your tests own, not just your build.** A test database, a fixed port, a well-known fixture file, or a hardcoded temp path is shared between concurrent workers exactly the way `obj/` is, and a suite that passes alone and fails in a pool is almost always this. Where a test binds such a resource, scope it per run — a unique database name, an ephemeral port, a temp directory under the scratchpad. This is a property of the tests you author, so it is your problem at authoring time rather than a flake to be diagnosed later.
    - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **.agent_scratchpad** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
@@ -94,15 +103,15 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 
 ## Completion digest
 
-When done, return:
+Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any direct reads of indexed code, followed by the explicit 6-field worker completion digest:
 
 ```text
-STATUS: READY_FOR_REVIEW
-ARTIFACTS: <list of test file paths>
-SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
-DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied, or skipped (not C# / .NET)> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
-TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
-COVERAGE_GAPS: <untested branches or scenarios, or "none">
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: NONE
+REMOTE_HEAD: UNPUSHED
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```
 
 If the iteration circuit breaker trips, return instead:

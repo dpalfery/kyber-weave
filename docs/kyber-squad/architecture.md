@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -673,8 +673,8 @@ and validates.
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
 | `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` (canonical skills and derived primary entry points) | Native |
 | `antigravity` | `AntigravityRenderer` | `.agents/agents/<name>/agent.md` | `.agents/skills/<name>/SKILL.md` | Native |
-| `opencode` | `OpenCodeRenderer` | `.opencode/agents/<name>.md` | `.opencode/skills/<name>/SKILL.md` | Native |
-| `kilo` | `KiloRenderer` | `.kilo/agents/<name>.md` | `.kilo/skills/<name>/SKILL.md` | Native |
+| `opencode` | `OpenCodeRenderer` | `.opencode/agents/*.md` | `.opencode/skills/*/SKILL.md` | Native |
+| `kilo` | `KiloRenderer` | `.kilo/agents/*.md` | `.kilo/skills/*/SKILL.md` | Native |
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
@@ -778,7 +778,7 @@ and validates.
   registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
-  not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  not declare those servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
   The conductor has no MCP tools by default. Its only exception is the opt-in operator channel
   overlay, described in the next bullet.
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
@@ -1134,6 +1134,42 @@ cannot complete while an unresolved circuit-breaker finding exists in supervised
 In autonomous mode the breaker is not a run stop. Its halt on rework is unchanged, and an
 unresolved finding is listed in the draft pull request as an open finding while delivery
 continues ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
+
+### Concurrency and scheduling model (worktree and artifact isolation)
+
+To eliminate git lock contention (`index.lock`) and test output collisions while maximizing
+execution throughput, conductor does not serialize all task execution or test runs:
+
+- **Maximum parallelization of ready tasks**: Independent ready tasks whose declared file and
+  symbol scopes do not overlap execute concurrently up to `review.max-concurrent-workers`.
+- **Worktree and artifact isolation**: Each concurrent worker executes in an isolated git
+  worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses per-task
+  artifact paths (`--artifacts-path`, `--out artifacts/task-gate-<task-id>.json`) and direct
+  assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
+  targeted tests simultaneously without mutual interference or file locks.
+- **Serialized branch-head integration**: Only final integration and branch-head mutations are
+  serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
+  recording shared index and review gate state, and running `git push` execute sequentially at the
+  integration boundary. All read-only tasks, test runs, and non-overlapping task implementations
+  run in parallel.
+
+### Adversarial RED/GREEN role boundary and same-role task bundling
+
+Quality and verification rigor depend on objective, adversarial test authorship:
+
+- **Strict two-agent adversarial separation**: `test-dev` authors the failing contract test (RED)
+  with a distinct adversarial mindset, and the implementation specialist (`csharp-dev`, etc.)
+  implements production code (GREEN). RED and GREEN are never collapsed into a single worker
+  dispatch; the repository deliberately pays the dispatch and context cost to retain adversarial
+  tension and prevent confirmation bias.
+- **Same-role task bundling**: Conductor avoids unnecessary dispatch latency by bundling small
+  adjacent micro-tasks strictly within the same specialist role (for example, combining all
+  related contract test assertions into one `test-dev` dispatch, or bundling small related
+  implementation edits across 1–3 files within the same specialist role into one dispatch), rather
+  than over-splitting.
+- **Independent verification pass**: Combining small tasks never bypasses verification. The
+  deterministic `task-gate` exit check and final council review execute against the integrated
+  working tree, ensuring all contract tests pass and no false positives or uncommitted changes survive.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
