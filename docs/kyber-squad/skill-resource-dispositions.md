@@ -65,6 +65,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/lenses/correctness.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/dependency-supply-chain.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/di-composition.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
+| `skills/code-review/references/lenses/documentation-accuracy.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/duplicate-implementation.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/infra-workflow.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/intent-alignment.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |

@@ -253,6 +253,9 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   agent to run an interactive command or confirm an unspecified thing.
 - **R16** Agent and skill prompts define every outcome, verdict, key, and rubric they refer to,
   and change together with their sibling contracts. (#424, #434, #429)
+- The reference for a document's claim is the code. Verify each count, size, list, procedure
+  and absolute ("once", "only", "always", "all") against the code, then search documents the
+  diff did not touch for the old value. An archived plan is corrected, not left false.
 - Every count, size, and file list a document gives for code ("~15 files", "creates once",
   "copies the .git directory") is checked against the code it describes, not against the PR
   description or another document. (#468)
@@ -343,6 +346,7 @@ and *What not to flag* only.
 | duplicate-implementation | Ground rules and *What not to flag* only |
 | test-adequacy | 10 |
 | test-infrastructure | 4, 10, 14 |
+| documentation-accuracy | 11, Scope discipline |
 | static-analysis-triage | Ground rules and *What not to flag* only |
 | performance | 4, 13 |
 | blast-radius-revertibility | 3, 6, 11 |

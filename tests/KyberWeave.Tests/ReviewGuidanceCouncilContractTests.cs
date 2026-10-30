@@ -306,6 +306,36 @@ public sealed class ReviewGuidanceCouncilContractTests
             $"{GuidanceFileName} must carry the test-infrastructure guidance section.");
     }
 
+    /// <summary>
+    /// Prevents documentation claims (counts, enumerations, procedures, absolutes) from going
+    /// unchecked against the code: the council must carry a documentation-accuracy lens that
+    /// verifies against the code, catalogued and mapped to the docs guidance section.
+    /// </summary>
+    [Fact]
+    public void ADocumentationAccuracyLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = Path.Combine(LensesRoot, "documentation-accuracy.md");
+        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        string lens = File.ReadAllText(lensPath);
+        foreach (string token in new[] { "count", "enumeration", "absolute", "reverse pass", "archived" })
+        {
+            Assert.True(
+                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'documentation-accuracy.md' must cover '{token}'.");
+        }
+
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            catalogue.Contains("references/lenses/documentation-accuracy.md", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the documentation-accuracy lens.");
+
+        string guidance = File.ReadAllText(ReviewGuidancePath);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| documentation-accuracy \|", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must give the documentation-accuracy lens a row.");
+    }
+
     [Fact]
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {
