@@ -231,10 +231,10 @@ Create `tests/KyberWeave.Tests/Fakes/TestSquadCorpus.cs`:
 Create `tests/KyberWeave.Tests/Fakes/SyntheticValidSquadReleaseSource.cs`:
 - Generates a minimal, valid Squad source tree containing:
   - `squad.yml`, `toolchain.yml`, `schemas/*.schema.json`
-  - 1 minimal valid agent (`architect.agent.md`)
-  - 1 minimal valid skill (`response-format/SKILL.md`)
+  - 2 valid agents (`conductor`, `architect`)
+  - 3 valid skills (`response-format`, `task-gate`, `test-dev`)
   - Valid `models.yml`, `capabilities.yml`, `fallbacks.yml`
-- Emits ~8 files instead of 203 files during extraction.
+- Emits ~15 small files instead of 203 files during extraction.
 - Fully valid under `SquadSourceLoader.Load`.
 - Used in `SquadGlobalHomeCliTests`, `SquadGlobalRootTests`, `SquadDeploymentStateTests`, and `SquadCapturePluginStepTests` for tests asserting state transitions, receipts, locks, and CLI exit codes.
 
@@ -245,12 +245,10 @@ Create `tests/KyberWeave.Tests/Fakes/SyntheticValidSquadReleaseSource.cs`:
 
 #### 2.4.1 `TestGitRepositoryTemplate` Helper
 Create `tests/KyberWeave.Tests/Fakes/TestGitRepositoryTemplate.cs`:
-- Thread-safe singleton that initializes a base git repository in a temp directory once:
-  - Runs `git init --quiet`.
-  - Writes initial test files (`src/a.cs`, `src/gone.cs`, `notes/readme.md`, `.kyber-weave/kyber-weave.yml`).
-  - Commits `initial` and `configure gates`.
-- Provides `CreateRepositoryCopy(string targetDirectory)`:
-  - Performs a fast filesystem copy of the pre-seeded repository directory (<2ms, 0 OS child processes).
+- Pre-seeds git repository templates once per template key in a temp directory and provides `CreateRepositoryCopy(templateKey, destination, initialize)` (<2ms fast filesystem copy, 0 OS child processes):
+  - Agent template (`review-gates-agent`): writes `src/a.cs`, `src/gone.cs`, and `notes/readme.md`, commits `initial`, and adds `.kyber-weave/` to `.git/info/exclude`.
+  - Council template (`review-gates-council`): writes `src/a.cs` and `notes/readme.md`, commits `initial`, and adds `.kyber-weave/` to `.git/info/exclude`.
+  - Docs-init templates (`docs-init-fixture:*` and empty variants `docs-init-empty:*`): writes tracked host `.kyber-weave/kyber-weave.yml` (and fixture clean directory for fixture variants), commits `fixture`, with no `.git/info/exclude`.
 - Update `ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, and `DocsInitReviewGatesTests` to initialize their per-test repos from `TestGitRepositoryTemplate.CreateRepositoryCopy`.
 - Retain real `git` CLI process calls only for the actual test scenarios under evaluation (e.g. `MustGit("add", ...)`, `CommandApp.Run(...)`).
 
