@@ -744,118 +744,16 @@ registered project. A project uninstall also removes that project's registry ent
 
 ---
 
-## Model Presets and Concurrent Harness Instances
+## Concurrent Harness Instances
 
-A **model preset** is a named, user-owned YAML configuration that overrides default agent model
-assignments across harnesses. While canonical agents define semantic model profiles (`fast`,
-`architect`, `general`, `reviewer`, `deep-planning`) mapped to default tokens in the bundled
-`models.yml`, presets allow switching inference providers or models on demand without editing
-managed agent files or waiting for upstream releases.
+Model profiles and presets have their own page: **[Model profiles and model presets](model-profiles.md)**.
+That page covers the six semantic profiles, the per-harness token shapes, creating and
+validating a preset, and switching or reverting one.
 
-### 1. Model Preset Files
+This section covers the other half of the same problem: running a harness against a selected
+preset in an isolated instance, so two projects can use different profiles at the same time.
 
-Presets live in the user home directory under `~/.kyber-weave/squad/presets/<name>.yml`.
-The preset name is the file stem and must match `^[a-z0-9][a-z0-9-]{0,63}$`.
-
-Preset files use the `kyber-squad.model-preset/v1` schema and mirror the profile shape of
-`models.yml`:
-
-```yaml
-schema: kyber-squad.model-preset/v1
-profiles:
-  fast:
-    claude: claude-haiku-5-5
-    opencode: zai-coding-plan/glm-5.3-flash
-  architect:
-    claude: inherit
-```
-
-- **Inheritance and fallbacks**: A preset performs a key-by-key merge per category. Categories or
-  harnesses omitted by the preset fall back to bundled `models.yml` definitions.
-- **Explicit inherit**: Setting a model token to `inherit` omits the `model` frontmatter key on
-  rendered agents, matching bundled behavior.
-- **Default token**: An optional `default` key per profile category specifies a fallback token for
-  any harness not explicitly mapped in that category.
-- **Validation**: `squad preset use` and `squad preset show` strictly validate preset keys
-  against the resolved canonical profiles before any rewrite or print. Referencing an unknown
-  profile category or harness fails validation immediately with **exit code 1**, reporting the
-  exact file path and line number before writing any files. Install and update enforce the
-  same check at render time.
-
-### 2. Managing Presets (`squad preset`)
-
-Model presets are managed using four subcommands:
-
-```bash
-# Apply a preset to target harnesses in project scope
-kyber-weave squad preset use <name> --target claude,copilot
-
-# Apply a preset globally across all deployments of the target
-kyber-weave squad preset use <name> --target claude --global
-
-# Preview model changes without modifying files or state
-kyber-weave squad preset use <name> --target claude --dry-run
-
-# Revert target harnesses to bundled model profiles
-kyber-weave squad preset clear --target claude [--global]
-
-# List all available presets and their active deployments
-kyber-weave squad preset list
-
-# Inspect resolved models for a preset and target harness
-kyber-weave squad preset show <name> --target claude
-```
-
-- **Transactional updates**: `squad preset use` executes through the existing atomic `update`
-  transaction engine. It updates `squad.lock.yml` to schema v2 (`kyber-squad.lock/v2`),
-  recording the applied preset name and lowercase SHA-256 digest under `model-presets`.
-- **Canonical profile resolution**: `use`, `clear`, and `show` resolve canonical model profiles
-  in this order: the `products/kyber-squad` checkout when one is present, then the snapshot
-  stored for the deployment lock's `SquadVersion`, then the newest snapshot, then nothing.
-  `show` has no deployment context, so it resolves checkout first and then the newest snapshot.
-  Resolution from a checkout keeps repo-built behaviour; outside a checkout the snapshot is
-  what reflects the release the deployment was rendered from.
-- **Skills are never rewritten**: model rewrites apply only to deployed agent files. Any
-  receipt `.md` whose final path segment is `SKILL.md` or whose path contains a `skills/`
-  segment passes through byte-identical — canonical skills and primary-agent entry-point
-  skill projections alike — and only agent files whose profile category resolves are touched.
-  Files with an unresolvable identity keep their bytes and produce no diff row.
-- **Unresolvable profiles fail fast**: when no checkout and no snapshot resolve, `use` and
-  `clear` exit with **exit code 1** in both dry-run and apply, and `show` exits with
-  **exit code 1** as well — before any file rewrite, lock change, or printed plan. The error
-  names the remedy: run `kyber-weave squad update` to refresh the profile snapshot; running
-  from a kyber-weave checkout also works.
-- **Snapshot persistence**: committed `squad install` and `squad update` runs (including
-  `squad run` instance provisioning) write one snapshot per Squad release version to
-  `~/.kyber-weave/squad/profiles/<version>.yml` (schema `kyber-squad.canonical-profiles/v1`,
-  carrying the `models.yml` shape plus the agent-name-to-category map). Dry-run writes
-  nothing. A snapshot write that fails after the deployment commits produces a warning
-  naming the remedy (rerun `squad update`); the deployment itself is never failed for it.
-  One file is kept per distinct version and snapshots are never pruned.
-- **Migration for pre-snapshot deployments**: deployments installed before snapshots existed
-  have no snapshot file. After upgrading the CLI, the first `preset use/clear/show` fails
-  with the exit-1 remedy above; one `squad update` (global and/or in the project) re-renders
-  from the release and writes the snapshot, and preset verbs work from then on.
-- **Preserved versioning**: Switching presets never changes the release version of deployed agents.
-- **Dry run preview**: Passing `--dry-run` prints each agent whose resolved model changes in the format
-  `<agent>: <old-model> -> <new-model>` and exits without modifying state or files.
-- **Status reporting**: `squad status` reports the active preset per target. If a preset file has
-  been modified since it was applied, status flags `(changed since applied)`. If a referenced
-  preset file has been deleted, status flags `(missing)` and exits with **exit code 1**, because
-  future updates will fail until repaired.
-
-### 3. Project Preset Selections
-
-When running in project scope without `--global`, `squad preset use` records the project's chosen
-preset under `~/.kyber-weave/squad/selections/<root-key>.yml` (schema `kyber-squad.project-selection/v1`),
-where `<root-key>` is the SHA-256 of the project's canonical physical path.
-
-- **Clean repositories**: Selections are saved exclusively in the user's home state tree. No preset
-  or configuration file is written into the repository, leaving `git status` clean.
-- **Automatic persistence**: Project selections survive releases and updates. Running `squad update`
-  or installing additional targets automatically honors the recorded project selection.
-
-### 4. Running Isolated Harness Instances (`squad run`)
+### 1. Running Isolated Harness Instances (`squad run`)
 
 Different projects frequently require different model presets on the same harness simultaneously.
 Deploying agents directly into project repositories clutters source control, while modifying the
@@ -886,7 +784,7 @@ When `kyber-weave squad run <target> [-- <args>...]` is executed:
    are located via `PATHEXT` and executed under `cmd.exe` with proper argument escaping.
 7. Squad waits for harness process exit and propagates its exact exit code.
 
-### 5. Cleaning Instances (`squad instance remove`)
+### 2. Cleaning Instances (`squad instance remove`)
 
 Harness instances can be inspected via `squad status --global` (under the `Instances` heading)
 and pruned with `instance remove`:
@@ -898,7 +796,7 @@ kyber-weave squad instance remove --target claude --preset fast [--yes]
 Removal reads the instance's `links.json` manifest and safely removes created symbolic links,
 hard links, and directory junctions without following them into the user's main home directory.
 
-### 6. Harness Instance Support Matrix
+### 3. Harness Instance Support Matrix
 
 The `SquadInstanceCatalog` defines the redirection mechanism and support status for each target:
 
