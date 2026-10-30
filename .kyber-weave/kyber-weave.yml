@@ -372,8 +372,9 @@ review:
     # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
     # stamp for whatever comes next.
     max-reviewable-lines: 20000
-    major-count-blocks: 3
-    min-confidence: 7
+    # strict: min-confidence 5, and one surviving major requests changes. The preset supplies
+    # both thresholds, so major-count-blocks and min-confidence are deliberately not set here.
+    strictness: strict
 
 # Rendered into the Config Reg block of AGENTS.md as <autonomy>, the only place a portable
 # agent can read it. This repository is built by agent teams working test-first through the
