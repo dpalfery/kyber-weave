@@ -8,9 +8,9 @@ A task is ready only when its declared dependencies are complete, its file or sy
 
 Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope: inlined entry-file table, acceptance criteria, dependencies, selected development mode, required contract, required skills, and pre-computed test commands. Keep plan and spec files out of the worker context: a plan or spec path in the packet is routing metadata marked not for reading; never instruct a worker to open the plan or spec to learn its task.
 
-When dispatching concurrent workers up to `review.max-concurrent-workers`, isolate parallel workers using separate git worktree checkouts or isolated working contexts with dedicated per-task artifact paths (`--artifacts-path` or `artifacts/task-gate-<task-id>.json`). Serialize final branch-head integration on the main working tree before git push.
+When dispatching concurrent workers up to `review.max-concurrent-workers`, isolate parallel workers using separate git worktree checkouts or isolated working contexts with dedicated per-task artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and review gates `--out artifacts/task-gate-<task-id>.json` for gate reports). Serialize final branch-head integration (cherry-pick or fast-forward merge onto the shared feature branch) on the main working tree before git push. Following successful integration, conductor removes the task worktree (`git worktree remove` and `git worktree prune`). If an integration conflict occurs, conductor halts integration for that task and routes a conflict-reconciliation rework dispatch.
 
-Bundle same-role micro-tasks within a single dispatch where appropriate to minimize dispatch latency, while strictly preserving adversarial separation between RED test authorship and GREEN implementation. RED and GREEN micro-tasks must never be merged into one worker dispatch: `test-dev` authors the failing test contract and proves it RED; the implementation specialist delivers GREEN and automated verification without weakening that contract.
+Bundle same-role micro-tasks within a single dispatch where appropriate to minimize dispatch latency, while strictly preserving adversarial separation between RED test authorship and GREEN implementation. Never collapse RED and GREEN into a single worker dispatch: `test-dev` authors the failing test contract and proves it RED; the implementation specialist delivers GREEN and automated verification without weakening that contract, preserving the independent verification pass at task completion.
 
 ## Task session continuity
 
@@ -50,16 +50,18 @@ Changing the verification contract after approval reopens its approval gate.
 
 Every developer worker ends its task by running the deterministic `task-gate` and reports the result in its completion digest. No agent audits a single task, and the conductor does not judge technical correctness.
 
-The completion digest must follow this exact six-field schema:
+Workers precede the six-field completion digest block with the `Discovery: codegraph N, docs N, direct reads N` header; this header is valid and is not rejected as a 7th digest field. The completion digest itself must follow this exact six-field schema:
 
 ```text
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: NONE
-REMOTE_HEAD: UNPUSHED
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```
+
+Worktree workers committing locally report their `<commit-sha>`, while uncommitted/unpushed task runs report `NONE` and `UNPUSHED`.
 
 - **Missing line or `FAIL`:** reject the digest. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.
