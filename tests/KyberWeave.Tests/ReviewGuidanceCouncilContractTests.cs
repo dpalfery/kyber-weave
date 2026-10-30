@@ -269,6 +269,72 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
+    /// Prevents shared test machinery (fakes, fixtures, caches, capture helpers) from going
+    /// unreviewed: the council must carry a lens for it, the catalogue must list it, and the lens
+    /// map must give it the test-infrastructure guidance section.
+    /// </summary>
+    [Fact]
+    public void ATestInfrastructureLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = Path.Combine(LensesRoot, "test-infrastructure.md");
+        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        string lens = File.ReadAllText(lensPath);
+        foreach (string token in new[] { "Task", "Console.Error", "regex", "collapse", "parallel" })
+        {
+            Assert.True(
+                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'test-infrastructure.md' must cover '{token}'.");
+        }
+
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            catalogue.Contains("references/lenses/test-infrastructure.md", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the test-infrastructure lens.");
+
+        string guidance = File.ReadAllText(ReviewGuidancePath);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| test-infrastructure \| 4, 10, 14 \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the test-infrastructure lens to sections 4, 10, 14.");
+        Assert.True(
+            guidance.Contains("### 14. Test infrastructure", StringComparison.Ordinal),
+            $"{GuidanceFileName} must carry the test-infrastructure guidance section.");
+    }
+
+    /// <summary>
+    /// Prevents documentation claims (counts, enumerations, procedures, absolutes) from going
+    /// unchecked against the code: the council must carry a documentation-accuracy lens that
+    /// verifies against the code, catalogued and mapped to the docs guidance section.
+    /// </summary>
+    [Fact]
+    public void ADocumentationAccuracyLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = Path.Combine(LensesRoot, "documentation-accuracy.md");
+        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        string lens = File.ReadAllText(lensPath);
+        foreach (string token in new[] { "count", "enumeration", "absolute", "reverse pass", "archived" })
+        {
+            Assert.True(
+                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'documentation-accuracy.md' must cover '{token}'.");
+        }
+
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            catalogue.Contains("references/lenses/documentation-accuracy.md", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the documentation-accuracy lens.");
+
+        string guidance = File.ReadAllText(ReviewGuidancePath);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| documentation-accuracy \| 11, Scope discipline \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the documentation-accuracy lens to section 11 and Scope discipline.");
+        Assert.True(
+            guidance.Contains("### 11. Docs, plans, and agent files", StringComparison.Ordinal),
+            $"{GuidanceFileName} must keep the section 11 the documentation-accuracy lens is routed to.");
+    }
+
+    /// <summary>
     /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
     /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
     /// every named lens must match a file under <c>references/lenses/</c>.

@@ -253,6 +253,12 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   agent to run an interactive command or confirm an unspecified thing.
 - **R16** Agent and skill prompts define every outcome, verdict, key, and rubric they refer to,
   and change together with their sibling contracts. (#424, #434, #429)
+- The reference for a document's claim is the code. Verify each count, size, list, procedure
+  and absolute ("once", "only", "always", "all") against the code, then search documents the
+  diff did not touch for the old value. An archived plan is corrected, not left false.
+- Every count, size, and file list a document gives for code ("~15 files", "creates once",
+  "copies the .git directory") is checked against the code it describes, not against the PR
+  description or another document. (#468)
 - **R16** Counts, status lines, claimed measurements, and links are updated everywhere they
   appear. (#410, #419, #432)
 - **R16** *(low evidence)* Code examples in skill references obey the surrounding guidance. (#415)
@@ -283,6 +289,23 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   race. (#414)
 - **R12** *(low evidence)* Do not type host handlers as `never[]` or `any[]`. (#422)
 - Shared registrations across instances are covered in [§8](#8-react-and-typescript-ui-kyberdash).
+
+### 14. Test infrastructure: shared state, caches, and fixtures
+
+- A cached or shared fixture handed to parallel tests is immutable by construction (copy,
+  frozen type, read-only view), not by comment.
+- A cache of `Task`, `Lazy`, or computed results decides what a failure does; a faulted entry
+  is never kept for the life of the process.
+- Cache keys and directory names built by sanitising strings cannot collide and handle every
+  separator on every supported OS; prefer a hash over replacement.
+- Code that sets process-global state (environment, `Console.Out` and `Console.Error`, current
+  directory, statics) restores it, and no assertion reads such state as a precondition.
+- A capture scope outlives the work started inside it, or says plainly that it does not.
+- A regex or string rewrite that derives a fixture asserts that it matched, in every format the
+  source may use (inline or block list, LF or CRLF).
+- Removing a serialising collection or `DisableParallelization` comes with a search for every
+  remaining writer of the state it guarded.
+- A cache or temp root that grows per distinct key names its bound or its cleanup. (#468)
 
 ### Scope discipline
 
@@ -322,6 +345,8 @@ and *What not to flag* only.
 | prior-art | 5 |
 | duplicate-implementation | Ground rules and *What not to flag* only |
 | test-adequacy | 10 |
+| test-infrastructure | 4, 10, 14 |
+| documentation-accuracy | 11, Scope discipline |
 | static-analysis-triage | Ground rules and *What not to flag* only |
 | performance | 4, 13 |
 | blast-radius-revertibility | 3, 6, 11 |
@@ -338,13 +363,13 @@ The sections named here are sections of this file. Only the technologies with a 
 | Technology | Files | Take these sections |
 |---|---|---|
 | azure | Azure resource definitions | 12 |
-| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12 |
+| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14 |
 | github-actions | `.github/workflows/*.yml`, `templates/github-actions/*.yml` | 7, 12 |
 | pulumi | Pulumi programs | 12 |
 | python | `*.py` and embedded Python | 2, 3, 4, 5, 12 |
 | react | `*.tsx`, `*.jsx`, React UI `.ts` | 1, 2, 8 |
 | sql | `*.sql`, migrations | 4, 6 |
-| typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13 |
+| typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13, 14 |
 | rust | `*.rs`, `Cargo.toml`, `build.rs` outside Tauri | 3, 6 (no Kilo evidence) |
 | tauri | `src-tauri/**`, IPC, capabilities | 6, 12 (no Kilo evidence; also load the rust and react rows) |
 | go | `*.go`, `go.mod` | 3, 6 (no Kilo evidence) |
