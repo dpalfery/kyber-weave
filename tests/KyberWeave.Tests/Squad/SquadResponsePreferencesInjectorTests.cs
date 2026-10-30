@@ -126,7 +126,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(carrier, "effective");
         Assert.Contains("<response-preferences>effective</response-preferences>", Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()), StringComparison.Ordinal);
 
-        SquadRenderResult unrelated = RenderResult(("skills/bug-crusher/SKILL.md", "<response-preferences>bad</response-preferences>"));
+        SquadRenderResult unrelated = RenderResult(("skills/architect/SKILL.md", "<response-preferences>bad</response-preferences>"));
         Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(unrelated, "effective"));
 
         SquadRenderResult prefixed = RenderResult(("skills/role-conductor.md", "<response-preferences>ok</response-preferences>"));

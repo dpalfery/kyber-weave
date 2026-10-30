@@ -60,27 +60,103 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
             { SquadTarget.CommandCode, "bug-crusher", [".commandcode/agents/bug-crusher.md", ".commandcode/skills/bug-crusher/SKILL.md"] },
         };
 
+    private static readonly Dictionary<SquadTarget, HashSet<string>> TargetEntryFiles = new()
+    {
+        [SquadTarget.Codex] = [
+            ".codex/agents/conductor.toml",
+            ".codex/skills/conductor/SKILL.md",
+            ".codex/agents/bug-crusher.toml",
+            ".codex/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Cursor] = [
+            ".cursor/skills/conductor/SKILL.md",
+            ".cursor/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Claude] = [
+            ".claude/agents/conductor.md",
+            ".claude/skills/conductor/SKILL.md",
+            ".claude/agents/bug-crusher.md",
+            ".claude/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Copilot] = [
+            ".github/agents/conductor.agent.md",
+            ".github/agents/bug-crusher.agent.md",
+            ".github/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.OpenCode] = [
+            ".opencode/agents/conductor.md",
+            ".opencode/agents/bug-crusher.md",
+            ".opencode/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Kilo] = [
+            ".kilo/agents/conductor.md",
+            ".kilo/agents/bug-crusher.md",
+            ".kilo/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Antigravity] = [
+            ".agents/agents/conductor/agent.md",
+            ".agents/agents/bug-crusher/agent.md",
+            ".agents/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Factory] = [
+            ".factory/droids/conductor.md",
+            ".factory/skills/conductor/SKILL.md",
+            ".factory/droids/bug-crusher.md",
+            ".factory/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Warp] = [
+            ".warp/skills/conductor/SKILL.md",
+            ".warp/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Pi] = [
+            ".pi/skills/conductor/SKILL.md",
+            ".pi/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.ZCode] = [
+            ".zcode/commands/conductor.md",
+            ".zcode/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.Devin] = [
+            ".devin/skills/conductor/SKILL.md",
+            ".devin/skills/bug-crusher/SKILL.md",
+        ],
+        [SquadTarget.CommandCode] = [
+            ".commandcode/agents/conductor.md",
+            ".commandcode/skills/conductor/SKILL.md",
+            ".commandcode/agents/bug-crusher.md",
+            ".commandcode/skills/bug-crusher/SKILL.md",
+        ],
+    };
+
+    private static HashSet<string> GetTargetUnionSet(SquadTarget target)
+    {
+        return new HashSet<string>(TargetEntryFiles[target], StringComparer.Ordinal);
+    }
+
     [Theory]
     [MemberData(nameof(EntryFilesByTarget))]
-    public async Task RealCanonicalTree_CarriesExactlyTheTargetEntryFilesWithResponsePreferences(
+    public async Task RealCanonicalTree_CarriesTheTargetUnionOfResponsePreferenceEntryFiles(
         SquadTarget target,
         string agentName,
         string[] expectedEntryFiles)
     {
         SquadRenderResult baseline = await TestSquadCorpus.GetProjectRenderAsync(target);
 
-        HashSet<string> expectedSet = expectedEntryFiles.ToHashSet(StringComparer.Ordinal);
-        AssertEntryFilesForMarker(target, baseline, expectedSet, DistinctiveText, agentName);
+        HashSet<string> identitySet = expectedEntryFiles.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> targetUnionSet = GetTargetUnionSet(target);
+
+        AssertEntryFilesForMarker(target, baseline, targetUnionSet, identitySet, DistinctiveText, agentName);
 
         string secondMarker = $"distinct marker for {target}/{agentName} v2";
         SquadRenderResult rerendered = SquadResponsePreferencesInjector.Inject(baseline, secondMarker);
-        AssertEntryFilesForMarker(target, rerendered, expectedSet, secondMarker, agentName);
+        AssertEntryFilesForMarker(target, rerendered, targetUnionSet, identitySet, secondMarker, agentName);
     }
 
     private static void AssertEntryFilesForMarker(
         SquadTarget target,
         SquadRenderResult render,
-        HashSet<string> expectedSet,
+        HashSet<string> targetUnionSet,
+        HashSet<string> identitySet,
         string marker,
         string agentName)
     {
@@ -96,7 +172,7 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
                 actualSet.Add(file.RelativePath);
             }
 
-            if (expectedSet.Contains(file.RelativePath))
+            if (targetUnionSet.Contains(file.RelativePath))
             {
                 Assert.True(hasBlock, $"Expected '{file.RelativePath}' to contain exactly one <response-preferences> block for '{target}/{agentName}'.");
 
@@ -112,7 +188,8 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
             Assert.False(hasBlock, $"Unexpected response-preferences block in '{file.RelativePath}' for target '{target}/{agentName}'.");
         }
 
-        Assert.Equal(expectedSet, actualSet);
+        Assert.Equal(targetUnionSet, actualSet);
+        Assert.True(identitySet.IsSubsetOf(actualSet), $"Every file for identity '{agentName}' on target '{target}' must be present in the target union's block-bearing set.");
     }
 
     [GeneratedRegex("<response-preferences>.*?</response-preferences>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
