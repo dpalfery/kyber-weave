@@ -273,6 +273,39 @@ public sealed class ReviewGuidanceCouncilContractTests
     /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
     /// every named lens must match a file under <c>references/lenses/</c>.
     /// </summary>
+    /// <summary>
+    /// Prevents shared test machinery (fakes, fixtures, caches, capture helpers) from going
+    /// unreviewed: the council must carry a lens for it, the catalogue must list it, and the lens
+    /// map must give it the test-infrastructure guidance section.
+    /// </summary>
+    [Fact]
+    public void ATestInfrastructureLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = Path.Combine(LensesRoot, "test-infrastructure.md");
+        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        string lens = File.ReadAllText(lensPath);
+        foreach (string token in new[] { "Task", "Console.Error", "regex", "collapse", "parallel" })
+        {
+            Assert.True(
+                lens.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'test-infrastructure.md' must cover '{token}'.");
+        }
+
+        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            catalogue.Contains("references/lenses/test-infrastructure.md", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the test-infrastructure lens.");
+
+        string guidance = File.ReadAllText(ReviewGuidancePath);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| test-infrastructure \|", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must give the test-infrastructure lens a row.");
+        Assert.True(
+            guidance.Contains("### 14. Test infrastructure", StringComparison.Ordinal),
+            $"{GuidanceFileName} must carry the test-infrastructure guidance section.");
+    }
+
     [Fact]
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {

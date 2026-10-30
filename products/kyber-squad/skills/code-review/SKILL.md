@@ -78,7 +78,7 @@ passed.
 **Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
 lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
 applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
-owns — auto-skipping is what makes fifteen lenses affordable. Every seat given guidance sections
+owns — auto-skipping is what makes sixteen lenses affordable. Every seat given guidance sections
 ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
 findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
 findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
@@ -105,6 +105,7 @@ premium for attribution.
 | [duplicate-implementation](references/lenses/duplicate-implementation.md) | **`review-triage`** | Bodies duplicated across the tree, attributed from the duplicates gate |
 | [test-adequacy](references/lenses/test-adequacy.md) | `review-lens` | Would the tests catch this breaking? Behaviour over implementation |
 | [static-analysis-triage](references/lenses/static-analysis-triage.md) | **`review-triage`** | Analyzer output, attributed and reported by rule id |
+| [test-infrastructure](references/lenses/test-infrastructure.md) | `review-lens` | Is the shared test machinery sound: isolation, caches, fixtures, global state? |
 | [performance](references/lenses/performance.md) | `review-lens` | Cost at scale, with a named growth dimension |
 | [blast-radius-revertibility](references/lenses/blast-radius-revertibility.md) | `review-lens` | What else it reaches, and whether it can be undone |
 | [supportability](references/lenses/supportability.md) | `review-lens` | Diagnosability, correlation, what leaks to the caller |

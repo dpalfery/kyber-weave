@@ -67,7 +67,7 @@ A single agent reading a whole diff is one attention budget spread across a doze
 concerns, and it produces a verdict that cannot be checked. This splits that into parts that
 fail differently:
 
-- **Fifteen lenses** read the diff in parallel, each owning one concern and each declaring an
+- **Sixteen lenses** read the diff in parallel, each owning one concern and each declaring an
   applicability predicate so it skips diffs holding nothing for it. A change to a Markdown file
   does not pay for a database-migration reviewer to tell it so.
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and
