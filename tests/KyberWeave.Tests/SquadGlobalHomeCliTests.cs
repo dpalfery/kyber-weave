@@ -674,13 +674,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // Pinned to this harness's own home rather than to the temp directory it happens to sit under:
         // every fake home in this suite is beneath the temp directory, so a prefix check would pass for
         // a guidance file deployed beside the wrong home. The path is built here instead of through
         // GuidancePath, so the test fails if that helper and the deployer ever agree on the wrong
         // location. The file must be absent first, or its presence afterwards would say nothing about
-        // where the update wrote.
+        // where the update wrote. Install now creates the file, so the precondition is set explicitly.
         string expected = Path.GetFullPath(Path.Combine(h.Home, ".kyber-weave", "response-guidance.md"));
         Assert.False(
             File.Exists(expected),
@@ -880,6 +881,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
         string path = GuidancePath(h);
 
         // A directory at the destination makes the write fail the way a permission error or a full
@@ -931,6 +933,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer installRenderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, installRenderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // An unowned hand-authored file at a path the update would claim, so plan construction throws
         // before any write — the same portable mechanism the collision tests use.
@@ -1265,6 +1268,33 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     private static string GuidancePath(Harness h)
     {
         return Path.Combine(h.Home, ".kyber-weave", "response-guidance.md");
+    }
+
+    /// <summary>
+    ///     Puts the home back in the state a fresh install used to leave: no response guidance file and no
+    ///     ownership record for it. Global install now creates the file, so a scenario that needs the
+    ///     guidance absent must remove both the file and its receipt record itself.
+    /// </summary>
+    private static void ClearResponseGuidanceToAbsentAndUnowned(Harness h)
+    {
+        string path = GuidancePath(h);
+        if (File.Exists(path))
+            File.Delete(path);
+
+        string receiptPath = RequireFile(GlobalReceiptPath(h));
+        JsonNode root = JsonNode.Parse(File.ReadAllText(receiptPath))
+                        ?? throw new InvalidDataException("The global receipt must parse as JSON.");
+        if (root["homeFiles"] is JsonArray homeFiles)
+        {
+            for (int index = homeFiles.Count - 1; index >= 0; index--)
+            {
+                if (homeFiles[index]?["relativePath"]?.GetValue<string>() == "response-guidance.md")
+                    homeFiles.RemoveAt(index);
+            }
+        }
+
+        File.WriteAllText(receiptPath, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+        Assert.False(File.Exists(path), $"The scenario requires no guidance at '{path}' beforehand.");
     }
 
     #endregion

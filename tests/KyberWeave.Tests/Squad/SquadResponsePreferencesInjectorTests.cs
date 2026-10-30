@@ -101,10 +101,15 @@ public sealed class SquadResponsePreferencesInjectorTests
     [InlineData("skills/lowered-agent.md")]
     public void Inject_ThrowsForEntryFilesMissingOrDuplicatingTheResponseBlock(string relativePath)
     {
+        // D8: a render with no block anywhere is a pre-block corpus and returns unchanged; a file that
+        // duplicates the block in a render that has one still fails closed.
         SquadRenderResult missing = RenderResult((relativePath, "hello world"));
         SquadRenderResult duplicate = RenderResult((relativePath, "<response-preferences>a</response-preferences>\n<response-preferences>b</response-preferences>"));
 
-        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(missing, "effective"));
+        SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(missing, "effective");
+        Assert.Same(missing, injected);
+        Assert.Equal("hello world", Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
+
         Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(duplicate, "effective"));
     }
 
@@ -141,8 +146,11 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void Inject_ThrowsWhenTargetCarrierSetDoesNotProduceAnyBlockBearingFile()
     {
-        SquadRenderResult noCarrier = RenderResult((".claude/agents/unknown.md", "plain text"));
-        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(noCarrier, "effective"));
+        // A block on one carrier and none on its sibling is a partial render, which still fails closed.
+        SquadRenderResult partial = RenderResult(
+            (".claude/agents/conductor.md", "<response-preferences>old</response-preferences>"),
+            (".claude/agents/bug-crusher.md", "bug-crusher without block"));
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(partial, "effective"));
     }
 
     private static string NewHomeDirectory()

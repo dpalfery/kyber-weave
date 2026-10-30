@@ -100,7 +100,7 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
             [SquadTarget.Codex],
             Version: "1.2.3"))).Success);
 
-        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), ".codex", "agents", "conductor.toml");
+        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         string original = await File.ReadAllTextAsync(conductor, Encoding.UTF8);
         string localEdit = original + "\n# operator edit\n";
         await File.WriteAllTextAsync(conductor, localEdit, Encoding.UTF8);
@@ -263,7 +263,15 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     private static string[] InstalledEntryFiles(Harness h, SquadTarget target, string? projectRoot = null)
     {
         string root = projectRoot is null ? h.GlobalRoot(target) : projectRoot;
-        string[] expected = TargetEntryFiles(target).Select(relativePath => Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)))
+
+        // The global Codex home is $CODEX_HOME itself, so the renderer's ".codex/" prefix is not part of
+        // the installed path there. A project root keeps the prefix. The renderer decides both layouts.
+        bool globalCodex = projectRoot is null && target == SquadTarget.Codex;
+        string[] expected = TargetEntryFiles(target)
+            .Select(relativePath => globalCodex && relativePath.StartsWith(".codex/", StringComparison.Ordinal)
+                ? relativePath[".codex/".Length..]
+                : relativePath)
+            .Select(relativePath => Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)))
             .Where(File.Exists)
             .ToArray();
 
