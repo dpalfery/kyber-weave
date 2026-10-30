@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -433,6 +433,13 @@ and anything else belongs to the operator:
   overwriting it would discard the one customization the file exists to hold. A file that exists
   with no ownership record was written by the operator or by a release older than the receipt,
   so it is never claimed. Deleting the file is how an operator takes the shipped default back.
+
+The `response-format` skill is a mandatory trigger, not a passive helper. `conductor` and
+`bug-crusher` must load it before any routing action or user-visible write, and the conductor
+must load it before the first intent read. That ordering resolves the earlier failure mode in
+which the router could take an action before the format contract was in scope. Headless
+specialists (`architect`, `product-owner`) remain exempt because they do not speak to the human
+in the same conversational channel.
 
 Ownership is recorded only from a digest this run read back from the deployed path, and the order
 follows from that: the deployment plan is built and validated first, then the transaction takes

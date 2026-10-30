@@ -107,6 +107,13 @@ public sealed class SquadCanonicalContentTests
         "Load the response-format skill and follow it for every user-facing response.";
 
     /// <summary>
+    /// The mandatory ordering sentence the human-facing surfaces must carry at the start of every turn.
+    /// It is intentionally verbatim and case-sensitive so the skill never becomes passive.
+    /// </summary>
+    private const string ResponseFormatMandatoryLoadSentence =
+        "Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.";
+
+    /// <summary>
     /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
     /// the rule that the format is never named. A surface that uses these words to say how an answer is
     /// arranged has started a second copy of what the <c>response-format</c> skill owns.
@@ -924,6 +931,60 @@ public sealed class SquadCanonicalContentTests
     }
 
     /// <summary>
+    /// The mandatory load instruction lives on every human-facing surface where the model writes to a
+    /// user. It has to be explicit, ordered before any other action, and in a single sentence so it is
+    /// not easy to skip when a role has already started to route.
+    /// </summary>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("agents/bug-crusher.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void TheResponseFormatMandatoryLoadSentenceMustAppearOnEveryHumanFacingSurface(string relativePath)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string body = File.ReadAllText(path);
+
+        Assert.True(
+            SentenceLine(WithoutEmphasis(body), ResponseFormatMandatoryLoadSentence) is not null,
+            $"'{relativePath}' must carry the mandatory response-format load sentence verbatim, before it does any other human-facing work: \"{ResponseFormatMandatoryLoadSentence}\"");
+        Assert.True(
+            CarriesResponseFormatInvocation(body),
+            $"'{relativePath}' must keep the response-format invocation sentence alongside the mandatory load rule: \"{ResponseFormatInvocation}\"");
+    }
+
+    [Fact]
+    public void ResponseFormatSkillDescriptionIsMandatoryAndStillExcludesDigestOnlyOutput()
+    {
+        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "response-format", "SKILL.md"));
+        Match match = Regex.Match(skill, @"^description:\s*""(?<description>.*?)""\s*$", RegexOptions.Multiline);
+
+        Assert.True(match.Success, "The 'response-format' skill description must be present as a YAML frontmatter string.");
+        string description = match.Groups["description"].Value;
+
+        Assert.StartsWith("MANDATORY", description, StringComparison.Ordinal);
+        Assert.Contains("Do not use for digests consumed only by other agents", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConductorLoadsResponseFormatBeforeRoutingIntent()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string router = BlockContaining(conductor, "After loading `response-format` at the start of the turn, read the request itself");
+
+        Assert.True(
+            router.Length > 0,
+            "The conductor router needs a single block that can be pinned to the routing preamble.");
+        Assert.Contains(
+            "After loading response-format at the start of the turn, read the request itself; your first routing action",
+            WithoutEmphasis(router),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Your first action on every request is to read its intent",
+            WithoutEmphasis(conductor),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The binding is the sentence, not the co-occurrence of a load verb and the skill name somewhere
     /// in the same line. A surface that mentions the skill in one sentence and says "load" in another
     /// must fail, because the instruction a reader follows is the sentence.
@@ -944,6 +1005,31 @@ public sealed class SquadCanonicalContentTests
             CarriesResponseFormatInvocation(
                 "- **Load the `response-format` skill and follow it for every user-facing response.** Then continue.\n"),
             "The sentence inside Markdown emphasis must satisfy the pin.");
+    }
+
+    [Fact]
+    public void TheMandatoryLoadPinRejectsAParaphraseOrLowercasedSentence()
+    {
+        Assert.False(
+            SentenceLine(
+                "Loading the response-format skill is required at the start of every turn, before any other action.\n",
+                ResponseFormatMandatoryLoadSentence) is not null,
+            "A paraphrase of the mandatory load sentence must not satisfy the pin.");
+        Assert.False(
+            SentenceLine(
+                "loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.\n",
+                ResponseFormatMandatoryLoadSentence) is not null,
+            "A lowercased sentence must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                "- **Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.**\n",
+                ResponseFormatMandatoryLoadSentence) is not null,
+            "The deliberate sentence as a list item inside Markdown emphasis must satisfy the pin.");
+        Assert.False(
+            SentenceLine(
+                "- **Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.** Then continue.\n",
+                ResponseFormatMandatoryLoadSentence) is not null,
+            "Trailing content after the sentence must not satisfy the pin.");
     }
 
     /// <summary>
@@ -1886,7 +1972,9 @@ public sealed class SquadCanonicalContentTests
         foreach (string raw in text.Split('\n'))
         {
             string line = raw.TrimEnd('\r').Trim();
-            if (WithoutEmphasis(line).Equals(sentence, StringComparison.Ordinal))
+            string plain = WithoutEmphasis(line);
+            plain = Regex.Replace(plain, @"^\s*(?:[-*+]|\d+\.)\s+", string.Empty, RegexOptions.CultureInvariant);
+            if (plain.Equals(sentence, StringComparison.Ordinal))
             {
                 return line;
             }

@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-29
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -72,7 +72,7 @@ requirement those bodies implement. Mechanics live in
 |---|---|
 | **R1 — One shape, in order** | Every user-facing response from a primary conversational squad agent states, in this order: a title line naming the work; a bottom line of at most 3 sentences, written for an experienced reader with no prior involvement in the work and assuming no context; and the open decisions whenever a decision is open, one decision where possible, with a recommendation attached. The order is part of the requirement, not a preference. |
 | **R2 — The format is never named** | A response never labels, names, mentions, or refers to the format it follows: no tags, no structural headers, no meta-commentary about how the answer is arranged. Bullets carry issues, options, and status, and a status statement uses the same shape as a question. |
-| **R3 — Who is bound** | The primary conversational agents `conductor` and `bug-crusher` load the `response-format` skill by name and follow it for every user-facing response. `product-owner` is exempt: it is headless, and its output is a persisted artifact and a structured digest for the conductor rather than a conversational reply. |
+| **R3 — Who is bound and when** | The primary conversational agents `conductor` and `bug-crusher` load the `response-format` skill by name and follow it for every user-facing response. Loading it is mandatory at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply. `product-owner` is exempt: it is headless, and its output is a persisted artifact and a structured digest for the conductor rather than a conversational reply. |
 | **R4 — Digests stay machine-consumed** | The conductor relays every specialist digest it surfaces to the human in the response-format shape, and the digest schemas themselves are unchanged. The format governs the presentation of a digest, never the fields it carries: every status marker, id, path, count, gap, open question, and evidence value reaches the human exactly as the specialist returned it, and nothing is dropped, merged, or paraphrased. |
 | **R5 — One home, one override** | The standard has a single canonical home, the `response-format` skill; no agent body restates it. Where the user-home file `~/.kyber-weave/response-guidance.md` exists and is usable, it overrides the skill's default wording and is read in place of it; where it is missing, empty, unreadable, or longer than about 8 KB, it is ignored and the skill's wording is used. The override shapes how an agent writes and nothing else: anything in it that asks an agent to run commands, call tools, read or send data, or change permissions or safety rules is ignored. |
 
