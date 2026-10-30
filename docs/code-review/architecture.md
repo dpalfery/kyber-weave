@@ -378,15 +378,24 @@ review:
   coverage:
     file-line-percent: 85
   policy:
+    strictness: balanced   # lenient | balanced | strict
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
         expires: 2026-11-18                # required
 ```
+
+**Strictness.** `policy.strictness` selects a preset for the two numbers the verdict engine reads:
+`lenient` (`min-confidence: 8`, `major-count-blocks: 5`), `balanced` (`7`, `3`, the default) or
+`strict` (`5`, `1`, so one surviving major requests changes). An explicit `min-confidence` or
+`major-count-blocks` in the same block overrides the preset. The code-review skill passes the
+strictness to every lens so a strict host receives lower-confidence findings rather than having
+them withheld at the source. Minor and info findings never block at any level, which keeps the
+autonomous-gate rule that only critical and major findings gate a change.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither

@@ -574,6 +574,25 @@ public static class ReviewConfigLoader
         if (policy is null)
             return defaults;
 
+        // A declared strictness replaces the inherited thresholds with its preset; an explicit
+        // threshold in the same block still wins over the preset, so a host can say "strict,
+        // but a floor of 6".
+        ReviewStrictness strictness = defaults.Strictness;
+        if (policy.Strictness is not null)
+        {
+            strictness = ParseStrictness(policy.Strictness);
+            ReviewPolicy preset = ReviewPolicy.ForStrictness(strictness);
+            defaults = new ReviewPolicy
+            {
+                Strictness = strictness,
+                AlwaysHuman = defaults.AlwaysHuman,
+                MaxReviewableLines = defaults.MaxReviewableLines,
+                MajorCountBlocks = preset.MajorCountBlocks,
+                MinConfidence = preset.MinConfidence,
+                Suppressions = defaults.Suppressions
+            };
+        }
+
         int maxLines = policy.MaxReviewableLines ?? defaults.MaxReviewableLines;
         if (maxLines <= 0)
             throw new YamlException("review.policy.max-reviewable-lines must be greater than zero.");
@@ -588,6 +607,7 @@ public static class ReviewConfigLoader
 
         return new ReviewPolicy
         {
+            Strictness = strictness,
             AlwaysHuman = policy.AlwaysHuman is null ? defaults.AlwaysHuman : [.. policy.AlwaysHuman],
             MaxReviewableLines = maxLines,
             MajorCountBlocks = majorBlocks,
@@ -597,6 +617,14 @@ public static class ReviewConfigLoader
                 : ParseSuppressions(policy.Suppressions)
         };
     }
+
+    private static ReviewStrictness ParseStrictness(string value) =>
+        value.Length > 0 && char.IsLetter(value[0]) &&
+        Enum.TryParse(value, ignoreCase: true, out ReviewStrictness parsed) &&
+        Enum.IsDefined(parsed)
+            ? parsed
+            : throw new YamlException(
+                $"review.policy.strictness '{value}' is not recognised; use lenient, balanced, or strict.");
 
     private static IReadOnlyList<ReviewSuppression> ParseSuppressions(List<ReviewSuppressionYaml> suppressions)
     {

@@ -55,6 +55,29 @@ public class ReviewVerdictTests
             coverage);
 
     [Fact]
+    public void StrictModeBlocksOnASingleLowerConfidenceMajorThatBalancedModeLetsThrough()
+    {
+        ReviewFinding major = Finding(ReviewSeverity.Major, confidence: 5);
+
+        ReviewOutcome balanced = Evaluate([major], config: Config(ReviewPolicy.ForStrictness(ReviewStrictness.Balanced)));
+        ReviewOutcome strict = Evaluate([major], config: Config(ReviewPolicy.ForStrictness(ReviewStrictness.Strict)));
+
+        Assert.Equal(ReviewVerdict.Approve, balanced.Verdict);
+        Assert.Equal(ReviewVerdict.RequestChanges, strict.Verdict);
+        Assert.Contains(strict.Diagnostics, d => d.Code == VerdictEngine.MajorFindingThreshold);
+    }
+
+    [Fact]
+    public void StrictModeStillNeverBlocksOnMinorFindings()
+    {
+        ReviewOutcome strict = Evaluate(
+            [Finding(ReviewSeverity.Minor), Finding(ReviewSeverity.Minor, id: "correctness/other")],
+            config: Config(ReviewPolicy.ForStrictness(ReviewStrictness.Strict)));
+
+        Assert.Equal(ReviewVerdict.Approve, strict.Verdict);
+    }
+
+    [Fact]
     public void ACleanChangeWithNoFindingsIsApprovedAtLowRisk()
     {
         ReviewOutcome outcome = Evaluate(gates: [new GateResult("test", true, 0, "passed")]);

@@ -107,9 +107,32 @@ public sealed record ReviewDuplicates(int MinimumLines = 4)
 /// </remarks>
 public sealed record ReviewSuppression(string Id, string Reason, DateOnly Expires);
 
+/// <summary>How hard the council and the verdict engine lean on a change.</summary>
+/// <remarks>
+/// A named preset over two thresholds, not a third mechanism: <see cref="ReviewPolicy.MinConfidence"/>
+/// and <see cref="ReviewPolicy.MajorCountBlocks"/> remain the only numbers the engine reads, and a
+/// host that declares either explicitly overrides the preset. Minor and info findings never block
+/// at any level; strictness changes how many findings are heard and how few majors it takes to
+/// request changes.
+/// </remarks>
+public enum ReviewStrictness
+{
+    /// <summary>Only high-confidence findings count, and several majors are needed to block.</summary>
+    Lenient,
+
+    /// <summary>The product default.</summary>
+    Balanced,
+
+    /// <summary>Lower-confidence findings count, and a single surviving major blocks.</summary>
+    Strict
+}
+
 /// <summary>The rules the verdict engine may not decide for itself.</summary>
 public sealed class ReviewPolicy
 {
+    /// <summary>The preset these thresholds came from.</summary>
+    public ReviewStrictness Strictness { get; init; } = ReviewStrictness.Balanced;
+
     /// <summary>Glob patterns whose paths always escalate to a human reviewer.</summary>
     public IReadOnlyList<string> AlwaysHuman { get; init; } = [];
 
@@ -133,6 +156,16 @@ public sealed class ReviewPolicy
 
     /// <summary>Product defaults for a host that declares no policy.</summary>
     public static ReviewPolicy ProductDefaults { get; } = new();
+
+    /// <summary>The thresholds a strictness preset stands for.</summary>
+    /// <param name="strictness">The preset.</param>
+    public static ReviewPolicy ForStrictness(ReviewStrictness strictness) => strictness switch
+    {
+        ReviewStrictness.Lenient => new ReviewPolicy { Strictness = strictness, MinConfidence = 8, MajorCountBlocks = 5 },
+        ReviewStrictness.Balanced => new ReviewPolicy { Strictness = strictness },
+        ReviewStrictness.Strict => new ReviewPolicy { Strictness = strictness, MinConfidence = 5, MajorCountBlocks = 1 },
+        _ => throw new ArgumentOutOfRangeException(nameof(strictness), strictness, "Unknown strictness.")
+    };
 }
 
 /// <summary>The <c>review:</c> host configuration.</summary>

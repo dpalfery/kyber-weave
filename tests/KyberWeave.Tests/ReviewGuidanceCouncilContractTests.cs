@@ -273,6 +273,25 @@ public sealed class ReviewGuidanceCouncilContractTests
     /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
     /// every named lens must match a file under <c>references/lenses/</c>.
     /// </summary>
+    /// <summary>
+    /// Prevents the council strictness setting from reaching the verdict engine but not the lenses:
+    /// the code-review skill must pass <c>review.policy.strictness</c> to every seat, so a strict
+    /// host gets lower-confidence findings reported instead of silently dropped at source.
+    /// </summary>
+    [Fact]
+    public void TheCodeReviewSkillPassesTheStrictnessToEverySeat()
+    {
+        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            skill.Contains("review.policy.strictness", StringComparison.Ordinal),
+            "The code-review skill must document review.policy.strictness.");
+
+        string lens = File.ReadAllText(Path.Combine(ProductRoot, "agents", "review-lens.md"));
+        Assert.True(
+            lens.Contains("strictness", StringComparison.OrdinalIgnoreCase),
+            "The review-lens agent must say how it applies the strictness it is given.");
+    }
+
     [Fact]
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {
