@@ -99,7 +99,7 @@ A token is only valid on the harness it was written for. Do not carry an id acro
 | `antigravity` | tier `pro` or `flash` | `pro` | Reasoning effort comes from the profile category, not the token |
 | `pi` | `<provider>/<model>[thinking=<level>]` | `zai/glm-5.3[thinking=high]` | The suffix is parsed into `thinking` |
 | `factory` | id with `[reasoningEffort=<level>]` | `glm-5.3[reasoningEffort=high]` | |
-| `kilo` | provider/model or display string | `kilo/deepseek/deepseek-v4-pro-0813` | Display strings may contain spaces |
+| `kilo` | `<provider>/<model-path>` | `kilo/deepseek/deepseek-v4-pro-0813` | Model path may contain slashes; display strings with spaces are also valid |
 | `zcode` | bare model id | `glm-5.3` | |
 | `devin` | id with effort suffix | `claude-opus-5-5-high` | Omitting the key leaves the router-chosen default |
 | `warp` | — | — | Warp renders no model key; a preset entry has no effect |
@@ -165,7 +165,13 @@ kyber-weave squad preset clear --target <harness> [--global]
 ```
 
 Always pass `--target`. Without it, `preset use` falls back to every target in the
-deployment receipt, which is rarely what a profile author intends.
+deployment receipt — rarely what a profile author intends — and exits `2` only when there is
+no receipt to read.
+
+Model rewrites apply only to deployed agent files. A receipt file whose final path segment is
+`SKILL.md`, or whose path contains a `skills/` segment, passes through byte-identical; files
+whose profile identity cannot be resolved keep their bytes and produce no diff row. Switching
+a preset never rewrites a skill.
 
 `preset use` updates `squad.lock.yml` (schema `kyber-squad.lock/v2`) with the preset name
 and lowercase SHA-256 digest under `model-presets`. Switching presets never changes the
@@ -207,7 +213,7 @@ or agent starts, so:
 | Exit `1`, unknown profile category, file and line named | The preset names a category absent from `models.yml`. Use one of the six profiles above |
 | Exit `1`, unknown harness key | The key is not a registered target token. Check the table above |
 | Exit `1`, no canonical profiles resolve | Neither a checkout nor a version snapshot was found. Run `kyber-weave squad update`, or work from a kyber-weave checkout |
-| Exit `2`, unknown preset name or missing `--target` | Client-input error; check the file stem and the target list |
+| Exit `2`, unknown preset name, or no `--target` and no deployment receipt | Client-input error; check the file stem and the target list |
 | Model accepted but rejected at run time | The id does not exist in that provider's catalog, or the provider is not authenticated. Re-verify and re-apply |
 | `squad status` says `(changed since applied)` | The preset file was edited after it was applied. Re-run `preset use` |
 | `squad status` says `(missing)` and exits `1` | The referenced preset file was deleted. Restore it or `preset clear` the target |

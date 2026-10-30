@@ -126,7 +126,7 @@ profiles:
     opencode: github-copilot/grok-4.7
 ```
 
-The matrix must state, per tier, either the confirmed token or **inherited from bundled**.
+The matrix must state, per tier, either the confirmed token or **kept from the bundled matrix**.
 Omission is not the same as `inherit`:
 
 - **Omit a category or harness** — the bundled `models.yml` token stays in force.
@@ -237,7 +237,7 @@ preset and re-apply; do not edit deployed agent files.
 | `antigravity` | tier `pro` or `flash` | `pro` | Reasoning effort comes from the tier |
 | `pi` | `<provider>/<model>[thinking=<level>]` | `zai/glm-5.3[thinking=high]` | Suffix is parsed into `thinking` |
 | `factory` | id with `[reasoningEffort=<level>]` | `glm-5.3[reasoningEffort=high]` | |
-| `kilo` | provider/model or display string | `kilo/deepseek/deepseek-v4-pro-0813` | Display strings may contain spaces |
+| `kilo` | `<provider>/<model-path>` | `kilo/deepseek/deepseek-v4-pro-0813` | Model path may contain slashes; display strings with spaces are also valid |
 | `zcode` | bare model id | `glm-5.3` | |
 | `devin` | id with effort suffix | `claude-opus-5-5-high` | Omitted key leaves the router default |
 | `warp` | — | — | Renders no model key; a preset entry has no effect |
@@ -250,7 +250,7 @@ preset and re-apply; do not edit deployed agent files.
 | Exit `1`, unknown profile category, file and line named | The preset names a category absent from `models.yml`; use one of the six above |
 | Exit `1`, unknown harness key | The key is not a registered target token; check the table above |
 | Exit `1`, no canonical profiles resolve | No checkout and no version snapshot. Run `kyber-weave squad update`, or work from a checkout |
-| Exit `2`, unknown preset name or missing `--target` | Client-input error; check the file stem and the target list |
+| Exit `2`, unknown preset name, or no `--target` and no deployment receipt | Client-input error; check the file stem and the target list |
 | Model accepted, rejected at run time | The id does not exist in that provider's catalog; re-verify and re-apply |
 
 Canonical profiles resolve from the `products/kyber-squad` checkout first, then the snapshot
@@ -266,7 +266,8 @@ a cheap one for dev work, a good reviewer."
 2. Ask tier by tier. Verify each candidate with `opencode models`, then confirm the tokens:
    `architect`/`deep-planning` → `github-copilot/claude-opus-5.5`, `fast` →
    `github-copilot/mai-code-1.1-flash`, `general` → `github-copilot/gpt-6.1-terra`,
-   `reviewer` → `github-copilot/grok-4.7`, `orchestration` left inherited.
+   `reviewer` → `github-copilot/grok-4.7`, `orchestration` omitted so the bundled token stays
+   in force.
 3. Name it `kyber-weave-copilot`, scope global.
 4. Show the YAML and the resolved matrix. The user confirms.
 5. Write the file, run `preset show` and `preset use --dry-run`. Both pass.
