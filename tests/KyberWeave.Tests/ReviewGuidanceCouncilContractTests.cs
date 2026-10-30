@@ -269,11 +269,6 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
-    /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
-    /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
-    /// every named lens must match a file under <c>references/lenses/</c>.
-    /// </summary>
-    /// <summary>
     /// Prevents shared test machinery (fakes, fixtures, caches, capture helpers) from going
     /// unreviewed: the council must carry a lens for it, the catalogue must list it, and the lens
     /// map must give it the test-infrastructure guidance section.
@@ -299,8 +294,8 @@ public sealed class ReviewGuidanceCouncilContractTests
 
         string guidance = File.ReadAllText(ReviewGuidancePath);
         Assert.True(
-            Regex.IsMatch(guidance, @"^\| test-infrastructure \|", RegexOptions.Multiline),
-            $"{GuidanceFileName} lens map must give the test-infrastructure lens a row.");
+            Regex.IsMatch(guidance, @"^\| test-infrastructure \| 4, 10, 14 \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the test-infrastructure lens to sections 4, 10, 14.");
         Assert.True(
             guidance.Contains("### 14. Test infrastructure", StringComparison.Ordinal),
             $"{GuidanceFileName} must carry the test-infrastructure guidance section.");
@@ -332,10 +327,18 @@ public sealed class ReviewGuidanceCouncilContractTests
 
         string guidance = File.ReadAllText(ReviewGuidancePath);
         Assert.True(
-            Regex.IsMatch(guidance, @"^\| documentation-accuracy \|", RegexOptions.Multiline),
-            $"{GuidanceFileName} lens map must give the documentation-accuracy lens a row.");
+            Regex.IsMatch(guidance, @"^\| documentation-accuracy \| 11, Scope discipline \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the documentation-accuracy lens to section 11 and Scope discipline.");
+        Assert.True(
+            guidance.Contains("### 11. Docs, plans, and agent files", StringComparison.Ordinal),
+            $"{GuidanceFileName} must keep the section 11 the documentation-accuracy lens is routed to.");
     }
 
+    /// <summary>
+    /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
+    /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
+    /// every named lens must match a file under <c>references/lenses/</c>.
+    /// </summary>
     [Fact]
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {

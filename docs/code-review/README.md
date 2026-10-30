@@ -31,7 +31,7 @@ exit gate run by its own developer agent, never a reviewer. `code-reviewer` neve
 per-task basis unless a human specifically asks it to.**
 
 Not on a failed task gate. Not on a path the policy reserves. Not on a concern that looks
-serious. Every one of those is a per-task council bill — fifteen lenses and a full gate suite
+serious. Every one of those is a per-task council bill — seventeen lenses and a full gate suite
 spent to settle a question about a couple of files, and spent again on the next task. A task
 that cannot converge produces a *finding*, and findings are collected, planned by `architect`,
 and read once by the end-of-run review.
