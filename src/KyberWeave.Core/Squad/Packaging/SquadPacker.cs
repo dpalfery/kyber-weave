@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Packaging;
 
@@ -10,6 +12,7 @@ namespace KyberWeave.Core.Squad.Packaging;
 /// </summary>
 public static class SquadPacker
 {
+    private const string PackTarget = "pack";
     private static readonly DateTimeOffset FixedTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
@@ -31,7 +34,7 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = CollectApmEntries(sourcePath);
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(CollectApmEntries(sourcePath));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -55,7 +58,7 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = CollectPluginsEntries(sourcePath, version);
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(CollectPluginsEntries(sourcePath, version));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -161,6 +164,27 @@ public static class SquadPacker
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Fills every carrier's response-preferences block with the shipped default text. The packer
+    /// never consults the operator's home guidance: the archive is a function of the canonical
+    /// source alone. A corpus with no block is passed through unchanged (injector no-op).
+    /// </summary>
+    private static List<(string RelativePath, byte[] Content)> FillResponsePreferences(
+        List<(string RelativePath, byte[] Content)> entries)
+    {
+        List<SquadDeploymentFile> files = entries
+            .Select(entry => new SquadDeploymentFile(entry.RelativePath, entry.Content, PackTarget))
+            .ToList();
+
+        SquadRenderResult filled = SquadResponsePreferencesInjector.Inject(
+            new SquadRenderResult(true, files, [], [], []),
+            SquadResponseGuidanceSource.DefaultText);
+
+        return filled.Files
+            .Select(file => (file.RelativePath, file.Content.ToArray()))
+            .ToList();
     }
 
     private static byte[] ReadNormalizedFile(string filePath)
