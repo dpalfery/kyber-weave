@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 import { getConfigDir } from '../config.js'
 import { runningAsSea } from '../sea.js'
@@ -90,6 +90,12 @@ export const nodeFs: InstallFs = {
   },
   remove: async (path) => {
     await rm(path, { recursive: true, force: true })
+  },
+  trash: async (path) => {
+    const home = process.env['HOME'] ?? ''
+    const destination = join(home, '.Trash', `${basename(path)} ${Date.now()}`)
+    await rename(path, destination)
+    return destination
   },
   unzip: async (archive, into) => {
     // `ditto -xk` rather than `unzip`: it is what the release job packs with,

@@ -6,9 +6,8 @@
  * `codesign`, carries the wrong team, or is refused by `spctl` must not be
  * installed, and its quarantine attribute must not be stripped to make it run
  * (12.6) — stripping quarantine is precisely the workaround the signing work
- * exists to remove. And any failure after the existing app has been moved aside
- * must put it back (15.5), because a user who runs an update and is left with
- * no tray at all is worse off than one whose update simply failed.
+ * exists to remove. And a failed update never puts an older version back: it
+ * fails with the step and the reason, even if that leaves no tray at all.
  */
 
 import { createHash } from 'node:crypto'
@@ -26,6 +25,12 @@ import {
 
 /** How long a `--quit` is given before the replace goes ahead anyway (D7). */
 export const QUIT_TIMEOUT_MS = 10_000
+
+/** How long a freshly launched tray is given to show up as a process. */
+const LAUNCH_ATTEMPTS = 3
+const LAUNCH_RETRY_DELAY_MS = 1_000
+const LAUNCH_CHECKS = 10
+const LAUNCH_CHECK_INTERVAL_MS = 500
 
 export const MACOS_APP_NAME = 'KyberDash.app'
 
@@ -182,38 +187,102 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
   }
 
   const target = join(await applicationsDir(deps), MACOS_APP_NAME)
-  const backup = `${target}.backup`
-  let backedUp = false
+  const copies = await knownCopies(deps, target, plan.existing)
 
-  if (plan.existing !== null || (await deps.fs.exists(target))) {
-    await quitRunningTray(deps, target)
-  }
+  // 1. Quit everything that could be holding the old app: every copy of the
+  // tray, and the legacy menubar. Refuse to replace a tray that is still
+  // running rather than swapping a bundle out from under it.
+  await quitAll(deps, copies)
+
+  // 2. Move the old app to the Trash. Nothing is deleted: the Trash copy is
+  // the user's recovery path; the installer never restores it.
+  let trashed: string | null = null
 
   try {
-    if (await deps.fs.exists(target)) {
-      await deps.fs.rename(target, backup)
-      backedUp = true
-    }
+    if (await deps.fs.exists(target)) trashed = await deps.fs.trash(target)
+    // 3. Put the new app in place.
     await deps.fs.rename(staged, target)
   } catch (error) {
-    await restore(deps, backedUp, backup, target)
-    throw new InstallError('install', describe(error))
+    // No rollback: an old version coming back is not an acceptable outcome. The
+    // update fails and says why; the old app, if moved, is in the Trash.
+    throw new InstallError(
+      'install',
+      `${describe(error)}${trashed === null ? '' : ` (the previous app is in the Trash at ${trashed})`}`,
+    )
   }
 
-  const record = await recordInstall(deps, target, plan.version)
-
+  let record: TrayRecord
   try {
-    // The relaunch is part of the install: a tray that is installed but not
-    // running has not replaced the one that was quit.
-    await launch(deps, target)
+    record = await recordInstall(deps, target, plan.version)
   } catch (error) {
-    await restore(deps, backedUp, backup, target)
-    throw new InstallError('launch', describe(error))
+    // No rollback: an old version coming back is not an acceptable outcome. The
+    // update fails and says why; the old app, if moved, is in the Trash.
+    throw new InstallError(
+      'install',
+      `${describe(error)}${trashed === null ? '' : ` (the previous app is in the Trash at ${trashed})`}`,
+    )
   }
 
-  // Only now is the old copy not needed (D7).
-  if (backedUp) await deps.fs.remove(backup)
+  // The relaunch is part of the install: a tray that is installed but not
+  // running has not replaced the one that was quit. A failed launch is retried,
+  // never rolled back — the new app is on disk and is the one to get running.
+  await launchWithRetry(deps, target)
+
+  // Only now are the other copies not needed: a stale duplicate left behind is
+  // how an old tray gets launched by mistake.
+  for (const stale of copies.filter((copy) => copy !== target)) {
+    try {
+      if (await deps.fs.exists(stale)) {
+        await deps.fs.trash(stale)
+        deps.log(`kyberdash: moved the stale tray at ${stale} to the Trash`)
+      }
+    } catch (error) {
+      deps.log(`kyberdash: could not move ${stale} to the Trash: ${describe(error)}`)
+    }
+  }
   return record
+}
+
+/** Every place a tray copy may be: the target, the record, and both Applications folders. */
+async function knownCopies(
+  deps: InstallDeps,
+  target: string,
+  existing: TrayRecord | null,
+): Promise<string[]> {
+  const candidates = [
+    target,
+    ...(existing !== null ? [existing.path] : []),
+    join('/Applications', MACOS_APP_NAME),
+    join(deps.homeDir, 'Applications', MACOS_APP_NAME),
+  ]
+  const found: string[] = []
+  for (const candidate of new Set(candidates)) {
+    if (candidate === target || (await deps.fs.exists(candidate))) found.push(candidate)
+  }
+  return found
+}
+
+const TRAY_PROCESS = 'Contents/MacOS/kyberdash-tray'
+const LEGACY_MENUBAR_PROCESS = 'KyberDashMenubar.app/'
+
+async function isRunning(deps: InstallDeps, pattern: string): Promise<boolean> {
+  const result = await deps.run('pgrep', ['-f', pattern])
+  return result.code === 0
+}
+
+/** Quits every tray and the legacy menubar, escalating to a kill, and verifies. */
+async function quitAll(deps: InstallDeps, copies: string[]): Promise<void> {
+  for (const copy of copies) {
+    if (await deps.fs.exists(copy)) await quitRunningTray(deps, copy)
+  }
+  for (const pattern of [TRAY_PROCESS, LEGACY_MENUBAR_PROCESS]) {
+    if (!(await isRunning(deps, pattern))) continue
+    deps.log(`kyberdash: ${pattern} is still running; stopping it`)
+    await deps.run('pkill', ['-f', pattern])
+    if (await isRunning(deps, pattern)) {
+      throw new InstallError('quit', `${pattern} would not stop; quit it and run the update again`)
+    }
+  }
 }
 
 async function installWindows(
@@ -283,24 +352,6 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-async function restore(
-  deps: InstallDeps,
-  backedUp: boolean,
-  backup: string,
-  target: string,
-): Promise<void> {
-  if (!backedUp) return
-  try {
-    if (await deps.fs.exists(target)) await deps.fs.remove(target)
-    await deps.fs.rename(backup, target)
-    deps.log('kyberdash: restored the previous tray after a failed install')
-  } catch (error) {
-    // Reported rather than swallowed: the user now has a backup on disk and
-    // needs to know where it is.
-    deps.log(`kyberdash: could not restore ${backup}: ${describe(error)}`)
-  }
-}
-
 async function recordInstall(deps: InstallDeps, target: string, version?: string): Promise<TrayRecord> {
   const record: TrayRecord = {
     path: target,
@@ -316,14 +367,46 @@ async function recordInstall(deps: InstallDeps, target: string, version?: string
   return record
 }
 
+async function launchWithRetry(deps: InstallDeps, target: string): Promise<void> {
+  let lastError = ''
+  for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
+    try {
+      await launch(deps, target)
+      return
+    } catch (error) {
+      lastError = describe(error)
+      deps.log(`kyberdash: launch attempt ${attempt}/${LAUNCH_ATTEMPTS} failed: ${lastError}`)
+      // Clear anything half-started before trying again.
+      await deps.run('pkill', ['-f', TRAY_PROCESS])
+      await new Promise((resolve) => setTimeout(resolve, LAUNCH_RETRY_DELAY_MS))
+    }
+  }
+  throw new InstallError(
+    'launch',
+    `${lastError} (after ${LAUNCH_ATTEMPTS} attempts; the new tray is installed at ${target} — open it manually)`,
+  )
+}
+
 async function launch(deps: InstallDeps, target: string): Promise<void> {
   const result =
     deps.platform === 'darwin'
       ? await deps.run('open', [target])
       : await deps.run(target, [])
   if (result.code !== 0) {
-    throw new Error(`exited ${result.code}`)
+    throw new Error(`exited ${result.code}${result.stderr.trim() === '' ? '' : `: ${result.stderr.trim()}`}`)
   }
+  if (deps.platform === 'darwin' && !(await runningSoon(deps))) {
+    throw new Error('the tray was opened but is not running; it may have crashed on start')
+  }
+}
+
+/** Gives a launching tray a moment to appear before calling it dead. */
+async function runningSoon(deps: InstallDeps): Promise<boolean> {
+  for (let attempt = 0; attempt < LAUNCH_CHECKS; attempt += 1) {
+    if (await isRunning(deps, TRAY_PROCESS)) return true
+    await new Promise((resolve) => setTimeout(resolve, LAUNCH_CHECK_INTERVAL_MS))
+  }
+  return false
 }
 
 function describe(error: unknown): string {

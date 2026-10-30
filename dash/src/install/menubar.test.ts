@@ -46,6 +46,14 @@ function fakeFs() {
       files.delete(path)
       dirs.delete(path)
     },
+    trash: async (path) => {
+      const to = `/Users/dev/.Trash/${path.split('/').pop()}`
+      const payload = files.get(path) ?? '<dir>'
+      files.delete(path)
+      dirs.delete(path)
+      files.set(to, payload)
+      return to
+    },
     unzip: async (_archive, into) => {
       // A real `ditto -xk` leaves the bundle beside the archive.
       files.set(join(into, MACOS_APP_NAME), '<app bundle>')
@@ -73,6 +81,7 @@ function harness(overrides: Partial<InstallDeps> = {}) {
 
   const logs: string[] = []
   const commands: Array<{ command: string; args: string[] }> = []
+  let running = false
 
   const deps: InstallDeps = {
     platform: 'darwin',
@@ -98,6 +107,10 @@ function harness(overrides: Partial<InstallDeps> = {}) {
     fs,
     run: vi.fn(async (command: string, args: string[]) => {
       commands.push({ command, args })
+      // A tiny process table: `open` starts the tray, a quit or kill stops it.
+      if (command === 'open') running = true
+      if (command === 'pkill' || args.includes('--quit')) running = false
+      if (command === 'pgrep') return { code: running ? 0 : 1, stdout: '', stderr: '' }
       return { code: 0, stdout: '', stderr: '' }
     }),
     now: () => new Date('2026-09-19T12:00:00.000Z'),
@@ -256,36 +269,104 @@ describe('kyberdash menubar on macOS', () => {
     expect(ranXattr).toBe(false)
   })
 
-  /** R15.5: a failure after the swap puts the old app back. */
-  it('restores the previous app when the install fails', async () => {
+  /** A failed install fails with the reason; the old version never comes back. */
+  it('fails with the reason and does not restore the old app when the install fails', async () => {
     const existing = harness()
     existing.files.set(installedApp(), '<old app bundle>')
-    // Only the staged bundle's move fails. The backup and the restore are the
-    // same operation on other paths, and both have to keep working or the test
-    // would be asserting that restore is broken too.
+    const move = existing.deps.fs.rename
     existing.deps.fs.rename = vi.fn(async (from: string, to: string) => {
       if (from.startsWith('/tmp/')) throw new Error('disk full')
-      existing.files.set(to, existing.files.get(from) ?? '<dir>')
-      existing.files.delete(from)
+      await move(from, to)
     })
 
-    await expect(installTray(existing.deps, { force: true })).rejects.toThrow(/install/)
-    expect(existing.files.get(installedApp())).toBe('<old app bundle>')
-    expect(existing.logs.join('\n')).toContain('restored the previous tray')
+    await expect(installTray(existing.deps, { force: true })).rejects.toThrow(
+      /install: disk full \(the previous app is in the Trash/,
+    )
+    expect(existing.files.has(installedApp())).toBe(false)
+    expect(existing.logs.join('\n')).not.toContain('restored')
   })
 
-  it('restores the previous app when the relaunch fails', async () => {
-    const existing = harness({
+  it('retries a failed launch and keeps the new app', async () => {
+    let opens = 0
+    const flaky = harness({
+      run: vi.fn(async (command: string) => {
+        if (command === 'open') {
+          opens += 1
+          return opens < 3
+            ? { code: 1, stdout: '', stderr: 'LSOpenURLsWithRole failed' }
+            : { code: 0, stdout: '', stderr: '' }
+        }
+        return { code: command === 'pgrep' ? (opens >= 3 ? 0 : 1) : 0, stdout: '', stderr: '' }
+      }),
+    })
+    flaky.files.set(installedApp(), '<old app bundle>')
+
+    await expect(installTray(flaky.deps, { force: true })).resolves.not.toBeNull()
+    expect(opens).toBe(3)
+    expect(flaky.files.get(installedApp())).toBe('<app bundle>')
+  })
+
+  it('never rolls back when the launch keeps failing, and says where the app is', async () => {
+    const broken = harness({
       run: vi.fn(async (command: string) =>
         command === 'open'
-          ? { code: 1, stdout: '', stderr: 'LSOpenURLsWithRole failed' }
-          : { code: 0, stdout: '', stderr: '' },
+          ? { code: 1, stdout: '', stderr: 'boom' }
+          : { code: command === 'pgrep' ? 1 : 0, stdout: '', stderr: '' },
       ),
     })
-    existing.files.set(installedApp(), '<old app bundle>')
+    broken.files.set(installedApp(), '<old app bundle>')
 
-    await expect(installTray(existing.deps, { force: true })).rejects.toThrow(/launch/)
-    expect(existing.files.get(installedApp())).toBe('<old app bundle>')
+    await expect(installTray(broken.deps, { force: true })).rejects.toThrow(
+      /launch: exited 1: boom \(after 3 attempts/,
+    )
+    expect(broken.files.get(installedApp())).toBe('<app bundle>')
+    expect(broken.files.has(trayRecordPath('/Users/dev/.kyberdash'))).toBe(true)
+  })
+
+  it('fails the launch when the opened tray is not running', async () => {
+    const dead = harness({
+      run: vi.fn(async (command: string) => ({ code: command === 'pgrep' ? 1 : 0, stdout: '', stderr: '' })),
+    })
+    dead.files.set(installedApp(), '<old app bundle>')
+
+    await expect(installTray(dead.deps, { force: true })).rejects.toThrow(/not running/)
+    expect(dead.files.get(installedApp())).toBe('<app bundle>')
+  })
+
+  it('quits first, moves the old app to the Trash, then installs the new one', async () => {
+    const h2 = harness()
+    h2.files.set(installedApp(), '<old app bundle>')
+
+    await installTray(h2.deps, { force: true })
+
+    expect(h2.files.get('/Users/dev/.Trash/KyberDash.app')).toBe('<old app bundle>')
+    expect(h2.files.get(installedApp())).toBe('<app bundle>')
+    const quitAt = h2.commands.findIndex(({ args }) => args.includes('--quit'))
+    const openAt = h2.commands.findIndex(({ command }) => command === 'open')
+    expect(quitAt).toBeGreaterThanOrEqual(0)
+    expect(quitAt).toBeLessThan(openAt)
+  })
+
+  it('moves a stale copy in the other Applications folder to the Trash', async () => {
+    const h2 = harness()
+    const stale = join('/Users/dev/Applications', MACOS_APP_NAME)
+    h2.files.set(installedApp(), '<old app bundle>')
+    h2.files.set(stale, '<stale bundle>')
+
+    await installTray(h2.deps, { force: true })
+
+    expect(h2.files.has(stale)).toBe(false)
+    expect(h2.logs.join('\n')).toContain('stale tray')
+  })
+
+  it('refuses to replace a tray that will not stop', async () => {
+    const stuck = harness({
+      run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })),
+    })
+    stuck.files.set(installedApp(), '<old app bundle>')
+
+    await expect(installTray(stuck.deps, { force: true })).rejects.toThrow(/quit:.*would not stop/)
+    expect(stuck.files.get(installedApp())).toBe('<old app bundle>')
   })
 
   /** R15.6: the message says which step, so the user knows what to check. */
@@ -350,14 +431,15 @@ describe('kyberdash menubar --update', () => {
     const openAt = h.commands.findIndex(({ command }) => command === 'open')
     expect(quitAt).toBeLessThan(openAt)
 
-    // The backup is gone only because the relaunch succeeded.
-    expect(h.files.has(`${installedApp()}.backup`)).toBe(false)
   })
 
   it('continues when the running tray will not confirm the quit', async () => {
+    let opened = false
     const h = harness({
       run: vi.fn(async (command: string, args: string[]) => {
         if (args.includes('--quit')) throw new Error('no such process')
+        if (command === 'pgrep') return { code: opened ? 0 : 1, stdout: '', stderr: '' }
+        if (command === 'open') opened = true
         return { code: 0, stdout: '', stderr: '' }
       }),
     })

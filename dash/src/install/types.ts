@@ -56,6 +56,8 @@ export type InstallFs = {
   readFile(path: string): Promise<string>
   rename(from: string, to: string): Promise<void>
   remove(path: string): Promise<void>
+  /** Moves to the user's Trash, never deleting; returns where it landed. */
+  trash(path: string): Promise<string>
   /** Unpacks a zip; `ditto -xk` on macOS. */
   unzip(archive: string, into: string): Promise<void>
   mkdtemp(prefix: string): Promise<string>
