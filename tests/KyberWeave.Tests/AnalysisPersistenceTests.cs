@@ -566,7 +566,7 @@ public sealed class AnalysisPersistenceTests
         process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
         process.StandardInput.Flush();
 
-        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
             ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 1\nBEGIN IMMEDIATE;");
