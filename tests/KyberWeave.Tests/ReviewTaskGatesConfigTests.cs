@@ -699,7 +699,7 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewGate> gates = RepositoryReviewGates();
 
-        Assert.Equal(27, gates.Count);
+        Assert.Equal(30, gates.Count);
         List<string> missing = [];
         foreach (ReviewGate gate in gates)
             if (gate.Include.Count == 0)
@@ -707,7 +707,7 @@ public sealed class ReviewTaskGatesConfigTests
 
         Assert.True(
             missing.Count == 0,
-            $"Expected all 27 review gates to declare non-empty include globs, but these {missing.Count} did not: {string.Join(", ", missing)}");
+            $"Expected all 30 review gates to declare non-empty include globs, but these {missing.Count} did not: {string.Join(", ", missing)}");
     }
 
     /// <summary>

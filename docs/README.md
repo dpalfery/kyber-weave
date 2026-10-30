@@ -126,6 +126,7 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 |---|---|
 | [Overview & Why Kyber-Squad](kyber-squad/README.md) | Value proposition, solving multi-harness fragmentation, capability lattices |
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
+| [Model profiles and presets](kyber-squad/model-profiles.md) | The six semantic profiles, per-harness token shapes, creating, applying, switching, and reverting presets |
 | [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine, conductor execution circuit-breaker |
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix, conductor circuit-breaker harvest |
 

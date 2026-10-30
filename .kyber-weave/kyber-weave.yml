@@ -131,6 +131,21 @@ review:
       include: *skill-onboarding-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-onboarding-and-assessment, --fail-on, critical]
       blocking: true
+    # The model-profile skill teaches preset authoring for every harness. It is
+    # gated like the rest so the command examples and per-harness table cannot
+    # drift from the CLI surface without a failing gate.
+    - id: skill-validate-model-profile
+      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-model-profile]
+      blocking: true
+    - id: skill-lint-model-profile
+      include: *skill-model-profile-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-model-profile, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-model-profile
+      include: *skill-model-profile-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-model-profile, --fail-on, critical]
+      blocking: true
     - id: docs-validate
       include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]

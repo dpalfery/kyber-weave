@@ -365,6 +365,10 @@ The `squad:` section governs agent and skill deployment via `kyber-weave squad`.
 - **Version**: When omitted, installation uses the running CLI version. When specified, `squad.version` must match the CLI's semantic `X.Y.Z` version.
 - **Validation**: Unrecognized bundles, invalid target tokens, or unsupported translation modes fail immediately with `KW-CONFIG-001`.
 
+Model selection is not part of this file. Each deployed agent names a semantic model profile,
+and a user-owned preset selects the concrete model per harness. See
+[Model profiles and presets](kyber-squad/model-profiles.md).
+
 ## Review
 
 The `review:` section declares the deterministic gates and the ready-queue
