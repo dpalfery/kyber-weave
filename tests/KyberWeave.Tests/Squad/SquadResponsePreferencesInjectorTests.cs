@@ -119,6 +119,32 @@ public sealed class SquadResponsePreferencesInjectorTests
         Assert.Equal("plain text", Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
     }
 
+    [Fact]
+    public void Inject_AcceptsCarrierNamedFilesAndRejectsUnrelatedSkillsWithBlocks()
+    {
+        SquadRenderResult carrier = RenderResult((".claude/agents/conductor.md", "<response-preferences>old</response-preferences>"));
+        SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(carrier, "effective");
+        Assert.Contains("<response-preferences>effective</response-preferences>", Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()), StringComparison.Ordinal);
+
+        SquadRenderResult unrelated = RenderResult(("skills/bug-crusher/SKILL.md", "<response-preferences>bad</response-preferences>"));
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(unrelated, "effective"));
+
+        SquadRenderResult prefixed = RenderResult(("skills/role-conductor.md", "<response-preferences>ok</response-preferences>"));
+        SquadRenderResult prefixedInjected = SquadResponsePreferencesInjector.Inject(prefixed, "effective");
+        Assert.Contains("<response-preferences>effective</response-preferences>", Encoding.UTF8.GetString(prefixedInjected.Files[0].Content.ToArray()), StringComparison.Ordinal);
+
+        SquadRenderResult stripped = RenderResult(("agents/bug-crusher.md", "<response-preferences>ok</response-preferences>"));
+        SquadRenderResult strippedInjected = SquadResponsePreferencesInjector.Inject(stripped, "effective");
+        Assert.Contains("<response-preferences>effective</response-preferences>", Encoding.UTF8.GetString(strippedInjected.Files[0].Content.ToArray()), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inject_ThrowsWhenTargetCarrierSetDoesNotProduceAnyBlockBearingFile()
+    {
+        SquadRenderResult noCarrier = RenderResult((".claude/agents/unknown.md", "plain text"));
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(noCarrier, "effective"));
+    }
+
     private static string NewHomeDirectory()
     {
         string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-home-" + Guid.NewGuid().ToString("N"));
