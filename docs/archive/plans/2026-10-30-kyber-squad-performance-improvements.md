@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-10-30
 development-mode: test-first
 documentation-impact: extends-component
-impact-components: [KyberSquad]
+impact-components: [KyberSquad, ReviewCouncil]
 ---
 
 # Kyber-Squad performance improvements and execution latency reduction
@@ -51,7 +51,7 @@ impact-components: [KyberSquad]
 >   25. `docs/plans/README.md`: Direct read to review Active Plans registration row.
 >   26. `products/kyber-squad/agents/csharp-dev.md`: Re-checked lines 1–20 to confirm absence of model profile edits.
 >   27. `.system_generated/steps/10/output.txt`: Direct read to inspect CodeGraph explore output for `SquadPerformanceContractTests`.
->   28. `docs/plans/README.md`: To inspect and verify Active Plans registration row status during R2 refinement.
+>   28: `docs/plans/README.md`: To inspect and verify Active Plans registration row status during R2 refinement.
 >   29. `docs/plans/2026-10-30-kyber-squad-performance-improvements.md`: Direct read to review and update D8, R2, AP3, H1, and §1–§7 per user directive R2.
 >   30. `docs/plans/2026-10-30-kyber-squad-performance-improvements.md`: Direct read to update D7, R3, AP4, H1, §1.1 #6, §1.2 #6, §3, §4 (T1–T3), and §7 per user concurrency refinement R3.
 >   31. `docs/plans/README.md`: Direct read to update Active Plans registration row reflecting worktree-isolated parallel task/test execution and adversarial RED/GREEN separation.
@@ -80,6 +80,7 @@ impact-components: [KyberSquad]
 | AP3 | Approve and execute the revised Ready plan on branch feat/kyber-squad-performance-improvements following user scope refinement R2 (adversarial RED/GREEN separation strictly preserved)? | Superseded by AP4 following user concurrency refinement R3. | Superseded by AP4. | Superseded (`user: explicit concurrency refinement R3`) |
 | R3 | How should task execution and test concurrency be scheduled per user explicit comment on maximum parallelization? | User explicitly directed: *"i want maximum parallelization, can we split by worktree still achive isolation but have multiple tasks running simaltanously? serializeing all tests will slow us down"*. Do NOT serialize all task execution or test runs. Independent ready tasks whose declared file/symbol scopes do not overlap execute **in parallel** up to `review.max-concurrent-workers`: each concurrent write/test worker executes in an isolated git worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses per-task `artifacts-path` isolation (`--artifacts-path` / isolated `TASK_GATE` `--out artifacts/task-gate-<task-id>.json` and class-filtered direct assembly execution `-class "<namespace>.<Class>"`) so multiple workers author code and run tests simultaneously without `index.lock` or build-output collisions. **Only final integration/branch-head mutations are serialized:** cherry-picking/merging a finished worktree back onto the shared feature branch, recording shared index/gate state on the integration branch, and `git push` are serialized at the integration boundary. All read-only tasks, test runs, and non-overlapping task implementations run concurrently. | Eliminates unnecessary test and task serialization bottlenecks while preventing git `index.lock` contention and artifact overwrite collisions through worktree and artifact-path isolation. | Approved (`user: explicit decision`) |
 | AP4 | Approve and execute the revised Ready plan on branch feat/kyber-squad-performance-improvements following user concurrency refinement R3 (maximum parallelization via worktree/artifacts isolation; serial branch-head integration)? | Approve and execute the revised performance improvements plan with worktree-isolated parallel task and test execution, serial branch-head integration, adversarial RED/GREEN role separation, small same-role micro-task bundling, and independent verification enforced. | Scales concurrency up to `review.max-concurrent-workers` for non-overlapping tasks and test runs via worktrees and isolated artifact paths. Grounded in empirical evidence, user directives R1, R2, R3, and approved decisions D1–D10, R1–R3. | Approved (user: explicit approve and execute — "approved execute") |
+| D11 | How should read-only review lenses access git diff without executing git commands across subagents? | `DECISION-COUNCIL-GIT-ACCESS: OPTION-A-MATERIALIZED-DIFF`. `code-reviewer` materializes `git diff <base>...<head>` to `artifacts/review-diff.patch` before council fan-out, and passes this path in each `review-lens` packet. `review-lens` retains `read-only` profile and reads `artifacts/review-diff.patch` via `filesystem.read: allow` (`view_file` / `read_file`) without running git commands. | Preserves strict capability lattice (`read-only` subagents never execute git or mutate state) while eliminating git index contention and duplicate git diff executions across 17 lenses. Council hardening also includes cross-document contract parity, contract assertion rigor, operational lifecycle walks, literal prompt parsing, and refutation guardrails. | Approved (user: explicit selection "option 2" and "option a") |
 
 ---
 
@@ -87,7 +88,7 @@ impact-components: [KyberSquad]
 
 ```yaml
 documentation-impact: extends-component
-impact-components: [KyberSquad]
+impact-components: [KyberSquad, ReviewCouncil]
 ```
 
 | ID | Target component | Target doc type | Proposed location | Summary of durable knowledge |
@@ -96,6 +97,7 @@ impact-components: [KyberSquad]
 | H2 | KyberSquad | onboarding | [`docs/kyber-squad/onboarding.md`](../../kyber-squad/onboarding.md) | Task execution runbook: inlined task packets (entry-file table, acceptance checklist), pre-computed assembly test runner command (`-class`), and terse 6-field completion digest contract. |
 | H3 | KyberSquad | requirements | [`docs/kyber-squad/requirements.md`](../../kyber-squad/requirements.md) | Conductor execution invariants: strict 6-field digest validation, zero-stashing red proof contract, build-once test-many iteration rules, and adversarial RED/GREEN role separation. |
 | H4 | KyberSquad | coding-standard | [`docs/standards/test/README.md`](../../standards/test/README.md) | Fast .NET direct assembly runner invocation (`dotnet <dll> -class ... -reporter quiet`), `--no-build` filtered test iteration, and clean-tree / worktree red proof verification. |
+| H5 | ReviewCouncil | architecture | [`docs/code-review/architecture.md`](../../code-review/architecture.md) | Review Council hardening: materialized diff contract at `artifacts/review-diff.patch` before lens fan-out (Option A); cross-document and prompt-to-prompt contract parity across modified markdown instructions, runbooks, and reference contracts; contract assertion rigor (banning bare single-word `Assert.Contains`, unguarded boolean `||` assertions, non-contiguous multi-line `foreach` checks); operational lifecycle state-machine walks (`create` → `execute` → `integrate` → `cleanup`/`remove`/`prune` → `conflict`/`rollback`); literal prompt parsing prohibiting charitable reading; and refutation guardrails forbidding dismissal of contract assertions (`R14`), cross-document contradictions (`R16`), or missing lifecycle cleanup paths. |
 
 ---
 
@@ -316,14 +318,16 @@ ADR waiver for the whole plan: "no ADR — ADR waiver: This plan refines interna
 | AP3 | Documentation waiver: Revised plan approval provenance following R2; transient planning history with no surviving invariant. | extends-component | KyberSquad | 2026-10-30 | archived |
 | R3 | Concurrency and maximum parallelization via worktree/artifacts isolation: [Kyber-Squad architecture, Concurrency and scheduling model](../../kyber-squad/architecture.md#concurrency-and-scheduling-model-worktree-and-artifact-isolation) | extends-component | KyberSquad | 2026-10-30 | archived |
 | AP4 | Documentation waiver: Final explicit user approval provenance ("approved execute"); transient planning authorization with no surviving invariant. | extends-component | KyberSquad | 2026-10-30 | archived |
+| D11 | Review Council materialized diff contract (Option A): [Review council architecture, Materialized diff contract (Option A)](../../code-review/architecture.md#materialized-diff-contract-option-a) | extends-component | ReviewCouncil | 2026-10-30 | archived |
 | H1 | Concurrency and scheduling model, worktree isolation, adversarial RED/GREEN role separation, same-role micro-task bundling: [Kyber-Squad architecture, Concurrency and scheduling model](../../kyber-squad/architecture.md#concurrency-and-scheduling-model-worktree-and-artifact-isolation) | extends-component | KyberSquad | 2026-10-30 | archived |
 | H2 | Task execution runbook, inlined task packets, pre-computed test runner, and 6-field completion digest schema: [Kyber-Squad onboarding, Task execution runbook](../../kyber-squad/onboarding.md#task-execution-runbook-inlined-packets-fast-testing-and-completion-digests) | extends-component | KyberSquad | 2026-10-30 | archived |
 | H3 | Conductor execution invariants, build-once test-many, zero-stash red proofs, 6-field digest validation, and adversarial separation: [Kyber-Squad requirements, Conductor execution and worker invariants](../../kyber-squad/requirements.md#conductor-execution-and-worker-invariants) | extends-component | KyberSquad | 2026-10-30 | archived |
 | H4 | Fast direct assembly runner invocation, `--no-build` filtered iteration, and clean-tree / worktree red proofs: [Test coding standard, Fast Assembly Runner and Iteration Workflow](../../standards/test/README.md#fast-assembly-runner-and-iteration-workflow) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H5 | Review Council hardening (materialized diff, contract parity, assertion rigor, lifecycle walks, literal prompt parsing, and refutation guardrails): [Review council architecture, Council hardening and contract verification](../../code-review/architecture.md#council-hardening-and-contract-verification) | extends-component | ReviewCouncil | 2026-10-30 | archived |
 
 ```text
 DOCS_REVIEW: update
-RECOMMENDATIONS: docs/kyber-squad/architecture.md, docs/kyber-squad/onboarding.md, docs/kyber-squad/requirements.md, docs/standards/test/README.md
+RECOMMENDATIONS: docs/kyber-squad/architecture.md, docs/kyber-squad/onboarding.md, docs/kyber-squad/requirements.md, docs/standards/test/README.md, docs/code-review/architecture.md
 ```
 
 CLOSEOUT_COMPLETE
