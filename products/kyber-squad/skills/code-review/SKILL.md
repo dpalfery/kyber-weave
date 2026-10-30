@@ -193,6 +193,14 @@ Findings whose `confidence` is **below** `review.policy.min-confidence` are excl
 the critical and major blocking rules. Equal to the threshold is kept; above it is kept.
 Below it is dropped. The engine compares `Confidence < MinConfidence`.
 
+**Strictness.** `review.policy.strictness` is a named preset over those two numbers, not a
+third mechanism. `balanced` (the default) is `min-confidence: 7`, `major-count-blocks: 3`;
+`lenient` is `8` and `5`; `strict` is `5` and `1`, so one surviving major requests changes. A
+host that also declares `min-confidence` or `major-count-blocks` overrides the preset for that
+number. Minor findings never block at any level. Pass the strictness and the effective
+`min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
+findings instead of having them dropped at the source and a lenient host is not flooded.
+
 The two escalation rules run **before** any finding is weighed, because a reserved path and
 an unreviewable diff both say the same thing: this change is not the engine's to settle,
 however clean or filthy the council's report was.
@@ -292,10 +300,11 @@ review:
   duplicates:
     minimum-lines: 4                       # normalized lines, signature and braces excluded
   policy:
+    strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.

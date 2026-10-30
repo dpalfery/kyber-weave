@@ -269,6 +269,33 @@ public sealed class ReviewGuidanceCouncilContractTests
     }
 
     /// <summary>
+    /// Prevents the council strictness setting from reaching the verdict engine but not the lenses:
+    /// the code-review skill must pass <c>review.policy.strictness</c> to every seat, so a strict
+    /// host gets lower-confidence findings reported instead of silently dropped at source.
+    /// </summary>
+    [Fact]
+    public void TheCodeReviewSkillPassesTheStrictnessToEverySeat()
+    {
+        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Assert.True(
+            skill.Contains("review.policy.strictness", StringComparison.Ordinal),
+            "The code-review skill must document review.policy.strictness.");
+        Assert.True(
+            Regex.IsMatch(
+                skill,
+                @"Pass\s+the\s+strictness\s+and\s+the\s+effective\s+`min-confidence`\s+to\s+\*\*every\s+seat\*\*",
+                RegexOptions.CultureInvariant),
+            "The code-review skill must tell the reviewer to pass the strictness and effective floor to every seat.");
+
+        string lens = File.ReadAllText(Path.Combine(ProductRoot, "agents", "review-lens.md"));
+        Assert.True(
+            lens.Contains("`lenient`", StringComparison.Ordinal) &&
+            lens.Contains("`balanced`", StringComparison.Ordinal) &&
+            lens.Contains("`strict`", StringComparison.Ordinal),
+            "The review-lens agent must say how it applies each strictness level it is given.");
+    }
+
+    /// <summary>
     /// Prevents shared test machinery (fakes, fixtures, caches, capture helpers) from going
     /// unreviewed: the council must carry a lens for it, the catalogue must list it, and the lens
     /// map must give it the test-infrastructure guidance section.
