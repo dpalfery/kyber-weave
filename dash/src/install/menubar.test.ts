@@ -90,6 +90,13 @@ function fakeFs() {
 
 type Harness = ReturnType<typeof harness>
 
+/** A failed trash move: the old app is still there, no new app, no record, no launch. */
+function expectOldAppUntouched(h: Harness) {
+  expect(h.files.get(installedApp())).toBe('<old app bundle>')
+  expect([...h.files.keys()].some((path) => path.endsWith('tray.json'))).toBe(false)
+  expect(h.commands.some(({ command }) => command === 'open')).toBe(false)
+}
+
 function harness(overrides: Partial<InstallDeps> = {}) {
   const { fs, files, dirs, writable, faults } = fakeFs()
   const payload = new TextEncoder().encode('tray-artifact-bytes')
@@ -421,8 +428,9 @@ describe('kyberdash menubar on macOS', () => {
     h5.faults.trashMove = 'EXDEV: cross-device link'
 
     await expect(installTray(h5.deps, { force: true })).rejects.toThrow(/install: EXDEV/)
-    expect(h5.files.get(installedApp())).toBe('<old app bundle>')
     expect([...h5.dirs].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual([])
+    expect([...h5.files.keys()].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual([])
+    expectOldAppUntouched(h5)
   })
 
   it('reports both the move and the placeholder cleanup failure through the installer', async () => {
@@ -432,9 +440,12 @@ describe('kyberdash menubar on macOS', () => {
     h6.faults.keepPlaceholder = true
 
     await expect(installTray(h6.deps, { force: true })).rejects.toThrow(
-      /install: EXDEV.*could not be removed: EACCES/,
+      /install: EXDEV.*placeholder \/Users\/dev\/\.Trash\/KyberDash 1\.app could not be removed: EACCES/,
     )
-    expect(h6.files.get(installedApp())).toBe('<old app bundle>')
+    // The claim stays: the Trash holds exactly the empty placeholder, nothing was moved into it.
+    expect([...h6.dirs].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual(['/Users/dev/.Trash/KyberDash 1.app'])
+    expect([...h6.files.keys()].filter((path) => path.startsWith('/Users/dev/.Trash/'))).toEqual([])
+    expectOldAppUntouched(h6)
   })
 
   it('refuses to replace a tray that will not stop', async () => {
