@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
 using Xunit.Sdk;
@@ -9,16 +10,16 @@ using Xunit.Sdk;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the per-agent task-gate contract of <c>kyber-weave review gates --agent</c>, driven through a
-/// real <see cref="CommandApp"/> against a temporary git repository that carries its own
-/// <c>.kyber-weave/kyber-weave.yml</c>.
+///     Pins the per-agent task-gate contract of <c>kyber-weave review gates --agent</c>, driven through a
+///     real <see cref="CommandApp" /> against a temporary git repository that carries its own
+///     <c>.kyber-weave/kyber-weave.yml</c>.
 /// </summary>
 /// <remarks>
-/// The only program any gate runs is <c>git</c>, which every host the suite targets already has, so
-/// the same assertions hold on macOS and Linux. Assertions read the boundary a caller sees: the exit
-/// code, the rule identifiers rendered to the console, and the gate report written by <c>--out</c>.
-/// A gate that must not start proves it by leaving a mark in the repository's own git configuration,
-/// which the test reads back; a gate that ran cannot hide behind a missing diagnostic.
+///     The only program any gate runs is <c>git</c>, which every host the suite targets already has, so
+///     the same assertions hold on macOS and Linux. Assertions read the boundary a caller sees: the exit
+///     code, the rule identifiers rendered to the console, and the gate report written by <c>--out</c>.
+///     A gate that must not start proves it by leaving a mark in the repository's own git configuration,
+///     which the test reads back; a gate that ran cannot hide behind a missing diagnostic.
 /// </remarks>
 public sealed class ReviewGatesAgentCommandTests : IDisposable
 {
@@ -31,21 +32,97 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     private const int ClientInputExitCode = 2;
     private const string StartedMarkerKey = "t2r.started";
     private const string FixedMarkerKey = "t2r.fixed";
-    private readonly TempDirectory _temp = new();
     private readonly string _repo;
+    private readonly TempDirectory _temp = new();
 
     public ReviewGatesAgentCommandTests()
     {
         _repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(_repo);
-
-        MustGit("init", "--quiet");
-        WriteRepositoryFile("src/a.cs", "// a\n");
-        WriteRepositoryFile("src/gone.cs", "// gone\n");
-        WriteRepositoryFile("notes/readme.md", "# readme\n");
-        MustGit("add", "-A");
-        Commit("initial");
+        TestGitRepositoryTemplate.CreateReviewGatesAgentRepository(_repo);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // Configuration fixtures. Each is a complete kyber-weave.yml for one scenario.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>A probe that passes only when every changed path is tracked by git.</summary>
+    private static string TrackedProbeConfiguration => """
+                                                       review:
+                                                         task-gates:
+                                                           csharp-dev:
+                                                             - id: tracked-probe
+                                                               include: ["**/*.cs"]
+                                                               run: [git, ls-files, --error-unmatch, "{changed}"]
+                                                       """;
+
+    /// <summary>A probe that fails on any missing file, so it blocks if a deleted path is passed in.</summary>
+    private static string HashObjectProbeConfiguration => """
+                                                          review:
+                                                            task-gates:
+                                                              csharp-dev:
+                                                                - id: hash-probe
+                                                                  include: ["**/*.cs"]
+                                                                  run: [git, hash-object, "{changed}"]
+                                                          """;
+
+    /// <summary>A gate that must never start in the unsafe-input tests; starting it sets a marker.</summary>
+    private static string MustNotRunConfiguration => $"""
+                                                      review:
+                                                        task-gates:
+                                                          csharp-dev:
+                                                            - id: must-not-run
+                                                              include: ["**/*.cs"]
+                                                              run: [git, config, --local, {StartedMarkerKey}, yes]
+                                                      """;
+
+    /// <summary>A gate whose argv carries a <c>{task}</c> placeholder.</summary>
+    private static string TaskPlaceholderConfiguration => """
+                                                          review:
+                                                            task-gates:
+                                                              csharp-dev:
+                                                                - id: task-placeholder
+                                                                  include: ["**/*.cs"]
+                                                                  run: [git, config, --local, t2r.started, "{task}"]
+                                                          """;
+
+    /// <summary>A probe that passes only when <c>{task}</c> was substituted into its path.</summary>
+    private static string ScratchpadProbeConfiguration => """
+                                                          review:
+                                                            task-gates:
+                                                              csharp-dev:
+                                                                - id: scratchpad-probe
+                                                                  include: ["**/*.cs"]
+                                                                  run: [git, ls-files, --error-unmatch, ".agent_scratchpad/{task}/marker.txt"]
+                                                          """;
+
+    /// <summary>A fix that marks the repository, and a verify that passes only once the mark exists.</summary>
+    private static string FixConfiguration => $"""
+                                               review:
+                                                 task-gates:
+                                                   csharp-dev:
+                                                     - id: formatted
+                                                       include: ["**/*.cs"]
+                                                       fix: [git, config, --local, {FixedMarkerKey}, yes]
+                                                       run: [git, config, --local, --get, {FixedMarkerKey}]
+                                               """;
+
+    /// <summary>The repository-wide <c>review.gates</c> list, with no task gates.</summary>
+    private static string RepositoryGateConfiguration => """
+                                                         review:
+                                                           gates:
+                                                             - id: repository-wide
+                                                               run: [git, --version]
+                                                         """;
+
+    private static string CurrentOs => OperatingSystem.IsWindows() ? "windows" : "unix";
+
+    private static string OtherOs => OperatingSystem.IsWindows() ? "unix" : "windows";
+
+    // -----------------------------------------------------------------------------------------
+    // Harness: a real CommandApp, the repository, and the report.
+    // -----------------------------------------------------------------------------------------
+
+    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
 
     public void Dispose()
     {
@@ -310,8 +387,8 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     /// <summary>
-    /// <c>--base</c> is a git ref. A value that starts with a dash would be read by git as an option,
-    /// so it is refused before the agent is looked up and before any gate starts.
+    ///     <c>--base</c> is a git ref. A value that starts with a dash would be read by git as an option,
+    ///     so it is refused before the agent is looked up and before any gate starts.
     /// </summary>
     [Fact]
     public void ALeadingDashBaseRefIsRefusedBeforeAnyGateStarts()
@@ -327,15 +404,16 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     /// <summary>
-    /// On unix a backslash is an ordinary file-name character, so <c>a\b.cs</c> names one file. The path
-    /// must reach argv as written; rewriting it to <c>a/b.cs</c> would point the gate at a different file.
-    /// The probe passes only when the file exists under the name it was given.
+    ///     On unix a backslash is an ordinary file-name character, so <c>a\b.cs</c> names one file. The path
+    ///     must reach argv as written; rewriting it to <c>a/b.cs</c> would point the gate at a different file.
+    ///     The probe passes only when the file exists under the name it was given.
     /// </summary>
     [Fact]
     public void ABackslashInAChangedFileNameReachesArgvAsWritten()
     {
         if (OperatingSystem.IsWindows())
-            throw SkipException.ForSkip("A backslash is a path separator on Windows, so this file name cannot exist there.");
+            throw SkipException.ForSkip(
+                "A backslash is a path separator on Windows, so this file name cannot exist there.");
 
         WriteRepositoryFile(@"a\b.cs", "// backslash\n");
         WriteConfiguration(HashObjectProbeConfiguration);
@@ -348,9 +426,9 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     /// <summary>
-    /// A changed path whose file, or a directory above it, is a symbolic link leading outside the
-    /// repository is refused before any gate starts. The gate would otherwise read a file the
-    /// repository does not contain.
+    ///     A changed path whose file, or a directory above it, is a symbolic link leading outside the
+    ///     repository is refused before any gate starts. The gate would otherwise read a file the
+    ///     repository does not contain.
     /// </summary>
     [Theory]
     [InlineData("file")]
@@ -435,6 +513,8 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     public void AValidTaskSlugIsSubstitutedIntoEveryPlaceholder()
     {
         WriteRepositoryFile(".agent_scratchpad/t2r-probe/marker.txt", "marker\n");
+        MustGit("add", "-A");
+        Commit("add marker for probe");
         WriteConfiguration(ScratchpadProbeConfiguration);
         ChangeTracked("src/a.cs");
 
@@ -610,92 +690,9 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         Assert.Equal(["repository-wide"], GateIds(report));
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Configuration fixtures. Each is a complete kyber-weave.yml for one scenario.
-    // -----------------------------------------------------------------------------------------
-
-    /// <summary>A probe that passes only when every changed path is tracked by git.</summary>
-    private static string TrackedProbeConfiguration => """
-                                                       review:
-                                                         task-gates:
-                                                           csharp-dev:
-                                                             - id: tracked-probe
-                                                               include: ["**/*.cs"]
-                                                               run: [git, ls-files, --error-unmatch, "{changed}"]
-                                                       """;
-
-    /// <summary>A probe that fails on any missing file, so it blocks if a deleted path is passed in.</summary>
-    private static string HashObjectProbeConfiguration => """
-                                                          review:
-                                                            task-gates:
-                                                              csharp-dev:
-                                                                - id: hash-probe
-                                                                  include: ["**/*.cs"]
-                                                                  run: [git, hash-object, "{changed}"]
-                                                          """;
-
-    /// <summary>A gate that must never start in the unsafe-input tests; starting it sets a marker.</summary>
-    private static string MustNotRunConfiguration => $"""
-                                                      review:
-                                                        task-gates:
-                                                          csharp-dev:
-                                                            - id: must-not-run
-                                                              include: ["**/*.cs"]
-                                                              run: [git, config, --local, {StartedMarkerKey}, yes]
-                                                      """;
-
-    /// <summary>A gate whose argv carries a <c>{task}</c> placeholder.</summary>
-    private static string TaskPlaceholderConfiguration => """
-                                                          review:
-                                                            task-gates:
-                                                              csharp-dev:
-                                                                - id: task-placeholder
-                                                                  include: ["**/*.cs"]
-                                                                  run: [git, config, --local, t2r.started, "{task}"]
-                                                          """;
-
-    /// <summary>A probe that passes only when <c>{task}</c> was substituted into its path.</summary>
-    private static string ScratchpadProbeConfiguration => """
-                                                          review:
-                                                            task-gates:
-                                                              csharp-dev:
-                                                                - id: scratchpad-probe
-                                                                  include: ["**/*.cs"]
-                                                                  run: [git, ls-files, --error-unmatch, ".agent_scratchpad/{task}/marker.txt"]
-                                                          """;
-
-    /// <summary>A fix that marks the repository, and a verify that passes only once the mark exists.</summary>
-    private static string FixConfiguration => $"""
-                                               review:
-                                                 task-gates:
-                                                   csharp-dev:
-                                                     - id: formatted
-                                                       include: ["**/*.cs"]
-                                                       fix: [git, config, --local, {FixedMarkerKey}, yes]
-                                                       run: [git, config, --local, --get, {FixedMarkerKey}]
-                                               """;
-
-    /// <summary>The repository-wide <c>review.gates</c> list, with no task gates.</summary>
-    private static string RepositoryGateConfiguration => """
-                                                         review:
-                                                           gates:
-                                                             - id: repository-wide
-                                                               run: [git, --version]
-                                                         """;
-
-    private static string CurrentOs => OperatingSystem.IsWindows() ? "windows" : "unix";
-
-    private static string OtherOs => OperatingSystem.IsWindows() ? "unix" : "windows";
-
-    // -----------------------------------------------------------------------------------------
-    // Harness: a real CommandApp, the repository, and the report.
-    // -----------------------------------------------------------------------------------------
-
-    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
-
     /// <summary>
-    /// The <c>review gates</c> invocation against the temporary repository, always writing the
-    /// report to a path inside the temporary root so the test can read it back.
+    ///     The <c>review gates</c> invocation against the temporary repository, always writing the
+    ///     report to a path inside the temporary root so the test can read it back.
     /// </summary>
     private string[] GatesCommand(params string[] options)
     {
@@ -706,8 +703,8 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The CLI boundary: a strict-parsing <see cref="CommandApp"/> with the review branch registered,
-    /// driven with console output captured and the process-wide console lock held.
+    ///     The CLI boundary: a strict-parsing <see cref="CommandApp" /> with the review branch registered,
+    ///     driven with console output captured and the process-wide console lock held.
     /// </summary>
     private static CliRun Cli(string[] arguments)
     {
@@ -784,10 +781,8 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (JsonElement item in element.EnumerateArray())
-            {
                 if (ContainsDiagnostic(item, code, severity))
                     return true;
-            }
 
             return false;
         }
@@ -799,15 +794,11 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
             && foundCode.GetString() == code
             && element.TryGetProperty("severity", out JsonElement foundSeverity)
             && foundSeverity.GetString() == severity)
-        {
             return true;
-        }
 
         foreach (JsonProperty property in element.EnumerateObject())
-        {
             if (ContainsDiagnostic(property.Value, code, severity))
                 return true;
-        }
 
         return false;
     }
@@ -830,8 +821,6 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     private void WriteConfiguration(string yaml)
     {
         WriteRepositoryFile(".kyber-weave/kyber-weave.yml", yaml);
-        MustGit("add", "-A");
-        Commit("configure gates");
     }
 
     private void WriteRepositoryFile(string relativePath, string content)

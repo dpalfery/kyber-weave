@@ -14,17 +14,17 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the CLI contract for home-level Squad state: a <c>--global</c> run finds its one receipt
-/// whatever directory it is launched from, offers the registered projects through the picker,
-/// honours <c>--projects</c> without prompting, and keeps project, registry and global state
-/// consistent when one of them fails.
+///     Pins the CLI contract for home-level Squad state: a <c>--global</c> run finds its one receipt
+///     whatever directory it is launched from, offers the registered projects through the picker,
+///     honours <c>--projects</c> without prompting, and keeps project, registry and global state
+///     consistent when one of them fails.
 /// </summary>
 /// <remarks>
-/// Every test runs against a temp home, a temp application data directory, and temp global roots
-/// supplied through the internal command seams. No test reads or writes the real home, the real
-/// application data directory, or a harness directory. Project state is seeded through the same
-/// lifecycle the CLI uses, so the registry is whatever the install path registers; a hand-written
-/// registry file would pin a format this contract does not yet fix.
+///     Every test runs against a temp home, a temp application data directory, and temp global roots
+///     supplied through the internal command seams. No test reads or writes the real home, the real
+///     application data directory, or a harness directory. Project state is seeded through the same
+///     lifecycle the CLI uses, so the registry is whatever the install path registers; a hand-written
+///     registry file would pin a format this contract does not yet fix.
 /// </remarks>
 public sealed class SquadGlobalHomeCliTests : IDisposable
 {
@@ -33,7 +33,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     [Fact]
     public void UpdateGlobalFromTwoUnrelatedDirectoriesFindsTheSameGlobalReceipt()
@@ -43,7 +46,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string first = h.MakeDirectory("unrelated-first");
         string second = h.MakeDirectory("unrelated-second");
         InstallGlobal(h, first, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
 
         CommandExecution fromFirst = Capture(() => command.Execute(null!, GlobalUpdate(first)));
         CommandExecution fromSecond = Capture(() => command.Execute(null!, GlobalUpdate(second)));
@@ -64,7 +67,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(named)));
 
         AssertExit(execution, 0);
@@ -82,7 +85,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? staleLockBefore = Snapshot(fleet.Stale.LockPath);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -99,7 +102,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RecordingProjectPicker picker = new(NoProjects);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -115,7 +118,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RecordingProjectPicker picker = new(_ => [fleet.Alpha.Physical]);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -124,9 +127,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// <c>None</c> means nothing, so it cannot sit beside another choice. The interactive picker
-    /// re-prompts on that combination; the flag form has no prompt to re-ask, so it must be refused
-    /// as client input before any write. The re-prompt itself has no seam yet (see the report).
+    ///     <c>None</c> means nothing, so it cannot sit beside another choice. The interactive picker
+    ///     re-prompts on that combination; the flag form has no prompt to re-ask, so it must be refused
+    ///     as client input before any write. The re-prompt itself has no seam yet (see the report).
     /// </summary>
     [Fact]
     public void UpdateGlobalNoneCombinedWithAnotherProjectChoiceIsRejectedWithoutWrites()
@@ -137,7 +140,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RecordingProjectPicker picker = new(AllNonStale);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: false, new PromptRecorder().Answer).Execute(
+            fleet.Command(picker, false, new PromptRecorder().Answer).Execute(
                 null!,
                 new SquadUpdateSettings
                 {
@@ -162,7 +165,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RecordingProjectPicker picker = new(AllNonStale);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: false, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor, yes: false)));
+            fleet.Command(picker, false, new PromptRecorder().Answer)
+                .Execute(null!, GlobalUpdate(fleet.Anchor, yes: false)));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -179,7 +183,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         PromptRecorder prompts = new();
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["all"])));
+            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["all"])));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -196,7 +200,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         PromptRecorder prompts = new();
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["none"])));
+            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["none"])));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -213,7 +217,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         PromptRecorder prompts = new();
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Alpha.Root])));
+            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Alpha.Root])));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -223,8 +227,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A named path that is stale is warned about and skipped, not updated and not treated as a
-    /// failure: the operator named it, so silence would hide that nothing happened to it.
+    ///     A named path that is stale is warned about and skipped, not updated and not treated as a
+    ///     failure: the operator named it, so silence would hide that nothing happened to it.
     /// </summary>
     [Fact]
     public void UpdateGlobalProjectsNamingAStaleProjectWarnsAndSkipsIt()
@@ -233,7 +237,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? staleLockBefore = Snapshot(fleet.Stale.LockPath);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(new RecordingProjectPicker(NoProjects), isInteractive: false, new PromptRecorder().Answer)
+            fleet.Command(new RecordingProjectPicker(NoProjects), false, new PromptRecorder().Answer)
                 .Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Stale.Root])));
 
         AssertExit(execution, 0);
@@ -242,9 +246,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A dry run plans and never writes. A global dry run that names an unregistered project with
-    /// in-repo state must not import it: the home project state and the registry stay as they were, the
-    /// in-repo files stay byte-identical, and the project is reported as skipped, so the exit stays 0.
+    ///     A dry run plans and never writes. A global dry run that names an unregistered project with
+    ///     in-repo state must not import it: the home project state and the registry stay as they were, the
+    ///     in-repo files stay byte-identical, and the project is reported as skipped, so the exit stays 0.
     /// </summary>
     [Fact]
     public void GlobalDryRunNamingAnImportableProjectWritesNothingAndSkipsIt()
@@ -271,7 +275,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         settings.DryRun = true;
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, settings));
 
         AssertExit(execution, 0);
@@ -285,8 +289,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// An unknown path is refused before any global work starts, and the hint names the nearest
-    /// registered project so a typo is one copy-paste away from being fixed.
+    ///     An unknown path is refused before any global work starts, and the hint names the nearest
+    ///     registered project so a typo is one copy-paste away from being fixed.
     /// </summary>
     [Fact]
     public void UpdateGlobalUnknownProjectsPathExitsTwoWithNearestHintAndNoWrites()
@@ -297,7 +301,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string typo = Path.Combine(fleet.Harness.Root, "alpah");
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(new RecordingProjectPicker(NoProjects), isInteractive: false, new PromptRecorder().Answer)
+            fleet.Command(new RecordingProjectPicker(NoProjects), false, new PromptRecorder().Answer)
                 .Execute(null!, GlobalUpdate(fleet.Anchor, [typo])));
 
         AssertExit(execution, 2);
@@ -315,8 +319,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? alphaLockBefore = Snapshot(alpha.LockPath);
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
-                .Execute(null!, new SquadUpdateSettings { Path = alpha.Root, Global = false, Version = UpdatedVersion, Projects = ["all"] }));
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!,
+                    new SquadUpdateSettings
+                    { Path = alpha.Root, Global = false, Version = UpdatedVersion, Projects = ["all"] }));
 
         AssertExit(execution, 2);
         Assert.Contains("--global", execution.Output, StringComparison.Ordinal);
@@ -331,7 +337,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using FailingReleaseSource failing = new();
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, new PromptRecorder().Answer, failing)
+            fleet.Command(picker, true, new PromptRecorder().Answer, failing)
                 .Execute(null!, GlobalUpdate(fleet.Anchor)));
 
         AssertExit(execution, 1);
@@ -341,8 +347,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// One project failing must not stop the rest, and the operator must be told which one failed:
-    /// the run ends with a summary and exit 1 rather than a silent partial success.
+    ///     One project failing must not stop the rest, and the operator must be told which one failed:
+    ///     the run ends with a summary and exit 1 rather than a silent partial success.
     /// </summary>
     [Fact]
     public void UpdateGlobalWhenOneProjectFailsUpdatesTheRestPrintsSummaryAndExitsOne()
@@ -354,7 +360,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RecordingProjectPicker picker = new(AllNonStale);
 
         CommandExecution execution = Capture(() =>
-            fleet.Command(picker, isInteractive: true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
 
         AssertExit(execution, 1);
         Assert.Contains(fleet.Alpha.Physical, execution.Output, StringComparison.Ordinal);
@@ -365,8 +371,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// The global form runs from an unrelated directory, so the receipt is found by the home anchor
-    /// rather than by the directory the operator happened to be in.
+    ///     The global form runs from an unrelated directory, so the receipt is found by the home anchor
+    ///     rather than by the directory the operator happened to be in.
     /// </summary>
     [Fact]
     public void UpdateGlobalTargetAllReplaceManagedOverwritesEditedOwnedFile()
@@ -381,8 +387,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[] edited = File.ReadAllBytes(architect);
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
-                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!,
+                    GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
 
         AssertExit(execution, 0);
         Assert.NotEqual(edited, File.ReadAllBytes(architect));
@@ -390,10 +397,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// The same run that would overwrite the owned file must not overwrite anything once it finds a
-    /// new path held by an unowned hand-authored file: the collision is planned before any write, so
-    /// the owned file keeps the operator's edit, the receipt and lock keep their bytes, and the
-    /// unowned file is untouched.
+    ///     The same run that would overwrite the owned file must not overwrite anything once it finds a
+    ///     new path held by an unowned hand-authored file: the collision is planned before any write, so
+    ///     the owned file keeps the operator's edit, the receipt and lock keep their bytes, and the
+    ///     unowned file is untouched.
     /// </summary>
     [Fact]
     public void UpdateGlobalTargetAllReplaceManagedWithUnmanagedNewPathFailsWholeRunWithoutWrites()
@@ -413,8 +420,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer updateRenderer = new("architect", "collider");
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, updateRenderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
-                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+            UpdateCommand(h, updateRenderer, new RecordingProjectPicker(NoProjects), false)
+                .Execute(null!,
+                    GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -435,7 +443,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     public void StatusGlobalListsRegisteredProjectsWithStaleFlags()
     {
         using Fleet fleet = ArrangeFleet("status-global");
-        SquadStatusCommand status = new(userPaths: fleet.Harness.UserPaths, stateStore: fleet.Harness.Store, globalRoots: fleet.Harness.GlobalRoots);
+        SquadStatusCommand status = new(fleet.Harness.UserPaths, fleet.Harness.Store, fleet.Harness.GlobalRoots);
 
         CommandExecution execution = Capture(() =>
             status.Execute(null!, new SquadStatusSettings { Path = fleet.Anchor, Global = true }));
@@ -448,8 +456,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A registry the status command cannot parse is named and fails the run, the way doctor reports it, rather than
-    /// crashing or listing nothing and succeeding. The status read is not a repair, so the corrupt file is left as found.
+    ///     A registry the status command cannot parse is named and fails the run, the way doctor reports it, rather than
+    ///     crashing or listing nothing and succeeding. The status read is not a repair, so the corrupt file is left as found.
     /// </summary>
     [Fact]
     public void StatusGlobalNamesAnUnreadableRegistryAndFailsWithoutRewritingIt()
@@ -461,7 +469,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         const string corrupt = "{ this registry is corrupt \n";
         File.WriteAllText(RegistryPath(h), corrupt, new UTF8Encoding(false));
 
-        CommandExecution status = Status(h, anchor, global: true);
+        CommandExecution status = Status(h, anchor, true);
 
         AssertExit(status, 1);
         Assert.Contains("registry is unreadable", status.Output, StringComparison.OrdinalIgnoreCase);
@@ -469,9 +477,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Doctor is the one place an operator sees the state the migration and registry left behind,
-    /// so each category must be named: a stale registry entry, a legacy global root the migration
-    /// could not move, and in-repo legacy state that was imported but kept.
+    ///     Doctor is the one place an operator sees the state the migration and registry left behind,
+    ///     so each category must be named: a stale registry entry, a legacy global root the migration
+    ///     could not move, and in-repo legacy state that was imported but kept.
     /// </summary>
     [Fact]
     public void DoctorGlobalReportsStaleEntriesUnmigratedLegacyRootsAndRetainedInRepoState()
@@ -485,13 +493,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
         CommandExecution execution = Capture(() =>
             new SquadDoctorCommand(
-                executor: new FakeProcessExecutor(),
-                userPaths: fleet.Harness.UserPaths,
-                workingDirectory: fleet.Anchor,
-                globalRoots: fleet.Harness.GlobalRoots,
-                renderer: renderer,
-                stateStore: fleet.Harness.Store)
-            .Execute(null!, new SquadDoctorSettings { Path = fleet.Anchor, Global = true }));
+                    new FakeProcessExecutor(),
+                    fleet.Harness.UserPaths,
+                    fleet.Anchor,
+                    fleet.Harness.GlobalRoots,
+                    renderer,
+                    fleet.Harness.Store)
+                .Execute(null!, new SquadDoctorSettings { Path = fleet.Anchor, Global = true }));
 
         Assert.Contains("is stale (", execution.Output, StringComparison.Ordinal);
         Assert.Contains("until its path is restored", execution.Output, StringComparison.Ordinal);
@@ -504,8 +512,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Global uninstall removes machine-wide files and nothing else. A project that still depends on
-    /// the registry, or a registry the operator can see, must keep the same bytes.
+    ///     Global uninstall removes machine-wide files and nothing else. A project that still depends on
+    ///     the registry, or a registry the operator can see, must keep the same bytes.
     /// </summary>
     [Fact]
     public void UninstallGlobalLeavesProjectStateAndRegistryUntouched()
@@ -517,12 +525,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? alphaReceiptBefore = Snapshot(fleet.Alpha.ReceiptPath);
         RecordingProjectPicker picker = new(AllNonStale);
         SquadUninstallCommand command = new(
-            userPaths: fleet.Harness.UserPaths,
-            stateStore: fleet.Harness.Store,
-            lifecycleService: fleet.Harness.Lifecycle(fleet.Renderer),
-            isInteractive: false,
-            readAnswer: null,
-            globalRoots: fleet.Harness.GlobalRoots);
+            fleet.Harness.UserPaths,
+            fleet.Harness.Store,
+            fleet.Harness.Lifecycle(fleet.Renderer),
+            false,
+            null,
+            fleet.Harness.GlobalRoots);
 
         CommandExecution execution = Capture(() =>
             command.Execute(null!, new SquadUninstallSettings { Path = fleet.Anchor, Global = true, Yes = true }));
@@ -536,8 +544,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A migrated global deployment that was uninstalled must stay uninstalled. The migration keeps the legacy copy
-    /// for an older CLI, so the command that runs after the uninstall must not copy it back into the home.
+    ///     A migrated global deployment that was uninstalled must stay uninstalled. The migration keeps the legacy copy
+    ///     for an older CLI, so the command that runs after the uninstall must not copy it back into the home.
     /// </summary>
     [Fact]
     public void UninstallOfMigratedGlobalStateIsNotUndoneByTheNextCommand()
@@ -548,10 +556,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
         MoveGlobalStateToLegacyRoot(h, anchor);
 
-        AssertExit(Uninstall(h, renderer, anchor, global: true), 0);
+        AssertExit(Uninstall(h, renderer, anchor, true), 0);
         Assert.False(File.Exists(GlobalReceiptPath(h)), "Global uninstall must remove the global receipt.");
 
-        CommandExecution status = Status(h, anchor, global: true);
+        CommandExecution status = Status(h, anchor, true);
 
         AssertExit(status, 1);
         Assert.Contains("No Kyber-Squad deployment found", status.Output, StringComparison.Ordinal);
@@ -564,8 +572,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Project state imported from the repository must not come back after the project is uninstalled. The in-repo
-    /// copy is kept on purpose, so the next touch would import it again unless the import is recorded as done.
+    ///     Project state imported from the repository must not come back after the project is uninstalled. The in-repo
+    ///     copy is kept on purpose, so the next touch would import it again unless the import is recorded as done.
     /// </summary>
     [Fact]
     public void UninstallOfImportedProjectStateIsNotUndoneByTheNextTouch()
@@ -575,15 +583,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Project alpha = InstallProject(h, "alpha", renderer);
         MoveProjectStateInRepo(h, alpha);
         new SquadStateMigration(h.Store, h.UserPaths).ImportProject(alpha.Root);
-        Assert.True(File.Exists(alpha.ReceiptPath), "The import must restore the home project receipt before the uninstall.");
+        Assert.True(File.Exists(alpha.ReceiptPath),
+            "The import must restore the home project receipt before the uninstall.");
 
-        AssertExit(Uninstall(h, renderer, alpha.Root, global: false), 0);
+        AssertExit(Uninstall(h, renderer, alpha.Root, false), 0);
         Assert.False(File.Exists(alpha.ReceiptPath), "Project uninstall must remove the home project receipt.");
         Assert.True(
             File.Exists(Path.Combine(alpha.Root, ".kyber-weave", "squad.receipt.json")),
             "Project uninstall keeps the in-repo state, so the next touch has something to re-import.");
 
-        CommandExecution touch = Status(h, alpha.Root, global: false);
+        CommandExecution touch = Status(h, alpha.Root, false);
 
         AssertExit(touch, 1);
         Assert.Contains("No Kyber-Squad deployment found", touch.Output, StringComparison.Ordinal);
@@ -596,8 +605,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// After a migrated global uninstall, an explicit fresh install is not blocked by the migration record. It writes
-    /// new home state, and the status that follows reads that state back.
+    ///     After a migrated global uninstall, an explicit fresh install is not blocked by the migration record. It writes
+    ///     new home state, and the status that follows reads that state back.
     /// </summary>
     [Fact]
     public void FreshGlobalInstallAfterUninstallOfMigratedStateWritesNewHomeState()
@@ -607,16 +616,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string anchor = h.MakeDirectory("global-anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
         MoveGlobalStateToLegacyRoot(h, anchor);
-        AssertExit(Uninstall(h, renderer, anchor, global: true), 0);
+        AssertExit(Uninstall(h, renderer, anchor, true), 0);
 
         CommandExecution install = Capture(() => new SquadInstallCommand(
-            userPaths: h.UserPaths,
-            stateStore: h.Store,
-            releaseSource: h.ReleaseSource,
-            renderer: renderer,
-            isInteractive: false,
-            readAnswer: null,
-            globalRoots: h.GlobalRoots)
+                h.UserPaths,
+                h.Store,
+                h.ReleaseSource,
+                renderer,
+                false,
+                null,
+                h.GlobalRoots)
             .Execute(null!, new SquadInstallSettings
             {
                 Path = anchor,
@@ -628,15 +637,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
         AssertExit(install, 0);
         Assert.True(File.Exists(GlobalReceiptPath(h)), "A fresh global install must write new home global state.");
-        CommandExecution status = Status(h, anchor, global: true);
+        CommandExecution status = Status(h, anchor, true);
         AssertExit(status, 0);
         Assert.Contains("All deployed files match", status.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Guards the isolation rule itself: every fake home and global root in this class must be
-    /// beneath the temp directory, and the fake home refuses any other location outright, so a test
-    /// that forgets its fixture cannot quietly reach the real profile.
+    ///     Guards the isolation rule itself: every fake home and global root in this class must be
+    ///     beneath the temp directory, and the fake home refuses any other location outright, so a test
+    ///     that forgets its fixture cannot quietly reach the real profile.
     /// </summary>
     [Fact]
     public void EveryFakeHomeAndGlobalRootIsBeneathTheTempDirectory()
@@ -678,7 +687,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             $"A fresh global install must not deploy the response guidance to '{expected}'; only an update does.");
 
         CommandExecution update = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor)));
 
         AssertExit(update, 0);
@@ -703,7 +712,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
         AssertExit(
-            Capture(() => UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            Capture(() => UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor))),
             0);
         string guidancePath = GuidancePath(h);
@@ -734,7 +743,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
         Assert.True(
@@ -769,7 +778,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
         Assert.True(
@@ -799,7 +808,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
         Assert.True(
@@ -878,7 +887,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Directory.CreateDirectory(path);
 
         CommandExecution failed = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor)));
 
         AssertExit(failed, 0);
@@ -890,10 +899,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             "A run that could not write the guidance must record no ownership of it: a digest recorded " +
             "ahead of its write makes the next run read the operator's untouched file as an edit.");
 
-        Directory.Delete(path, recursive: true);
+        Directory.Delete(path, true);
 
         CommandExecution recovered = Capture(() =>
-            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor)));
 
         AssertExit(recovered, 0);
@@ -911,9 +920,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Preflight is what decides whether a run is allowed to write, so it must decide before the home
-    /// guidance is touched. A run that fails on a conflicting path and has already written the guidance
-    /// would leave behind a change nothing accounted for.
+    ///     Preflight is what decides whether a run is allowed to write, so it must decide before the home
+    ///     guidance is touched. A run that fails on a conflicting path and has already written the guidance
+    ///     would leave behind a change nothing accounted for.
     /// </summary>
     [Fact]
     public void UpdateGlobalWhosePlanFailsPreflightLeavesAnAbsentResponseGuidanceAbsent()
@@ -933,8 +942,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Assert.False(File.Exists(guidance), $"The scenario requires no guidance at '{guidance}' beforehand.");
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects), isInteractive: false)
-                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects),
+                    false)
+                .Execute(null!,
+                    GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -949,9 +960,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// The same ordering seen from the other side: a refreshable default already on disk keeps both its
-    /// bytes and its record when the plan is refused, so a failed run cannot silently upgrade the file
-    /// it was never allowed to touch.
+    ///     The same ordering seen from the other side: a refreshable default already on disk keeps both its
+    ///     bytes and its record when the plan is refused, so a failed run cannot silently upgrade the file
+    ///     it was never allowed to touch.
     /// </summary>
     [Fact]
     public void UpdateGlobalWhosePlanFailsPreflightLeavesADigestMatchingResponseGuidanceUntouched()
@@ -960,7 +971,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
         // An earlier release's default, on disk and recorded: exactly the file a later run would replace.
@@ -978,8 +989,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             Encoding.UTF8.GetBytes("hand-authored collider\n"));
 
         CommandExecution execution = Capture(() =>
-            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects), isInteractive: false)
-                .Execute(null!, GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+            UpdateCommand(h, new ScriptedAgentRenderer("architect", "collider"), new RecordingProjectPicker(NoProjects),
+                    false)
+                .Execute(null!,
+                    GlobalUpdate(h.MakeDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -988,9 +1001,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Rewrites the recorded SHA-256 of the deployed guidance across the home state, so the superseded
-    /// bytes look like a default this release replaced rather than a user edit. The receipt is the whole
-    /// ownership record, so replacing the digest there is the same state an older release leaves behind.
+    ///     Rewrites the recorded SHA-256 of the deployed guidance across the home state, so the superseded
+    ///     bytes look like a default this release replaced rather than a user edit. The receipt is the whole
+    ///     ownership record, so replacing the digest there is the same state an older release leaves behind.
     /// </summary>
     private static void RewriteRecordedDigest(Harness h, byte[] deployed, byte[] superseded)
     {
@@ -1014,10 +1027,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A global receipt is rewritten by more than the deployment verbs — the preset commands rewrite it
-    /// through the same plan while deploying no guidance at all. If that rewrite dropped the guidance's
-    /// ownership record, the operator's untouched default would look unowned to the next update, which
-    /// would then preserve it forever and report an edit they never made.
+    ///     A global receipt is rewritten by more than the deployment verbs — the preset commands rewrite it
+    ///     through the same plan while deploying no guidance at all. If that rewrite dropped the guidance's
+    ///     ownership record, the operator's untouched default would look unowned to the next update, which
+    ///     would then preserve it forever and report an edit they never made.
     /// </summary>
     [Fact]
     public void GuidanceOwnershipSurvivesAReceiptRewriteThatDeploysNoGuidance()
@@ -1026,7 +1039,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
         // An earlier release's default on disk, recorded as what Squad deployed: the file a later run is
@@ -1059,9 +1072,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Uninstall keeps a receipt only when something survives it. A retained receipt must carry the
-    /// guidance record with it: the file outlives the uninstall either way, so a record dropped here
-    /// would strand it as unowned and it would never refresh again.
+    ///     Uninstall keeps a receipt only when something survives it. A retained receipt must carry the
+    ///     guidance record with it: the file outlives the uninstall either way, so a record dropped here
+    ///     would strand it as unowned and it would never refresh again.
     /// </summary>
     [Fact]
     public void UninstallGlobalThatRetainsAnEditedFileKeepsTheGuidanceOwnershipRecord()
@@ -1070,7 +1083,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string guidance = GuidancePath(h);
         byte[] guidanceBefore = File.ReadAllBytes(guidance);
@@ -1080,7 +1093,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
         File.WriteAllText(architect, "operator edit that uninstall must keep\n", Encoding.UTF8);
 
-        CommandExecution uninstall = Uninstall(h, renderer, anchor, global: true);
+        CommandExecution uninstall = Uninstall(h, renderer, anchor, true);
 
         AssertExit(uninstall, 0);
         Assert.True(
@@ -1095,10 +1108,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Two updates can overlap, and the deployment lease is what keeps them apart. An update that cannot
-    /// take it has to have written nothing: guidance written ahead of the lease is replaced by whichever
-    /// run loses the race, under a receipt the winner commits for different bytes, and a later release
-    /// then reads the shipped text as an operator edit.
+    ///     Two updates can overlap, and the deployment lease is what keeps them apart. An update that cannot
+    ///     take it has to have written nothing: guidance written ahead of the lease is replaced by whichever
+    ///     run loses the race, under a receipt the winner commits for different bytes, and a later release
+    ///     then reads the shipped text as an operator edit.
     /// </summary>
     [Fact]
     public void UpdateGlobalThatCannotTakeTheHomeLeaseLeavesTheResponseGuidanceUntouched()
@@ -1107,7 +1120,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
         // An earlier release's default, recorded as what Squad deployed: the file a run that reached it
@@ -1151,9 +1164,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// The lease has to cover the guidance work itself, not only the commit after it. The callback a
-    /// transaction runs for home-owned files therefore executes with the lease held, so a second
-    /// deployment of the same root is refused while it runs, and what it attaches is what is committed.
+    ///     The lease has to cover the guidance work itself, not only the commit after it. The callback a
+    ///     transaction runs for home-owned files therefore executes with the lease held, so a second
+    ///     deployment of the same root is refused while it runs, and what it attaches is what is committed.
     /// </summary>
     [Fact]
     public void HomeFilesAreDeployedWhileTheTransactionHoldsTheHomeLeaseAndTheirRecordIsCommitted()
@@ -1170,8 +1183,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         new SquadTransaction(h.Store).Execute(plan, leasedPlan =>
         {
             ran = true;
-            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
-                () => SquadTransaction.AcquireLease(leaseKey).Dispose());
+            InvalidOperationException refused =
+                Assert.Throws<InvalidOperationException>(() => SquadTransaction.AcquireLease(leaseKey).Dispose());
             Assert.Contains("transaction is active", refused.Message, StringComparison.OrdinalIgnoreCase);
             leasedPlan.AttachHomeFiles([record]);
         });
@@ -1188,8 +1201,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// A callback that fails sits inside the transaction's cleanup, so it must leave the receipt as it
-    /// was and no half-open transaction behind: a stale journal would refuse every later run.
+    ///     A callback that fails sits inside the transaction's cleanup, so it must leave the receipt as it
+    ///     was and no half-open transaction behind: a stale journal would refuse every later run.
     /// </summary>
     [Fact]
     public void AHomeFileCallbackThatFailsLeavesTheReceiptAsItWasAndNoTransactionBehind()
@@ -1216,8 +1229,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Rewrites the global receipt the way the preset verbs do: re-plan the files already deployed
-    /// through <c>CreateUpdate</c> and commit the plan, with no guidance deploy anywhere in the path.
+    ///     Rewrites the global receipt the way the preset verbs do: re-plan the files already deployed
+    ///     through <c>CreateUpdate</c> and commit the plan, with no guidance deploy anywhere in the path.
     /// </summary>
     private static void RewriteGlobalReceiptWithoutGuidance(Harness h)
     {
@@ -1243,7 +1256,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             deployed,
             active,
             [],
-            replaceManaged: true,
+            true,
             TimeProvider.System,
             h.GlobalRoots);
     }
@@ -1258,11 +1271,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     #region Fixtures
 
-    private Harness NewHarness(string name) => new(Path.Combine(_temp.Path, name));
+    private Harness NewHarness(string name)
+    {
+        return new Harness(Path.Combine(_temp.Path, name));
+    }
 
     /// <summary>
-    /// Builds the registry the global CLI tests run against: a global install, two live projects
-    /// and one project whose root is then removed, so its registry entry is stale.
+    ///     Builds the registry the global CLI tests run against: a global install, two live projects
+    ///     and one project whose root is then removed, so its registry entry is stale.
     /// </summary>
     [SuppressMessage(
         "Reliability",
@@ -1277,7 +1293,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Project alpha = InstallProject(h, "alpha", renderer);
         Project beta = InstallProject(h, "beta", renderer);
         Project stale = InstallProject(h, "stale", renderer);
-        Directory.Delete(stale.Root, recursive: true);
+        Directory.Delete(stale.Root, true);
         return new Fleet(h, anchor, renderer, alpha, beta, stale);
     }
 
@@ -1288,9 +1304,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         params SquadTarget[] targets)
     {
         SquadLifecycleResult result = RunInstall(h, renderer, new SquadInstallRequest(
-            TargetRoot: anchor,
-            Scope: SquadDeploymentScope.Global,
-            Targets: targets,
+            anchor,
+            SquadDeploymentScope.Global,
+            targets,
             Version: InstalledVersion));
         Assert.True(result.Success, DescribeFailure(result));
     }
@@ -1299,9 +1315,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     {
         string root = h.MakeDirectory(name);
         SquadLifecycleResult result = RunInstall(h, renderer, new SquadInstallRequest(
-            TargetRoot: root,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
+            root,
+            SquadDeploymentScope.Project,
+            [SquadTarget.Codex],
             Version: InstalledVersion));
         Assert.True(result.Success, DescribeFailure(result));
         string physical = SquadPhysicalRootIdentity.Resolve(root).PhysicalPath;
@@ -1310,8 +1326,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         return new Project(root, physical, stateDirectory);
     }
 
-    private static SquadLifecycleResult RunInstall(Harness h, ISquadRenderer renderer, SquadInstallRequest request) =>
-        h.Lifecycle(renderer).InstallAsync(request).GetAwaiter().GetResult();
+    private static SquadLifecycleResult RunInstall(Harness h, ISquadRenderer renderer, SquadInstallRequest request)
+    {
+        return h.Lifecycle(renderer).InstallAsync(request).GetAwaiter().GetResult();
+    }
 
     /// <summary>Builds the update command over the injected seams, so no run reaches a real harness directory.</summary>
     private static SquadUpdateCommand UpdateCommand(
@@ -1320,24 +1338,27 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ISquadProjectPicker picker,
         bool isInteractive,
         Func<string, bool>? readAnswer = null,
-        ISquadReleaseSource? releaseSource = null) =>
-        new(
-            userPaths: h.UserPaths,
-            stateStore: h.Store,
-            releaseSource: releaseSource ?? h.ReleaseSource,
-            renderer: renderer,
-            isInteractive: isInteractive,
-            readAnswer: readAnswer ?? (_ => true),
-            globalRoots: h.GlobalRoots,
-            picker: picker);
+        ISquadReleaseSource? releaseSource = null)
+    {
+        return new SquadUpdateCommand(
+            h.UserPaths,
+            h.Store,
+            releaseSource ?? h.ReleaseSource,
+            renderer,
+            isInteractive,
+            readAnswer ?? (_ => true),
+            h.GlobalRoots,
+            picker);
+    }
 
     private static SquadUpdateSettings GlobalUpdate(
         string path,
         string[]? projects = null,
         string[]? targets = null,
         bool replaceManaged = false,
-        bool yes = true) =>
-        new()
+        bool yes = true)
+    {
+        return new SquadUpdateSettings
         {
             Path = path,
             Global = true,
@@ -1347,6 +1368,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             Targets = targets ?? [],
             ReplaceManaged = replaceManaged
         };
+    }
 
     private static void WriteLegacyGlobalRoot(Harness h, string name, string relativeFile, string content)
     {
@@ -1369,15 +1391,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             })
         };
         File.WriteAllText(Path.Combine(directory, "squad.receipt.json"), receipt.ToJsonString() + "\n", Encoding.UTF8);
-        File.WriteAllText(Path.Combine(directory, "squad.lock.yml"), h.Store.SerializeLock(LockFor(InstalledVersion)), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(directory, "squad.lock.yml"), h.Store.SerializeLock(LockFor(InstalledVersion)),
+            Encoding.UTF8);
         string legacyFile = Path.Combine(directory, relativeFile.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(legacyFile)!);
         File.WriteAllBytes(legacyFile, bytes);
     }
 
     /// <summary>
-    /// The pre-home layout: a receipt and lock under <c>.kyber-weave/</c> inside the project. The
-    /// migration imports it into the registry and leaves it byte-identical, so doctor must say it is kept.
+    ///     The pre-home layout: a receipt and lock under <c>.kyber-weave/</c> inside the project. The
+    ///     migration imports it into the registry and leaves it byte-identical, so doctor must say it is kept.
     /// </summary>
     private static void WriteInRepoLegacyState(Harness h, string root)
     {
@@ -1386,12 +1409,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         File.WriteAllText(
             Path.Combine(stateDirectory, "squad.receipt.json"),
             h.Store.SerializeReceipt(new SquadReceipt(
-                Schema: "kyber-squad.receipt/v1",
-                Scope: SquadDeploymentScope.Project,
-                TargetRoot: ".",
-                InstalledAtUtc: DateTimeOffset.UtcNow,
-                Degradations: [],
-                Files: [])),
+                "kyber-squad.receipt/v1",
+                SquadDeploymentScope.Project,
+                ".",
+                DateTimeOffset.UtcNow,
+                [],
+                [])),
             Encoding.UTF8);
         File.WriteAllText(
             Path.Combine(stateDirectory, "squad.lock.yml"),
@@ -1400,8 +1423,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Moves the home global receipt and lock into the legacy per-user root, the layout a pre-home install left
-    /// behind, so the next migration has a legacy copy to copy. The installed files stay where they were.
+    ///     Moves the home global receipt and lock into the legacy per-user root, the layout a pre-home install left
+    ///     behind, so the next migration has a legacy copy to copy. The installed files stay where they were.
     /// </summary>
     private static void MoveGlobalStateToLegacyRoot(Harness h, string anchor)
     {
@@ -1418,8 +1441,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
-    /// Moves a project's home state into the repository, the layout a pre-home install left behind, so the next
-    /// touch imports it. The project's installed files stay where they were.
+    ///     Moves a project's home state into the repository, the layout a pre-home install left behind, so the next
+    ///     touch imports it. The project's installed files stay where they were.
     /// </summary>
     private static void MoveProjectStateInRepo(Harness h, Project project)
     {
@@ -1430,53 +1453,69 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Directory.Delete(project.StateDirectory);
     }
 
-    private static CommandExecution Uninstall(Harness h, ISquadRenderer renderer, string path, bool global) =>
-        Capture(() => new SquadUninstallCommand(
-            userPaths: h.UserPaths,
-            stateStore: h.Store,
-            lifecycleService: h.Lifecycle(renderer),
-            isInteractive: false,
-            readAnswer: null,
-            globalRoots: h.GlobalRoots)
+    private static CommandExecution Uninstall(Harness h, ISquadRenderer renderer, string path, bool global)
+    {
+        return Capture(() => new SquadUninstallCommand(
+                h.UserPaths,
+                h.Store,
+                h.Lifecycle(renderer),
+                false,
+                null,
+                h.GlobalRoots)
             .Execute(null!, new SquadUninstallSettings { Path = path, Global = global, Yes = true }));
+    }
 
-    private static CommandExecution Status(Harness h, string path, bool global) =>
-        Capture(() => new SquadStatusCommand(
-            userPaths: h.UserPaths,
-            stateStore: h.Store,
-            globalRoots: h.GlobalRoots)
+    private static CommandExecution Status(Harness h, string path, bool global)
+    {
+        return Capture(() => new SquadStatusCommand(
+                h.UserPaths,
+                h.Store,
+                h.GlobalRoots)
             .Execute(null!, new SquadStatusSettings { Path = path, Global = global }));
+    }
 
-    private static SquadLock LockFor(string version) => new(
-        Schema: "kyber-squad.lock/v1",
-        SquadVersion: version,
-        CliVersion: version,
-        McpVersion: version,
-        Bundle: "full",
-        Targets: ["codex"],
-        Exclusions: [],
-        Translation: "best-effort",
-        BundleDigest: "a".PadRight(64, '0'),
-        AssetDigest: "b".PadRight(64, '0'),
-        Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+    private static SquadLock LockFor(string version)
+    {
+        return new SquadLock(
+            "kyber-squad.lock/v1",
+            version,
+            version,
+            version,
+            "full",
+            ["codex"],
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+    }
 
-    private static string GlobalStateDirectory(Harness h) =>
-        Path.Combine(h.Home, ".kyber-weave", "squad", "global");
+    private static string GlobalStateDirectory(Harness h)
+    {
+        return Path.Combine(h.Home, ".kyber-weave", "squad", "global");
+    }
 
-    private static string GlobalLockPath(Harness h) =>
-        Path.Combine(GlobalStateDirectory(h), "squad.lock.yml");
+    private static string GlobalLockPath(Harness h)
+    {
+        return Path.Combine(GlobalStateDirectory(h), "squad.lock.yml");
+    }
 
-    private static string GlobalReceiptPath(Harness h) =>
-        Path.Combine(GlobalStateDirectory(h), "squad.receipt.json");
+    private static string GlobalReceiptPath(Harness h)
+    {
+        return Path.Combine(GlobalStateDirectory(h), "squad.receipt.json");
+    }
 
-    private static string RegistryPath(Harness h) =>
-        Path.Combine(h.Home, ".kyber-weave", "squad", "registry.json");
+    private static string RegistryPath(Harness h)
+    {
+        return Path.Combine(h.Home, ".kyber-weave", "squad", "registry.json");
+    }
 
     private static string FindInstalled(Harness h, SquadTarget target, string fileName)
     {
         string root = h.GlobalRoot(target);
         string[] matches = Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).ToArray();
-        Assert.True(matches.Length == 1, $"Expected one installed '{fileName}' beneath {root}; found {matches.Length}.");
+        Assert.True(matches.Length == 1,
+            $"Expected one installed '{fileName}' beneath {root}; found {matches.Length}.");
         return matches[0];
     }
 
@@ -1485,18 +1524,23 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     {
         string prefix = "squad-version: ";
         string text = File.ReadAllText(RequireFile(lockPath), Encoding.UTF8);
-        string? line = text.Split('\n').FirstOrDefault(candidate => candidate.StartsWith(prefix, StringComparison.Ordinal));
+        string? line = text.Split('\n')
+            .FirstOrDefault(candidate => candidate.StartsWith(prefix, StringComparison.Ordinal));
         Assert.NotNull(line);
         return line[prefix.Length..].Trim().Trim('"');
     }
 
     /// <summary>Reads state before a run, or null when it is absent, so the run's own assertions go first.</summary>
-    private static byte[]? Snapshot(string path) => File.Exists(path) ? File.ReadAllBytes(path) : null;
+    private static byte[]? Snapshot(string path)
+    {
+        return File.Exists(path) ? File.ReadAllBytes(path) : null;
+    }
 
     /// <summary>Asserts a file keeps the bytes it had before the run, and that it still exists.</summary>
     private static void AssertUnchanged(byte[]? before, string path)
     {
-        Assert.True(before is not null, $"Expected state at '{path}' before the run. Squad state must be written beneath the home store.");
+        Assert.True(before is not null,
+            $"Expected state at '{path}' before the run. Squad state must be written beneath the home store.");
         Assert.True(File.Exists(path), $"State at '{path}' disappeared during the run.");
         Assert.Equal(before, File.ReadAllBytes(path));
     }
@@ -1515,17 +1559,22 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             .Split('\n')
             .Where(line => line.Contains(text, StringComparison.Ordinal))
             .ToArray();
-        Assert.True(lines.Length == 1, $"Expected exactly one line naming '{text}', found {lines.Length}:{Environment.NewLine}{output}");
+        Assert.True(lines.Length == 1,
+            $"Expected exactly one line naming '{text}', found {lines.Length}:{Environment.NewLine}{output}");
         return lines[0];
     }
 
-    private static string DescribeFailure(SquadLifecycleResult result) =>
-        result.Errors is null ? "The lifecycle reported failure." : string.Join("; ", result.Errors);
+    private static string DescribeFailure(SquadLifecycleResult result)
+    {
+        return result.Errors is null ? "The lifecycle reported failure." : string.Join("; ", result.Errors);
+    }
 
-    private static void AssertExit(CommandExecution execution, int expected) =>
+    private static void AssertExit(CommandExecution execution, int expected)
+    {
         Assert.True(
             execution.ExitCode == expected,
             $"Expected exit {expected} but got {execution.ExitCode}:{Environment.NewLine}{execution.Output}");
+    }
 
     private static CommandExecution Capture(Func<int> execute)
     {
@@ -1533,10 +1582,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         return new CommandExecution(execution.Result, execution.Output);
     }
 
-    private static IReadOnlyList<string> NoProjects(IReadOnlyList<SquadProjectRegistryEntry> projects) => [];
+    private static IReadOnlyList<string> NoProjects(IReadOnlyList<SquadProjectRegistryEntry> projects)
+    {
+        return [];
+    }
 
-    private static IReadOnlyList<string> AllNonStale(IReadOnlyList<SquadProjectRegistryEntry> projects) =>
-        projects.Where(entry => !entry.Stale).Select(entry => entry.Path).ToList();
+    private static IReadOnlyList<string> AllNonStale(IReadOnlyList<SquadProjectRegistryEntry> projects)
+    {
+        return projects.Where(entry => !entry.Stale).Select(entry => entry.Path).ToList();
+    }
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
@@ -1555,14 +1609,19 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Project Beta,
         Project Stale) : IDisposable
     {
+        public void Dispose()
+        {
+            Harness.Dispose();
+        }
+
         public SquadUpdateCommand Command(
             ISquadProjectPicker picker,
             bool isInteractive,
             Func<string, bool> readAnswer,
-            ISquadReleaseSource? releaseSource = null) =>
-            UpdateCommand(Harness, Renderer, picker, isInteractive, readAnswer, releaseSource);
-
-        public void Dispose() => Harness.Dispose();
+            ISquadReleaseSource? releaseSource = null)
+        {
+            return UpdateCommand(Harness, Renderer, picker, isInteractive, readAnswer, releaseSource);
+        }
     }
 
     private sealed class Harness : IDisposable
@@ -1578,7 +1637,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             Directory.CreateDirectory(GlobalRootsDirectory);
             UserPaths = new HomeUserPaths(ApplicationData, Home);
             Store = new SquadStateStore(UserPaths);
-            ReleaseSource = new FakeSquadReleaseSource();
+            ReleaseSource = new SyntheticValidSquadReleaseSource();
             GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
         }
 
@@ -1594,9 +1653,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
         public SquadStateStore Store { get; }
 
-        public FakeSquadReleaseSource ReleaseSource { get; }
+        public SyntheticValidSquadReleaseSource ReleaseSource { get; }
 
         public TempGlobalRoots GlobalRoots { get; }
+
+        /// <summary>Releases the fake release source; the temp root itself is removed by the test class.</summary>
+        public void Dispose()
+        {
+            ReleaseSource.Dispose();
+        }
 
         public string MakeDirectory(string name)
         {
@@ -1605,13 +1670,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             return path;
         }
 
-        public string GlobalRoot(SquadTarget target) => GlobalRoots.ResolveGlobalRoot(target);
+        public string GlobalRoot(SquadTarget target)
+        {
+            return GlobalRoots.ResolveGlobalRoot(target);
+        }
 
-        public SquadLifecycleService Lifecycle(ISquadRenderer renderer) =>
-            new(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
-
-        /// <summary>Releases the fake release source; the temp root itself is removed by the test class.</summary>
-        public void Dispose() => ReleaseSource.Dispose();
+        public SquadLifecycleService Lifecycle(ISquadRenderer renderer)
+        {
+            return new SquadLifecycleService(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
+        }
     }
 
     private sealed class HomeUserPaths : ISquadUserPaths
@@ -1631,13 +1698,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
     {
-        public string ResolveGlobalRoot(SquadTarget target) =>
-            Path.Combine(root, SquadTargetCatalog.GetToken(target));
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            return Path.Combine(root, SquadTargetCatalog.GetToken(target));
+        }
     }
 
     /// <summary>
-    /// Renders one agent file per requested target at a path the test controls, so a receipt and a
-    /// collision can be planned against exact bytes instead of the fake renderer's harness layout.
+    ///     Renders one agent file per requested target at a path the test controls, so a receipt and a
+    ///     collision can be planned against exact bytes instead of the fake renderer's harness layout.
     /// </summary>
     private sealed class ScriptedAgentRenderer(params string[] agentNames) : ISquadRenderer
     {
@@ -1650,22 +1719,18 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             ArgumentNullException.ThrowIfNull(request);
             List<SquadDeploymentFile> files = [];
             foreach (SquadTarget target in request.Targets)
-            {
                 foreach (string agent in agentNames)
-                {
                     files.Add(new SquadDeploymentFile(
                         $"agents/{agent}.md",
                         Encoding.UTF8.GetBytes($"canonical {agent}\n"),
                         SquadTargetCatalog.GetToken(target)));
-                }
-            }
 
             return Task.FromResult(new SquadRenderResult(
-                Success: true,
-                Files: files,
-                Degradations: [],
-                Warnings: [],
-                Errors: []));
+                true,
+                files,
+                [],
+                [],
+                []));
         }
     }
 
@@ -1698,8 +1763,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     {
         public Task<SquadReleaseResult> DownloadAndExtractAsync(
             SquadReleaseRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromException<SquadReleaseResult>(new InvalidOperationException("The Squad release is unavailable."));
+            CancellationToken cancellationToken)
+        {
+            return Task.FromException<SquadReleaseResult>(
+                new InvalidOperationException("The Squad release is unavailable."));
+        }
 
         public void Dispose()
         {
@@ -1711,10 +1779,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
         if (!full.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
             throw new InvalidOperationException(
                 $"Squad CLI tests must keep every fake home and state root beneath the temp directory; got '{full}'.");
-        }
     }
 
     #endregion

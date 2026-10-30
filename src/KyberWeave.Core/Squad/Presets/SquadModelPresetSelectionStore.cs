@@ -218,11 +218,17 @@ public sealed partial class SquadModelPresetSelectionStore
         string text = builder.ToString();
         try
         {
-            using (FileStream stream = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = new(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       4096,
+                       SquadTransaction.SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
             {
                 byte[] bytes = Encoding.UTF8.GetBytes(text);
                 stream.Write(bytes);
-                stream.Flush(true);
+                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
             }
 
             File.Move(temporaryPath, targetPath, true);

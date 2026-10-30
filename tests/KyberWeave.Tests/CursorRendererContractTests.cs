@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -106,7 +107,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -442,7 +443,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_LowersThePrimaryAgentToASkillOnly()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -531,7 +532,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_LoweredPrimarySkillUsesGlobalScopePaths()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -571,7 +572,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_NoPrimaryAgentValueSwitchesOnlyTheLoweredSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -630,7 +631,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
-        SquadSource baselineSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource baselineSource = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, agent => agent.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);

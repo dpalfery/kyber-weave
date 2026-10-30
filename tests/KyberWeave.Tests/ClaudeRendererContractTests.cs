@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -159,7 +160,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
@@ -478,7 +479,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -706,7 +707,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsSubagent()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
@@ -845,7 +846,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_GlobalScopePlacesTheEntryPointSkillUnderSkills()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
@@ -889,7 +890,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
@@ -974,7 +975,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Claude_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 

@@ -16,6 +16,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
     private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new uninstall command using default user paths.</summary>
     public SquadUninstallCommand()
@@ -35,7 +36,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadLifecycleService? lifecycleService = null,
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -43,14 +45,17 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
         _globalRoots = globalRoots;
+        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadUninstallSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
 
         // Coalesce the positional path with --path; invalid client input returns exit
         // code 2 before any resolution or work
@@ -73,8 +78,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
-            dryRun: settings.DryRun);
+            scope == SquadDeploymentScope.Project ? projectRoot : null,
+            settings.DryRun);
         SquadCommandComposition.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
@@ -85,18 +90,19 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         // whatever the working directory is, or at the recorded root of a legacy single-root receipt. It never reads
         // or changes a project or the registry. Chosen after the migration, so the receipt it removes is the migrated one.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
-            userPaths: _userPaths,
-            stateStore: stateStore,
-            globalRoots: _globalRoots);
+            _userPaths,
+            stateStore,
+            globalRoots: _globalRoots,
+            environmentReader: _environmentReader);
 
         SquadUninstallRequest uninstallRequest = new(
-            TargetRoot: targetRoot,
-            Scope: scope,
-            DryRun: settings.DryRun);
+            targetRoot,
+            scope,
+            settings.DryRun);
 
         // Uninstall has no --target option: its targets are the receipt's. A --global
         // receipt's files live beneath each target's own physical global root, not beneath
@@ -114,10 +120,10 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 targetRoot,
                 scope,
                 "uninstall",
-                isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
-                yes: settings.Yes,
-                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
-                globalTargetRoots: globalTargetRoots))
+                _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                settings.Yes,
+                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
@@ -125,12 +131,14 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest, cancellationToken).GetAwaiter().GetResult();
+            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest, cancellationToken)
+                .GetAwaiter().GetResult();
             if (result.Success)
             {
                 if (result.Plan is null)
                 {
-                    AnsiConsole.MarkupLine($"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
+                    AnsiConsole.MarkupLine(
+                        $"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
                     return 0;
                 }
 
@@ -142,16 +150,19 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                     IReadOnlyList<SquadPlannedFileChange> removals = result.Plan.PlannedFileChanges
                         .Where(change => change.Kind == SquadFileMutationKind.Delete)
                         .ToArray();
-                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] would uninstall {removals.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
+                    AnsiConsole.MarkupLine(
+                        $"[bold]Dry-run:[/] would uninstall {removals.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
                     foreach (SquadPlannedFileChange removal in removals)
                     {
-                        AnsiConsole.MarkupLine($"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
+                        AnsiConsole.MarkupLine(
+                            $"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
                     }
 
                     return 0;
                 }
 
-                SquadCommandComposition.WriteLine($"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                SquadCommandComposition.WriteLine(
+                    $"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
                 return 0;
             }
@@ -173,5 +184,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         }
     }
 
-    public int Execute(CommandContext context, SquadUninstallSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, SquadUninstallSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 }

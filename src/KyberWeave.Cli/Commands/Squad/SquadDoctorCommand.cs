@@ -22,6 +22,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadUserPaths? _userPaths;
     private readonly string? _workingDirectory;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
     public SquadDoctorCommand()
@@ -35,7 +36,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,
-        SquadStateStore? stateStore = null)
+        SquadStateStore? stateStore = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -43,6 +45,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _workingDirectory = workingDirectory;
         _globalRoots = globalRoots;
         _renderer = renderer;
+        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
@@ -76,7 +79,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // home directory whatever the working directory is, and a path given with it is named and ignored.
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
-        SquadStateStore homeStateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore homeStateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
         if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
@@ -227,7 +231,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string zcodeRoot;
         try
         {
-            zcodeRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots())
+            zcodeRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader))
                 .ResolveGlobalRoot(SquadTarget.ZCode);
         }
         catch (ArgumentException ex)
@@ -290,7 +294,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string? devinUserRoot;
         try
         {
-            devinUserRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots())
+            devinUserRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader))
                 .ResolveGlobalRoot(SquadTarget.Devin);
         }
         catch (ArgumentException)
@@ -471,8 +475,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        ISquadGlobalRootResolver globalRoots =
+            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
 
         List<SquadUnmanagedPathCollision> collisions = [];
         bool invalidGlobalRoot = false;
@@ -514,6 +520,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
             }
 
+            SquadSource sharedSource = SquadSourceLoader.Load(canonicalSourcePath);
+
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
@@ -546,7 +554,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                             [target],
                             SquadDeploymentScope.Global,
                             GlobalRoots: globalRoots,
-                            ModelPresets: loadedPresets))
+                            ModelPresets: loadedPresets,
+                            PreloadedSource: sharedSource,
+                            EnvironmentReader: _environmentReader))
                     .GetAwaiter()
                     .GetResult();
 

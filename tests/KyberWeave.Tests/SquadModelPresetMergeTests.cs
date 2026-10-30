@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using System.Text.Json;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
@@ -16,13 +17,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadModelPresetMergeTests
 {
-    private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-
     [Fact]
     public void ApplyToPreservesBundledCategoriesWhenPresetDoesNotMentionThem()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
@@ -205,7 +203,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ValidateAcceptsPresetWhenAllCategoriesAreDeclaredInBundledProfiles()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
@@ -224,7 +222,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ValidateThrowsSquadSourceValidationExceptionNamingUnknownCategoryKeyAndFile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string relativePath = "presets/unknown-category.yml";
@@ -284,7 +282,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ValidateOverloadAcceptingSquadSourceValidatesAgainstModelProfiles()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         const string validYaml = """
                                  schema: kyber-squad.model-preset/v1
@@ -425,7 +423,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ComputeReturnsEmptyDiffWhenProfilesAreIdentical()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelProfiles profiles = source.ModelProfiles;
 
         IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", profiles, profiles);
@@ -549,7 +547,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ComputeDetectsExpectedDiffsAcrossAgentsAgainstCanonicalSquadSource()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
