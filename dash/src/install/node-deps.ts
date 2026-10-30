@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, extname, join, resolve } from 'node:path'
 
 import { getConfigDir } from '../config.js'
 import { runningAsSea } from '../sea.js'
@@ -91,9 +91,13 @@ export const nodeFs: InstallFs = {
   remove: async (path) => {
     await rm(path, { recursive: true, force: true })
   },
-  trash: async (path) => {
-    const home = process.env['HOME'] ?? ''
-    const destination = join(home, '.Trash', `${basename(path)} ${Date.now()}`)
+  trash: async (path, homeDir) => {
+    if (homeDir === '') throw new Error('no home directory to find the Trash in')
+    const trashDir = join(homeDir, '.Trash')
+    await mkdir(trashDir, { recursive: true })
+    // Keep the `.app` extension so Finder still treats the trashed copy as an app.
+    const ext = extname(path)
+    const destination = join(trashDir, `${basename(path, ext)} ${Date.now()}${ext}`)
     await rename(path, destination)
     return destination
   },

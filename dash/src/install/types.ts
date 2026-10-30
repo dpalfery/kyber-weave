@@ -57,7 +57,7 @@ export type InstallFs = {
   rename(from: string, to: string): Promise<void>
   remove(path: string): Promise<void>
   /** Moves to the user's Trash, never deleting; returns where it landed. */
-  trash(path: string): Promise<string>
+  trash(path: string, homeDir: string): Promise<string>
   /** Unpacks a zip; `ditto -xk` on macOS. */
   unzip(archive: string, into: string): Promise<void>
   mkdtemp(prefix: string): Promise<string>
@@ -79,6 +79,8 @@ export type InstallDeps = {
   fs: InstallFs
   run(command: string, args: string[]): Promise<CommandResult>
   now(): Date
+  /** Waits; a port so tests do not pay real time for the launch retries. */
+  sleep?(ms: number): Promise<void>
   log(message: string): void
 }
 

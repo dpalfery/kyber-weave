@@ -20,6 +20,7 @@ function fakeFs() {
   const dirs = new Set<string>(['/Applications'])
   const writable = new Set<string>(['/Applications'])
   let tempCounter = 0
+  let trashCounter = 0
 
   const fs: InstallFs = {
     exists: async (path) => files.has(path) || dirs.has(path),
@@ -46,8 +47,13 @@ function fakeFs() {
       files.delete(path)
       dirs.delete(path)
     },
-    trash: async (path) => {
-      const to = `/Users/dev/.Trash/${path.split('/').pop()}`
+    trash: async (path, homeDir) => {
+      // Mirrors nodeFs.trash: needs a home, creates the Trash, never overwrites.
+      if (homeDir === '') throw new Error('no home directory to find the Trash in')
+      dirs.add(`${homeDir}/.Trash`)
+      const name = path.split('/').pop() ?? path
+      const dot = name.lastIndexOf('.')
+      const to = `${homeDir}/.Trash/${name.slice(0, dot)} ${(trashCounter += 1)}${name.slice(dot)}`
       const payload = files.get(path) ?? '<dir>'
       files.delete(path)
       dirs.delete(path)
@@ -114,6 +120,7 @@ function harness(overrides: Partial<InstallDeps> = {}) {
       return { code: 0, stdout: '', stderr: '' }
     }),
     now: () => new Date('2026-09-19T12:00:00.000Z'),
+    sleep: async () => {},
     log: (message: string) => logs.push(message),
     ...overrides,
   }
@@ -339,7 +346,7 @@ describe('kyberdash menubar on macOS', () => {
 
     await installTray(h2.deps, { force: true })
 
-    expect(h2.files.get('/Users/dev/.Trash/KyberDash.app')).toBe('<old app bundle>')
+    expect(h2.files.get('/Users/dev/.Trash/KyberDash 1.app')).toBe('<old app bundle>')
     expect(h2.files.get(installedApp())).toBe('<app bundle>')
     const quitAt = h2.commands.findIndex(({ args }) => args.includes('--quit'))
     const openAt = h2.commands.findIndex(({ command }) => command === 'open')
@@ -357,6 +364,28 @@ describe('kyberdash menubar on macOS', () => {
 
     expect(h2.files.has(stale)).toBe(false)
     expect(h2.logs.join('\n')).toContain('stale tray')
+  })
+
+  it('names the quit step when pgrep itself fails', async () => {
+    const broken = harness({
+      run: vi.fn(async (command: string) => {
+        if (command === 'pgrep') throw new Error('spawn pgrep ENOENT')
+        return { code: 0, stdout: '', stderr: '' }
+      }),
+    })
+    await expect(installTray(broken.deps, { force: true })).rejects.toThrow(/quit: could not stop/)
+  })
+
+  it('names the record step when tray.json cannot be written', async () => {
+    const h3 = harness()
+    const write = h3.deps.fs.writeFile
+    h3.deps.fs.writeFile = vi.fn(async (path: string, data: Uint8Array | string) => {
+      if (path.endsWith('tray.json')) throw new Error('read-only')
+      await write(path, data)
+    })
+    await expect(installTray(h3.deps, { force: true })).rejects.toThrow(
+      /record: read-only \(the new tray is installed at/,
+    )
   })
 
   it('refuses to replace a tray that will not stop', async () => {

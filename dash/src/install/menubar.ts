@@ -199,15 +199,15 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
   let trashed: string | null = null
 
   try {
-    if (await deps.fs.exists(target)) trashed = await deps.fs.trash(target)
+    if (await deps.fs.exists(target)) trashed = await deps.fs.trash(target, deps.homeDir)
     // 3. Put the new app in place.
     await deps.fs.rename(staged, target)
   } catch (error) {
-    // No rollback: an old version coming back is not an acceptable outcome. The
-    // update fails and says why; the old app, if moved, is in the Trash.
+    // The new app is in place but unrecorded, so a later `--update` would find
+    // nothing to update. Say so rather than reporting a plain install failure.
     throw new InstallError(
-      'install',
-      `${describe(error)}${trashed === null ? '' : ` (the previous app is in the Trash at ${trashed})`}`,
+      'record',
+      `${describe(error)} (the new tray is installed at ${target} but ${TRAY_RECORD_FILE} was not written; re-run with --force)`,
     )
   }
 
@@ -233,7 +233,7 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
   for (const stale of copies.filter((copy) => copy !== target)) {
     try {
       if (await deps.fs.exists(stale)) {
-        await deps.fs.trash(stale)
+        await deps.fs.trash(stale, deps.homeDir)
         deps.log(`kyberdash: moved the stale tray at ${stale} to the Trash`)
       }
     } catch (error) {
@@ -253,7 +253,7 @@ async function knownCopies(
     target,
     ...(existing !== null ? [existing.path] : []),
     join('/Applications', MACOS_APP_NAME),
-    join(deps.homeDir, 'Applications', MACOS_APP_NAME),
+    ...(deps.homeDir === '' ? [] : [join(deps.homeDir, 'Applications', MACOS_APP_NAME)]),
   ]
   const found: string[] = []
   for (const candidate of new Set(candidates)) {
@@ -276,11 +276,16 @@ async function quitAll(deps: InstallDeps, copies: string[]): Promise<void> {
     if (await deps.fs.exists(copy)) await quitRunningTray(deps, copy)
   }
   for (const pattern of [TRAY_PROCESS, LEGACY_MENUBAR_PROCESS]) {
-    if (!(await isRunning(deps, pattern))) continue
-    deps.log(`kyberdash: ${pattern} is still running; stopping it`)
-    await deps.run('pkill', ['-f', pattern])
-    if (await isRunning(deps, pattern)) {
-      throw new InstallError('quit', `${pattern} would not stop; quit it and run the update again`)
+    try {
+      if (!(await isRunning(deps, pattern))) continue
+      deps.log(`kyberdash: ${pattern} is still running; stopping it`)
+      await deps.run('pkill', ['-f', pattern])
+      if (await isRunning(deps, pattern)) {
+        throw new InstallError('quit', `${pattern} would not stop; quit it and run the update again`)
+      }
+    } catch (error) {
+      if (error instanceof InstallError) throw error
+      throw new InstallError('quit', `could not stop ${pattern}: ${describe(error)}`)
     }
   }
 }
@@ -367,6 +372,16 @@ async function recordInstall(deps: InstallDeps, target: string, version?: string
   return record
 }
 
+function sleep(deps: InstallDeps, ms: number): Promise<void> {
+  return deps.sleep !== undefined
+    ? deps.sleep(ms)
+    : new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Worst case before a failed launch is reported: 3 attempts x (10 x 500ms
+ * process checks) plus two 1s retry pauses, about 17s.
+ */
 async function launchWithRetry(deps: InstallDeps, target: string): Promise<void> {
   let lastError = ''
   for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
@@ -376,9 +391,10 @@ async function launchWithRetry(deps: InstallDeps, target: string): Promise<void>
     } catch (error) {
       lastError = describe(error)
       deps.log(`kyberdash: launch attempt ${attempt}/${LAUNCH_ATTEMPTS} failed: ${lastError}`)
+      if (attempt === LAUNCH_ATTEMPTS) break
       // Clear anything half-started before trying again.
       await deps.run('pkill', ['-f', TRAY_PROCESS])
-      await new Promise((resolve) => setTimeout(resolve, LAUNCH_RETRY_DELAY_MS))
+      await sleep(deps, LAUNCH_RETRY_DELAY_MS)
     }
   }
   throw new InstallError(
@@ -404,7 +420,7 @@ async function launch(deps: InstallDeps, target: string): Promise<void> {
 async function runningSoon(deps: InstallDeps): Promise<boolean> {
   for (let attempt = 0; attempt < LAUNCH_CHECKS; attempt += 1) {
     if (await isRunning(deps, TRAY_PROCESS)) return true
-    await new Promise((resolve) => setTimeout(resolve, LAUNCH_CHECK_INTERVAL_MS))
+    await sleep(deps, LAUNCH_CHECK_INTERVAL_MS)
   }
   return false
 }
