@@ -560,6 +560,12 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     .GetAwaiter()
                     .GetResult();
 
+                List<string> warnings = [];
+                string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                    Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
+                    warnings);
+                render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
+
                 collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
                     workingDirectory,
                     SquadDeploymentScope.Global,

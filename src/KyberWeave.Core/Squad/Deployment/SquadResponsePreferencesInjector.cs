@@ -12,12 +12,20 @@ public static partial class SquadResponsePreferencesInjector
 {
     private const string ResponsePreferencesTag = "response-preferences";
 
+    /// <summary>Lifecycle warning raised once per install or update run whose render carries no block.</summary>
+    public const string NoBlockWarning =
+        "The rendered Squad content has no <response-preferences> block; response preferences were not injected.";
+
     /// <summary>
     /// Replaces the inner content of the single response-preferences block in each entry file.
+    /// A render that contains no block anywhere is returned unchanged; see <see cref="HasAnyBlock"/>.
     /// </summary>
     public static SquadRenderResult Inject(SquadRenderResult renderResult, string effectiveText)
     {
         ArgumentNullException.ThrowIfNull(renderResult);
+
+        if (!HasAnyBlock(renderResult))
+            return renderResult;
 
         string effective = string.IsNullOrWhiteSpace(effectiveText)
             ? SquadResponseGuidanceSource.DefaultText
@@ -58,6 +66,16 @@ public static partial class SquadResponsePreferencesInjector
         return renderResult with { Files = files };
     }
 
+    /// <summary>
+    /// True when any file in the render carries a response-preferences block. A render without one
+    /// is a pre-block corpus: injection is skipped and the caller reports <see cref="NoBlockWarning"/>.
+    /// </summary>
+    public static bool HasAnyBlock(SquadRenderResult renderResult)
+    {
+        ArgumentNullException.ThrowIfNull(renderResult);
+        return renderResult.Files.Any(file => ContainsResponsePreferencesBlock(file.Content.Span));
+    }
+
     private static void ValidateTargetCarrierSet(IReadOnlyList<SquadDeploymentFile> files)
     {
         foreach (string target in files.Select(file => file.Target).Distinct(StringComparer.Ordinal))
@@ -75,7 +93,8 @@ public static partial class SquadResponsePreferencesInjector
                 IsCanonicalCarrier(GetCanonicalCarrierName(file.RelativePath) ?? string.Empty));
 
             if (!hasCanonicalCarrier)
-                throw new SquadRenderValidationException($"The target '{target}' must produce at least one response-preferences entry file.");
+                throw new SquadRenderValidationException(
+                    $"The target '{target}' must produce at least one response-preferences entry file.");
         }
     }
 
@@ -92,7 +111,8 @@ public static partial class SquadResponsePreferencesInjector
 
         return IsCarrierCandidate(stem) || IsCarrierCandidate(parentName) ||
                (Path.GetDirectoryName(path) is not null &&
-                string.Equals(Path.GetFileName(Path.GetDirectoryName(path)!), "skills", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Path.GetFileName(Path.GetDirectoryName(path)!), "skills",
+                    StringComparison.OrdinalIgnoreCase) &&
                 IsCarrierCandidate(fileName));
     }
 
@@ -107,10 +127,10 @@ public static partial class SquadResponsePreferencesInjector
 
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return segments.Any(segment =>
-                   segment.Equals("agents", StringComparison.OrdinalIgnoreCase) ||
-                   segment.Equals("skills", StringComparison.OrdinalIgnoreCase) ||
-                   segment.Equals("droids", StringComparison.OrdinalIgnoreCase) ||
-                   segment.Equals("commands", StringComparison.OrdinalIgnoreCase));
+            segment.Equals("agents", StringComparison.OrdinalIgnoreCase) ||
+            segment.Equals("skills", StringComparison.OrdinalIgnoreCase) ||
+            segment.Equals("droids", StringComparison.OrdinalIgnoreCase) ||
+            segment.Equals("commands", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsCarrierCandidate(string? candidate)
@@ -197,6 +217,7 @@ public static partial class SquadResponsePreferencesInjector
         return null;
     }
 
-    [GeneratedRegex("<response-preferences>.*?</response-preferences>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("<response-preferences>.*?</response-preferences>",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex ResponsePreferencesRegex();
 }
