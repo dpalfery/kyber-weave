@@ -10,9 +10,9 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Squad's global install and update run the KyberDash OpenCode capture-plugin verb after a successful
-/// deployment. These tests use a fake process executor and a fake KyberDash locator, so no test ever starts
-/// a real <c>kyberdash</c> on the developer's machine. The temp directory roots every fake home and global root.
+///     Squad's global install and update run the KyberDash OpenCode capture-plugin verb after a successful
+///     deployment. These tests use a fake process executor and a fake KyberDash locator, so no test ever starts
+///     a real <c>kyberdash</c> on the developer's machine. The temp directory roots every fake home and global root.
 /// </summary>
 public sealed class SquadCapturePluginStepTests : IDisposable
 {
@@ -372,10 +372,10 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
     private sealed class Harness : IDisposable
     {
-        private readonly FakeSquadReleaseSource _releaseSource = new();
+        private readonly TempGlobalRoots _globalRoots;
+        private readonly SyntheticValidSquadReleaseSource _releaseSource = new();
         private readonly SquadStateStore _store;
         private readonly HomeUserPaths _userPaths;
-        private readonly TempGlobalRoots _globalRoots;
 
         public Harness(string root)
         {
@@ -393,6 +393,11 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         }
 
         public string Anchor { get; }
+
+        public void Dispose()
+        {
+            _releaseSource.Dispose();
+        }
 
         public string GlobalRoot(SquadTarget target)
         {
@@ -441,11 +446,6 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         {
             return new KyberDashCapturePluginStep(executor, () => FakeKyberDash);
         }
-
-        public void Dispose()
-        {
-            _releaseSource.Dispose();
-        }
     }
 
     private sealed class HomeUserPaths(string applicationDataDirectory, string homeDirectory) : ISquadUserPaths
@@ -474,15 +474,11 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             ArgumentNullException.ThrowIfNull(request);
             List<SquadDeploymentFile> files = [];
             foreach (SquadTarget target in request.Targets)
-            {
                 foreach (string agent in agentNames)
-                {
                     files.Add(new SquadDeploymentFile(
                         $"agents/{agent}.md",
                         Encoding.UTF8.GetBytes($"canonical {agent}\n"),
                         SquadTargetCatalog.GetToken(target)));
-                }
-            }
 
             return Task.FromResult(new SquadRenderResult(
                 true,

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-10-30
 ---
 
 # Test coding standard
@@ -73,6 +73,23 @@ Failure messages should identify the offender. Where a report is asserted empty,
 findings into the assertion message so a failure names the rule and document rather than
 just `False != True`.
 
+## Concurrency and zero-flakiness isolation
+
+Tests run concurrently across classes. Never introduce hidden cross-test coupling, process-wide mutation, or unisolated state:
+
+- **No process-wide environment variable mutation**: Never call `Environment.SetEnvironmentVariable` in test code. An xUnit collection setting `DisableParallelization = true` only serializes tests inside that collection; tests in other collections continue running concurrently and observe mutated process state. Inject delegate resolvers (`Func<string, string?>? getEnvironmentVariable = null`, defaulting to `Environment.GetEnvironmentVariable`) or pass `SquadRenderRequest.EnvironmentReader`.
+- **Lock-free `AsyncLocal` execution context scopes**: CLI console redirection and durability overrides isolate per async context rather than using process-wide locks or mutable statics. `ProcessConsoleCapture` uses `AsyncLocalTextWriter` and `AsyncLocalAnsiConsole` so parallel CLI test classes never contend on a static lock or bleed console output. `SquadTransaction.UseSyncToDiskScope(bool)` uses an `AsyncLocal<bool?>` scope routing store flushes through `SquadTransaction.SyncToDisk` so durability tests never leak macOS APFS `F_FULLFSYNC` barriers onto concurrent test threads.
+- **Serial collections policy**: xUnit `DisableParallelization = true` (e.g. `ScaleAcceptanceCollection`) is reserved strictly for benchmarks monitoring thread allocations (`GC.GetAllocatedBytesForCurrentThread()`) or hard execution-time ceilings across high-volume iterations (such as 10,000 DocGraph claims). Never use collection serialization to mask shared static mutable state.
+- **Parallel repository-wide scans**: Whole-repository assertion sweeps (such as `UpstreamSeveranceTests`) partition tracked file sets across all available cores using `Parallel.ForEach` with thread-safe collectors (`ConcurrentBag<string>`) to avoid multi-second single-threaded disk I/O bottlenecks.
+
+## Release sources and immutable corpus fixtures
+
+Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing through focused test fixtures:
+
+- **Synthetic release sources for plumbing and lifecycle**: Tests verifying deployment state machines, receipts, locks, and CLI exit codes use `SyntheticValidSquadReleaseSource` (~15 small files) rather than copying the full 203-file corpus on every run. Reserve `CorpusSquadReleaseSource` for end-to-end installation contracts and canonical prose checks.
+- **Immutable test corpus caching**: Read-only contract tests asserting renderer templates and model presets (such as `SquadModelPresetRenderTests`, `CopilotRendererTests`, `AntigravityRendererContractTests`, and `SquadRustGoSpecialistTests`) consume lazy, thread-safe instances via `TestSquadCorpus.CanonicalSource` and cached unpreset baseline renders, avoiding hundreds of redundant disk reads and YAML/Markdown parsing across test theories.
+- **Git repository templates**: Tests requiring git repositories (such as Review Council gate command tests) use `TestGitRepositoryTemplate.CreateRepositoryCopy` to copy a pre-seeded, committed repository directory (<2ms, 0 child processes) instead of spawning repeated `git init`/`add`/`commit` OS child processes per fixture.
+
 ## Internals are in scope
 
 `InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
@@ -96,6 +113,10 @@ not a test to adjust.
 | `FakeCodeGraphResolver` | `.WithSymbols(...)` for deterministic symbol and route resolution |
 | `CodeGraphFixtureDb` | A real sqlite index, for adapter parity only |
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
+| `ProcessConsoleCapture` | Lock-free, `AsyncLocal` console capture isolating stdout, stderr, and Spectre console width per async context |
+| `TestSquadCorpus` | Thread-safe, lazy-cached immutable canonical `SquadSource` and target baseline renders |
+| `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
+| `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
 ## Commands
 

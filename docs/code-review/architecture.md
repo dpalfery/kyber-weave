@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -513,6 +513,10 @@ partitioned by ecosystem:
 
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
+
+#### Fast test git repository fixture template
+
+Review gate integration and command tests (`ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, `DocsInitReviewGatesTests`) initialize test repositories using a shared, pre-seeded template (`TestGitRepositoryTemplate`). The template is seeded once per template key (agent, council, and docs-init variants). Individual test fixtures perform a sub-millisecond filesystem copy of the whole pre-seeded working tree including `.git` via `TestGitRepositoryTemplate.CreateRepositoryCopy` rather than spawning repeated `git init`, `git add`, and `git commit` child processes. Untracked test configuration files (`.kyber-weave/`) are excluded via `.git/info/exclude` only for agent and council templates; docs-init templates commit the host config (`.kyber-weave/kyber-weave.yml`) as part of the fixture.
 
 Unknown keys are not silently dropped: any key outside the tables above loads anyway but
 is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate

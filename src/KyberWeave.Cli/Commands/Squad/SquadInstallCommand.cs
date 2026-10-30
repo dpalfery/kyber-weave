@@ -22,6 +22,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly Func<string, bool>? _readAnswer;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
@@ -44,7 +45,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        KyberDashCapturePluginStep? capturePluginStep = null)
+        KyberDashCapturePluginStep? capturePluginStep = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -54,6 +56,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         _readAnswer = readAnswer;
         _globalRoots = globalRoots;
         _capturePluginStep = capturePluginStep;
+        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
@@ -62,7 +65,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
@@ -152,7 +156,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // names the roots, so the confirmation shows the real destinations.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots, _environmentReader)
                 : null;
 
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
@@ -160,7 +164,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             stateStore,
             _releaseSource,
             _renderer,
-            globalRoots: _globalRoots);
+            globalRoots: _globalRoots,
+            environmentReader: _environmentReader);
 
         SquadInstallRequest installRequest = new(
             targetRoot,

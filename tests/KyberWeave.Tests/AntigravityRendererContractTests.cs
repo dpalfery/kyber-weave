@@ -1,7 +1,8 @@
+using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -28,19 +29,23 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// list — the same authoritative source the renderer uses — rather than a literal
     /// roster that could drift from profiles/fallbacks.yml.
     /// </summary>
-    private static IReadOnlyList<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.TryGetValue("role-skill", out SquadFallbackProfile? profile)
+    private static IReadOnlyList<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.TryGetValue("role-skill", out SquadFallbackProfile? profile)
             ? profile.SharedIdentities
             : [];
+    }
 
     /// <summary>
     /// The expected permission-degradation roster is derived from the loaded capability
     /// profiles' own declared vocabulary, mirroring the renderer's source of truth.
     /// </summary>
-    private static bool HasNonDenyCapability(SquadCapabilityProfiles profiles, SquadCapabilityProfile profile) =>
-        profiles.Capabilities.Any(capability =>
+    private static bool HasNonDenyCapability(SquadCapabilityProfiles profiles, SquadCapabilityProfile profile)
+    {
+        return profiles.Capabilities.Any(capability =>
             profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
             decision != SquadPermissionDecision.Deny);
+    }
 
     /// <summary>
     /// Collisions are derived from the loaded source (agent identity that also exists as a
@@ -81,9 +86,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         AntigravityRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
@@ -92,7 +98,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         HashSet<string> canonicalSkillNames = source.Skills
             .Select(skill => skill.Name)
@@ -112,16 +118,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // its identity directory. R17: Agents.Count + Σ agent resources + Skills.Count
         // + Σ skill resources.
         int expectedFiles = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count
-            + source.Skills.Sum(skill => skill.Resources.Count);
+                                                + source.Skills.Count
+                                                + source.Skills.Sum(skill => skill.Resources.Count);
 
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Equal(expectedFiles, result.Files.Count);
@@ -161,8 +161,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 f.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal),
                 $"File '{f.RelativePath}' is outside .agents/agents/ and .agents/skills/.");
             Assert.True(
-                (f.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) && f.RelativePath.EndsWith("/agent.md", StringComparison.Ordinal)) ||
-                (f.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal) && f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal)) ||
+                (f.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) &&
+                 f.RelativePath.EndsWith("/agent.md", StringComparison.Ordinal)) ||
+                (f.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal) &&
+                 f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal)) ||
                 agentResourceOutputPaths.Contains(f.RelativePath) ||
                 skillResourceOutputPaths.Contains(f.RelativePath),
                 $"Rendered file '{f.RelativePath}' is neither an agent.md/SKILL.md principal nor a projected closure resource.");
@@ -182,8 +184,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 string.Equals(emittedDescription, emittedDescription.Trim(), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description must be a trimmed single-line scalar.");
             foreach (string line in skill.Description.Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                         ['\r', '\n'],
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 Assert.Contains(line, emittedDescription, StringComparison.Ordinal);
             }
@@ -218,7 +220,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 string.Equals(collision, RequireScalar(agentFrontmatter, "name"), StringComparison.Ordinal),
                 $"Collision agent '{collision}' has the wrong name.");
             Assert.True(
-                string.Equals(ToSingleLineScalar(agent.Description), RequireScalar(agentFrontmatter, "description"), StringComparison.Ordinal),
+                string.Equals(ToSingleLineScalar(agent.Description), RequireScalar(agentFrontmatter, "description"),
+                    StringComparison.Ordinal),
                 $"Collision agent '{collision}' has the wrong description.");
             Assert.True(
                 string.Equals(NormalizeBody(agent.InstructionBody), ReadBody(agentFile), StringComparison.Ordinal),
@@ -260,12 +263,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             Assert.True(
-                source.CapabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile),
+                source.CapabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile,
+                    out SquadCapabilityProfile? profile),
                 $"Agent '{agent.Name}' references undeclared capability profile '{agent.CapabilityProfile}'.");
 
-            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+            bool executeAllowed =
+                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
                 exec == SquadPermissionDecision.Allow;
-            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+            bool writeAllowed =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
                 write == SquadPermissionDecision.Allow;
             bool isCapabilityNotIsolable = executeAllowed && !writeAllowed;
 
@@ -294,7 +300,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // Native renderer permission degradations record constraints that cannot be expressed.
         // Each degradation's target, identity, and instruction digest must be consistent.
-        foreach (SquadDegradationRecord degradation in result.Degradations.Where(d => d.Code == "permission-not-expressible"))
+        foreach (SquadDegradationRecord degradation in result.Degradations.Where(d =>
+                     d.Code == "permission-not-expressible"))
         {
             Assert.True(
                 string.Equals("antigravity", degradation.Target, StringComparison.Ordinal),
@@ -321,9 +328,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -359,7 +367,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderRequest request = new(
             ProductRoot,
             [SquadTarget.Antigravity],
-            SquadDeploymentScope.Project);
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -384,7 +393,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
 
         // Verify that agent resources are projected under .agents/agents/ beside agent.md
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         foreach (SquadAgent agent in source.Agents)
         {
             foreach (SquadResource resource in agent.Resources)
@@ -413,17 +422,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // The frontmatter contract is name, description, license — an ordered mapping, not
         // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
         // a list-of-pairs shape.
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string probe = source.Skills
-            .Select(skill => skill.Name)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .FirstOrDefault()
-            ?? throw new InvalidOperationException($"Corpus at '{ProductRoot}' declares no skills.");
+                           .Select(skill => skill.Name)
+                           .OrderBy(name => name, StringComparer.Ordinal)
+                           .FirstOrDefault()
+                       ?? throw new InvalidOperationException($"Corpus at '{ProductRoot}' declares no skills.");
 
-        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project));
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
@@ -442,11 +448,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
         return normalized.EndsWith('\n') ? normalized : normalized + "\n";
     }
 
-    private static string ToSingleLineScalar(string value) =>
-        string.Join(
+    private static string ToSingleLineScalar(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text)
     {
@@ -464,11 +472,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
         return (root, body);
     }
 
-    private static YamlMappingNode ReadFrontmatter(SquadDeploymentFile file) =>
-        SplitFrontmatter(System.Text.Encoding.UTF8.GetString(file.Content.Span)).Frontmatter;
+    private static YamlMappingNode ReadFrontmatter(SquadDeploymentFile file)
+    {
+        return SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span)).Frontmatter;
+    }
 
-    private static string ReadBody(SquadDeploymentFile file) =>
-        SplitFrontmatter(System.Text.Encoding.UTF8.GetString(file.Content.Span)).Body;
+    private static string ReadBody(SquadDeploymentFile file)
+    {
+        return SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span)).Body;
+    }
 
     private static string RequireScalar(YamlMappingNode node, string key)
     {
@@ -482,23 +494,19 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
 
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
+               ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
     }
 
-    private static YamlNode? OptionalScalar(YamlMappingNode node, string key) =>
-        node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value) ? value : null;
+    private static YamlNode? OptionalScalar(YamlMappingNode node, string key)
+    {
+        return node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value) ? value : null;
+    }
 
     [Fact]
     public async Task RenderAsync_Antigravity_Native_EmitsNativeAgentFiles()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -516,14 +524,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_EmitsCanonicalSkillFiles()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -541,13 +543,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_OmitsRolePrefixForCollisions()
     {
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -565,13 +561,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_AgentFrontmatterIncludesNativeKeys()
     {
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -603,13 +593,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_ConductorHasMainAgentFlag()
     {
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -624,7 +608,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             mainAgentNode is not null,
             "Conductor must have mainAgent key");
         string mainAgentValue = Assert.IsType<YamlScalarNode>(mainAgentNode).Value
-            ?? throw new InvalidOperationException("mainAgent scalar is null");
+                                ?? throw new InvalidOperationException("mainAgent scalar is null");
         Assert.True(
             string.Equals("true", mainAgentValue, StringComparison.OrdinalIgnoreCase),
             $"Conductor mainAgent must be 'true', got '{mainAgentValue}'");
@@ -633,27 +617,21 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_InvestigatorProfileHasNoWriteTools()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // D4/D10: Investigator profile (process.execute allow, filesystem.write deny)
         // must not include write tools in the narrowed tools list
-        var investigatorAgents = source.Agents
+        List<SquadAgent> investigatorAgents = source.Agents
             .Where(a => a.CapabilityProfile == "investigator")
             .ToList();
 
         // Expected at least one agent with investigator capability profile for this test
         Assert.NotEmpty(investigatorAgents);
 
-        foreach (var agent in investigatorAgents)
+        foreach (SquadAgent agent in investigatorAgents)
         {
             // Native renderer must emit agent.md for every agent
             SquadDeploymentFile agentFile = Assert.Single(
@@ -689,27 +667,21 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_DocumentationProfileGrantsRunCommand()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // D4/D10: Documentation profile (filesystem.write allow, process.execute allow)
         // must include run_command in the tools list, and must not degrade as not isolable
-        var docProfileAgents = source.Agents
+        List<SquadAgent> docProfileAgents = source.Agents
             .Where(a => a.CapabilityProfile == "documentation")
             .ToList();
 
         // Expected at least one agent with documentation capability profile for this test
         Assert.NotEmpty(docProfileAgents);
 
-        foreach (var agent in docProfileAgents)
+        foreach (SquadAgent agent in docProfileAgents)
         {
             // Native renderer must emit agent.md for every agent
             SquadDeploymentFile agentFile = Assert.Single(
@@ -749,17 +721,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_EnableWriteToolsAssertedPerCapabilityProfile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        HashSet<string> expectedTrueProfiles = ["architect", "documentation", "investigator", "product-planning", "reviewer", "root-fixer", "worker", "publishing-worker"];
+        HashSet<string> expectedTrueProfiles =
+        [
+            "architect", "documentation", "investigator", "product-planning", "reviewer", "root-fixer", "worker",
+            "publishing-worker"
+        ];
         HashSet<string> expectedFalseProfiles = ["orchestrator", "read-only"];
 
         List<SquadAgent> trueAgents = [];
@@ -768,10 +738,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                                        writeDecision == SquadPermissionDecision.Allow;
-            bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
-                                       execDecision == SquadPermissionDecision.Allow;
+            bool filesystemWriteAllow =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                writeDecision == SquadPermissionDecision.Allow;
+            bool processExecuteAllow =
+                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
+                execDecision == SquadPermissionDecision.Allow;
             bool expectedEnableWrite = filesystemWriteAllow || processExecuteAllow;
 
             SquadDeploymentFile agentFile = Assert.Single(
@@ -805,17 +777,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_WriteToFileToolAssertedPerCapabilityProfile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        HashSet<string> expectedWriteToFileProfiles = ["architect", "documentation", "product-planning", "root-fixer", "worker", "publishing-worker"];
+        HashSet<string> expectedWriteToFileProfiles =
+            ["architect", "documentation", "product-planning", "root-fixer", "worker", "publishing-worker"];
 
         List<SquadAgent> writeAgents = [];
         List<SquadAgent> nonWriteAgents = [];
@@ -823,8 +790,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                                        writeDecision == SquadPermissionDecision.Allow;
+            bool filesystemWriteAllow =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                writeDecision == SquadPermissionDecision.Allow;
 
             SquadDeploymentFile agentFile = Assert.Single(
                 result.Files,
@@ -864,14 +832,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_CapabilityNotIsolableDegradationRecordPresent()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -882,8 +844,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
             .Where(a =>
             {
                 SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) &&
+                            e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) &&
+                             w == SquadPermissionDecision.Allow;
                 return exec && !write;
             })
             .Select(a => a.Name)
@@ -895,13 +859,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+            bool executeAllowed =
+                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
                 exec == SquadPermissionDecision.Allow;
-            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+            bool writeAllowed =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
                 write == SquadPermissionDecision.Allow;
 
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
+                d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
 
             if (executeAllowed && !writeAllowed)
             {
@@ -915,6 +881,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 {
                     Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
                 }
+
                 foreach (string writeTool in withheldWriteTools)
                 {
                     Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
@@ -931,22 +898,16 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_DelegationEmittedPerDelegatesToRoster()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // D12: Agents with non-empty delegates-to must have invoke_subagent + enable_subagent_tools
-        var delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
+        List<SquadAgent> delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
         Assert.NotEmpty(delegatingAgents);
 
-        foreach (var agent in delegatingAgents)
+        foreach (SquadAgent agent in delegatingAgents)
         {
             // Native renderer must emit agent.md for every agent
             SquadDeploymentFile agentFile = Assert.Single(
@@ -982,10 +943,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
 
         // D12: Agents with empty delegates-to must NOT have invoke_subagent or enable_subagent_tools: true
-        var nonDelegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count == 0).ToList();
+        List<SquadAgent> nonDelegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count == 0).ToList();
         Assert.NotEmpty(nonDelegatingAgents);
 
-        foreach (var agent in nonDelegatingAgents)
+        foreach (SquadAgent agent in nonDelegatingAgents)
         {
             SquadDeploymentFile agentFile = Assert.Single(
                 result.Files,
@@ -1020,14 +981,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_OmitsCamelCaseOptionalFields()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -1059,14 +1014,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -1094,7 +1043,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 string.Equals(expectedModel, model, StringComparison.Ordinal),
                 $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') model must be '{expectedModel}', got '{model}'.");
             Assert.False(
-                model.Contains("flash", StringComparison.OrdinalIgnoreCase) && model.Contains('-', StringComparison.Ordinal),
+                model.Contains("flash", StringComparison.OrdinalIgnoreCase) &&
+                model.Contains('-', StringComparison.Ordinal),
                 $"Agent '{agent.Name}' model must not use flash-lite or flash_lite spelling, got '{model}'");
         }
     }
@@ -1102,14 +1052,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_ReasoningEffortMatchesPerProfileMapping()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -1121,7 +1065,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             { "reviewer", "high" },
             { "general", "medium" },
             { "fast", "low" },
-            { "orchestration", "minimal" },
+            { "orchestration", "minimal" }
         };
 
         foreach (SquadAgent agent in source.Agents)
@@ -1136,8 +1080,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
             {
                 string? actualLevel = OptionalScalar(frontmatter, "reasoning_effort")?.ToString();
                 Assert.True(
-                string.Equals(expectedLevel, actualLevel, StringComparison.Ordinal),
-                $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') reasoning_effort must be '{expectedLevel}', got '{actualLevel}'");
+                    string.Equals(expectedLevel, actualLevel, StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') reasoning_effort must be '{expectedLevel}', got '{actualLevel}'");
             }
         }
     }
@@ -1145,19 +1089,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_InconclusiveToolsWithheld()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // D12: These tools are withheld pending live verification
-        string[] inconclusivelTools = ["grep_search", "replace_file_content", "multi_replace_file_content", "search_web", "read_url_content"];
+        string[] inconclusivelTools =
+            ["grep_search", "replace_file_content", "multi_replace_file_content", "search_web", "read_url_content"];
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -1188,23 +1127,17 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Antigravity_Native_UnenforcedDelegatesToRecordsPermissionNotExpressible()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // D12-delegate: Agents with non-empty delegates-to have an unenforceable roster,
         // which should be recorded as permission-not-expressible degradation
-        var delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
+        List<SquadAgent> delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
         Assert.NotEmpty(delegatingAgents);
 
-        foreach (var agent in delegatingAgents)
+        foreach (SquadAgent agent in delegatingAgents)
         {
             // Should have a permission-not-expressible degradation for the unenforceable roster
             SquadDegradationRecord? delegateDegradation = result.Degradations
@@ -1228,9 +1161,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // Native target validation applies to Antigravity: rendering must succeed without
         // triggering native validation errors (no role- prefixes, single projection per identity)
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -1240,14 +1173,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [Fact]
     public async Task SquadDeploymentPlan_IdentityFromRelativePathHandlesAgentMd()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Antigravity],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -1255,8 +1182,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // to its parent directory name (e.g., ".agents/agents/conductor/agent.md" → "conductor")
         foreach (SquadAgent agent in source.Agents)
         {
-            SquadDeploymentFile agentFile = result.Files.First(
-                f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
+            SquadDeploymentFile agentFile =
+                result.Files.First(f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
 
             string identity = SquadDeploymentPlan.IdentityFromRelativePath(agentFile.RelativePath);
             Assert.Equal(agent.Name, identity);

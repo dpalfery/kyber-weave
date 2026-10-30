@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
@@ -100,7 +101,7 @@ public sealed class WarpRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Warp_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         HashSet<string> canonicalSkillNames = source.Skills
             .Select(skill => skill.Name)
@@ -362,7 +363,7 @@ public sealed class WarpRendererContractTests : IDisposable
         // The frontmatter contract is name, description, license — an ordered mapping, not
         // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
         // a list-of-pairs shape.
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string probe = source.Skills
             .Select(skill => skill.Name)
             .OrderBy(name => name, StringComparer.Ordinal)

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -199,7 +200,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
 
@@ -240,7 +241,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_EachSubagentAgentHasCanonicalFrontmatterAndBody()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -475,7 +476,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_AgentsDirectoryHasOnlyAgentPrincipalsAtTopLevel()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -508,7 +509,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_LowersThePrimaryAgentToASkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -600,7 +601,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_CanonicalSkillsHaveValidFrontmatter()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -631,7 +632,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_RecordsDegradationsPerContract()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -743,7 +744,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -886,7 +887,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
-        SquadSource baselineSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource baselineSource = TestSquadCorpus.CanonicalSource;
         // The conductor is the primary agent that is NOT a declared shared identity, so a
         // canonical skill occupying its identity is a real, unresolvable collision.
         SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, a => a.Name == "conductor");
@@ -1098,7 +1099,7 @@ public sealed class PiRendererContractTests : IDisposable
         string expectedModel,
         string expectedThinking)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent targetAgent = source.Agents.First(a =>
             a.Invocation == SquadInvocation.Subagent &&
             string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal));
@@ -1129,7 +1130,7 @@ public sealed class PiRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Pi_OrchestrationProfileOmitsModelAndThinking()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = source.Agents.First(a =>
             a.Invocation == SquadInvocation.Primary &&
             string.Equals(a.ModelProfile, "orchestration", StringComparison.Ordinal));

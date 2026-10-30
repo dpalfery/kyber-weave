@@ -37,6 +37,7 @@ internal static class SquadOperatorChannel
 
     /// <summary>Internal marker: the overlay was inlined. Never shown on the CLI.</summary>
     internal const string OverlayAppliedCode = "operator-channel-overlay-applied";
+
     internal const string NotRenderedCode = "operator-channel-not-rendered";
 
     internal const string NotRenderedDetails =
@@ -46,13 +47,16 @@ internal static class SquadOperatorChannel
     /// The renderer warning codes the install and update output shows. Every other renderer warning stays off
     /// the CLI, so a default install prints exactly what it printed before the overlay existed.
     /// </summary>
-    internal static bool IsOperatorChannelWarning(string code) =>
-        code is ServerAbsentCode or ServerNameMissingCode or ServerNameInvalidCode;
+    internal static bool IsOperatorChannelWarning(string code)
+    {
+        return code is ServerAbsentCode or ServerNameMissingCode or ServerNameInvalidCode;
+    }
 
     /// <summary>True only when the gate variable is exactly <c>true</c>, compared ordinally.</summary>
-    internal static bool IsGateOn()
+    internal static bool IsGateOn(Func<string, string?>? getEnvironmentVariable = null)
     {
-        return string.Equals(Environment.GetEnvironmentVariable(GateVariable), "true", StringComparison.Ordinal);
+        Func<string, string?> reader = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        return string.Equals(reader(GateVariable), "true", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -60,9 +64,10 @@ internal static class SquadOperatorChannel
     /// turns the overlay off. The warning never carries the raw value, because a value that failed
     /// validation must not reach any output.
     /// </summary>
-    internal static ServerName ResolveServerName()
+    internal static ServerName ResolveServerName(Func<string, string?>? getEnvironmentVariable = null)
     {
-        string? raw = Environment.GetEnvironmentVariable(ServerVariable);
+        Func<string, string?> reader = getEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        string? raw = reader(ServerVariable);
         if (string.IsNullOrEmpty(raw))
         {
             return new ServerName(
@@ -149,13 +154,17 @@ internal static class SquadOperatorChannel
     /// The marker the renderer adds when the overlay was inlined. It is not a CLI warning. The lifecycle reads it to
     /// decide whether the conductor's body-length warning belongs to the operator channel, and it never reaches output.
     /// </summary>
-    internal static SquadRenderWarning OverlayApplied() =>
-        Warning(
+    internal static SquadRenderWarning OverlayApplied()
+    {
+        return Warning(
             OverlayAppliedCode,
             "The operator channel overlay was inlined into the Copilot conductor.");
+    }
 
-    private static SquadRenderWarning Warning(string code, string message) =>
-        new(code, message, "copilot");
+    private static SquadRenderWarning Warning(string code, string message)
+    {
+        return new SquadRenderWarning(code, message, "copilot");
+    }
 
     /// <summary>The tool allow-list entry and the body text of the overlay, ready to render.</summary>
     internal sealed record Overlay(string ToolEntry, string Body);

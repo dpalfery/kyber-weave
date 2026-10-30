@@ -1,10 +1,12 @@
-using System.Diagnostics.CodeAnalysis;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Squad;
@@ -20,16 +22,37 @@ namespace KyberWeave.Tests.Squad;
 /// Facts are black-box through <see cref="SquadCommandComposition.ResolveRenderer"/> and
 /// <see cref="SquadRenderRequest"/>. The default-off parity facts guard against regressions: with the gate
 /// unset or set to any value other than the exact string <c>true</c>, every output must match a render with
-/// the gate unset, and no <c>operator-channel</c> text may appear anywhere. The environment is mutated, so
-/// this class joins a non-parallel collection; no other class in the assembly writes the gate or the server
-/// variable.
+/// the gate unset, and no <c>operator-channel</c> text may appear anywhere. Environment variables are read
+/// through injectable delegates rather than process mutation, allowing safe parallel test execution.
 /// </remarks>
-[Collection(SquadOperatorChannelCollection.Name)]
 public sealed class SquadOperatorChannelOptInTests : IDisposable
 {
+    private static readonly (string CopilotHome, string HomeDirectory) DefaultOffFixture = CreateDefaultOffFixture();
+
+    private static readonly ConcurrentDictionary<SquadDeploymentScope, Task<SquadRenderResult>> DefaultOffBaselines =
+        new();
+
+    private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> NonCopilotGlobalOffRenders =
+        new();
+
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
+
+    private static (string CopilotHome, string HomeDirectory) CreateDefaultOffFixture()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "kw-default-off-" + Guid.NewGuid().ToString("N"));
+        string copilotHome = Path.Combine(root, "copilot-home");
+        string homeDirectory = Path.Combine(root, "home");
+        Directory.CreateDirectory(copilotHome);
+        Directory.CreateDirectory(homeDirectory);
+        File.WriteAllText(Path.Combine(copilotHome, "mcp-config.json"), SquadOperatorChannelFixture.ServerPresentConfig,
+            Encoding.UTF8);
+        return (copilotHome, homeDirectory);
+    }
 
     /// <summary>
     /// Creates an isolated COPILOT_HOME with an optional <c>mcp-config.json</c> and a fake user home.
@@ -56,12 +79,14 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
 
-        IReadOnlyList<string> offTools = SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(off));
-        IReadOnlyList<string> onTools = SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(on));
+        IReadOnlyList<string> offTools =
+            SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(off));
+        IReadOnlyList<string> onTools =
+            SquadOperatorChannelFixture.ToolEntries(SquadOperatorChannelFixture.ConductorText(on));
 
         Assert.Equal(
             offTools.Append(SquadOperatorChannelFixture.ToolEntry).ToArray(),
@@ -74,7 +99,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
         string body = SquadOperatorChannelFixture.ConductorText(on);
 
         // The overlay file is the source of truth; its first prose paragraph must reach the body with the
@@ -94,9 +119,9 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
 
         int offLength = SquadOperatorChannelFixture.ConductorText(off).Length;
         int onLength = SquadOperatorChannelFixture.ConductorText(on).Length;
@@ -115,9 +140,9 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
 
         Assert.Equal(
             SquadOperatorChannelFixture.FileDigests(off).Where(IsNotConductor).ToArray(),
@@ -126,8 +151,10 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             off.Files.Select(f => f.RelativePath).Order(StringComparer.Ordinal).ToArray(),
             on.Files.Select(f => f.RelativePath).Order(StringComparer.Ordinal).ToArray());
 
-        static bool IsNotConductor(string digest) =>
-            !digest.Contains("conductor.agent.md", StringComparison.Ordinal);
+        static bool IsNotConductor(string digest)
+        {
+            return !digest.Contains("conductor.agent.md", StringComparison.Ordinal);
+        }
     }
 
     /// <summary>
@@ -143,15 +170,17 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerConfig(serverName));
 
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
-            serverName: serverName);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
+            serverName);
 
         string conductor = SquadOperatorChannelFixture.ConductorText(on);
-        Assert.Contains($"'{serverName}/*'", SquadOperatorChannelFixture.ToolEntries(conductor), StringComparer.Ordinal);
+        Assert.Contains($"'{serverName}/*'", SquadOperatorChannelFixture.ToolEntries(conductor),
+            StringComparer.Ordinal);
         Assert.Contains(serverName, conductor, StringComparison.Ordinal);
 
         string[] texts = SquadOperatorChannelFixture.FileTexts(on);
-        Assert.Empty(texts.Where(t => t.Contains(SquadOperatorChannelFixture.Placeholder, StringComparison.Ordinal)).ToArray());
+        Assert.Empty(texts.Where(t => t.Contains(SquadOperatorChannelFixture.Placeholder, StringComparison.Ordinal))
+            .ToArray());
         Assert.Empty(texts.Where(t => t.Contains("operator-channel/*", StringComparison.Ordinal)).ToArray());
     }
 
@@ -171,9 +200,9 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(mcpConfigJson);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global);
 
         Assert.True(on.Success, $"Variant '{variant}' must still render.");
         Assert.Equal(
@@ -199,7 +228,11 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
     {
         yield return ["no-config-file", null];
         yield return ["no-mcp-servers-key", "{\"servers\":{\"ops-relay\":{\"command\":\"x\"}}}"];
-        yield return ["other-server-names-only", "{\"mcpServers\":{\"codegraph\":{\"command\":\"x\"},\"other-relay\":{\"command\":\"y\"}}}"];
+        yield return
+        [
+            "other-server-names-only",
+            "{\"mcpServers\":{\"codegraph\":{\"command\":\"x\"},\"other-relay\":{\"command\":\"y\"}}}"
+        ];
         yield return ["malformed-json", "{\"mcpServers\": {\"ops-relay\": "];
     }
 
@@ -211,15 +244,16 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public async Task OperatorChannelGate_ServerNameMissing_RendersDefaultOutputPlusNameMissingWarning(string? serverName)
+    public async Task OperatorChannelGate_ServerNameMissing_RendersDefaultOutputPlusNameMissingWarning(
+        string? serverName)
     {
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
-            serverName: serverName);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
+            serverName);
 
         Assert.Equal(
             SquadOperatorChannelFixture.FileDigests(off),
@@ -238,15 +272,16 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(InvalidServerNames))]
-    public async Task OperatorChannelGate_ServerNameInvalid_RendersDefaultOutputAndNeverEchoesTheRawValue(string serverName)
+    public async Task OperatorChannelGate_ServerNameInvalid_RendersDefaultOutputAndNeverEchoesTheRawValue(
+        string serverName)
     {
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Global);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
-            serverName: serverName);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Global,
+            serverName);
 
         Assert.Equal(
             SquadOperatorChannelFixture.FileDigests(off),
@@ -279,9 +314,9 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
         SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [SquadTarget.Copilot], SquadDeploymentScope.Project);
+            copilot, home, null, [SquadTarget.Copilot], SquadDeploymentScope.Project);
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [SquadTarget.Copilot], SquadDeploymentScope.Project);
+            copilot, home, "true", [SquadTarget.Copilot], SquadDeploymentScope.Project);
 
         Assert.Equal(
             SquadOperatorChannelFixture.FileDigests(off),
@@ -297,7 +332,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         Assert.Contains("Copilot CLI global scope only", record.Details ?? string.Empty, StringComparison.Ordinal);
         Assert.Empty(SquadOperatorChannelFixture.OperatorChannelMentions(
             on,
-            requiredDegradationCode: SquadOperatorChannelFixture.NotRenderedDegradation));
+            SquadOperatorChannelFixture.NotRenderedDegradation));
     }
 
     [Theory]
@@ -307,10 +342,12 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
     {
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
-        SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [target], SquadDeploymentScope.Global);
+        SquadRenderResult off = await NonCopilotGlobalOffRenders.GetOrAdd(
+            target,
+            t => SquadOperatorChannelFixture.RenderAsync(
+                copilot, home, null, [t], SquadDeploymentScope.Global));
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [target], SquadDeploymentScope.Global);
+            copilot, home, "true", [target], SquadDeploymentScope.Global);
 
         string token = SquadTargetCatalog.GetToken(target);
         Assert.Equal(
@@ -328,7 +365,7 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
 
         Assert.Empty(SquadOperatorChannelFixture.OperatorChannelMentions(
             on,
-            requiredDegradationCode: SquadOperatorChannelFixture.NotRenderedDegradation));
+            SquadOperatorChannelFixture.NotRenderedDegradation));
     }
 
     /// <summary>
@@ -343,11 +380,13 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
     {
         (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
 
-        SquadRenderResult off = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, [target], SquadDeploymentScope.Global);
+        SquadRenderResult off = await NonCopilotGlobalOffRenders.GetOrAdd(
+            target,
+            t => SquadOperatorChannelFixture.RenderAsync(
+                copilot, home, null, [t], SquadDeploymentScope.Global));
         SquadRenderResult on = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: "true", [target], SquadDeploymentScope.Global,
-            serverName: serverName);
+            copilot, home, "true", [target], SquadDeploymentScope.Global,
+            serverName);
 
         Assert.Equal(
             SquadOperatorChannelFixture.FileDigests(off),
@@ -364,10 +403,12 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         }
     }
 
-    public static IEnumerable<object[]> NonCopilotTargets() =>
-        SquadTargetCatalog.All
+    public static IEnumerable<object[]> NonCopilotTargets()
+    {
+        return SquadTargetCatalog.All
             .Where(static target => target != SquadTarget.Copilot)
             .Select(static target => new object[] { target });
+    }
 
     /// <summary>
     /// Guards the default-off path: with the gate unset or any value other than the exact string
@@ -381,10 +422,13 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         SquadDeploymentScope scope,
         string gateValue)
     {
-        (string copilot, string home) = NewFixture(SquadOperatorChannelFixture.ServerPresentConfig);
+        string copilot = DefaultOffFixture.CopilotHome;
+        string home = DefaultOffFixture.HomeDirectory;
 
-        SquadRenderResult baseline = await SquadOperatorChannelFixture.RenderAsync(
-            copilot, home, gateValue: null, SquadTargetCatalog.All, scope);
+        SquadRenderResult baseline = await DefaultOffBaselines.GetOrAdd(
+            scope,
+            s => SquadOperatorChannelFixture.RenderAsync(
+                copilot, home, null, SquadTargetCatalog.All, s));
         SquadRenderResult candidate = await SquadOperatorChannelFixture.RenderAsync(
             copilot, home, gateValue, SquadTargetCatalog.All, scope);
 
@@ -496,16 +540,17 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
         {
             string deniedMessage = DeniedReadMessage(overlay);
 
-            SquadRenderValidationException failure = await Assert.ThrowsAsync<SquadRenderValidationException>(
-                () => SquadOperatorChannelFixture.RunWithGateAsync("true", copilot, async () =>
+            SquadRenderValidationException failure =
+                await Assert.ThrowsAsync<SquadRenderValidationException>(async () =>
                 {
                     ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-                    return await renderer.RenderAsync(new SquadRenderRequest(
-                        SourceDirectory: sourceCopy,
-                        Targets: [SquadTarget.Copilot],
-                        Scope: SquadDeploymentScope.Global,
-                        GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(copilot, home)));
-                }));
+                    await renderer.RenderAsync(new SquadRenderRequest(
+                        sourceCopy,
+                        [SquadTarget.Copilot],
+                        SquadDeploymentScope.Global,
+                        GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(copilot, home),
+                        EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)));
+                });
 
             Assert.Contains(overlay, failure.Message, StringComparison.Ordinal);
             Assert.Contains(deniedMessage, failure.Message, StringComparison.Ordinal);
@@ -558,15 +603,14 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             laterRoot,
             SquadOperatorChannelFixture.GlobalRoots(copilot, home));
 
-        SquadRenderResult on = await SquadOperatorChannelFixture.RunWithGateAsync("true", copilot, async () =>
-        {
-            ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-            return await renderer.RenderAsync(new SquadRenderRequest(
-                SourceDirectory: SquadOperatorChannelFixture.ProductRoot,
-                Targets: [SquadTarget.Copilot],
-                Scope: SquadDeploymentScope.Global,
-                GlobalRoots: roots));
-        });
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        SquadRenderResult on = await renderer.RenderAsync(new SquadRenderRequest(
+            SquadOperatorChannelFixture.ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Global,
+            GlobalRoots: roots,
+            PreloadedSource: TestSquadCorpus.CanonicalSource,
+            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader("true", copilot)));
 
         Assert.Contains(
             SquadOperatorChannelFixture.ToolEntry,
@@ -605,7 +649,8 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             return denied.Message;
         }
 
-        Assert.Skip("The process can read a file with mode 000 (running as root?), so an unreadable overlay cannot be simulated.");
+        Assert.Skip(
+            "The process can read a file with mode 000 (running as root?), so an unreadable overlay cannot be simulated.");
         throw new InvalidOperationException("Unreachable: Assert.Skip always throws.");
     }
 
@@ -626,18 +671,6 @@ public sealed class SquadOperatorChannelOptInTests : IDisposable
             }
         }
     }
-}
-
-/// <summary>Non-parallel collection for every test that mutates the operator-channel gate, its server name, or COPILOT_HOME.</summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-[SuppressMessage(
-    "Naming",
-    "CA1711:Identifiers should not have incorrect suffix",
-    Justification = "xUnit collection definitions are named <Name>Collection by convention; "
-        + "the suffix is the framework idiom, not a claim to be a collection type.")]
-public sealed class SquadOperatorChannelCollection
-{
-    public const string Name = "Squad operator channel gate";
 }
 
 /// <summary>Shared fixture for the operator channel facts: paths, the gate and server variables, and render and parsing helpers.</summary>
@@ -688,70 +721,36 @@ internal static class SquadOperatorChannelFixture
         new(@"^tools:\s*\[(?<items>.*)\]\s*$", RegexOptions.Compiled | RegexOptions.Multiline);
 
     /// <summary>A mcp-config.json that declares exactly one server, <paramref name="serverName"/>.</summary>
-    internal static string ServerConfig(string serverName) =>
-        "{\"mcpServers\":{\"" + serverName + "\":{\"command\":\"x\",\"args\":[]}}}";
-
-    /// <summary>
-    /// Runs an async body with the gate, the server variable, and COPILOT_HOME set, restoring all three
-    /// afterwards. A null <paramref name="serverName"/> leaves the server variable unset.
-    /// </summary>
-    internal static async Task<T> RunWithGateAsync<T>(
-        string? gateValue,
-        string copilotHome,
-        Func<Task<T>> body,
-        string? serverName = DefaultServerName)
+    internal static string ServerConfig(string serverName)
     {
-        string? previousGate = Environment.GetEnvironmentVariable(GateVariable);
-        string? previousServer = Environment.GetEnvironmentVariable(ServerVariable);
-        string? previousCopilotHome = Environment.GetEnvironmentVariable(CopilotHomeVariable);
-        Environment.SetEnvironmentVariable(GateVariable, gateValue);
-        Environment.SetEnvironmentVariable(ServerVariable, serverName);
-        Environment.SetEnvironmentVariable(CopilotHomeVariable, copilotHome);
-        try
-        {
-            return await body();
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(GateVariable, previousGate);
-            Environment.SetEnvironmentVariable(ServerVariable, previousServer);
-            Environment.SetEnvironmentVariable(CopilotHomeVariable, previousCopilotHome);
-        }
+        return "{\"mcpServers\":{\"" + serverName + "\":{\"command\":\"x\",\"args\":[]}}}";
     }
 
-    /// <summary>Runs a synchronous body with the gate, the server variable, and COPILOT_HOME set, restoring all three afterwards.</summary>
-    internal static T RunWithGate<T>(
+    /// <summary>Creates an in-memory environment variable reader delegate for operator channel settings.</summary>
+    internal static Func<string, string?> CreateEnvironmentReader(
         string? gateValue,
-        string copilotHome,
-        Func<T> body,
+        string? copilotHome = null,
         string? serverName = DefaultServerName)
     {
-        string? previousGate = Environment.GetEnvironmentVariable(GateVariable);
-        string? previousServer = Environment.GetEnvironmentVariable(ServerVariable);
-        string? previousCopilotHome = Environment.GetEnvironmentVariable(CopilotHomeVariable);
-        Environment.SetEnvironmentVariable(GateVariable, gateValue);
-        Environment.SetEnvironmentVariable(ServerVariable, serverName);
-        Environment.SetEnvironmentVariable(CopilotHomeVariable, copilotHome);
-        try
+        return key => key switch
         {
-            return body();
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(GateVariable, previousGate);
-            Environment.SetEnvironmentVariable(ServerVariable, previousServer);
-            Environment.SetEnvironmentVariable(CopilotHomeVariable, previousCopilotHome);
-        }
+            GateVariable => gateValue,
+            ServerVariable => serverName,
+            CopilotHomeVariable => copilotHome,
+            _ => null
+        };
     }
 
     /// <summary>
     /// Resolves global roots so that the Copilot global root is the given COPILOT_HOME directory, the
     /// same location the probe reads <c>mcp-config.json</c> from.
     /// </summary>
-    internal static ISquadGlobalRootResolver GlobalRoots(string copilotHome, string homeDirectory) =>
-        new SquadGlobalRoots(
+    internal static ISquadGlobalRootResolver GlobalRoots(string copilotHome, string homeDirectory)
+    {
+        return new SquadGlobalRoots(
             name => string.Equals(name, CopilotHomeVariable, StringComparison.Ordinal) ? copilotHome : null,
             homeDirectory);
+    }
 
     internal static async Task<SquadRenderResult> RenderAsync(
         string copilotHome,
@@ -759,30 +758,34 @@ internal static class SquadOperatorChannelFixture
         string? gateValue,
         IReadOnlyList<SquadTarget> targets,
         SquadDeploymentScope scope,
-        string? serverName = DefaultServerName)
+        string? serverName = DefaultServerName,
+        SquadSource? preloadedSource = null)
     {
-        return await RunWithGateAsync(gateValue, copilotHome, async () =>
-        {
-            ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
-            SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-                SourceDirectory: ProductRoot,
-                Targets: targets,
-                Scope: scope,
-                GlobalRoots: GlobalRoots(copilotHome, homeDirectory)));
-            Assert.True(result.Success, string.Join("; ", result.Errors));
-            return result;
-        }, serverName);
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            targets,
+            scope,
+            GlobalRoots: GlobalRoots(copilotHome, homeDirectory),
+            PreloadedSource: preloadedSource ?? TestSquadCorpus.CanonicalSource,
+            EnvironmentReader: CreateEnvironmentReader(gateValue, copilotHome, serverName)));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        return result;
     }
 
-    internal static IReadOnlyList<string> FileDigests(SquadRenderResult result) =>
-        result.Files
+    internal static IReadOnlyList<string> FileDigests(SquadRenderResult result)
+    {
+        return result.Files
             .Select(static file => $"{file.RelativePath} {Convert.ToHexString(SHA256.HashData(file.Content.Span))}")
             .ToArray();
+    }
 
-    internal static string[] FileTexts(SquadRenderResult result) =>
-        result.Files
+    internal static string[] FileTexts(SquadRenderResult result)
+    {
+        return result.Files
             .Select(static file => Encoding.UTF8.GetString(file.Content.Span))
             .ToArray();
+    }
 
     internal static string ConductorText(SquadRenderResult result)
     {
@@ -835,10 +838,12 @@ internal static class SquadOperatorChannelFixture
     /// The overlay's first prose paragraph, read from the file with the placeholder replaced by the default
     /// server name, so the body check follows the file as the renderer will emit it.
     /// </summary>
-    internal static string OverlayFirstParagraph() =>
-        OverlayText()
+    internal static string OverlayFirstParagraph()
+    {
+        return OverlayText()
             .Split('\n')
             .Select(static line => line.Trim())
             .First(static line => line.Length > 0 && !line.StartsWith('#'))
             .Replace(Placeholder, DefaultServerName, StringComparison.Ordinal);
+    }
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -8,28 +9,33 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
+using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <c>docs init</c> appends the rendered <c>review:</c> block when the host configuration has
-/// none, never changes an existing block, and honours the opt-out. Each family fixture proves
-/// the written section byte for byte against its approved <c>expected-review.yml</c>.
+///     <c>docs init</c> appends the rendered <c>review:</c> block when the host configuration has
+///     none, never changes an existing block, and honours the opt-out. Each family fixture proves
+///     the written section byte for byte against its approved <c>expected-review.yml</c>.
 /// </summary>
 public sealed class DocsInitReviewGatesTests : IDisposable
 {
     private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
     private const string NoGatesForAgent = "KW-REVIEW-027";
     private const string OptOutLine = "review gates not written (--no-review-gates)";
+
     private const string CiTemplateLine =
         "CI: copy templates/github-actions/kyber-weave-review-gate.yml from " +
         "https://github.com/dpalfery/kyber-weave into .github/workflows/.";
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     /// <summary>One argument per gate-catalogue family fixture directory.</summary>
     public static IEnumerable<object[]> FamilyFixtureNames()
@@ -42,9 +48,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// The written <c>review:</c> section must equal the family's approved expected file.
-    /// A hand edit to the catalogue that changes what a host receives fails here rather
-    /// than silently shipping different gates to the next host that runs <c>docs init</c>.
+    ///     The written <c>review:</c> section must equal the family's approved expected file.
+    ///     A hand edit to the catalogue that changes what a host receives fails here rather
+    ///     than silently shipping different gates to the next host that runs <c>docs init</c>.
     /// </summary>
     [Theory]
     [MemberData(nameof(FamilyFixtureNames))]
@@ -60,8 +66,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// A host-owned <c>review:</c> section is never rewritten, with or without
-    /// <c>--force</c>. Regenerating it would discard gates the operator tuned by hand.
+    ///     A host-owned <c>review:</c> section is never rewritten, with or without
+    ///     <c>--force</c>. Regenerating it would discard gates the operator tuned by hand.
     /// </summary>
     [Theory]
     [InlineData(false)]
@@ -88,9 +94,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// The second run finds <c>review:</c> and writes nothing, so the host configuration is
-    /// byte-identical to the first run's result. A diff on every re-run would make adoption
-    /// look perpetually dirty.
+    ///     The second run finds <c>review:</c> and writes nothing, so the host configuration is
+    ///     byte-identical to the first run's result. A diff on every re-run would make adoption
+    ///     look perpetually dirty.
     /// </summary>
     [Fact]
     public void RunningDocsInitTwiceLeavesTheHostConfigByteIdentical()
@@ -110,9 +116,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// Adding the section must not touch any other byte: comments, key order, and the
-    /// file's newline style belong to the operator. Both newline styles are covered because
-    /// the append uses the file's existing style.
+    ///     Adding the section must not touch any other byte: comments, key order, and the
+    ///     file's newline style belong to the operator. Both newline styles are covered because
+    ///     the append uses the file's existing style.
     /// </summary>
     [Theory]
     [InlineData("\n")]
@@ -121,8 +127,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         string repo = NewFixtureRepo("go", ["go"]);
         string original = string.Join(
-            newline,
-            ["# Ours, not the tool's.", "ontology:", "  docs-root: docs", "  technologies:", "    - go", string.Empty]);
+            newline, "# Ours, not the tool's.", "ontology:", "  docs-root: docs", "  technologies:", "    - go",
+            string.Empty);
         File.WriteAllText(ConfigPath(repo), original);
         MustGit(repo, "add", "-A");
         MustGit(
@@ -138,16 +144,16 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// The opt-out writes no gates and says so. An operator who manages review gates by
-    /// hand must not find a generated block after asking for none.
+    ///     The opt-out writes no gates and says so. An operator who manages review gates by
+    ///     hand must not find a generated block after asking for none.
     /// </summary>
     [Fact]
     public void NoReviewGatesWritesNothingAndSaysSo()
     {
         string repo = NewFixtureRepo("go", ["go"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            DocsApp().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
 
         Assert.True(
             execution.Result == 0,
@@ -157,16 +163,16 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// A declared technology with no catalogue entry is reported, not failed. A stack
-    /// without shipped gates is a valid state, and failing on it would block adoption.
+    ///     A declared technology with no catalogue entry is reported, not failed. A stack
+    ///     without shipped gates is a valid state, and failing on it would block adoption.
     /// </summary>
     [Fact]
     public void AHostWithOnlyUnfamiliedTechnologiesWritesNoReviewSection()
     {
         string repo = NewRepo(["azure"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -176,34 +182,31 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// Merged <c>--kyber-standards</c> technologies render the families whose roots exist
-    /// live and comment the rest out with the marker the host should point at. The go-only
-    /// fixture has exactly one root, so every other family must explain itself.
+    ///     Merged <c>--kyber-standards</c> technologies render the families whose roots exist
+    ///     live and comment the rest out with the marker the host should point at. The go-only
+    ///     fixture has exactly one root, so every other family must explain itself.
     /// </summary>
     [Fact]
     public void KyberStandardsOnAGoOnlyFixtureWritesGoGatesAndCommentsTheOtherFamiliesOut()
     {
         string repo = NewFixtureRepo("go", ["go"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            DocsApp().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
 
         Assert.True(
             execution.Result == 0,
             $"docs init --kyber-standards exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
         IReadOnlyList<GateCatalogueFamily> families = GateCatalogue.LoadEmbedded();
-        GateCatalogueFamily go = families.Single(
-            candidate => candidate.Technologies.Contains("go", StringComparer.Ordinal));
+        GateCatalogueFamily go =
+            families.Single(candidate => candidate.Technologies.Contains("go", StringComparer.Ordinal));
         string configText = File.ReadAllText(ConfigPath(repo));
         Assert.Contains(
             configText.Split('\n'),
             line => line.TrimStart().StartsWith("- id: go-", StringComparison.Ordinal));
         foreach (GateCatalogueFamily other in families)
         {
-            if (string.Equals(other.Family, go.Family, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (string.Equals(other.Family, go.Family, StringComparison.Ordinal)) continue;
 
             string reason = $"no {other.Markers[0]} found";
             Assert.Contains(reason, configText, StringComparison.Ordinal);
@@ -212,17 +215,17 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// Writing gates is reported per technology — the ids written, the gates commented
-    /// out with their reasons — and points at the CI template. The exact ids are pinned
-    /// by the approved-files test; this pins the reporting contract.
+    ///     Writing gates is reported per technology — the ids written, the gates commented
+    ///     out with their reasons — and points at the CI template. The exact ids are pinned
+    ///     by the approved-files test; this pins the reporting contract.
     /// </summary>
     [Fact]
     public void DocsInitListsWrittenAndCommentedOutGatesPerTechnology()
     {
         string repo = NewFixtureRepo("go", ["go"]);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -235,9 +238,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// Leaving an existing block in place still tells the operator which catalogue gates
-    /// are missing from it, without changing the exit code. Silence here would let a host
-    /// drift behind the catalogue without noticing.
+    ///     Leaving an existing block in place still tells the operator which catalogue gates
+    ///     are missing from it, without changing the exit code. Silence here would let a host
+    ///     drift behind the catalogue without noticing.
     /// </summary>
     [Fact]
     public void AnExistingReviewSectionListsMissingCatalogueGatesAsInformation()
@@ -249,8 +252,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             repo, "-c", "user.name=t2r", "-c", "user.email=t2r@example.invalid",
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "hand-owned review");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -259,9 +262,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// The file <c>docs init</c> writes must load through <c>KyberWeaveConfigLoader</c>
-    /// with no configuration error. A catalogue that cannot load is a bug the tests catch
-    /// first, not the host's first review.
+    ///     The file <c>docs init</c> writes must load through <c>KyberWeaveConfigLoader</c>
+    ///     with no configuration error. A catalogue that cannot load is a bug the tests catch
+    ///     first, not the host's first review.
     /// </summary>
     [Fact]
     public void TheWrittenHostConfigLoadsWithoutAConfigurationError()
@@ -281,13 +284,13 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// After <c>docs init</c> on the rust fixture, <c>review gates --agent rust-dev</c>
-    /// runs that agent's gates instead of reporting that no gates are declared. Toolchain
-    /// runs need cargo; the selection itself is asserted from the written configuration
-    /// when cargo is missing, so the test holds on hosts without the toolchain.
-    /// The R6.4 trigger is the task-gate skill, which always names a task, so the run
-    /// passes <c>--task r6-4-probe</c>: rust-clippy uses
-    /// <c>--target-dir .agent_scratchpad/{task}/target</c>, which is refused without one.
+    ///     After <c>docs init</c> on the rust fixture, <c>review gates --agent rust-dev</c>
+    ///     runs that agent's gates instead of reporting that no gates are declared. Toolchain
+    ///     runs need cargo; the selection itself is asserted from the written configuration
+    ///     when cargo is missing, so the test holds on hosts without the toolchain.
+    ///     The R6.4 trigger is the task-gate skill, which always names a task, so the run
+    ///     passes <c>--task r6-4-probe</c>: rust-clippy uses
+    ///     <c>--target-dir .agent_scratchpad/{task}/target</c>, which is refused without one.
     /// </summary>
     [Fact]
     public void ReviewGatesRunsTheWrittenRustGatesAndReportsGatesDeclared()
@@ -297,12 +300,11 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         File.AppendAllText(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
         string reportPath = Path.Combine(_temp.Path, "rust-gates-" + Guid.NewGuid().ToString("N") + ".json");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => ReviewApp().Run(
-            [
-                "review", "gates", repo, "--agent", "rust-dev", "--task", "r6-4-probe",
-                "--paths", "src/lib.rs", "--out", reportPath
-            ]));
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => ReviewApp().Run(
+        [
+            "review", "gates", repo, "--agent", "rust-dev", "--task", "r6-4-probe",
+            "--paths", "src/lib.rs", "--out", reportPath
+        ]));
 
         Assert.DoesNotContain(NoGatesForAgent, execution.Output, StringComparison.Ordinal);
         if (CargoAvailable())
@@ -331,25 +333,21 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// Copies the family's clean fixture into a fresh temp git repository and declares the
-    /// family's technologies, ready for <c>docs init</c>. Never builds in place: the
-    /// repository's <c>Directory.Build.props</c> would otherwise apply to the fixture.
+    ///     Copies the family's clean fixture into a fresh temp git repository and declares the
+    ///     family's technologies, ready for <c>docs init</c>. Never builds in place: the
+    ///     repository's <c>Directory.Build.props</c> would otherwise apply to the fixture.
     /// </summary>
     private string NewFixtureRepo(string family, IReadOnlyList<string> technologies)
     {
         string repo = Path.Combine(_temp.Path, family + "-" + Guid.NewGuid().ToString("N"));
-        CopyDirectory(FixtureCleanPath(family), repo);
-        WriteHostConfig(repo, technologies);
-        InitGit(repo);
+        TestGitRepositoryTemplate.CreateDocsInitFixtureRepository(family, technologies, repo);
         return repo;
     }
 
     private string NewRepo(IReadOnlyList<string> technologies)
     {
         string repo = Path.Combine(_temp.Path, "host-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(repo);
-        WriteHostConfig(repo, technologies);
-        InitGit(repo);
+        TestGitRepositoryTemplate.CreateDocsInitEmptyRepository(technologies, repo);
         return repo;
     }
 
@@ -362,37 +360,42 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture");
     }
 
-    private static string FixtureCleanPath(string family) =>
-        Path.Combine(
+    private static string FixtureCleanPath(string family)
+    {
+        return Path.Combine(
             KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "clean");
+    }
 
-    private static string ExpectedReviewPath(string family) =>
-        Path.Combine(
+    private static string ExpectedReviewPath(string family)
+    {
+        return Path.Combine(
             KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, "expected-review.yml");
+    }
 
     /// <summary>
-    /// The header comment stamps the build version, which carries the commit hash; blank it
-    /// so the fixtures stay valid on every commit.
+    ///     The header comment stamps the build version, which carries the commit hash; blank it
+    ///     so the fixtures stay valid on every commit.
     /// </summary>
-    private static string NormalizeVersionStamp(string yaml) =>
-        Regex.Replace(yaml, "written by Kyber-Weave \\S+", "written by Kyber-Weave <version>");
+    private static string NormalizeVersionStamp(string yaml)
+    {
+        return Regex.Replace(yaml, "written by Kyber-Weave \\S+", "written by Kyber-Weave <version>");
+    }
 
-    private static string ConfigPath(string repo) => Path.Combine(repo, ConfigRelativePath);
+    private static string ConfigPath(string repo)
+    {
+        return Path.Combine(repo, ConfigRelativePath);
+    }
 
     /// <summary>
-    /// The written <c>review:</c> section: from the top-level <c>review</c> key (a commented
-    /// <c># review:</c> does not count) to the end of the file. Empty when absent.
+    ///     The written <c>review:</c> section: from the top-level <c>review</c> key (a commented
+    ///     <c># review:</c> does not count) to the end of the file. Empty when absent.
     /// </summary>
     private static string ReadReviewSection(string repo)
     {
         string[] lines = File.ReadAllLines(ConfigPath(repo));
         for (int index = 0; index < lines.Length; index++)
-        {
             if (Regex.IsMatch(lines[index], "^review[ \\t]*:"))
-            {
                 return string.Join("\n", lines, index, lines.Length - index) + "\n";
-            }
-        }
 
         return string.Empty;
     }
@@ -409,10 +412,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         else
         {
             yaml.AppendLine("  technologies:");
-            foreach (string technology in technologies)
-            {
-                yaml.Append("    - ").AppendLine(technology);
-            }
+            foreach (string technology in technologies) yaml.Append("    - ").AppendLine(technology);
         }
 
         string directory = Path.Combine(repo, ".kyber-weave");
@@ -421,27 +421,29 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    /// A hand-owned host configuration: operator comments, the go stack, and a review
-    /// block with ids the catalogue never emits, so every catalogue gate for go is missing
-    /// from it. Mirrors the minimal shape the review-gates command tests load.
+    ///     A hand-owned host configuration: operator comments, the go stack, and a review
+    ///     block with ids the catalogue never emits, so every catalogue gate for go is missing
+    ///     from it. Mirrors the minimal shape the review-gates command tests load.
     /// </summary>
-    private static string HandOwnedConfigWithReview() =>
-        """
-        # Ours, not the tool's.
-        ontology:
-          docs-root: docs
-          technologies:
-            - go
-        review:
-          gates:
-            - id: hand-owned-council
-              run: [git, --version]
-          task-gates:
-            go-dev:
-              - id: hand-owned-task
-                include: ["**/*.go"]
-                run: [git, --version]
-        """;
+    private static string HandOwnedConfigWithReview()
+    {
+        return """
+               # Ours, not the tool's.
+               ontology:
+                 docs-root: docs
+                 technologies:
+                   - go
+               review:
+                 gates:
+                   - id: hand-owned-council
+                     run: [git, --version]
+                 task-gates:
+                   go-dev:
+                     - id: hand-owned-task
+                       include: ["**/*.go"]
+                       run: [git, --version]
+               """;
+    }
 
     private static void CopyDirectory(string source, string destination)
     {
@@ -486,12 +488,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            CreateNoWindow = true,
+            CreateNoWindow = true
         };
-        foreach (string argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(
@@ -507,17 +506,14 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true,
+                RedirectStandardError = true
             };
             using Process? process = Process.Start(startInfo);
-            if (process is null)
-            {
-                return false;
-            }
+            if (process is null) return false;
 
             return ProcessRunner.ReadToEnd(process).ExitCode == 0;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
             return false;
         }

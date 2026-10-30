@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -157,7 +158,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -448,7 +449,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -549,7 +550,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsDroid()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -668,7 +669,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_GlobalScopePlacesTheEntryPointSkillUnderSkills()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -726,7 +727,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -802,7 +803,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents,
             a => a.Name == "conductor");
 
@@ -889,7 +890,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderSkill_FrontmatterKeyOrderIsStable()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         string probe = source.Skills
             .Select(skill => skill.Name)
