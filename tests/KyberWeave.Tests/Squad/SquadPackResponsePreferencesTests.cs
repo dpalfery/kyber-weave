@@ -1,0 +1,205 @@
+using System.IO.Compression;
+using System.Text;
+using System.Text.RegularExpressions;
+using KyberWeave.Core.Squad.Packaging;
+using Xunit;
+
+namespace KyberWeave.Tests.Squad;
+
+/// <summary>
+/// Pins decision D-A: canonical sources keep an empty <c>&lt;response-preferences&gt;</c> block,
+/// <c>squad install</c> and <c>squad update</c> fill it with the operator's effective text, and
+/// <c>squad pack</c> fills every conductor and bug-crusher carrier with the shipped default so a
+/// packed archive is self-contained and deterministic. Without this, an archive ships the canonical
+/// placeholder line and the operator's home file leaks into a distributable artifact.
+/// </summary>
+public sealed class SquadPackResponsePreferencesTests : IDisposable
+{
+    private const string ConductorAgent = "agents/conductor.md";
+    private const string BugCrusherAgent = "agents/bug-crusher.md";
+    private const string BugCrusherSkill = "skills/bug-crusher/SKILL.md";
+
+    private static readonly Regex BlockPattern = new(
+        "<response-preferences>(?<body>.*?)</response-preferences>",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    private static readonly Regex EmptyBlockPattern = new(
+        "<response-preferences>\\s*</response-preferences>",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    private readonly TempDirectory _temp = new();
+
+    public void Dispose() => _temp.Dispose();
+
+    private static string ProductRoot =>
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    private static string DefaultText =>
+        File.ReadAllText(Path.Combine(ProductRoot, "response-guidance.default.md"), Encoding.UTF8);
+
+    private static string OperatorHomeGuidancePath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kyber-weave", "response-guidance.md");
+
+    /// <summary>
+    /// Guards the packed conductor carrier: a shipped APM archive must carry the default text inside its
+    /// response-preferences block, never the canonical placeholder or an empty block, so the archive
+    /// routes the same preferences on every machine.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_ShipsTheShippedDefaultInTheConductorAndBugCrusherCarriers()
+    {
+        string archivePath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-apm");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+
+        AssertCarrierShipsDefault(archive, ConductorAgent);
+        AssertCarrierShipsDefault(archive, BugCrusherAgent);
+        AssertCarrierShipsDefault(archive, BugCrusherSkill);
+    }
+
+    /// <summary>
+    /// Guards the Agent Plugins archive: the bug-crusher skill is the only carrier it ships, so that
+    /// skill must carry the shipped default; a plugin install that kept the placeholder would route
+    /// the wrong preferences with no install step to repair it.
+    /// </summary>
+    [Fact]
+    public void Pack_Plugins_ShipsTheShippedDefaultInTheBugCrusherSkillCarrier()
+    {
+        string archivePath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-plugins");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+
+        AssertCarrierShipsDefault(archive, BugCrusherSkill);
+    }
+
+    /// <summary>
+    /// Guards against an empty block surviving into a distributable archive: an empty block is the
+    /// canonical source's pre-install state, and shipping it would leave the operator with no
+    /// preferences at all after an offline install from the archive.
+    /// </summary>
+    [Fact]
+    public void Pack_NoPackedArchiveHoldsAnEmptyResponsePreferencesBlock()
+    {
+        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-empty-apm");
+        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-empty-plugins");
+
+        foreach (string archivePath in new[] { apmPath, pluginsPath })
+        {
+            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                string text = ReadEntryText(entry);
+                Assert.False(
+                    EmptyBlockPattern.IsMatch(text),
+                    $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' holds an empty <response-preferences> block.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Guards byte-level determinism: packing twice from the same inputs must yield identical archive
+    /// bytes, member order, and fixed member timestamps, because the release checksum file depends on it.
+    /// This test is a regression guard, not a red: the packer is already deterministic, and it must stay so
+    /// once the default text is filled in.
+    /// </summary>
+    [Fact]
+    public void Pack_TwiceFromTheSameInputs_ProducesByteIdenticalArchivesWithFixedMemberTimestamps()
+    {
+        string firstDirectory = Path.Combine(_temp.Path, "first");
+        string secondDirectory = Path.Combine(_temp.Path, "second");
+
+        string firstApm = SquadPacker.PackApm(ProductRoot, firstDirectory, "rp-det");
+        string secondApm = SquadPacker.PackApm(ProductRoot, secondDirectory, "rp-det");
+        string firstPlugins = SquadPacker.PackPlugins(ProductRoot, firstDirectory, "rp-det");
+        string secondPlugins = SquadPacker.PackPlugins(ProductRoot, secondDirectory, "rp-det");
+
+        AssertArchivesIdentical(firstApm, secondApm);
+        AssertArchivesIdentical(firstPlugins, secondPlugins);
+    }
+
+    /// <summary>
+    /// Guards the isolation rule: packing is a function of the canonical source alone, so the operator's
+    /// home guidance file is neither read into nor written by an archive. The home file is only inspected
+    /// read-only here; a content-level absence check is conditional because it is vacuous while the home
+    /// file equals the shipped default.
+    /// </summary>
+    [Fact]
+    public void Pack_DoesNotReadOrWriteTheOperatorHomeGuidance()
+    {
+        string homePath = OperatorHomeGuidancePath;
+        bool existedBefore = File.Exists(homePath);
+        byte[] homeBytesBefore = existedBefore ? File.ReadAllBytes(homePath) : [];
+        DateTime homeWriteBefore = existedBefore ? File.GetLastWriteTimeUtc(homePath) : DateTime.MinValue;
+
+        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
+        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
+
+        Assert.Equal(existedBefore, File.Exists(homePath));
+        if (existedBefore)
+        {
+            Assert.True(
+                homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
+                $"Packing changed the operator home guidance at '{homePath}'.");
+            Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
+
+            string homeText = File.ReadAllText(homePath, Encoding.UTF8);
+            if (!string.IsNullOrWhiteSpace(homeText) && !string.Equals(homeText, DefaultText, StringComparison.Ordinal))
+            {
+                foreach (string archivePath in new[] { apmPath, pluginsPath })
+                {
+                    using ZipArchive archive = ZipFile.OpenRead(archivePath);
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        Assert.False(
+                            ReadEntryText(entry).Contains(homeText, StringComparison.Ordinal),
+                            $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void AssertCarrierShipsDefault(ZipArchive archive, string entryName)
+    {
+        ZipArchiveEntry? entry = archive.GetEntry(entryName);
+        Assert.True(entry is not null, $"The archive does not carry the carrier '{entryName}'.");
+
+        string text = ReadEntryText(entry);
+        MatchCollection matches = BlockPattern.Matches(text);
+        Assert.True(
+            matches.Count == 1,
+            $"'{entryName}' must carry exactly one <response-preferences> block in the archive; it carries {matches.Count}.");
+
+        string body = matches[0].Groups["body"].Value;
+        Assert.True(
+            string.Equals(DefaultText, body, StringComparison.Ordinal),
+            $"The <response-preferences> block of '{entryName}' in the archive does not equal the shipped default byte-for-byte.");
+    }
+
+    private static void AssertArchivesIdentical(string first, string second)
+    {
+        byte[] firstBytes = File.ReadAllBytes(first);
+        byte[] secondBytes = File.ReadAllBytes(second);
+        Assert.True(
+            firstBytes.AsSpan().SequenceEqual(secondBytes),
+            $"'{Path.GetFileName(first)}' is not byte-identical across two packs from the same inputs.");
+
+        using ZipArchive firstArchive = ZipFile.OpenRead(first);
+        using ZipArchive secondArchive = ZipFile.OpenRead(second);
+        Assert.Equal(
+            firstArchive.Entries.Select(entry => entry.FullName),
+            secondArchive.Entries.Select(entry => entry.FullName));
+
+        foreach ((ZipArchiveEntry a, ZipArchiveEntry b) in firstArchive.Entries.Zip(secondArchive.Entries))
+        {
+            Assert.True(
+                a.LastWriteTime == b.LastWriteTime,
+                $"'{a.FullName}' has a different timestamp across two packs.");
+            Assert.Equal(1980, a.LastWriteTime.Year);
+        }
+    }
+
+    private static string ReadEntryText(ZipArchiveEntry entry)
+    {
+        using StreamReader reader = new(entry.Open(), Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+}
