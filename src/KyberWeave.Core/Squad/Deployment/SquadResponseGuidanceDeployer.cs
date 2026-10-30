@@ -41,8 +41,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///     </para>
 ///     <para>
 ///         The default text is a resource in this assembly rather than the canonical
-///         <c>products/kyber-squad/skills/response-format/user-guidance.md</c>, because a deployed tool
-///         has no product tree to read: the skill file travels with the release, while the binary a host
+///         <c>products/kyber-squad/response-guidance.default.md</c>, because a deployed tool
+///         has no product tree to read: the product file travels with the release, while the binary a host
 ///         already has installed is what performs the deploy. The two files are kept byte-identical by
 ///         the <c>VerifyResponseGuidanceDefault</c> build target, so they cannot drift into two different
 ///         defaults.
