@@ -2,7 +2,7 @@
 id: plans/2026-10-30-response-preferences-in-agent-body
 title: Response preferences injected into conductor and bug-crusher; response-format skill removed
 doc-type: plan
-status: draft
+status: current
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-30
@@ -14,7 +14,7 @@ impact-components: [KyberSquad]
 
 # Response preferences injected into conductor and bug-crusher; response-format skill removed
 
-**Status:** Draft — decision-complete as of revision 3 (2026-10-30): the human answered D-B, D-C, D-D and OQ1. Awaiting the approve-and-execute gate; not executable until it is passed.
+**Status:** Ready — decision-complete as of revision 3 (2026-10-30): the human answered D-B, D-C, D-D and OQ1. Approve-and-execute gate passed: approved and executing, human, 2026-10-30, on branch `feat/response-preferences-in-agent-body` with draft PR #475.
 
 **Autonomy override (D-D):** frontmatter `autonomy: supervised` is a deliberate, human-approved override of this repository's Config Reg default `<autonomy>: autonomous`, not a contradiction. Reason: the human is deciding this plan's items in-session. A reader sees it here, in the frontmatter, and in the D-D row of `## Decisions`.
 
@@ -112,12 +112,12 @@ Default text moves from `products/kyber-squad/skills/response-format/user-guidan
 | D-B | May the operator's personal preferences text land in committed project-scope files on all 13 targets, including canonical skill entry files, the Warp `role-` skills and ZCode commands? | Human answer, verbatim: "**yes.** The operator's personal preferences text may land in committed project-scope files on all 13 targets, including canonical skill entry files, the Warp `role-` skills and ZCode commands." | **Recorded once, applies to every task:** user-specific text is committed to project-scope files on all 13 targets; the operator owns that text; review of those files must not treat its presence or content as a defect. No project-scope warning or default-only fallback is built. | Decided: human, 2026-10-30 (relayed by conductor) |
 | D-C | Should `squad install` create the home file, and may `squad update` overwrite it? | Human answer, verbatim: "**yes.** Create the default if it does not exist; once the user has changed it, update must not overwrite it." Requirements: **R-DC1** global `squad install` creates `~/.kyber-weave/response-guidance.md` with the shipped default when absent (same `Global && !DryRun` condition and `DeployGuidance` transaction step as update). **R-DC2** `squad update` leaves a user-edited file byte-identical. | Source (F0): update already preserves an edited file (`Deploy` `:185–189`); install does not create it today → T3(g) adds it; T3(h) pins R-DC2. | Decided: human, 2026-10-30 (relayed by conductor) |
 | D-D | Frontmatter `autonomy: supervised` vs Config Reg `<autonomy>: autonomous`. | Human answer, verbatim: "**yes.** Keep `supervised` as an explicit override of the repository's `autonomous` Config Reg default." | Reason: the human is deciding this plan's items in-session. Visible to a plan-only reader in the frontmatter, the Status block's "Autonomy override" note, and this row. | Decided: human, 2026-10-30 (relayed by conductor) |
-| D1 | Injection mechanism | Post-render transform over `SquadRenderResult.Files` in install, update and doctor; entry files per F1 table; single-block fail-closed rule covers commands, canonical skills and `role-` skills. | F1 | architect, pending gate approval |
-| D2 | Drift and receipts | No new receipt fields: injected bytes are the owned bytes. | F2 | architect, pending gate approval |
-| D3 | Migration | Stale-owned-file removal, proven by test. **Not** added to `SquadRetiredSkills` (wrong remedy text). | F4 | architect, pending gate approval |
-| D4 | Session-title matrix | Moves to architecture §8 as reference; title-line rule into the default guidance; guidance-file guard test retargeted. | F5 | architect, pending gate approval |
-| D5 | Default repository home | `products/kyber-squad/response-guidance.default.md`; csproj 46–48 and 58–75 repointed; home file unchanged. | F6 | architect, pending gate approval |
-| D6 | Who owns the response shape after the skill is gone? | `products/kyber-squad/response-guidance.default.md` (delivered as the home file and injected block). Shape-owner guard test renamed and re-pointed to it. | F7 | architect, pending gate approval |
+| D1 | Injection mechanism | Post-render transform over `SquadRenderResult.Files` in install, update and doctor; entry files per F1 table; single-block fail-closed rule covers commands, canonical skills and `role-` skills. | F1 | approved by the human at the approve-and-execute gate, 2026-10-30 |
+| D2 | Drift and receipts | No new receipt fields: injected bytes are the owned bytes. | F2 | approved by the human at the approve-and-execute gate, 2026-10-30 |
+| D3 | Migration | Stale-owned-file removal, proven by test. **Not** added to `SquadRetiredSkills` (wrong remedy text). | F4 | approved by the human at the approve-and-execute gate, 2026-10-30 |
+| D4 | Session-title matrix | Moves to architecture §8 as reference; title-line rule into the default guidance; guidance-file guard test retargeted. | F5 | approved by the human at the approve-and-execute gate, 2026-10-30 |
+| D5 | Default repository home | `products/kyber-squad/response-guidance.default.md`; csproj 46–48 and 58–75 repointed; home file unchanged. | F6 | approved by the human at the approve-and-execute gate, 2026-10-30 |
+| D6 | Who owns the response shape after the skill is gone? | `products/kyber-squad/response-guidance.default.md` (delivered as the home file and injected block). Shape-owner guard test renamed and re-pointed to it. | F7 | approved by the human at the approve-and-execute gate, 2026-10-30 |
 
 ## Open questions
 

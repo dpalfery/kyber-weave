@@ -35,7 +35,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| [2026-10-30-response-preferences-in-agent-body.md](2026-10-30-response-preferences-in-agent-body.md) | Draft (revision 3) — decision-complete; awaiting approve-and-execute gate | 2026-10-30 | Remove the `response-format` skill (the home file is kept); inject `~/.kyber-weave/response-guidance.md` verbatim into a `<response-preferences>` section of `conductor` and `bug-crusher` on every target at `squad install`/`update`. |
+| [2026-10-30-response-preferences-in-agent-body.md](2026-10-30-response-preferences-in-agent-body.md) | Ready (revision 3) — approved 2026-10-30; executing on draft PR #475 | 2026-10-30 | Remove the `response-format` skill (the home file is kept); inject `~/.kyber-weave/response-guidance.md` verbatim into a `<response-preferences>` section of `conductor` and `bug-crusher` on every target at `squad install`/`update`. |
 
 ## Archived Plans
 
