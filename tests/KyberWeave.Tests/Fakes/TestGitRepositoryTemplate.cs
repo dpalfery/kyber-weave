@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Processes;
 
@@ -17,7 +18,7 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public static class TestGitRepositoryTemplate
 {
-    private static readonly string TemplateRoot =
+    internal static readonly string TemplateRoot =
         Path.Combine(Path.GetTempPath(), "kyber-weave-git-templates-" + Guid.NewGuid().ToString("N"));
 
     private static readonly ConcurrentDictionary<string, Lazy<string>> Templates = new(StringComparer.Ordinal);
@@ -103,7 +104,9 @@ public static class TestGitRepositoryTemplate
             templateKey,
             key => new Lazy<string>(() =>
             {
-                string dir = Path.Combine(TemplateRoot, key.Replace(':', '_').Replace('/', '_'));
+                string sanitized = key.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
+                string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..12];
+                string dir = Path.Combine(TemplateRoot, $"{sanitized}_{hash}");
                 Directory.CreateDirectory(dir);
                 initialize(dir);
                 return dir;

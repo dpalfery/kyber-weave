@@ -36,12 +36,39 @@ public static class TestSquadCorpus
 
     /// <summary>
     /// Gets a thread-safe cached baseline render for the specified target and deployment scope.
+    /// Faulted renders are evicted so subsequent retries can succeed.
     /// </summary>
-    public static Task<SquadRenderResult> GetDefaultRenderAsync(SquadTarget target, SquadDeploymentScope scope)
+    public static async Task<SquadRenderResult> GetDefaultRenderAsync(SquadTarget target, SquadDeploymentScope scope)
     {
-        return CachedRenders.GetOrAdd(
-            (target, scope),
-            static key => RenderCoreAsync(key.Target, key.Scope));
+        return await GetDefaultRenderAsync(
+            target,
+            scope,
+            static (t, s) => RenderCoreAsync(t, s),
+            CachedRenders).ConfigureAwait(false);
+    }
+
+    internal static async Task<SquadRenderResult> GetDefaultRenderAsync(
+        SquadTarget target,
+        SquadDeploymentScope scope,
+        Func<SquadTarget, SquadDeploymentScope, Task<SquadRenderResult>> renderFactory,
+        ConcurrentDictionary<(SquadTarget Target, SquadDeploymentScope Scope), Task<SquadRenderResult>>? cache = null)
+    {
+        ConcurrentDictionary<(SquadTarget Target, SquadDeploymentScope Scope), Task<SquadRenderResult>> dictionary =
+            cache ?? CachedRenders;
+        (SquadTarget Target, SquadDeploymentScope Scope) key = (target, scope);
+        Task<SquadRenderResult> task = dictionary.GetOrAdd(
+            key,
+            _ => renderFactory(target, scope));
+
+        try
+        {
+            return await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            dictionary.TryRemove(KeyValuePair.Create(key, task));
+            throw;
+        }
     }
 
     /// <summary>
