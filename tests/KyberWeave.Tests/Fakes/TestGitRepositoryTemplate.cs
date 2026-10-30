@@ -104,16 +104,49 @@ public static class TestGitRepositoryTemplate
             templateKey,
             key => new Lazy<string>(() =>
             {
-                string sanitized = key.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
-                string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..12];
-                string dir = Path.Combine(TemplateRoot, $"{sanitized}_{hash}");
+                string dir = GetTemplateDirectoryPath(key);
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, true);
+                }
+
                 Directory.CreateDirectory(dir);
                 initialize(dir);
                 return dir;
             }));
 
-        string templateDir = lazyTemplate.Value;
+        string templateDir;
+        try
+        {
+            templateDir = lazyTemplate.Value;
+        }
+        catch
+        {
+            Templates.TryRemove(KeyValuePair.Create(templateKey, lazyTemplate));
+            try
+            {
+                string dir = GetTemplateDirectoryPath(templateKey);
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of partial template directory on initialization failure.
+            }
+
+            throw;
+        }
+
         CopyDirectory(templateDir, destinationPath);
+    }
+
+    private static string GetTemplateDirectoryPath(string key)
+    {
+        string sanitized = key.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
+        string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..12];
+        return Path.Combine(TemplateRoot, $"{sanitized}_{hash}");
     }
 
     /// <summary>

@@ -65,6 +65,43 @@ public sealed class TestFixtureFakesTests
     }
 
     /// <summary>
+    /// A faulted repository template initialization must throw, evict the lazy entry from cache,
+    /// and clean up any partial directory so a subsequent attempt retries, succeeds, and avoids copying partial files.
+    /// </summary>
+    [Fact]
+    public void FaultedTemplateThrowsEvictsFromCacheAndCleansUpDirectoryAllowingSubsequentCallToSucceed()
+    {
+        using TempDirectory temp = new();
+        string dest1 = Path.Combine(temp.Path, "dest-1");
+        string dest2 = Path.Combine(temp.Path, "dest-2");
+        string key = "faulted-template-" + Guid.NewGuid().ToString("N");
+
+        int callCount = 0;
+
+        void Initialize(string dir)
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                File.WriteAllText(Path.Combine(dir, "partial.txt"), "partial content");
+                throw new InvalidOperationException("Simulated template initialization fault");
+            }
+
+            File.WriteAllText(Path.Combine(dir, "valid.txt"), "valid content");
+        }
+
+        Assert.Throws<InvalidOperationException>(() =>
+            TestGitRepositoryTemplate.CreateRepositoryCopy(key, dest1, Initialize));
+        Assert.Equal(1, callCount);
+
+        TestGitRepositoryTemplate.CreateRepositoryCopy(key, dest2, Initialize);
+
+        Assert.Equal(2, callCount);
+        Assert.True(File.Exists(Path.Combine(dest2, "valid.txt")));
+        Assert.False(File.Exists(Path.Combine(dest2, "partial.txt")));
+    }
+
+    /// <summary>
     /// A faulted render must throw and be evicted from cache so a subsequent call can retry and succeed.
     /// </summary>
     [Fact]
