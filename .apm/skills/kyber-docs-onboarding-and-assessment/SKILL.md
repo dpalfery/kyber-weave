@@ -2,6 +2,9 @@
 name: kyber-docs-onboarding-and-assessment
 description: "Bootstraps or audits a repository's documentation architecture — root AGENTS.md, canonical tree, catalog, config registry, and plan lifecycle. Also runs owner-started assessment and remediation of archived plans and specs, classifying each as harvested, partial, or not harvested and grouping docs-dev fixes into a batch delivered as a pull request. Use when setting up documentation for a new or existing repo, auditing whether docs match a standard, mentioning config registry, documentation architecture, ADR, plan lifecycle, or catalog, when project facts are hardcoded in skills instead of canonical docs, or when the owner asks to assess archived plans and specs for harvest gaps. Not for authoring a single governed document — that is kyber-docs-authoring."
 license: MIT
+metadata:
+  author: dpalfery
+  version: 0.1.0
 ---
 
 # Documentation architecture, onboarding, and assessment
