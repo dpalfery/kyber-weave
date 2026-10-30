@@ -59,7 +59,7 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # 28 canonical skill directories; 115 recursive files
+├── skills/                             # 28 canonical skill directories; 116 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -130,7 +130,7 @@ and `kilo-review-loop` are authored in Kyber-Squad. Every imported raw `SKILL.md
 explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 87 supplemental resources, for 115 skill-tree files in total; recursive APM and
+tree also retains 88 supplemental resources, for 116 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,

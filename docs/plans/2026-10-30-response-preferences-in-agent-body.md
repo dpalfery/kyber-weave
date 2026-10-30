@@ -201,3 +201,8 @@ ADR: likely **no ADR — ADR waiver**; reverses a skill-carrier choice within th
 - G1: Revision 1's docs-check evidence had no artifact path and is withdrawn. Revision 3's `docs_validate` / `docs_drift` verdicts are in the architect digest, not asserted here.
 - G2: **Closed (revision 3).** Stale-file removal verified in `SquadDeploymentPlan.CreateUpdate` 505–538 (F4); T5 pins it.
 - G3: **Partly closed (revision 3).** `CursorRenderer.cs:159–172` and `ZCodeRenderer.cs:404–444` / `:411–422` re-read and correct. Not re-read: `SquadRetiredSkills.cs:7–26`, csproj 46–48 / 58–75, and test-file line ranges in F5/F7 — verified at implementation time; T2/T4/T5 are the proof.
+- Closeout note (docs-dev, 2026-10-30) — **ADR position:** no new ADR — ADR waiver: this reverses a skill-carrier choice inside the existing renderer and receipt architecture, with no new boundary, schema or dependency. Recorded in [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy).
+- Closeout note — **Known gap:** under `ReplaceManaged` mode, preserved stale entries are not reported by update. No doctor finding covers it.
+- Closeout note — **D8 warning as shipped:** `The rendered Squad content has no <response-preferences> block; response preferences were not injected.` (install and update, once; no throw; doctor silent).
+- Closeout note — **Accepted risk (H5):** the operator's text is pasted verbatim, with no size cap and no style-only guard line. The earlier guard is deliberately gone; restoring it is a design change.
+- Closeout note — **Project-scope risk (D-B):** operator text is committed into every entry file on all 13 targets; the operator owns it, and reviewers must not treat it as a defect.
