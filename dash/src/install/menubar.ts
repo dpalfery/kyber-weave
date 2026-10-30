@@ -203,11 +203,11 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
     // 3. Put the new app in place.
     await deps.fs.rename(staged, target)
   } catch (error) {
-    // The new app is in place but unrecorded, so a later `--update` would find
-    // nothing to update. Say so rather than reporting a plain install failure.
+    // No rollback: an old version coming back is not an acceptable outcome. The
+    // update fails and says why; the old app, if moved, is in the Trash.
     throw new InstallError(
-      'record',
-      `${describe(error)} (the new tray is installed at ${target} but ${TRAY_RECORD_FILE} was not written; re-run with --force)`,
+      'install',
+      `${describe(error)}${trashed === null ? '' : ` (the previous app is in the Trash at ${trashed})`}`,
     )
   }
 
@@ -215,11 +215,11 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
   try {
     record = await recordInstall(deps, target, plan.version)
   } catch (error) {
-    // No rollback: an old version coming back is not an acceptable outcome. The
-    // update fails and says why; the old app, if moved, is in the Trash.
+    // The new app is in place but unrecorded, so a later `--update` would find
+    // nothing to update. Say so rather than reporting a plain install failure.
     throw new InstallError(
-      'install',
-      `${describe(error)}${trashed === null ? '' : ` (the previous app is in the Trash at ${trashed})`}`,
+      'record',
+      `${describe(error)} (the new tray is installed at ${target} but ${TRAY_RECORD_FILE} was not written; re-run with --force)`,
     )
   }
 
