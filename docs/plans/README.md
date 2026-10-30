@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 ---
 
 # Kyber-Weave Plan Inventory
@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-30-opencode-v2-capture.md](2026-10-30-opencode-v2-capture.md) | In progress — Wave 0 verification (code present; T15 docs open); approved 2026-10-30 (AP1) | 2026-10-30 | Rebuild kyberDash's OpenCode capture as an OpenCode V2-only plugin pipeline that records system prompt, user prompts, skills, tools offered and invoked, tokens, cost and duration per session, removes V1 support, and is proven by an agent-run live session on macOS plus the full suite on Linux. |
 
 ## Archived Plans
 

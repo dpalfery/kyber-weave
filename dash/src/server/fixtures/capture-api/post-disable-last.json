@@ -9,18 +9,6 @@
       "harness": "opencode",
       "fileId": "plugin",
       "path": "/Users/example/.config/opencode/plugins/kyberdash-opencode.js"
-    },
-    {
-      "kind": "restored",
-      "harness": "opencode",
-      "fileId": "opencode-config",
-      "path": "/Users/example/.config/opencode/opencode.jsonc",
-      "changes": [
-        {
-          "key": "experimental.openTelemetry",
-          "before": true
-        }
-      ]
     }
   ],
   "harnessState": {
@@ -33,34 +21,9 @@
     ],
     "state": "off",
     "receipt": "absent",
-    "files": [
-      {
-        "id": "opencode-config",
-        "path": "/Users/example/.config/opencode/opencode.jsonc",
-        "applicable": true,
-        "exists": true,
-        "expectedKeys": [
-          "experimental.openTelemetry"
-        ],
-        "presentKeys": [],
-        "missingKeys": [
-          "experimental.openTelemetry"
-        ],
-        "mismatchedKeys": [],
-        "drift": null
-      }
-    ],
+    "files": [],
     "warnings": [],
-    "manualSteps": [
-      {
-        "id": "opencode-otel-endpoint",
-        "text": "OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from",
-        "env": {
-          "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-          "value": "http://127.0.0.1:4318"
-        }
-      }
-    ],
+    "manualSteps": [],
     "statusLines": [
       "plugin: not installed",
       "content consent: off (turn OpenCode capture on in KyberDash Settings to capture the system prompt, tool definitions and skills)"

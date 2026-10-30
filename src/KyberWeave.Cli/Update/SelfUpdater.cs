@@ -54,8 +54,8 @@ internal sealed class SelfUpdater : IDisposable
 
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
-    /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the restart
-    /// line depends on what the verb printed. Tests pass a fake so no reconciliation starts a real process.
+    /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the guidance
+    /// lines depend on what the verb printed. Tests pass a fake so no reconciliation starts a real process.
     /// </param>
     internal SelfUpdater(
         HttpMessageHandler handler,
@@ -406,7 +406,7 @@ internal sealed class SelfUpdater : IDisposable
 
     /// <summary>
     /// Installs or upgrades the OpenCode capture plugin, but only when it is already installed (D13), so an update
-    /// never adds a surface the owner did not choose. Prints the restart line when the plugin file changed.
+    /// never adds a surface the owner did not choose. Relays the verb's OpenCode guidance lines, which KyberDash words.
     /// </summary>
     private void UpdateCapturePlugin(bool windows)
     {
@@ -444,10 +444,9 @@ internal sealed class SelfUpdater : IDisposable
             return;
         }
 
-        string verdict = FirstLine(result.StandardOutput, "the OpenCode capture plugin is checked");
-        _log(verdict);
-        if (PluginChanged(verdict))
-            _log("Restart OpenCode to load the upgraded capture plugin.");
+        _log(FirstLine(result.StandardOutput, "the OpenCode capture plugin is checked"));
+        foreach (string guidance in KyberDashGuidance.HarnessOpenCodeLines(result.StandardOutput))
+            _log(guidance);
     }
 
     /// <summary>The installed kyberdash, beside kyber-weave. Reconciliation never looks on PATH, so it only touches the binary this update installed.</summary>
@@ -472,15 +471,6 @@ internal sealed class SelfUpdater : IDisposable
         {
             return null;
         }
-    }
-
-    private static bool PluginChanged(string verdict)
-    {
-        if (!verdict.StartsWith("opencode plugin: ", StringComparison.Ordinal))
-            return false;
-
-        string[] fields = verdict.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return fields.Length >= 3 && fields[2] is "installed" or "upgraded";
     }
 
     private static bool MentionsUnknownCommand(ProcessResult result)

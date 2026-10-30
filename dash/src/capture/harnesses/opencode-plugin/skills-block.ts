@@ -1,11 +1,11 @@
-// Pure parser for OpenCode 2.1.4's `<available_skills>` system-prompt block.
+// Pure parser for OpenCode's `<available_skills>` system-prompt block.
 //
-// Shape pinned in `fixtures/plugin-module-1x.json` (`skills_listing_g2`): one
+// Shape pinned by the captured system prompt in `fixtures/v2/runA.context.json`: one
 // `<skill>` element per skill with `<id>`, `<name>`, `<description>` children.
 // When skills change mid-session OpenCode re-emits the block after "The
 // available skills have changed…", and the later block supersedes the earlier.
 //
-// Shared by the plugin (T2, bundled: no imports) and the adapter (T7). Absent
+// Shared by the plugin (bundled: no imports) and the adapter. Absent
 // is not empty: a missing or malformed block is a named failure, never `[]`.
 
 const BLOCK_OPEN = '<available_skills>'

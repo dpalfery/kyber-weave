@@ -1,0 +1,553 @@
+{
+  "id": "ses_e74c398c7ffeVajzhRWZNgfR2n",
+  "session_id": "ses_e74c398c7ffeVajzhRWZNgfR2n",
+  "harness": "opencode",
+  "label": "kw-probe runA shared-service",
+  "agent_name": null,
+  "repo": null,
+  "branch": null,
+  "span_count": 3,
+  "summary": {
+    "turn_count": 3,
+    "request_count": 1,
+    "total_input": 40108,
+    "total_output": 1529,
+    "total_cache_read": 27475,
+    "total_cache_creation": 0,
+    "duration_ms": 13367,
+    "models": [
+      "muse-spark-1.3-contributor"
+    ],
+    "cost": {
+      "basis": "harness",
+      "status": "priced",
+      "value": 0,
+      "currency": "USD"
+    },
+    "tools_offered": [
+      "edit",
+      "glob",
+      "grep",
+      "question",
+      "read",
+      "shell",
+      "skill",
+      "subagent",
+      "webfetch",
+      "websearch",
+      "write",
+      "execute"
+    ],
+    "tool_calls": 2,
+    "tools_invoked": [
+      "skill",
+      "read"
+    ]
+  },
+  "context": {
+    "measurable": true,
+    "reason": null,
+    "turns": 3,
+    "first": {
+      "buckets": {
+        "system_prompt": 7915
+      },
+      "reported_input": 12456
+    },
+    "last": {
+      "buckets": {
+        "system_prompt": 7915
+      },
+      "reported_input": 13992
+    },
+    "unmeasuredTurns": 0
+  },
+  "tools": [],
+  "schema": {
+    "measurable": true,
+    "byServer": {},
+    "neverInvoked": [
+      "edit",
+      "glob",
+      "grep",
+      "question",
+      "shell",
+      "subagent",
+      "webfetch",
+      "websearch",
+      "write",
+      "execute"
+    ],
+    "unusedRange": {
+      "tokenResidencies": 0,
+      "floor": 0,
+      "ceiling": 0
+    },
+    "turns": 3
+  },
+  "timeline": [],
+  "requests": [
+    {
+      "request": "msg_18b3c6740001zU7nSdoH0fWGZB",
+      "timestamp": "2026-10-30T05:15:54.050Z",
+      "turns": 3,
+      "model": "muse-spark-1.3-contributor",
+      "prompt": "\"Load the skill named kw-probe-skill using the skill tool, then read the file notes.txt with the read tool, then follow the skill's instruction. Do not do anything else.\""
+    }
+  ],
+  "servers": [],
+  "coverage": {
+    "schema": 1,
+    "context": 1
+  },
+  "problems": [],
+  "costBasisMismatch": null,
+  "reconciliation": [],
+  "subagents": [],
+  "auxiliary": {
+    "basis": "unknown",
+    "status": "no_rate"
+  },
+  "skills": {
+    "measurable": true,
+    "listed_count": 37,
+    "listed_uninvoked_count": 36,
+    "rows": [
+      {
+        "name": "app-docs-standard",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "architecture-decision-record",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "azure-cli",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "azure-naming",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "bug-crusher",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "code-review",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "code-review-loop",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "conductor",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "create-pull-request",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "csharp-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "csp-security",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "dal-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "doc-corpus-integrity-review",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "dp-code-reviewer",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "github-cli",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "github-devops",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "go-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "kilo-review-loop",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "kw-probe-skill",
+        "listed": true,
+        "invocations": 1,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "kyber-weave-docs",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "lm-studio-cli",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "maui-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "opencode",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "pr-review-fix-comments",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "product-owner",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "python-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "report",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "resharper-clt",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "response-format",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "rust-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "security-review",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "setup-dev-environment",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "spec-conductor",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "task-gate",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "test-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "typescript-dev",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      },
+      {
+        "name": "writing-trigger-descriptions",
+        "listed": true,
+        "invocations": 0,
+        "turns_listed": [
+          0,
+          1,
+          2
+        ]
+      }
+    ]
+  },
+  "measurability": {
+    "token_usage": {
+      "availability": "measured"
+    },
+    "output": {
+      "availability": "measured"
+    },
+    "cache_read": {
+      "availability": "measured"
+    },
+    "cache_creation": {
+      "availability": "measured"
+    },
+    "skills": {
+      "availability": "measured"
+    }
+  },
+  "turns": [
+    {
+      "index": 0,
+      "spanId": "msg_18b3c6754001zOaRnFAQ8wClXP",
+      "timestamp": "2026-10-30T05:16:03.020Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 12456,
+      "output": 69,
+      "fresh": 10935,
+      "cache_read": 1521,
+      "cache_creation": 0,
+      "reasoning": 957
+    },
+    {
+      "index": 1,
+      "spanId": "msg_18b3c8a44001ZD4defsrkMbE3G",
+      "timestamp": "2026-10-30T05:16:05.558Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 13660,
+      "output": 65,
+      "fresh": 1259,
+      "cache_read": 12401,
+      "cache_creation": 0,
+      "reasoning": 223
+    },
+    {
+      "index": 2,
+      "spanId": "msg_18b3c942e001wjgpKdLdgWwk4L",
+      "timestamp": "2026-10-30T05:16:07.434Z",
+      "model": "muse-spark-1.3-contributor",
+      "input": 13992,
+      "output": 19,
+      "fresh": 439,
+      "cache_read": 13553,
+      "cache_creation": 0,
+      "reasoning": 196
+    }
+  ],
+  "fixture_notes": [
+    "Hand-built expected values for the rebuilt pipeline, one prompt (runA). Sources: runA.opencode-db.json (tokens, cost, steps), runA.context.json (tools offered, system text), runA.events.jsonl (prompt, title, tool calls).",
+    "context.*.buckets.system_prompt is an estimate: 31661 characters of captured system text at four characters per token. Only this bucket is filled. The comparator checks only that it is above zero; the rebuilt counter replaces it.",
+    "duration_ms 13367 is the packet figure. Event times give 13369 ms from the prompt hook to the last step end, and 13376 ms from session.created.",
+    "turns[].spanId holds the assistant message id, because OpenCode message ids are the only turn identity in the capture.",
+    "tools is empty: tool-table rows need schema token counts that the probe did not capture.",
+    "schema.unusedRange keeps zeros: schema token counts were not captured. schema.neverInvoked is the offered tools minus the two invoked.",
+    "skills.rows: 37 ids from the captured system block. kw-probe-skill has one invocation; the rest have zero. turns_listed is 0-based and covers all three steps, which carry one identical listing.",
+    "reconciliation, problems, servers, subagents, coverage and auxiliary are empty or neutral. The comparator does not read them."
+  ]
+}

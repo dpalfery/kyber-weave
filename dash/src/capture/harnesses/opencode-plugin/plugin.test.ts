@@ -1,301 +1,83 @@
-// T2 plugin skeleton: lifecycle + failure-injection (test-first RED).
+// Ownership and generations (D10): which instance emits a session, and which setup is current.
 //
-// One codebase serves both opencode targets (Desktop + CLI v2) from the
-// dash-CLI-managed home `dash/src/capture/harnesses/opencode-plugin/`.
-// Every hook is best-effort and never fails the host (CommandCode
-// `statusbar.ts` swallow-and-continue precedent): an emitter throw or a
-// delivery timeout resolves quietly and the session continues.
+// An instance emits a session only when one of its own hooks fired for it, or when the event's
+// `location.directory` equals its own directory. A setup for a directory supersedes the earlier setup
+// for that same directory only; instances for other directories keep emitting.
 
 import { describe, expect, it } from 'vitest'
 
+import { OPENCODE_KEYS, SPAN_NAMES } from './contract.js'
+import { createSetup } from './entry.js'
 import {
-  OPENCODE_CONTEXT_HOOK_KIND,
-  OPENCODE_PLUGIN_CONFIG_KEYS,
-  OPENCODE_PLUGIN_HOOK_KINDS,
-  OPENCODE_PLUGIN_ID,
-  createInstalledOpencodePlugin,
-  createOpencodePlugin,
-  registerOpencodePlugin,
-  resolveOpencodePluginPaths,
-  type OpencodeHookKind,
-  type OpencodePluginHost,
-} from './plugin.js'
+  OWNED_DIRECTORY,
+  attributesOf,
+  bus,
+  createHost,
+  mergeBodies,
+  noSleep,
+  receiver,
+  spansOf,
+  start,
+  stopPlugin,
+  useTempDirectories,
+  consentPathIn,
+  type Receiver,
+} from './testing.js'
 
-// The default sender would POST to the live receiver at 127.0.0.1:4318 (D10); inject a stub.
-const acceptingReceiver = () => Promise.resolve(new Response(null, { status: 200 }))
+const tempDir = useTempDirectories()
+const OTHER_DIRECTORY = '/HOME/scratch/other-project'
 
-const SESSION_ID = 'opencode-session-7f3a'
-const TURN_INDEX = 3
-const SPAN_ID = 'span-00c1'
-
-function sessionHooks(plugin: ReturnType<typeof createOpencodePlugin>) {
-  return plugin.hooks
+function options(rcv: Receiver) {
+  return { fetchFn: rcv.fetch, env: {}, consentPath: consentPathIn(tempDir()), sleepFn: noSleep, randomFn: () => 0 }
 }
 
-describe('Opencode plugin skeleton hook lifecycle', () => {
-  it('registers one hook set on both Desktop and CLIv2 targets from a single source', () => {
-    const plugin = createOpencodePlugin({ now: () => '2026-10-22T00:00:00.000Z' })
+function requestSessionIds(rcv: Receiver): string[] {
+  return spansOf(mergeBodies(rcv.accepted))
+    .filter((span) => span.name === SPAN_NAMES.request)
+    .map((span) => attributesOf(span).get(OPENCODE_KEYS.sessionId))
+    .map((value) => (value as { stringValue: string }).stringValue)
+}
 
-    const desktopRegistered: Record<string, unknown> = {}
-    const desktopHost: OpencodePluginHost = {
-      hooks: (registered: Record<string, unknown>) => {
-        Object.assign(desktopRegistered, registered)
-      },
-    }
-    const cliHost: OpencodePluginHost & {
-      session?: Record<string, unknown>
-      tool?: Record<string, unknown>
-    } = {}
-
-    registerOpencodePlugin(desktopHost, plugin)
-    registerOpencodePlugin(cliHost, plugin)
-
-    // The single source exposes the full lifecycle once ...
-    expect(Object.keys(sessionHooks(plugin)).sort()).toEqual([...OPENCODE_PLUGIN_HOOK_KINDS].sort())
-
-    // ... and both targets observe it: Desktop via hooks(), CLIv2 via namespaced surfaces.
-    for (const kind of OPENCODE_PLUGIN_HOOK_KINDS) {
-      expect(desktopRegistered).toHaveProperty(kind, expect.any(Function))
-    }
-    expect(cliHost.session).toMatchObject(
-      Object.fromEntries(OPENCODE_PLUGIN_HOOK_KINDS.filter((kind) => kind.startsWith('session.') || kind.startsWith('turn.')).map((kind) => [kind, expect.any(Function)])),
-    )
-    expect(cliHost.tool).toMatchObject(
-      Object.fromEntries(OPENCODE_PLUGIN_HOOK_KINDS.filter((kind) => kind.startsWith('span.')).map((kind) => [kind, expect.any(Function)])),
-    )
-
-    // One codebase: both targets share the same function identities.
-    for (const kind of OPENCODE_PLUGIN_HOOK_KINDS) {
-      expect(desktopRegistered[kind]).toBe(sessionHooks(plugin)[kind])
-    }
+describe('an instance emits only the sessions it owns', () => {
+  it('never emits a session whose events name another directory and whose hooks never fired', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await host.deliverEvent(bus.sessionCreated('ses_elsewhere', 1000, OTHER_DIRECTORY))
+    await host.deliverEvent(bus.executionStarted('ses_elsewhere', 1010))
+    await host.deliverEvent(bus.executionSucceeded('ses_elsewhere', 1020))
+    await stopPlugin(cleanup)
+    expect(rcv.attempts).toEqual([])
   })
 
-  it('emits session, turn and span boundaries in lifecycle order', async () => {
-    const emitted: string[] = []
-    const plugin = createOpencodePlugin({
-      emit: (event) => {
-        emitted.push(event.kind)
-      },
-      now: () => '2026-10-22T00:00:00.000Z',
-    })
-    const hooks = sessionHooks(plugin)
-
-    await hooks['session.start']({ sessionId: SESSION_ID })
-    await hooks['turn.start']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX })
-    await hooks['span.start']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX, spanId: SPAN_ID })
-    await hooks['span.end']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX, spanId: SPAN_ID })
-    await hooks['turn.end']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX })
-    await hooks['session.end']({ sessionId: SESSION_ID })
-
-    expect(emitted).toEqual([
-      'session.start',
-      'turn.start',
-      'span.start',
-      'span.end',
-      'turn.end',
-      'session.end',
-    ])
-
-    const last = plugin.events.at(-1)
-    expect(last).toMatchObject({ kind: 'session.end', sessionId: SESSION_ID })
-    expect(plugin.events.map((event) => event.timestamp)).toEqual(
-      plugin.events.map(() => '2026-10-22T00:00:00.000Z'),
-    )
+  it('owns a session created in its own directory even before any of its hooks fires', async () => {
+    const rcv = receiver()
+    const host = createHost({ directory: OWNED_DIRECTORY })
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await host.deliverEvent(bus.sessionCreated('ses_mine', 1000, OWNED_DIRECTORY))
+    await host.deliverEvent(bus.executionStarted('ses_mine', 1010))
+    await host.deliverEvent(bus.executionSucceeded('ses_mine', 1020))
+    await stopPlugin(cleanup)
+    expect(requestSessionIds(rcv)).toEqual(['ses_mine'])
   })
 
-  it('swallows an emitter throw and lets the host session continue', async () => {
-    const emitted: string[] = []
-    const plugin = createOpencodePlugin({
-      emit: (event) => {
-        if (event.kind === 'span.start') throw new Error('receiver down')
-        emitted.push(event.kind)
-      },
-      now: () => '2026-10-22T00:00:00.000Z',
-    })
-    const hooks = sessionHooks(plugin)
-
-    // The failing hook resolves quietly — the host never sees the throw ...
-    await expect(
-      hooks['span.start']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX, spanId: SPAN_ID }),
-    ).resolves.toBeUndefined()
-
-    // ... and the session continues past the failure.
-    await hooks['span.end']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX, spanId: SPAN_ID })
-    await hooks['turn.end']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX })
-
-    expect(emitted).toEqual(['span.end', 'turn.end'])
-    expect(plugin.failures).toHaveLength(1)
-    expect(String(plugin.failures[0]?.error)).toMatch(/receiver down/)
-  })
-
-  it('swallows an emitter timeout and lets the host session continue', async () => {
-    const plugin = createOpencodePlugin({
-      emit: () => new Promise<void>(() => {}),
-      now: () => '2026-10-22T00:00:00.000Z',
-      timeoutMs: 5,
-    })
-    const hooks = sessionHooks(plugin)
-
-    const startedAt = Date.now()
-    await expect(
-      hooks['turn.start']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX }),
-    ).resolves.toBeUndefined()
-    expect(Date.now() - startedAt).toBeLessThan(2000)
-    expect(plugin.failures).toHaveLength(1)
-    expect(plugin.failures[0]).toMatchObject({ kind: 'turn.start' })
-
-    // The timed-out hook still let the host continue: the next boundary is
-    // attempted (and recorded) instead of wedging the session.
-    await expect(
-      hooks['turn.end']({ sessionId: SESSION_ID, turnIndex: TURN_INDEX }),
-    ).resolves.toBeUndefined()
-    expect(plugin.failures).toHaveLength(2)
-    expect(plugin.events.map((event) => event.kind)).toEqual(['turn.start', 'turn.end'])
-  })
-
-  it('tolerates a host with no hook surface and still exposes the hook set', () => {
-    const plugin = createOpencodePlugin({ now: () => '2026-10-22T00:00:00.000Z' })
-
-    const returned = registerOpencodePlugin({}, plugin)
-
-    expect(returned).toBe(plugin)
-    expect(Object.keys(returned.hooks).sort()).toEqual([...OPENCODE_PLUGIN_HOOK_KINDS].sort())
-  })
-
-  it('declares the dash-CLI-managed install targets and config keys', () => {
-    const paths = resolveOpencodePluginPaths('/home/operator')
-
-    expect(paths).toMatchObject({
-      globalPluginDir: '/home/operator/.config/opencode/plugins',
-      projectPluginDir: '.opencode/plugins',
-    })
-    expect(OPENCODE_PLUGIN_ID).toBe('kyberdash-opencode')
-    expect(OPENCODE_PLUGIN_CONFIG_KEYS).toMatchObject({ plugins: expect.any(String) })
-  })
-})
-
-describe('Opencode plugin session.context hook (T2, fixture: fixtures/context-payload.json @opencode/plugin 2.1.4)', () => {
-  it('fires session.context with the pinned payload shape', async () => {
-    const kind: OpencodeHookKind = 'session.context'
-    expect(kind).toBe(OPENCODE_CONTEXT_HOOK_KIND)
-    // Lifecycle kinds unchanged: the context kind rides beside them, not among them.
-    expect(OPENCODE_PLUGIN_HOOK_KINDS).not.toContain('session.context')
-    const plugin = createOpencodePlugin({ now: () => '2026-10-23T00:00:00.000Z' })
-    await plugin.context({
-      sessionId: SESSION_ID,
-      messageId: 'msg-01',
-      turnIndex: TURN_INDEX,
-      systemPrompt: 'system text',
-      toolsText: '[{"name":"read"}]',
-      skills: ['skill-a'],
-      model: 'model-x',
-      agent: 'agent-y',
-    })
-    expect(plugin.events.at(-1)).toMatchObject({
-      kind: 'session.context',
-      sessionId: SESSION_ID,
-      messageId: 'msg-01',
-      systemPrompt: 'system text',
-      toolsText: '[{"name":"read"}]',
-      skills: ['skill-a'],
-      model: 'model-x',
-      agent: 'agent-y',
-    })
-  })
-
-  it('registers session.context on the v2 namespaced and v1 dotted host surfaces', () => {
-    const plugin = createOpencodePlugin({ now: () => '2026-10-23T00:00:00.000Z' })
-    const desktopRegistered: Record<string, unknown> = {}
-    const desktopHost: OpencodePluginHost = {
-      hooks: (registered: Record<string, unknown>) => {
-        Object.assign(desktopRegistered, registered)
-      },
-    }
-    const cliHost: OpencodePluginHost = {}
-    registerOpencodePlugin(desktopHost, plugin)
-    registerOpencodePlugin(cliHost, plugin)
-    expect(desktopRegistered).toHaveProperty('session.context', expect.any(Function))
-    expect(desktopRegistered['session.context']).toBe(plugin.context)
-    expect(cliHost.session).toHaveProperty('context', expect.any(Function))
-    expect(cliHost.session?.['context']).toBe(plugin.context)
-    expect(cliHost.session?.['session.context']).toBe(plugin.context)
-  })
-
-  it('never fails the host when the session.context handler throws or times out', async () => {
-    const throwing = createOpencodePlugin({
-      emit: () => {
-        throw new Error('receiver down')
-      },
-      now: () => '2026-10-23T00:00:00.000Z',
-    })
-    await expect(
-      throwing.context({ sessionId: SESSION_ID, systemPrompt: 's' }),
-    ).resolves.toBeUndefined()
-    expect(throwing.failures).toHaveLength(1)
-
-    const hanging = createOpencodePlugin({
-      emit: () => new Promise<void>(() => {}),
-      now: () => '2026-10-23T00:00:00.000Z',
-      timeoutMs: 5,
-    })
-    await expect(
-      hanging.context({ sessionId: SESSION_ID }),
-    ).resolves.toBeUndefined()
-    expect(hanging.failures).toHaveLength(1)
-  })
-})
-
-describe('Opencode installed pipeline stamper forwards session.context content (T2 missing link)', () => {
-  it('stamps context content onto the mapper payload when present', async () => {
-    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
-    await installed.plugin.context({
-      sessionId: SESSION_ID,
-      turnIndex: TURN_INDEX,
-      systemPrompt: 'system text',
-      toolsText: '[{"name":"read"}]',
-      skills: ['skill-a'],
-      model: 'model-x',
-      agent: 'agent-y',
-    })
-    const span = installed.mappedSpans.at(-1)
-    expect(span?.attributes['opencode.context.system']).toBe('system text')
-    expect(span?.attributes['opencode.context.tools']).toBe('[{"name":"read"}]')
-    expect(span?.attributes['opencode.context.skills']).toBe('["skill-a"]')
-    expect(span?.attributes['opencode.model.id']).toBe('model-x')
-    expect(span?.attributes['opencode.agent']).toBe('agent-y')
-  })
-
-  it('leaves content keys absent when the event names no content (lifecycle stamps byte-unchanged)', async () => {
-    const installed = createInstalledOpencodePlugin({ spool: true, fetchFn: acceptingReceiver })
-    await installed.plugin.context({ sessionId: SESSION_ID })
-    const contextSpan = installed.mappedSpans.at(-1)
-    for (const key of [
-      'opencode.context.system',
-      'opencode.context.tools',
-      'opencode.context.skills',
-      'opencode.model.id',
-      'opencode.agent',
-    ]) {
-      expect(key in (contextSpan?.attributes ?? {})).toBe(false)
-    }
-
-    await installed.plugin.hooks['turn.start']({
-      sessionId: SESSION_ID,
-      turnIndex: TURN_INDEX,
-    })
-    const lifecycleSpan = installed.mappedSpans.at(-1)
-    expect(lifecycleSpan).toMatchObject({
-      traceId: SESSION_ID,
-      name: 'opencode.turn.start',
-    })
-    for (const key of [
-      'opencode.context.system',
-      'opencode.context.tools',
-      'opencode.context.skills',
-      'opencode.model.id',
-      'opencode.agent',
-    ]) {
-      expect(key in (lifecycleSpan?.attributes ?? {})).toBe(false)
-    }
+  it('a setup for another directory does not supersede this instance', async () => {
+    const mine = receiver()
+    const theirs = receiver()
+    const hostMine = createHost({ directory: OWNED_DIRECTORY })
+    const hostTheirs = createHost({ directory: OTHER_DIRECTORY })
+    const cleanupMine = await start(createSetup(options(mine)), hostMine)
+    const cleanupTheirs = await start(createSetup(options(theirs)), hostTheirs)
+    expect(hostMine.closedSubscriptions).toBe(0)
+    await hostMine.deliverEvent(bus.sessionCreated('ses_mine', 1000, OWNED_DIRECTORY))
+    await hostMine.deliverEvent(bus.executionStarted('ses_mine', 1010))
+    await hostMine.deliverEvent(bus.executionSucceeded('ses_mine', 1020))
+    await hostTheirs.deliverEvent(bus.sessionCreated('ses_theirs', 1000, OTHER_DIRECTORY))
+    await hostTheirs.deliverEvent(bus.executionStarted('ses_theirs', 1010))
+    await hostTheirs.deliverEvent(bus.executionSucceeded('ses_theirs', 1020))
+    await stopPlugin(cleanupMine)
+    await stopPlugin(cleanupTheirs)
+    expect(requestSessionIds(mine)).toEqual(['ses_mine'])
+    expect(requestSessionIds(theirs)).toEqual(['ses_theirs'])
   })
 })

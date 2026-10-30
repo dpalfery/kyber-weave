@@ -8,53 +8,23 @@ import { fileURLToPath } from 'node:url'
 import {
   HONEST_EMPTY_HARNESS,
   MEASURED_HARNESS,
-  MEASURED_OPENCODE_EXEC_ID,
-  MEASURED_OPENCODE_MODEL,
-  MEASURED_OPENCODE_RUN_ID,
-  MEASURED_OPENCODE_SESSION_ID,
+  OPENCODE_REPLAY_SESSION_ID,
   USER_CANON,
   ZERO_RECORD_HARNESS,
 } from './harness-collection-world.js'
 
 /**
- * Harness-collection completeness predicate (GREEN: the fixture world ships
- * alongside this spec).
- *
- * RED was captured against the missing `harness-collection-world.ts`; the
- * world and its boot script now exist, so this spec pins the contract they
- * satisfy: a measured harness is claimable as complete, an honest-empty
- * harness shows its session as unmeasurable with a reason, and a zero-record
- * harness stays honest-empty and is never claimable as complete.
+ * Harness-collection completeness predicate.
  *
  * Isolated browser acceptance. Starts its own dashboard against a temp DB from
- * the fixture. Does not use the live 4747 spine host.
+ * the world. Does not use the live 4747 spine host.
  *
- * LIVE-TURN GATE (manual procedure only — DO NOT run, DO NOT touch live state,
- * DO NOT change consent):
- * 1. In the owner's OpenCode, pick a cheap model (e.g. the pinned
- *    `opencode-go/muse-spark-1.3-contributor` or another low-cost model the
- *    owner already consents to) and run exactly one trivial turn (e.g. ask
- *    "say hi" or read one small file, no edits, no network).
- * 2. Run `kyberdash refresh` (or `kyber dash refresh`) for the opencode
- *    harness only, then open the dashboard HarnessDetail for `opencode`,
- *    drill into the newest run/session for that turn.
- * 3. The tiles that must show real numbers (never `—`, never `$0.00` for a
- *    missing rate, never `unknown` for the model):
- *    - Model shown: the turn/session row names the cheap model used above,
- *      not `unknown` and not blank.
- *    - Real token figures: Total Input / Total Output (and the run turns
- *      Tokens cell) carry non-zero measured counters (e.g. thousands in /
- *      tens out, like the `18044 in / 71 out / 113 cache-read` fixture
- *      pattern), not dashes.
- *    - Tool call listed: Tool Calls counts >= 1 and the tool-schema section
- *      lists the invoked tool (e.g. `Bash`/`Read`) with its invocation, not
- *      "invocations not reported".
- *    - Cost basis resolved: the Cost tile / runs-table Cost cell renders a
- *      `$` figure with basis `published` (or `harness` where the harness
- *      reported it), not "no published rate".
- * 4. This spec never runs that turn; it pins the same contract against the
- *    `hc-opencode-measured-*` fixture (temp DB + booted dashboard, no live
- *    host, no real network).
+ * Capture proof comes from one scenario only: the OpenCode 2.2.1 replay. The
+ * world runs it through the production plugin, receiver decode, canonical
+ * ingest and projection before the dashboard starts, so the session the
+ * round-trip case reads was derived, not seeded. The honest-empty `opencode`
+ * row and the measured `claude-code` row are rendering-only seeds and prove
+ * no capture.
  */
 const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
@@ -228,17 +198,14 @@ test('honest-empty harness renders a visible session as unmeasurable with reason
   const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
   expect(runs.status, runs.body).toBe(200)
   expect(runs.body, 'the runs payload must come from the fixture store').toContain('hc-honest-run-1')
-  // The `opencode` harness deliberately carries both the honest-empty session
-  // and the measured one, so this case pins the coexistence: the honest run
-  // stays visible and unmeasurable while a measured sibling exists. Without
-  // this assertion "the old run is present" would still pass if the measured
-  // seed silently replaced it.
-  expect(runs.body, 'the measured sibling must not replace the honest run').toContain(
-    MEASURED_OPENCODE_RUN_ID,
-  )
+  // The `opencode` harness also carries the replayed OpenCode run, so this case
+  // pins the coexistence: the honest run stays visible and unmeasurable beside
+  // its replayed sibling. Two runs must be listed, so a replay that replaced
+  // the honest run (or the reverse) fails here.
+  expect(runs.runs.length, 'the replayed sibling must not replace the honest run').toBeGreaterThanOrEqual(2)
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
   await expect(page.getByTestId(/^drill-run-/).first()).toBeVisible()
-  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
+  await expect(page.getByTestId(/^drill-run-/).nth(1)).toBeVisible()
 
   const unmeasurable = page.getByTestId('dimension-unmeasurable')
   expect(await unmeasurable.count()).toBeGreaterThan(0)
@@ -265,68 +232,33 @@ test('zero-record harness renders honest-empty and is never complete', async ({ 
   await expect(page.getByTestId('dimension-value')).toHaveCount(0)
   await expect(page.getByTestId('page-harness')).not.toContainText(/complete/i)
 })
-test('measured opencode round trip renders model, tokens, tool call and cost', async ({ page }) => {
+test('OpenCode 2.2.1 replay through the production pipeline renders the consent-on session', async ({ page }) => {
   test.setTimeout(120_000)
   const runs = await openHarness(page, HONEST_EMPTY_HARNESS)
   expect(runs.status, runs.body).toBe(200)
-  expect(runs.body, 'the measured opencode run must come from the fixture store').toContain(
-    MEASURED_OPENCODE_RUN_ID,
-  )
-  // The same harness also carries the honest-empty run; a measured seed that
-  // replaced it would silently delete the case the sibling test pins.
-  expect(runs.body, 'the honest-empty sibling must survive the measured seed').toContain(
-    'hc-honest-run-1',
-  )
+  // Both `opencode` runs are listed: the replayed run from the production
+  // pipeline and the honest-empty rendering seed beside it.
+  expect(runs.runs.length, 'the replayed run and the honest-empty sibling must both be listed').toBeGreaterThanOrEqual(2)
   await expect(page.getByTestId('harness-runs-table')).toBeVisible()
-  await expect(page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)).toBeVisible()
-  // Runs-table Cost cell for the measured run resolves the fixture's real
-  // figure. A bare `$` would also pass for `$0.00`, which the spec header
-  // forbids for a missing rate, so the exact rendered value is pinned and the
-  // missing-rate rendering is excluded.
-  const costCell = page.getByTestId(`drill-run-${MEASURED_OPENCODE_RUN_ID}`)
-  await expect(costCell).toContainText('$0.012')
-  await expect(costCell).not.toContainText('$0.00')
 
-  await page.evaluate(
-    (args) => {
-      const stack = [
-        { level: 'context-doctor' },
-        { level: 'harness', harnessId: args.harnessId },
-        { level: 'run', runId: args.runId, harnessId: args.harnessId },
-      ]
-      window.history.pushState({ stack }, '', `/run/${args.runId}`)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    },
-    { harnessId: HONEST_EMPTY_HARNESS, runId: MEASURED_OPENCODE_RUN_ID },
-  )
-  await expect(page.getByTestId('page-run')).toBeVisible()
-  await expect(page.getByTestId('turns-panel')).toBeVisible()
-  await expect(page.getByTestId('turn-row-0')).toBeVisible()
-  // Model identity from the adapter survives projection to the turn row.
-  await expect(page.getByTestId('turn-row-0')).toContainText('muse-spark')
-  // Real token figures: input + output renders as a measured figure.
-  await expect(page.getByTestId('turn-row-0')).toContainText('18.1K')
-
-  // Sessions tab: the same fixture session lists its tool call, token
-  // figures and cost basis through the session dashboard.
+  // Sessions tab: the replayed session, found by its real session id, shows the
+  // consent-on figures the replay derived from runA.
   await page.getByTestId('nav-tab-sessions').click()
   await expect(page.getByTestId('page-sessions')).toBeVisible()
-  await expect(page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`)).toBeVisible()
-  await page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`).click()
-  await expect(page.getByTestId('metric-tool-calls')).toBeVisible()
-  await expect(page.getByTestId('metric-tool-calls')).toContainText('1')
-  await expect(page.getByTestId('tool-schema-section')).toContainText('Bash')
-  await expect(page.getByTestId('metric-cost')).toContainText('$')
-  await expect(page.getByTestId('metric-cost')).toContainText(/published|reported/i)
-  // Token figures are real measured counters (18.0K in / 71 out pattern).
-  await expect(page.getByTestId('page-sessions')).toContainText('18.0K')
-  await expect(page.getByTestId('page-sessions')).toContainText(/\b71\b/)
-  // Session identity survives alongside the measured figures (label + model
-  // where the dashboard renders it: the run turn row already pinned the model
-  // above, here the session row pins the measured session).
-  await expect(page.getByTestId(`agent-session-row-${MEASURED_OPENCODE_SESSION_ID}`)).toContainText(
-    'harness-collection measured opencode session',
-  )
-  void MEASURED_OPENCODE_EXEC_ID
-  void MEASURED_OPENCODE_MODEL
+  const row = page.getByTestId(`agent-session-row-${OPENCODE_REPLAY_SESSION_ID}`)
+  await expect(row).toBeVisible()
+  // Soft, so a missing label does not hide the figure checks below from the same run.
+  await expect.soft(row).toContainText('kw-probe runA shared-service')
+  await row.click()
+
+  // The figure checks are soft: one run reports every mismatch, not only the first.
+  // Two tool calls: the skill load and the read.
+  await expect.soft(page.getByTestId('metric-tool-calls')).toContainText('2')
+  // Cost: priced at zero on the harness basis. A zero the harness reported is a
+  // real figure; a missing rate would read "no published rate" instead.
+  await expect.soft(page.getByTestId('metric-cost')).toContainText('$0')
+  await expect.soft(page.getByTestId('metric-cost')).toContainText(/harness|reported/i)
+  // Token figures: 40108 input (40.1K) and 1529 output (1.5K, or the raw count).
+  await expect.soft(page.getByTestId('page-sessions')).toContainText('40.1K')
+  await expect.soft(page.getByTestId('page-sessions')).toContainText(/1\.5K|1,?529/)
 })

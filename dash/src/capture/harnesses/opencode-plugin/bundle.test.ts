@@ -91,15 +91,30 @@ describe('bundled plugin loaded from a data URL', () => {
     expect(shape).toEqual({ exports: ['default'], keys: ['id', 'setup'], id: 'kyberdash-opencode', setupType: 'function' })
   })
 
-  it('setup registers exactly one context hook on a fake context and starts no fetch', () => {
-    const result = probeInNode(
-      OPENCODE_PLUGIN_SOURCE,
-      `let fetches = 0
-      globalThis.fetch = () => { fetches += 1; return Promise.reject(new Error('no network in the load test')) }
-      const hooks = []
-      await ns.default.setup({ session: { hook: (name, callback) => { hooks.push({ name, callbackType: typeof callback }); return Promise.resolve() } } })
-      console.log(JSON.stringify({ hooks, fetches }))`,
-    )
-    expect(result).toEqual({ hooks: [{ name: 'context', callbackType: 'function' }], fetches: 0 })
+  it('setup registers the V2 session and tool hooks, subscribes to events, returns a cleanup, and starts no fetch', () => {
+    // The probe ends through stdout's write callback, so the output is flushed before the process exits.
+    const probe = [
+      'let fetches = 0',
+      'globalThis.fetch = () => { fetches += 1; return Promise.reject(new Error("no network in the load test")) }',
+      'const session = []',
+      'const tool = []',
+      'let subscriptions = 0',
+      'const ctx = {',
+      "  location: { directory: '/HOME/scratch/oc-probe' },",
+      '  session: { hook: (name) => { session.push(name); return Promise.resolve({}) } },',
+      '  tool: { hook: (name) => { tool.push(name); return Promise.resolve({}) } },',
+      '  event: { subscribe: () => { subscriptions += 1; return { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}), return: () => Promise.resolve({ done: true, value: undefined }) }) } } },',
+      '}',
+      'const cleanup = await ns.default.setup(ctx)',
+      'process.stdout.write(JSON.stringify({ session: session.sort(), tool: tool.sort(), subscriptions, fetches, cleanup: typeof cleanup }) + "\\n", () => process.exit(0))',
+    ].join('\n')
+    const result = probeInNode(OPENCODE_PLUGIN_SOURCE, probe)
+    expect(result).toEqual({
+      session: ['context', 'model.request', 'prompt'],
+      tool: ['execute.after', 'execute.before'],
+      subscriptions: 1,
+      fetches: 0,
+      cleanup: 'function',
+    })
   })
 })

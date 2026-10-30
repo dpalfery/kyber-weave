@@ -156,4 +156,24 @@ describe('cleanDatabase scope resolution (canonicalScope)', () => {
       store.close()
     }
   })
+
+  it('still resolves a clean scoped to opencode: the id is known, so only that harness is wiped and re-ingested', async () => {
+    const store = temporaryStore()
+    try {
+      const ports = fakePorts()
+      const wipeAll = vi.spyOn(store, 'wipeAll')
+      const wipeHarnesses = vi.spyOn(store, 'wipeHarnesses')
+
+      // OpenCode keeps its harness id for scope resolution after its import is removed,
+      // so `dash clean --harness opencode` must not be rejected as an unknown scope.
+      const report = await cleanDatabase(store, { harnesses: ['opencode'], reingestWeeks: 2 }, ports)
+
+      expect(wipeAll).not.toHaveBeenCalled()
+      expect(wipeHarnesses).toHaveBeenCalledWith(['opencode'])
+      expect(report.harnesses).toEqual(['opencode'])
+      expect(ports.reingest).toHaveBeenCalledWith({ harnesses: ['opencode'], historyWeeks: 2 })
+    } finally {
+      store.close()
+    }
+  })
 })

@@ -14,14 +14,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readJsonKeys } from '../edit-json.js'
 import { runCapture } from '../index.js'
 import { runCaptureAction } from '../actions.js'
+import {
+  receiptPathForHome,
+  saveCaptureReceipt,
+  sha256Hex,
+  loadCaptureReceipt,
+  type ReceiptPrior,
+} from '../receipt.js'
+import { readContentConsent, resolveConsentPath } from './opencode-plugin/consent.js'
 import { opencodeHarness, OPENCODE_PLUGIN_CONFIG_KEYS, OPENCODE_PLUGIN_ID } from './opencode.js'
 
 const temporaryHomes: string[] = []
 
-/** Managed config key (P2.4a). */
+/**
+ * The key older KyberDash builds wrote into opencode.jsonc. Enable no longer writes it. Enable and
+ * disable only put back the value a capture receipt recorded for it.
+ */
 const OPENCODE_OTEL_FLAG_KEY = 'experimental.openTelemetry'
 
-/** Process env reported on status only; never written into opencode.jsonc (P2.4a). */
+/** The OTLP endpoint variable. Status no longer reports it: OpenCode does not read it from opencode.jsonc. */
 const STATUS_ENV_KEY = 'OTEL_EXPORTER_OTLP_ENDPOINT' as const
 
 const KYBERDASH_LISTENER = async (): Promise<{ status: number; body: string }> => ({
@@ -44,6 +55,10 @@ function opencodeConfigPath(home: string): string {
   return join(home, '.config', 'opencode', 'opencode.jsonc')
 }
 
+function pluginFilePath(home: string): string {
+  return join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js')
+}
+
 function writeOpencodeJsonc(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, content)
@@ -53,10 +68,45 @@ function readOtelFlag(content: string) {
   return readJsonKeys(content, [OPENCODE_OTEL_FLAG_KEY])[OPENCODE_OTEL_FLAG_KEY]
 }
 
+/** Receipt keys KyberDash still holds for opencode.jsonc. */
+function opencodeReceiptKeys(home: string): string[] {
+  const receipt = loadCaptureReceipt(home)
+  return (receipt?.files ?? [])
+    .filter((file) => file.harnessId === 'opencode')
+    .flatMap((file) => Object.keys(file.keys))
+}
+
+/**
+ * Records the flag the way an older KyberDash did: it wrote `true` over `before`, and the receipt
+ * keeps the `prior` value so a later enable or disable can put it back.
+ */
+function recordLegacyFlag(
+  home: string,
+  path: string,
+  before: string,
+  written: string,
+  prior: ReceiptPrior,
+): void {
+  saveCaptureReceipt(home, {
+    version: 1,
+    files: [
+      {
+        path,
+        format: 'jsonc',
+        harnessId: 'opencode',
+        keys: { [OPENCODE_OTEL_FLAG_KEY]: { written: true, prior } },
+        preSha256: sha256Hex(before),
+        postSha256: sha256Hex(written),
+      },
+    ],
+  })
+}
+
+/** The owner's file: a comment, the flag set to `false` by hand, nothing KyberDash wrote. */
 function seedOpencodeJsonc(home: string): { path: string; initial: string } {
   const path = opencodeConfigPath(home)
   const initial = `{
-  // opencode capture fixture (P2.4a)
+  // opencode capture fixture
   "theme": "dark",
   "experimental": {
     "openTelemetry": false
@@ -67,9 +117,9 @@ function seedOpencodeJsonc(home: string): { path: string; initial: string } {
   return { path, initial }
 }
 
-describe('opencode capture writer (P2.4a)', () => {
+describe('opencode capture writer: plugin-only', () => {
   it.skipIf(process.platform === 'win32')(
-    'enable sets experimental.openTelemetry true in JSONC with comments preserved; disable restores false',
+    'enable writes no opencode.jsonc key and leaves the owner file byte-identical',
     async () => {
       const home = makeHome()
       const { path, initial } = seedOpencodeJsonc(home)
@@ -79,38 +129,186 @@ describe('opencode capture writer (P2.4a)', () => {
         harnessIds: ['opencode'],
         fetchHealth: KYBERDASH_LISTENER,
       })
+
       expect(enabled.exitCode).toBe(0)
-      expect(enabled.stdout).not.toMatch(/not yet supported/i)
+      expect(readFileSync(path, 'utf8')).toBe(initial)
+      expect(opencodeReceiptKeys(home)).toEqual([])
+    },
+  )
 
-      const afterEnable = readFileSync(path, 'utf8')
-      expect(afterEnable).toContain('// opencode capture fixture (P2.4a)')
-      expect(afterEnable).not.toBe(initial)
-      const flagEnabled = readOtelFlag(afterEnable)
-      expect(flagEnabled.present).toBe(true)
-      expect(flagEnabled.value).toBe(true)
-      expect(typeof flagEnabled.value).toBe('boolean')
+  it.skipIf(process.platform === 'win32')(
+    'enable installs the capture plugin and turns content consent on',
+    async () => {
+      const home = makeHome()
+      seedOpencodeJsonc(home)
 
-      const receiptPath = join(home, '.kyberdash', 'capture-receipt.json')
-      expect(existsSync(receiptPath)).toBe(true)
+      const enabled = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(enabled.exitCode).toBe(0)
+      expect(existsSync(pluginFilePath(home))).toBe(true)
+      expect(readContentConsent(resolveConsentPath(home))).toBe(true)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'enable puts back the flag value a receipt recorded, keeps the owner comment, and drops the receipt entry',
+    async () => {
+      const home = makeHome()
+      const path = opencodeConfigPath(home)
+      const before = '{\n  // owner comment\n  "experimental": {\n    "openTelemetry": false\n  }\n}\n'
+      const written = '{\n  // owner comment\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n'
+      writeOpencodeJsonc(path, written)
+      recordLegacyFlag(home, path, before, written, { present: true, value: false })
+
+      const enabled = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(enabled.exitCode).toBe(0)
+      const restored = readFileSync(path, 'utf8')
+      expect(readOtelFlag(restored)).toMatchObject({ present: true, value: false })
+      expect(restored).toContain('// owner comment')
+      expect(opencodeReceiptKeys(home)).not.toContain(OPENCODE_OTEL_FLAG_KEY)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'enable removes the flag when the receipt says KyberDash added it over an absent key',
+    async () => {
+      const home = makeHome()
+      const path = opencodeConfigPath(home)
+      const before = '{\n  "theme": "dark"\n}\n'
+      const written = '{\n  "theme": "dark",\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n'
+      writeOpencodeJsonc(path, written)
+      recordLegacyFlag(home, path, before, written, { present: false })
+
+      const enabled = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(enabled.exitCode).toBe(0)
+      expect(readOtelFlag(readFileSync(path, 'utf8')).present).toBe(false)
+      expect(opencodeReceiptKeys(home)).not.toContain(OPENCODE_OTEL_FLAG_KEY)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'enable keeps a flag the owner changed after KyberDash wrote it, with a warning',
+    async () => {
+      const home = makeHome()
+      const path = opencodeConfigPath(home)
+      const before = '{\n  "theme": "dark"\n}\n'
+      const written = '{\n  "theme": "dark",\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n'
+      const owner = '{\n  "theme": "dark",\n  "experimental": {\n    "openTelemetry": false\n  }\n}\n'
+      writeOpencodeJsonc(path, owner)
+      recordLegacyFlag(home, path, before, written, { present: false })
+
+      const enabled = await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(readOtelFlag(readFileSync(path, 'utf8'))).toMatchObject({ present: true, value: false })
+      const output = `${enabled.stdout}\n${enabled.stderr}`
+      expect(output).toMatch(/warning/i)
+      expect(output).toContain(OPENCODE_OTEL_FLAG_KEY)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'disable puts back the receipted flag value, keeps the owner comment, and drops the receipt entry',
+    async () => {
+      const home = makeHome()
+      const path = opencodeConfigPath(home)
+      const before = '{\n  // owner comment\n  "experimental": {\n    "openTelemetry": false\n  }\n}\n'
+      const written = '{\n  // owner comment\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n'
+      writeOpencodeJsonc(path, written)
+      recordLegacyFlag(home, path, before, written, { present: true, value: false })
 
       const disabled = await runCapture('disable', {
         homeDir: home,
         harnessIds: ['opencode'],
         fetchHealth: KYBERDASH_LISTENER,
       })
+
       expect(disabled.exitCode).toBe(0)
-      expect(readFileSync(path, 'utf8')).toBe(initial)
-      expect(readOtelFlag(readFileSync(path, 'utf8')).value).toBe(false)
+      const restored = readFileSync(path, 'utf8')
+      expect(readOtelFlag(restored)).toMatchObject({ present: true, value: false })
+      expect(restored).toContain('// owner comment')
+      expect(opencodeReceiptKeys(home)).not.toContain(OPENCODE_OTEL_FLAG_KEY)
     },
   )
 
   it.skipIf(process.platform === 'win32')(
-    'status reports OTEL_EXPORTER_OTLP_ENDPOINT from the capture process env and notes upstream #13438 and non-model span volume',
+    'disable keeps a flag the owner changed after KyberDash wrote it, with a warning',
+    async () => {
+      const home = makeHome()
+      const path = opencodeConfigPath(home)
+      const before = '{\n  "theme": "dark"\n}\n'
+      const written = '{\n  "theme": "dark",\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n'
+      const owner = '{\n  "theme": "dark",\n  "experimental": {\n    "openTelemetry": false\n  }\n}\n'
+      writeOpencodeJsonc(path, owner)
+      recordLegacyFlag(home, path, before, written, { present: false })
+
+      const disabled = await runCapture('disable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(readOtelFlag(readFileSync(path, 'utf8'))).toMatchObject({ present: true, value: false })
+      const output = `${disabled.stdout}\n${disabled.stderr}`
+      expect(output).toMatch(/warning/i)
+      expect(output).toContain(OPENCODE_OTEL_FLAG_KEY)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'disable removes the capture plugin and turns content consent off, leaving opencode.jsonc alone',
+    async () => {
+      const home = makeHome()
+      const { path, initial } = seedOpencodeJsonc(home)
+      await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+      expect(existsSync(pluginFilePath(home))).toBe(true)
+
+      const disabled = await runCapture('disable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      expect(disabled.exitCode).toBe(0)
+      expect(existsSync(pluginFilePath(home))).toBe(false)
+      expect(readContentConsent(resolveConsentPath(home))).toBe(false)
+      expect(readFileSync(path, 'utf8')).toBe(initial)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'status reports plugin state, content consent and receiver liveness, with no OTLP env snippet',
     async () => {
       vi.stubEnv(STATUS_ENV_KEY, 'http://192.0.2.17:4318')
 
       const home = makeHome()
       seedOpencodeJsonc(home)
+      await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
 
       const result = await runCapture('status', {
         homeDir: home,
@@ -120,81 +318,22 @@ describe('opencode capture writer (P2.4a)', () => {
 
       expect(result.exitCode).toBe(0)
       const combined = `${result.stdout}\n${result.stderr}`
-      expect(combined).not.toMatch(/not yet supported/i)
-      expect(combined).toContain(STATUS_ENV_KEY)
-      expect(combined).toContain('http://192.0.2.17:4318')
-      expect(combined).toMatch(/13438/)
-      expect(combined.toLowerCase()).toMatch(/non-model/)
+      expect(combined).toContain('plugin: installed')
+      expect(combined).toContain('content consent: on')
+      expect(combined).toMatch(/^receiver: /m)
+      expect(combined).not.toContain(STATUS_ENV_KEY)
+      expect(combined).not.toContain('KYBERDASH_OPENCODE_CONTEXT')
+      expect(combined).not.toContain('http://192.0.2.17:4318')
+      expect(combined).not.toContain('13438')
+      expect(combined.toLowerCase()).not.toContain('process environment')
     },
   )
 
   it.skipIf(process.platform === 'win32')(
-    'enable writes only experimental.openTelemetry in opencode.jsonc (never process env keys)',
+    'dry-run previews only the plugin install and writes nothing',
     async () => {
-      vi.stubEnv(STATUS_ENV_KEY, 'http://192.0.2.17:4318')
-
       const home = makeHome()
       const { path, initial } = seedOpencodeJsonc(home)
-
-      const enabled = await runCapture('enable', {
-        homeDir: home,
-        harnessIds: ['opencode'],
-        fetchHealth: KYBERDASH_LISTENER,
-      })
-      expect(enabled.exitCode).toBe(0)
-      expect(enabled.stdout).not.toMatch(/not yet supported/i)
-
-      const written = readFileSync(path, 'utf8')
-      expect(readOtelFlag(written).value).toBe(true)
-      const envInConfig = readJsonKeys(written, [
-        STATUS_ENV_KEY,
-        `env.${STATUS_ENV_KEY}`,
-        'OTEL_TRACES_EXPORTER',
-        'OTEL_EXPORTER_OTLP_PROTOCOL',
-      ])
-      for (const entry of Object.values(envInConfig)) {
-        expect(entry.present).toBe(false)
-      }
-      expect(written).not.toContain('http://192.0.2.17:4318')
-      expect(existsSync(join(home, '.profile'))).toBe(false)
-      expect(existsSync(join(home, '.bashrc'))).toBe(false)
-      expect(readFileSync(path, 'utf8')).not.toBe(initial)
-    },
-  )
-
-  it('registers opencode against ~/.config/opencode/opencode.jsonc (T8 layout)', () => {
-    expect(opencodeHarness.id).toBe('opencode')
-    expect(opencodeHarness.displayName).toBe('OpenCode')
-    expect(opencodeHarness.kind).toBe('managed')
-    expect(opencodeHarness.format).toBe('jsonc')
-    expect(opencodeHarness.resolvePath('/tmp/synthetic-home')).toBe(
-      join('/tmp/synthetic-home', '.config', 'opencode', 'opencode.jsonc'),
-    )
-  })
-})
-
-describe('opencode capture ownership (T6)', () => {
-  it('declares the plugin capture keys as declare-only: the OTel flag is the only written key', () => {
-    // The plugin registration (`plugins`) is declared on the writer module so
-    // capture owns the contract, but it is never written: local file discovery
-    // installs the plugin by file. The OTLP endpoint stays process-env-only
-    // for the same reason — OpenCode never reads it from opencode.jsonc.
-    for (const endpoint of ['http://127.0.0.1:4318', 'https://receiver.example:4318']) {
-      expect(opencodeHarness.desiredKeys(endpoint)).toEqual({ [OPENCODE_OTEL_FLAG_KEY]: true })
-    }
-    expect(OPENCODE_PLUGIN_ID).toBe('kyberdash-opencode')
-    expect(OPENCODE_PLUGIN_CONFIG_KEYS).toEqual({ plugins: 'plugins' })
-    expect(opencodeHarness.desiredKeys('http://127.0.0.1:4318')).not.toHaveProperty('plugins')
-    expect(opencodeHarness.desiredKeys('http://127.0.0.1:4318')).not.toHaveProperty(STATUS_ENV_KEY)
-    expect(opencodeHarness.ensureIfAbsentKeys).toBeUndefined()
-    expect(opencodeHarness.configFiles).toBeUndefined()
-  })
-
-  it.skipIf(process.platform === 'win32')(
-    'dry-run previews the exact flag change and writes nothing (CLI side)',
-    async () => {
-      const home = makeHome()
-      const { path } = seedOpencodeJsonc(home)
 
       const result = await runCapture('enable', {
         homeDir: home,
@@ -204,20 +343,17 @@ describe('opencode capture ownership (T6)', () => {
       })
 
       expect(result.exitCode).toBe(0)
-      // The config file, then the plugin file the strict install would write (T4).
-      expect(result.events).toHaveLength(2)
-      expect(result.events[1]).toMatchObject({ kind: 'would-write', harness: 'opencode', fileId: 'plugin' })
+      expect(result.events).toHaveLength(1)
       expect(result.events[0]).toMatchObject({
         kind: 'would-write',
         harness: 'opencode',
-        fileId: 'opencode-config',
-        path,
+        fileId: 'plugin',
+        path: pluginFilePath(home),
       })
-      expect(result.events[0]?.changes).toEqual([
-        { key: OPENCODE_OTEL_FLAG_KEY, before: false, after: true },
-      ])
-      expect(readFileSync(path, 'utf8')).toContain('"openTelemetry": false')
-      expect(existsSync(join(home, '.kyberdash', 'capture-receipt.json'))).toBe(false)
+      expect(readFileSync(path, 'utf8')).toBe(initial)
+      expect(existsSync(pluginFilePath(home))).toBe(false)
+      expect(readContentConsent(resolveConsentPath(home))).toBe(false)
+      expect(existsSync(receiptPathForHome(home))).toBe(false)
     },
   )
 
@@ -248,51 +384,18 @@ describe('opencode capture ownership (T6)', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
-    'a drifted flag refuses the disable without writes (409-class refusal)',
-    async () => {
-      const home = makeHome()
-      const { path } = seedOpencodeJsonc(home)
-
-      const enabled = await runCaptureAction({
-        action: 'enable',
-        harnessId: 'opencode',
-        dryRun: false,
-        homeDir: home,
-        fetchHealth: KYBERDASH_LISTENER,
-      })
-      expect(enabled.outcome).toBe('wrote')
-
-      writeOpencodeJsonc(path, readFileSync(path, 'utf8').replace('"openTelemetry": true', '"openTelemetry": false'))
-      const drifted = readFileSync(path, 'utf8')
-
-      const refused = await runCaptureAction({
-        action: 'disable',
-        harnessId: 'opencode',
-        dryRun: false,
-        homeDir: home,
-        fetchHealth: KYBERDASH_LISTENER,
-      })
-      expect(refused.outcome).toBe('refused')
-      expect(refused.reason).toBe('drift')
-      expect(readFileSync(path, 'utf8')).toBe(drifted)
-    },
-  )
-
-  it.skipIf(process.platform === 'win32')(
-    'an unparseable opencode.jsonc refuses the enable without writes',
+    'enable leaves an unparseable opencode.jsonc byte-identical',
     async () => {
       const home = makeHome()
       const configPath = opencodeConfigPath(home)
       writeOpencodeJsonc(configPath, '{ this is not jsonc\n')
 
-      const result = await runCapture('enable', {
+      await runCapture('enable', {
         homeDir: home,
         harnessIds: ['opencode'],
         fetchHealth: KYBERDASH_LISTENER,
       })
 
-      expect(result.exitCode).toBe(1)
-      expect(result.events.some((event) => event.kind === 'refused')).toBe(true)
       expect(readFileSync(configPath, 'utf8')).toBe('{ this is not jsonc\n')
     },
   )
@@ -311,5 +414,37 @@ describe('opencode capture ownership (T6)', () => {
     })
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain(`${home}\\.config\\opencode\\opencode.jsonc`)
+  })
+})
+
+describe('opencode capture: plugin-only ownership', () => {
+  it('keeps the plugin id and the plugins config key declared, not written', () => {
+    expect(OPENCODE_PLUGIN_ID).toBe('kyberdash-opencode')
+    expect(OPENCODE_PLUGIN_CONFIG_KEYS).toEqual({ plugins: 'plugins' })
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'enable never registers the plugin in opencode.jsonc',
+    async () => {
+      const home = makeHome()
+      const { path } = seedOpencodeJsonc(home)
+
+      await runCapture('enable', {
+        homeDir: home,
+        harnessIds: ['opencode'],
+        fetchHealth: KYBERDASH_LISTENER,
+      })
+
+      const written = readFileSync(path, 'utf8')
+      expect(readJsonKeys(written, [OPENCODE_PLUGIN_CONFIG_KEYS.plugins])[OPENCODE_PLUGIN_CONFIG_KEYS.plugins]!.present).toBe(false)
+    },
+  )
+
+  it('registers opencode against ~/.config/opencode/opencode.jsonc, the migration target', () => {
+    expect(opencodeHarness.id).toBe('opencode')
+    expect(opencodeHarness.displayName).toBe('OpenCode')
+    expect(opencodeHarness.resolvePath('/tmp/synthetic-home')).toBe(
+      join('/tmp/synthetic-home', '.config', 'opencode', 'opencode.jsonc'),
+    )
   })
 })

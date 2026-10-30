@@ -1,6 +1,6 @@
 // T2 (R1): the pure `<available_skills>` parser shared by the plugin (T2)
-// and the adapter (T7). Shape pinned in fixtures/plugin-module-1x.json
-// (`skills_listing_g2`): one `<skill>` per skill with `<id>`, `<name>`,
+// and the adapter (T7). Shape pinned in the V2 fixtures
+// (fixtures/v2/runA.context.json): one `<skill>` per skill with `<id>`, `<name>`,
 // `<description>`; a mid-session change re-emits the block after a
 // "The available skills have changed" message.
 

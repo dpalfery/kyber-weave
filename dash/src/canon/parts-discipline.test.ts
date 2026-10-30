@@ -301,7 +301,7 @@ describe("the projection's parts discipline", () => {
     await projectCanonicalStore(store)
 
     const digest = createHash('sha256').update(derivedSnapshot(store)).digest('hex')
-    // The digest of the derived tables for this corpus, re-pinned after two
+    // The digest of the derived tables for this corpus, re-pinned after three
     // intended changes on this branch; every other leaf matches the earlier
     // output:
     //   1. T8 (bdec1c4): the session payload gains
@@ -314,8 +314,15 @@ describe("the projection's parts discipline", () => {
     //      delegation_overhead, tool_yield) now read "OpenCode exports no
     //      session telemetry unless the KyberDash capture plugin has recorded
     //      sessions; none carrying this counter were observed."
+    //   3. OpenCode V2 capture (plan 2026-10-30, D3/D16, ruling D26): two leaves move.
+    //      `$.sessions.0.payload.summary.duration_ms` 88 -> 84: the corpus nests
+    //      `parts-session-tool-0` (4 ms) under `parts-session-turn-0`, so the session
+    //      duration is the sum of its request roots (7 x 12 ms) and the child tool is
+    //      no longer counted twice (§3.3 rule 2). `$.sessions.0.payload.requests[i].prompt`
+    //      is new and additive: the first 200 characters of the root's
+    //      conversation_history text, or null when it has none (§3.3 rule 4).
     expect(digest).toBe(
-      'bad2d184270cad22329e1c43216dbb5c87a6c447b45696f57a6c194dd3cfb753',
+      'c56b557ec04dad2afc84a541b2587739d0b53195663a67e1b6ede6aeb83eda96',
     )
   })
 

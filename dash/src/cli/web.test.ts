@@ -465,7 +465,10 @@ describe('the capture route behind the web server', () => {
       dryRun: false,
       outcome: 'wrote',
     })
-    expect(readFileSync(h.opencodeConfig, 'utf8')).toContain('"openTelemetry": true')
+    // The plugin-only writer leaves opencode.jsonc as the owner wrote it and installs the plugin file.
+    expect(readFileSync(h.opencodeConfig, 'utf8')).toBe('{\n  // synthetic opencode fixture (comments survive enable)\n}\n')
+    const { existsSync } = await import('node:fs')
+    expect(existsSync(join(h.captureHome, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js'))).toBe(true)
     // The enable turned the shared receiver-hosted setting on through the web server's store.
     expect(readSetting(h.store, SETTING_KEYS.receiverHosted)).toBe('on')
   })
