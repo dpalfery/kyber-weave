@@ -165,15 +165,20 @@ public class ReviewConfigTests
         ReviewPolicy policy = Load(
             "review:\n  policy:\n    strictness: strict\n    major-count-blocks: 2\n").Policy;
 
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
         Assert.Equal(2, policy.MajorCountBlocks);
         Assert.Equal(5, policy.MinConfidence);
     }
 
     [Fact]
-    public void ThePaddedStrictnessValueIsAccepted() =>
-        Assert.Equal(
-            ReviewStrictness.Strict,
-            Load("review:\n  policy:\n    strictness: \" strict \"\n").Policy.Strictness);
+    public void ThePaddedStrictnessValueIsAcceptedAndAppliesItsPreset()
+    {
+        ReviewPolicy policy = Load("review:\n  policy:\n    strictness: \" strict \"\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(5, policy.MinConfidence);
+        Assert.Equal(1, policy.MajorCountBlocks);
+    }
 
     [Fact]
     public void TheBalancedPresetMatchesTheProductDefaults()

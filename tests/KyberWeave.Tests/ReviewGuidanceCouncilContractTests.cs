@@ -283,7 +283,7 @@ public sealed class ReviewGuidanceCouncilContractTests
         Assert.True(
             Regex.IsMatch(
                 skill,
-                @"Pass the strictness and the effective\s+`min-confidence` to \*\*every seat\*\*",
+                @"Pass\s+the\s+strictness\s+and\s+the\s+effective\s+`min-confidence`\s+to\s+\*\*every\s+seat\*\*",
                 RegexOptions.CultureInvariant),
             "The code-review skill must tell the reviewer to pass the strictness and effective floor to every seat.");
 
