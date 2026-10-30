@@ -37,8 +37,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     private static string DefaultText =>
         File.ReadAllText(Path.Combine(ProductRoot, "response-guidance.default.md"), Encoding.UTF8);
 
-    private static string OperatorHomeGuidancePath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kyber-weave", "response-guidance.md");
+    private const string OperatorText = "operator pack-isolation sentinel: must never reach an archive";
 
     /// <summary>
     /// Guards the packed conductor carrier: a shipped APM archive must carry the default text inside its
@@ -124,38 +123,50 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Pack_DoesNotReadOrWriteTheOperatorHomeGuidance()
     {
-        string homePath = OperatorHomeGuidancePath;
-        bool existedBefore = File.Exists(homePath);
-        byte[] homeBytesBefore = existedBefore ? File.ReadAllBytes(homePath) : [];
-        DateTime homeWriteBefore = existedBefore ? File.GetLastWriteTimeUtc(homePath) : DateTime.MinValue;
+        // The operator's home is a temp directory holding a non-default guidance, so the leak check always
+        // has input. The packer takes no home parameter, so the override goes through the home variables
+        // that the platform resolves the user profile from, and is restored on exit.
+        string home = Path.Combine(_temp.Path, "home");
+        string homePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(homePath)!);
+        File.WriteAllText(homePath, OperatorText, Encoding.UTF8);
 
-        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
-        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
-
-        Assert.Equal(existedBefore, File.Exists(homePath));
-        if (existedBefore)
+        string? previousHome = Environment.GetEnvironmentVariable("HOME");
+        string? previousProfile = Environment.GetEnvironmentVariable("USERPROFILE");
+        Environment.SetEnvironmentVariable("HOME", home);
+        Environment.SetEnvironmentVariable("USERPROFILE", home);
+        try
         {
+            byte[] homeBytesBefore = File.ReadAllBytes(homePath);
+            DateTime homeWriteBefore = File.GetLastWriteTimeUtc(homePath);
+
+            string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
+            string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
+
+            Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
             Assert.True(
                 homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
                 $"Packing changed the operator home guidance at '{homePath}'.");
             Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
 
-            string homeText = File.ReadAllText(homePath, Encoding.UTF8);
-            if (!string.IsNullOrWhiteSpace(homeText) && !string.Equals(homeText, DefaultText, StringComparison.Ordinal))
+            foreach (string archivePath in new[] { apmPath, pluginsPath })
             {
-                foreach (string archivePath in new[] { apmPath, pluginsPath })
+                using ZipArchive archive = ZipFile.OpenRead(archivePath);
+                foreach (ZipArchiveEntry entry in archive.Entries)
                 {
-                    using ZipArchive archive = ZipFile.OpenRead(archivePath);
-                    foreach (ZipArchiveEntry entry in archive.Entries)
-                    {
-                        Assert.False(
-                            ReadEntryText(entry).Contains(homeText, StringComparison.Ordinal),
-                            $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
-                    }
+                    Assert.False(
+                        ReadEntryText(entry).Contains(OperatorText, StringComparison.Ordinal),
+                        $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
                 }
             }
         }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HOME", previousHome);
+            Environment.SetEnvironmentVariable("USERPROFILE", previousProfile);
+        }
     }
+
 
     private static void AssertCarrierShipsDefault(ZipArchive archive, string entryName)
     {

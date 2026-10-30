@@ -15,7 +15,7 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed partial class SquadResponsePreferencesPerTargetTests
 {
-    private const string DistinctiveText = "operator response-preferences: keep the plan in lockstep with the current request";
+    private const string DistinctiveText = "sentinel-operator-preferences 7f3a: differs from the canonical placeholder";
 
     public static TheoryData<SquadTarget, string, string[]> EntryFilesByTarget =>
         new()
@@ -145,7 +145,15 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
         HashSet<string> identitySet = expectedEntryFiles.ToHashSet(StringComparer.Ordinal);
         HashSet<string> targetUnionSet = GetTargetUnionSet(target);
 
-        AssertEntryFilesForMarker(target, baseline, targetUnionSet, identitySet, DistinctiveText, agentName);
+        // The raw render carries the canonical placeholder, never the sentinel, so the sentinel check can
+        // only pass once the injection has actually run.
+        foreach (SquadDeploymentFile file in baseline.Files)
+        {
+            Assert.DoesNotContain(DistinctiveText, Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+        }
+
+        SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(baseline, DistinctiveText);
+        AssertEntryFilesForMarker(target, injected, targetUnionSet, identitySet, DistinctiveText, agentName);
 
         string secondMarker = $"distinct marker for {target}/{agentName} v2";
         SquadRenderResult rerendered = SquadResponsePreferencesInjector.Inject(baseline, secondMarker);

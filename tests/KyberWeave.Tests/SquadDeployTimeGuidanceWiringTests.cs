@@ -121,6 +121,37 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateWithAnUnreadableDeployedEntryDegradesToAWarningAndSucceeds()
+    {
+        using Harness h = NewHarness("unreadable-deployed-entry");
+        string anchor = h.MakeDirectory("anchor");
+        WriteHomeGuidance(h, "Version 1 guidance.");
+
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex],
+            Version: "1.2.3"))).Success);
+
+        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
+        SquadLifecycleResult update;
+        using (Harness.DenyReadOrSkip(conductor))
+        {
+            // The preserved-edit report hashes every receipt-owned file; an unreadable one must become a
+            // warning naming it, not an exception that aborts the whole update.
+            update = await lifecycle.UpdateAsync(new SquadUpdateRequest(
+                anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex],
+                Version: "1.2.4"));
+        }
+
+        Assert.True(update.Success, DescribeFailure(update));
+        Assert.Contains("conductor", string.Join(Environment.NewLine, update.Warnings ?? []), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DoctorParityMatchesDeployedBytesAfterInjection()
     {
         using Harness h = NewHarness("doctor-parity");

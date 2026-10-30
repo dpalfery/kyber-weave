@@ -45,6 +45,34 @@ public sealed class SquadResponsePreferencesInjectorTests
     }
 
     [Fact]
+    public void ReadEffective_WhenTheHomeFileIsAbsent_UsesTheShippedDefaultWithoutWarnings()
+    {
+        string home = NewHomeDirectory();
+
+        List<string> warnings = [];
+        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public void ReadEffective_WhenTheHomePathIsADirectory_UsesTheShippedDefaultAndWarns()
+    {
+        // A directory where the file should be is an operator problem the run must report, not a silent
+        // absence. File.Exists answers false for a directory, so the source has to name it explicitly.
+        string home = NewHomeDirectory();
+        Directory.CreateDirectory(Path.Combine(home, SquadResponseGuidanceDeployer.FileName));
+
+        List<string> warnings = [];
+        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
+        string warning = Assert.Single(warnings);
+        Assert.Contains("response-guidance", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReadEffective_WhenSourceIsUnreadable_FallsBackToDefaultAndWarnsExactlyOnceWithoutWriting()
     {
         string home = NewHomeDirectory();
@@ -97,6 +125,51 @@ public sealed class SquadResponsePreferencesInjectorTests
 
         string content = Encoding.UTF8.GetString(injected.Files[0].Content.ToArray());
         Assert.Contains("<response-preferences>" + SquadResponseGuidanceSource.DefaultText + "</response-preferences>", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inject_InsertsEffectiveTextVerbatim_WhenItContainsRegexReplacementPatterns()
+    {
+        // Regex.Replace expands $&, $$, ${name} and $1 in a replacement string. The effective text is
+        // operator data, so every one of those sequences must reach the file exactly as typed.
+        const string effective = "keep $& literal, $$ literal, ${x} literal, $1 literal";
+        SquadRenderResult render = RenderResult(("agents/conductor.md", "<response-preferences>old</response-preferences>"));
+
+        SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(render, effective);
+
+        Assert.Equal(
+            "<response-preferences>" + effective + "</response-preferences>",
+            Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
+    }
+
+    [Fact]
+    public void Inject_RejectsEffectiveTextThatClosesAndReopensTheBlock()
+    {
+        // Text that closes the block and opens a second one would leave two blocks in the entry file.
+        // The render must refuse it rather than emit a file that carries two preference blocks.
+        const string breakout = "x</response-preferences><response-preferences>y";
+        SquadRenderResult render = RenderResult(("agents/conductor.md", "<response-preferences>old</response-preferences>"));
+
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(render, breakout));
+    }
+
+    [Fact]
+    public void Inject_ThrowsWhenATargetRendersFilesWithNoRecognisableEntryLayout()
+    {
+        // Codex renders only a file whose layout is neither an entry nor a carrier, while Claude carries
+        // a block. Skipping codex silently would leave it without response preferences and no diagnostic.
+        SquadRenderResult render = new(
+            Success: true,
+            Files: new List<SquadDeploymentFile>
+            {
+                new(".claude/agents/conductor.md", Encoding.UTF8.GetBytes("<response-preferences>old</response-preferences>"), "claude"),
+                new("weird/layout.txt", Encoding.UTF8.GetBytes("plain"), "codex"),
+            },
+            Degradations: [],
+            Warnings: [],
+            Errors: []);
+
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(render, "effective"));
     }
 
     [Theory]

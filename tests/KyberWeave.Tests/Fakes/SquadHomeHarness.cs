@@ -68,6 +68,13 @@ internal sealed class SquadHomeHarness : IDisposable
     }
 
     /// <summary>
+    ///     The environment variable a CI runner sets (GitHub Actions and most others export <c>CI</c>). When it is
+    ///     set, a denial that cannot be simulated fails the test instead of skipping it, so a CI host that runs
+    ///     as root cannot silently pass the read-denial scenarios.
+    /// </summary>
+    public const string CiEnvironmentVariable = "CI";
+
+    /// <summary>
     ///     Refuses this process read access to an existing file until the returned scope is disposed.
     ///     On Windows an exclusive open makes every other open of the file fail, this process's included.
     ///     On Unix the mode is cleared; a process that can still read it (root) is skipped, because the
@@ -105,6 +112,11 @@ internal sealed class SquadHomeHarness : IDisposable
         }
 
         File.SetUnixFileMode(path, original);
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(CiEnvironmentVariable)))
+            throw new InvalidOperationException(
+                $"The process can still read the mode-000 file '{path}' (running as root?), so the read denial cannot be simulated. " +
+                $"{CiEnvironmentVariable} is set, so this must fail rather than skip.");
+
         throw SkipException.ForSkip("The process can still read a mode-000 file (running as root?), so a read denial cannot be simulated.");
     }
 
