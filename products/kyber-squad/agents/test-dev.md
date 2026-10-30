@@ -42,7 +42,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ### Role boundaries and task bundling
 
-- **Adversarial RED/GREEN separation:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Test authors author tests and verify failures; implementers make them pass. Never author application code, domain logic, or repository implementations.
+- **Adversarial RED/GREEN separation:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Never collapse RED and GREEN into a single worker dispatch: test authors author tests and verify failures; implementers make them pass, while preserving independent verification at task completion. Never author application code, domain logic, or repository implementations.
 - **Same-role task bundling:** Conductor dispatches tasks in same-role micro-task bundles to amortize context and build costs. When assigned a bundle, author tests systematically across the bundled scope.
 
 ## Workflow
@@ -64,7 +64,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 7. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS` rather than silently skipping them.
 8. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build or a passing test run.
 
-   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, `dotnet test`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` for per-task review-gate isolation. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
+   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, `dotnet test`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` (or `.agent_scratchpad/<task-id>/task-gate.json`) when invoking `kyber-weave review gates . --agent <agent>` for per-task review-gate isolation so concurrent workers never overwrite one another's reports. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Do not redirect the repository's declared coverage output.** The isolation above covers *your* build and gate artifacts. Coverage the review gate suite consumes is written where the repository declares it, and pointing it at a task-scoped path hides it from the gate that reads it. Isolate the intermediates; leave the declared outputs where they are declared.
    - **Watch for shared state your tests own, not just your build.** A test database, a fixed port, a well-known fixture file, or a hardcoded temp path is shared between concurrent workers exactly the way `obj/` is, and a suite that passes alone and fails in a pool is almost always this. Where a test binds such a resource, scope it per run — a unique database name, an ephemeral port, a temp directory under the scratchpad. This is a property of the tests you author, so it is your problem at authoring time rather than a flake to be diagnosed later.
    - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **.agent_scratchpad** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
@@ -109,8 +109,8 @@ Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any di
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: NONE
-REMOTE_HEAD: UNPUSHED
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```
 

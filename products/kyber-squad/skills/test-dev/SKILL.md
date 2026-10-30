@@ -26,12 +26,12 @@ Identify your sub-task and read ONLY the relevant reference before proceeding.
 
 ## Execution & Parallelization Invariants
 
-- **Adversarial RED/GREEN role boundary:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Test authors author tests and verify failures; implementers make them pass.
+- **Adversarial RED/GREEN role boundary:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`, etc.). Never collapse RED and GREEN into a single worker dispatch: test authors author tests and verify failures; implementers make them pass, while preserving independent verification at task completion.
 - **Same-role task bundling:** Tasks belonging to the same specialist role are bundled in same-role micro-task dispatches to minimize context thrash.
 - **Build once, test many with direct assembly runner:** Do not rebuild or recompile the entire solution on every iteration. Use `--no-build` for targeted test runs, or execute the pre-built test assembly directly with quiet reporting:
   `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
 - **Zero-stash RED proof rule:** Forbid `git stash` for RED proofs; never run `git stash` to fake clean working state. Run the RED proof against a clean base checkout, throwaway copy, or isolated worktree before any implementation edits exist.
-- **Per-task artifact isolation:** Isolate intermediate build and review artifacts using unique per-task paths, including `--artifacts-path` and `--out artifacts/task-gate-<task-id>.json`.
+- **Per-task artifact isolation:** Isolate intermediate build and review artifacts using unique per-task paths, passing `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for build output isolation, and `kyber-weave review gates . --agent <agent> --out artifacts/task-gate-<task-id>.json` (or `.agent_scratchpad/<task-id>/task-gate.json`) so concurrent task-gate runs never overwrite one another.
 
 ## Completion Digest
 
@@ -41,7 +41,7 @@ Every task concludes by reporting the explicit 6-field worker completion digest:
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: NONE
-REMOTE_HEAD: UNPUSHED
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```

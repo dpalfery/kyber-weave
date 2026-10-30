@@ -41,7 +41,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 ### Role boundaries and task bundling
 
-- **Adversarial RED/GREEN separation:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`). Never author or modify test files, and never verify implementation without independent RED test verification.
+- **Adversarial RED/GREEN separation:** Maintain strict adversarial separation between RED phase test authoring (`test-dev`) and GREEN phase implementation (`csharp-dev`). Never collapse RED and GREEN into a single worker dispatch: do not author or modify test files; verify GREEN against the independent RED contract authored by test-dev, while preserving the independent verification pass at task completion.
 - **Same-role task bundling:** Conductor dispatches tasks in same-role micro-task bundles to amortize context and build costs. When receiving bundled tasks, implement them sequentially within your scope.
 
 ## Data layer handoff
@@ -67,7 +67,7 @@ Your packet is your whole scope. Do not open files under the directories named b
    - **JEV Checkpoint 3 (Invariant Contradiction):** If a failing test fixture asserts legacy internal implementation details or requirements that contradict the task's approved design invariant, do not twist production code to satisfy invalid invariants. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
 7. **Completion gate — diagnostics and build isolation.** This is blocking, and it is not satisfied by a green build.
 
-   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` for per-task review-gate isolation. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
+   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Pass `--out artifacts/task-gate-<task-id>.json` (or `.agent_scratchpad/<task-id>/task-gate.json`) when invoking `kyber-weave review gates . --agent <agent>` for per-task review-gate isolation so concurrent workers never overwrite one another's reports. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Build once, test many with direct assembly runner.** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly with quiet output:
      `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
      Reserve full-suite rebuilds for task exit gates and final council runs.
@@ -108,8 +108,8 @@ Include `Discovery: codegraph N, docs N, direct reads N` with reasons for any di
 STATUS: PASS | FAIL | ESCALATION
 FILES: <comma-separated-paths>
 TESTS: total=N failed=N passed=N
-COMMIT: NONE
-REMOTE_HEAD: UNPUSHED
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=csharp-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 ```
 
