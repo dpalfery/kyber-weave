@@ -34,17 +34,21 @@ pub const SETTINGS_PATH: &str = "/api/kyber/settings";
 /// reads only `receiver` from it for the green/red collector saber; the full
 /// document rides to the popover as `coverage` in `ViewState`.
 pub const COVERAGE_PATH: &str = "/api/kyber/coverage";
+/// The running KyberDash version document (`GET`, read-only), carried to the
+/// popover as `kyberdashVersion` in `ViewState`.
+pub const VERSION_PATH: &str = "/api/kyber/version";
 pub const REFRESH_PATH: &str = "/api/kyber/refresh";
 pub const CLEAN_PATH: &str = "/api/kyber/clean";
 pub const IMPORT_HISTORY_PATH: &str = "/api/kyber/import-history";
 
 /// Every endpoint the tray may contact. A closed list, so a bug that builds a
 /// URL from webview input cannot reach an arbitrary route on the server.
-const API_PATHS: [&str; 7] = [
+const API_PATHS: [&str; 8] = [
     REPORT_PATH,
     JOBS_PATH,
     SETTINGS_PATH,
     COVERAGE_PATH,
+    VERSION_PATH,
     REFRESH_PATH,
     CLEAN_PATH,
     IMPORT_HISTORY_PATH,
@@ -53,6 +57,11 @@ const API_PATHS: [&str; 7] = [
 /// How long a single request may take before it is a failure. Short, because a
 /// hung request would otherwise stall the poll loop past its own interval.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The version route reads no store, so a healthy server answers at once; a
+/// short deadline bounds the worst-case poll so one slow read cannot push the
+/// poll loop past its own interval.
+pub const VERSION_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn poll_interval(popover_open: bool) -> Duration {
     if popover_open {
@@ -262,6 +271,10 @@ pub trait LoopbackClient {
     /// `GET` a document; any non-success status is an error.
     fn get(&mut self, url: &str) -> Result<Value>;
 
+    /// `GET` a document with a per-request deadline in place of the default.
+    /// Required, not defaulted, so no double can silently ignore the deadline.
+    fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value>;
+
     /// A `GET` whose status is reported rather than turned into an error.
     ///
     /// The capability probe needs to tell "this server does not have that
@@ -300,16 +313,31 @@ impl LoopbackFetcher {
     }
 }
 
-impl LoopbackClient for LoopbackFetcher {
-    fn get(&mut self, url: &str) -> Result<Value> {
-        // Checked again here, not just by the caller: this is the only place
-        // that opens a socket, so it is the only place the guarantee holds.
+impl LoopbackFetcher {
+    /// Checked again here, not just by the caller: this is the only place
+    /// that opens a socket, so it is the only place the guarantee holds.
+    fn read_document(&self, url: &str, timeout: Option<Duration>) -> Result<Value> {
         let checked = api_request_url(url)?;
-        let response = self.client.get(&checked).send()?;
+        let request = self.client.get(&checked);
+        let request = match timeout {
+            Some(timeout) => request.timeout(timeout),
+            None => request,
+        };
+        let response = request.send()?;
         if !response.status().is_success() {
             bail!("server returned {}", response.status());
         }
         Ok(response.json()?)
+    }
+}
+
+impl LoopbackClient for LoopbackFetcher {
+    fn get(&mut self, url: &str) -> Result<Value> {
+        self.read_document(url, None)
+    }
+
+    fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value> {
+        self.read_document(url, Some(timeout))
     }
 
     fn get_with_status(&mut self, url: &str) -> Result<ApiResponse> {
@@ -368,6 +396,8 @@ mod tests {
     struct FakeFetcher {
         responses: Vec<Result<Value>>,
         urls: Vec<String>,
+        /// Every timed read, with the deadline the caller asked the client for.
+        deadlines: Vec<(String, Duration)>,
     }
 
     impl FakeFetcher {
@@ -375,6 +405,7 @@ mod tests {
             FakeFetcher {
                 responses: values.into_iter().map(Ok).collect(),
                 urls: Vec::new(),
+                deadlines: Vec::new(),
             }
         }
     }
@@ -391,6 +422,37 @@ mod tests {
             }
             self.responses.remove(0)
         }
+
+        fn get_with_timeout(&mut self, url: &str, timeout: Duration) -> Result<Value> {
+            self.deadlines.push((url.to_string(), timeout));
+            self.get(url)
+        }
+    }
+
+    /// The runtime bounds each document read with a deadline it passes in. A
+    /// double that drops that argument lets a wrong deadline pass every test,
+    /// so the double keeps the deadlines it was given and this pins that the
+    /// caller's value reaches it, distinct per read.
+    #[test]
+    fn a_timed_read_hands_the_client_the_deadline_the_caller_asked_for() {
+        let mut fetcher = FakeFetcher::ok(vec![json!({"ok": true}), json!({"ok": true})]);
+        let report_url = "http://127.0.0.1:4747/api/kyber/report?days=7";
+        let version_url = "http://127.0.0.1:4747/api/kyber/version";
+
+        fetcher
+            .get_with_timeout(report_url, REQUEST_TIMEOUT)
+            .expect("the fake can answer the report");
+        fetcher
+            .get_with_timeout(version_url, VERSION_REQUEST_TIMEOUT)
+            .expect("the fake can answer the version");
+
+        assert_eq!(
+            fetcher.deadlines,
+            vec![
+                (report_url.to_string(), REQUEST_TIMEOUT),
+                (version_url.to_string(), VERSION_REQUEST_TIMEOUT),
+            ]
+        );
     }
 
     fn at(secs: u64) -> SystemTime {
@@ -472,6 +534,30 @@ mod tests {
             "http://127.0.0.1:4747/other",
             "http://evil.test/api/kyber/clean",
             "http://127.0.0.1:1@evil.test/api/kyber/clean",
+        ] {
+            assert!(
+                api_request_url(refused).is_err(),
+                "{refused} should be refused"
+            );
+        }
+    }
+
+    /// The KyberDash version comes from its own fixed route. Only that exact
+    /// path is accepted, and like the other documents it takes no query.
+    #[test]
+    fn the_version_route_is_a_fixed_endpoint_that_takes_no_query() {
+        assert_eq!(VERSION_PATH, "/api/kyber/version");
+        assert!(API_PATHS.contains(&VERSION_PATH));
+
+        let url = endpoint_url("http://127.0.0.1:4747", VERSION_PATH).unwrap();
+        assert_eq!(url, "http://127.0.0.1:4747/api/kyber/version");
+        assert_eq!(api_request_url(&url).unwrap(), url);
+
+        for refused in [
+            "http://127.0.0.1:4747/api/kyber/version?days=30",
+            "http://127.0.0.1:4747/api/kyber/version#fragment",
+            "http://127.0.0.1:4747/api/kyber/version/../clean",
+            "http://127.0.0.1:4747/api/kyber/versions",
         ] {
             assert!(
                 api_request_url(refused).is_err(),

@@ -122,6 +122,10 @@ pub trait Spawner {
 /// Waiting, so a test does not.
 pub trait Clock {
     fn sleep(&mut self, duration: Duration);
+
+    /// Monotonic time since this clock was made. Callers subtract two
+    /// readings to measure how long something took.
+    fn elapsed(&self) -> Duration;
 }
 
 /// What one supervised attempt did.
@@ -453,14 +457,27 @@ impl Spawner for SystemServerSpawner {
     }
 }
 
-#[derive(Default)]
-pub struct ThreadClock;
+pub struct ThreadClock {
+    started: std::time::Instant,
+}
+
+impl Default for ThreadClock {
+    fn default() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+        }
+    }
+}
 
 impl Clock for ThreadClock {
     fn sleep(&mut self, duration: Duration) {
         if !duration.is_zero() {
             std::thread::sleep(duration);
         }
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed()
     }
 }
 
@@ -564,6 +581,10 @@ mod tests {
     impl Clock for FakeClock {
         fn sleep(&mut self, duration: Duration) {
             self.slept.push(duration);
+        }
+
+        fn elapsed(&self) -> Duration {
+            self.slept.iter().sum()
         }
     }
 

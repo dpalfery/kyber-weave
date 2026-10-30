@@ -275,6 +275,10 @@ impl Spawner for FakeLauncher {
 struct NoopClock;
 impl Clock for NoopClock {
     fn sleep(&mut self, _duration: Duration) {}
+
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 type EventLog = Arc<Mutex<Vec<(String, Value)>>>;
