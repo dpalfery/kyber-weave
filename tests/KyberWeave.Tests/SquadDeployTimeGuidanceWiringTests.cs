@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using Harness = KyberWeave.Tests.Fakes.SquadHomeHarness;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -363,74 +364,5 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     private Harness NewHarness(string name)
     {
         return new Harness(Path.Combine(_temp.Path, name));
-    }
-
-    private sealed class Harness : IDisposable
-    {
-        public Harness(string root)
-        {
-            Root = root;
-            ApplicationData = Path.Combine(root, "app-data");
-            Home = Path.Combine(root, "home");
-            GlobalRootsDirectory = Path.Combine(root, "global-roots");
-            Directory.CreateDirectory(ApplicationData);
-            Directory.CreateDirectory(Home);
-            Directory.CreateDirectory(GlobalRootsDirectory);
-            UserPaths = new HomeUserPaths(ApplicationData, Home);
-            Store = new SquadStateStore(UserPaths);
-            ReleaseSource = new SyntheticValidSquadReleaseSource();
-            GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
-        }
-
-        public string Root { get; }
-        public string ApplicationData { get; }
-        public string Home { get; }
-        public string GlobalRootsDirectory { get; }
-        public HomeUserPaths UserPaths { get; }
-        public SquadStateStore Store { get; }
-        public SyntheticValidSquadReleaseSource ReleaseSource { get; }
-        public TempGlobalRoots GlobalRoots { get; }
-
-        public string MakeDirectory(string name)
-        {
-            string path = Path.Combine(Root, name);
-            Directory.CreateDirectory(path);
-            return path;
-        }
-
-        public string GlobalRoot(SquadTarget target)
-        {
-            return GlobalRoots.ResolveGlobalRoot(target);
-        }
-
-        public SquadLifecycleService Lifecycle(ISquadRenderer renderer)
-        {
-            return new SquadLifecycleService(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
-        }
-
-        public void Dispose()
-        {
-            ReleaseSource.Dispose();
-        }
-    }
-
-    private sealed class HomeUserPaths : ISquadUserPaths
-    {
-        public HomeUserPaths(string applicationDataDirectory, string homeDirectory)
-        {
-            ApplicationDataDirectory = applicationDataDirectory;
-            HomeDirectory = homeDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
-        public string HomeDirectory { get; }
-    }
-
-    private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
-    {
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            return Path.Combine(root, SquadTargetCatalog.GetToken(target));
-        }
     }
 }

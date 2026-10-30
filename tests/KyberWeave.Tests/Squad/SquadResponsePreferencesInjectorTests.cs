@@ -1,6 +1,7 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Squad;
@@ -52,7 +53,12 @@ public sealed class SquadResponsePreferencesInjectorTests
         File.WriteAllText(path, originalText, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        string actual;
+        using (SquadHomeHarness.DenyReadOrSkip(path))
+        {
+            // The file exists but the process is refused its bytes: a genuine degradable read failure.
+            actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
+        }
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
