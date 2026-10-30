@@ -1,8 +1,8 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -47,10 +47,7 @@ public sealed class SquadTypeScriptSpecialistTests
     [MemberData(nameof(ApprovedTargets))]
     public async Task EveryApprovedTargetRendersTheTypeScriptSpecialist(SquadTarget target)
     {
-        SquadRenderResult result = await AllRenderers().RenderAsync(new SquadRenderRequest(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project));
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -142,34 +139,39 @@ public sealed class SquadTypeScriptSpecialistTests
     [Fact]
     public void SpecialistUsesTheGeneralModelProfile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == "typescript-dev");
 
         Assert.Equal("general", agent.ModelProfile);
-        var general = source.ModelProfiles.Profiles["general"].HarnessModels;
+        IReadOnlyDictionary<string, string> general = source.ModelProfiles.Profiles["general"].HarnessModels;
         Assert.Contains("sonnet", general["claude"], StringComparison.OrdinalIgnoreCase);
         Assert.All(
             source.ModelProfiles.Profiles["fast"].HarnessModels.Keys,
             harness => Assert.True(general.ContainsKey(harness), $"general has no model for '{harness}'."));
     }
 
-    private static SquadAgent LoadAgent(string name) =>
-        Assert.Single(SquadSourceLoader.Load(ProductRoot).Agents, a => a.Name == name);
+    private static SquadAgent LoadAgent(string name)
+    {
+        return Assert.Single(TestSquadCorpus.CanonicalSource.Agents, a => a.Name == name);
+    }
 
-    private static SquadRendererRegistry AllRenderers() => new(
-    [
-        new CopilotRenderer(),
-        new CursorRenderer(),
-        new ClaudeRenderer(),
-        new AntigravityRenderer(),
-        new CodexRenderer(),
-        new OpenCodeRenderer(),
-        new KiloRenderer(),
-        new PiRenderer(),
-        new FactoryRenderer(),
-        new WarpRenderer(),
-        new ZCodeRenderer(),
-        new DevinRenderer(),
-        new CommandCodeRenderer(),
-    ]);
+    private static SquadRendererRegistry AllRenderers()
+    {
+        return new SquadRendererRegistry(
+        [
+            new CopilotRenderer(),
+            new CursorRenderer(),
+            new ClaudeRenderer(),
+            new AntigravityRenderer(),
+            new CodexRenderer(),
+            new OpenCodeRenderer(),
+            new KiloRenderer(),
+            new PiRenderer(),
+            new FactoryRenderer(),
+            new WarpRenderer(),
+            new ZCodeRenderer(),
+            new DevinRenderer(),
+            new CommandCodeRenderer()
+        ]);
+    }
 }

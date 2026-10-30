@@ -773,27 +773,17 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         return Capture(() =>
         {
-            using StringWriter writer = new();
-            ForwardingWriter.Current = writer;
-            AnsiConsole.Console = SharedRenderConsole.Console;
-            try
+            SquadAppRegistrar registrar = new();
+            CommandApp app = new(registrar);
+            app.Configure(config =>
             {
-                SquadAppRegistrar registrar = new();
-                CommandApp app = new(registrar);
-                app.Configure(config =>
-                {
-                    config.SetApplicationName("kyber-weave");
-                    config.UseStrictParsing();
-                    config.AddCommand<PathBindingStubCommand>("install");
-                });
+                config.SetApplicationName("kyber-weave");
+                config.UseStrictParsing();
+                config.AddCommand<PathBindingStubCommand>("install");
+            });
 
-                return (app.Run(arguments), writer.ToString());
-            }
-            finally
-            {
-                ForwardingWriter.Current = null;
-            }
-        }).Result;
+            return app.Run(arguments);
+        });
     }
 
     /// <summary>Runs <paramref name="execute"/> once with console output captured.</summary>
@@ -970,55 +960,13 @@ public sealed class SquadPathSafetyTests : IDisposable
     }
 
     /// <summary>
-    /// Process-wide writer that forwards to whichever StringWriter the running capture
-    /// has installed. Spectre.Console.Cli binds the console used for command-app error
-    /// renders once per process — the first render wins and later renders keep writing
-    /// to that first console's writer, which earlier captures have by then disposed.
-    /// Rendering through one long-lived console whose target switches per capture is
-    /// what keeps every strict-parse assertion reading its own output.
-    /// </summary>
-    private sealed class ForwardingWriter : TextWriter
-    {
-        public static TextWriter? Current { get; set; }
-
-        public override Encoding Encoding => Encoding.UTF8;
-
-        public override void Write(char value) => Current?.Write(value);
-
-        public override void Write(string? value) => Current?.Write(value);
-    }
-
-    /// <summary>The single live console every strict-parse render is routed through.</summary>
-    private static class SharedRenderConsole
-    {
-        public static readonly ForwardingWriter Writer = new();
-
-        public static readonly IAnsiConsole Console = CreateConsole();
-
-        private static IAnsiConsole CreateConsole()
-        {
-            IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
-            {
-                Ansi = AnsiSupport.No,
-                ColorSystem = ColorSystemSupport.NoColors,
-                Interactive = InteractionSupport.No,
-                Out = new AnsiConsoleOutput(Writer)
-            });
-            ConsoleWidth.EnsureUsable(console);
-            return console;
-        }
-    }
-
-    /// <summary>
-    /// Registrar for the strict-parse app: pins the shared render console so no render
-    /// can land in a disposed capture, and resolves everything else the way the default
-    /// registrar does — instances directly, service/implementation pairs through
-    /// Activator, and IEnumerable&lt;T&gt; services as arrays of their registered
-    /// implementations.
+    /// Registrar for the strict-parse app: pins the active console so every render
+    /// routes through the active test capture, and resolves everything else the way
+    /// the default registrar does.
     /// </summary>
     private sealed class SquadAppRegistrar : ITypeRegistrar
     {
-        private readonly Dictionary<Type, object> _instances = new() { [typeof(IAnsiConsole)] = SharedRenderConsole.Console };
+        private readonly Dictionary<Type, object> _instances = new() { [typeof(IAnsiConsole)] = AnsiConsole.Console };
         private readonly Dictionary<Type, List<Type>> _implementations = [];
 
         public void Register(Type service, Type implementation)
@@ -1119,20 +1067,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     [ModuleInitializer]
     internal static void BindSharedRenderConsole()
     {
-        AnsiConsole.Console = SharedRenderConsole.Console;
-        ForwardingWriter.Current = new StringWriter();
-        try
-        {
-            RunThroughStrictApp(["install", "--__render-channel-binder__"]);
-        }
-        catch (Exception)
-        {
-            // Binding must never break test assembly load.
-        }
-        finally
-        {
-            ForwardingWriter.Current = null;
-        }
+        ProcessConsoleCapture.EnsureInstalled();
     }
 
     #endregion

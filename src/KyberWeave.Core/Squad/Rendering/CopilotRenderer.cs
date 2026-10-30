@@ -210,9 +210,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         // declares the server it calls. Without the server the conductor must stay exactly as it is,
         // because a tool entry for a server Copilot cannot reach is a tool the agent cannot call.
         SquadOperatorChannel.Overlay? operatorChannelOverlay = null;
-        if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn())
+        if (copilotGlobalRoot is not null && SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
         {
-            SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName();
+            SquadOperatorChannel.ServerName server = SquadOperatorChannel.ResolveServerName(request.EnvironmentReader);
             if (server.Warning is { } nameWarning)
             {
                 warnings.Add(nameWarning);
@@ -221,7 +221,10 @@ public sealed class CopilotRenderer : ISquadRenderer
             {
                 if (CopilotMcpServerProbe.HasServer(copilotGlobalRoot, serverName))
                 {
-                    operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(request.SourceDirectory, serverName);
+                    string overlaySourceDirectory = Directory.Exists(request.SourceDirectory)
+                        ? request.SourceDirectory
+                        : request.PreloadedSource?.RootPath ?? request.SourceDirectory;
+                    operatorChannelOverlay = SquadOperatorChannel.LoadOverlay(overlaySourceDirectory, serverName);
                     warnings.Add(SquadOperatorChannel.OverlayApplied());
                 }
                 else

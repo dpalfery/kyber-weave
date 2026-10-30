@@ -10,9 +10,9 @@ last-reviewed: 2026-10-27
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 87 supplemental files that sit
+This reference is the content-preservation audit for the 89 supplemental files that sit
 beside the 29 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 87 resources, a reader can answer three questions: what kind of
+that, for every one of those 89 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -65,6 +65,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/lenses/correctness.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/dependency-supply-chain.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/di-composition.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
+| `skills/code-review/references/lenses/documentation-accuracy.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/duplicate-implementation.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/infra-workflow.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/intent-alignment.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
@@ -74,6 +75,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/lenses/security.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/static-analysis-triage.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/supportability.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
+| `skills/code-review/references/lenses/test-infrastructure.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/lenses/test-adequacy.md` | lens-criteria | retain-in-place | rendered | — | Review-lens criteria; not a host-reversible policy (D2). |
 | `skills/code-review/references/pulumi.md` | review-pointer | pointer-already-#126 | rendered | the declared `<pulumi-coding-standard>` | Pointer-only since #126; resolves `<pulumi-coding-standard>` where declared. |
 | `skills/code-review/references/python.md` | review-pointer | pointer-already-#126 | rendered | the declared `<python-coding-standard>` | Pointer-only since #126; resolves `<python-coding-standard>` where declared. |
@@ -143,10 +145,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/types-and-absent-values.md` | technique | retain-in-place | rendered | — | Narrowing and absent-value technique; typing and absent-value policy lives in `<typescript-coding-standard>` (D2). |
 
-Eighty-six rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 64
+Eighty-nine rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 67
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 85 `rendered`, 1 `packaged-only` (`openai.yaml`).
+`policy-migrated-to-template`). Delivery: 88 `rendered`, 1 `packaged-only` (`openai.yaml`).
 
 ## Policy-line ledger
 

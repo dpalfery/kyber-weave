@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -61,7 +62,7 @@ public sealed class CommandCodeRendererContractTests
     [Fact]
     public async Task EveryAgentRendersAtItsFlatAgentPathWithAnExplicitToolsList()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -85,7 +86,7 @@ public sealed class CommandCodeRendererContractTests
     [Fact]
     public async Task SkillsRenderUnderCommandCodeSkillsAndNeverUnderAgentsCompatTree()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> suppressed = SquadSharedIdentityProjection.SuppressedSkillIdentities(
             source,
             source.FallbackProfiles.Profiles.Values.SelectMany(p => p.SharedIdentities).ToHashSet(StringComparer.Ordinal));
@@ -102,7 +103,7 @@ public sealed class CommandCodeRendererContractTests
     [Fact]
     public async Task PrimaryAgentAlsoRendersAnEntryPointSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderAsync(SquadDeploymentScope.Project);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))

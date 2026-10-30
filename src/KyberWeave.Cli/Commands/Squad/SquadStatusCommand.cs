@@ -14,6 +14,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadUserPaths? _userPaths;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new status command using default system paths.</summary>
     public SquadStatusCommand()
@@ -24,11 +25,13 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     internal SquadStatusCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _globalRoots = globalRoots;
+        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
@@ -37,7 +40,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
 
         // Coalesce the positional path with --path; invalid client input returns exit
         // code 2 before any resolution or work
@@ -66,7 +70,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         string targetRoot = scope == SquadDeploymentScope.Global
             ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
             : projectRoot;
-        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+        ISquadGlobalRootResolver globalRoots =
+            _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots(_environmentReader);
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
         IReadOnlyList<(string TargetPreset, string Version)> instances = scope == SquadDeploymentScope.Global
@@ -186,7 +191,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     ///     Inspects and renders the active model presets recorded in the deployment lock.
     /// </summary>
     /// <returns><see langword="true" /> when a recorded preset file is missing; otherwise <see langword="false" />.</returns>
-    private static (bool HasMissingPreset, bool HasLockError) WriteModelPresets(SquadStateStore stateStore, string targetRoot, SquadDeploymentScope scope)
+    private static (bool HasMissingPreset, bool HasLockError) WriteModelPresets(SquadStateStore stateStore,
+        string targetRoot, SquadDeploymentScope scope)
     {
         SquadLock? squadLock;
         try
@@ -246,7 +252,6 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
         return (hasMissingPreset, false);
     }
-
 
 
     /// <summary>

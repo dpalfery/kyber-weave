@@ -2,8 +2,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Squad;
@@ -76,7 +76,7 @@ public sealed class CopilotRendererTests
     [InlineData("architect")]
     public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == agentName);
 
         Assert.Equal("architect", agent.CapabilityProfile);
@@ -108,13 +108,7 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_EmitsToolsAsYamlFlowSequence_AcrossAllRenderedAgents()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile[] agentFiles = result.Files
@@ -142,13 +136,7 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_SingleQuotesAllMcpServerWildcardsInRawYamlText()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -167,7 +155,9 @@ public sealed class CopilotRendererTests
         }
 
         // Verify wildcards are never unquoted (e.g. "codegraph/*" without quotes) or double-quoted
-        Assert.DoesNotContain("codegraph/*,", architectToolsLine.Replace("'codegraph/*'", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.DoesNotContain("codegraph/*,",
+            architectToolsLine.Replace("'codegraph/*'", string.Empty, StringComparison.Ordinal),
+            StringComparison.Ordinal);
         Assert.DoesNotContain("\"codegraph/*\"", architectToolsLine, StringComparison.Ordinal);
         Assert.DoesNotContain("\"kyber-weave/*\"", architectToolsLine, StringComparison.Ordinal);
 
@@ -178,13 +168,7 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_AlwaysIncludesVscodeAndTodo_AcrossAllAgents()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile[] agentFiles = result.Files
@@ -203,39 +187,57 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
-    [InlineData("azure-reader", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
-    [InlineData("bug-crusher", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
-    [InlineData("bug-crusher-investigator", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]")]
-    [InlineData("code-reviewer", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
-    [InlineData("conductor", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]")]
-    [InlineData("csharp-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("dal-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("docs-dev", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("github-devops", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]")]
-    [InlineData("go-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("maui-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("product-owner", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
-    [InlineData("pulumi-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("python-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("react-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("research-agent", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
-    [InlineData("review-lens", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
-    [InlineData("review-triage", "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
-    [InlineData("rust-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("sql-database-architect", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("tauri-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("test-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
-    [InlineData("typescript-dev", "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("architect",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("azure-reader",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("bug-crusher",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("bug-crusher-investigator",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]")]
+    [InlineData("code-reviewer",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
+    [InlineData("conductor",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]")]
+    [InlineData("csharp-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("dal-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("docs-dev",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("github-devops",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web]")]
+    [InlineData("go-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("maui-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("product-owner",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
+    [InlineData("pulumi-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("python-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("react-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("research-agent",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-lens",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-triage",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("rust-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("sql-database-architect",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("tauri-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("test-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
+    [InlineData("typescript-dev",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -259,12 +261,8 @@ public sealed class CopilotRendererTests
     [InlineData("review-triage")]
     public async Task RenderAsync_ReviewerProfileAgentsResolveToTheirSharedReviewerCopilotModel(string agentName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project));
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -297,7 +295,7 @@ public sealed class CopilotRendererTests
         string expectedProfile,
         string expectedModel)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string frontmatter = await RenderFrontmatterAsync(agentName);
 
         // Verify the agent declares the correct profile
@@ -323,70 +321,74 @@ public sealed class CopilotRendererTests
     {
         using TempDirectory temp = new();
         WriteSyntheticSquad(temp.Path, """
-            schema: kyber-squad.capability-profiles/v1
-            capabilities:
-              - filesystem.read
-              - filesystem.search
-              - filesystem.write
-              - process.execute
-              - network.read
-              - network.publish
-              - delegate
-            profiles:
-              exec-only:
-                permissions:
-                  filesystem.read: deny
-                  filesystem.search: deny
-                  filesystem.write: deny
-                  process.execute: allow
-                  network.read: deny
-                  network.publish: deny
-                  delegate: deny
-              read-only-custom:
-                permissions:
-                  filesystem.read: allow
-                  filesystem.search: deny
-                  filesystem.write: deny
-                  process.execute: deny
-                  network.read: deny
-                  network.publish: deny
-                  delegate: deny
-              all-denied:
-                permissions:
-                  filesystem.read: deny
-                  filesystem.search: deny
-                  filesystem.write: deny
-                  process.execute: deny
-                  network.read: deny
-                  network.publish: deny
-                  delegate: deny
-            """);
+                                       schema: kyber-squad.capability-profiles/v1
+                                       capabilities:
+                                         - filesystem.read
+                                         - filesystem.search
+                                         - filesystem.write
+                                         - process.execute
+                                         - network.read
+                                         - network.publish
+                                         - delegate
+                                       profiles:
+                                         exec-only:
+                                           permissions:
+                                             filesystem.read: deny
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: allow
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                         read-only-custom:
+                                           permissions:
+                                             filesystem.read: allow
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: deny
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                         all-denied:
+                                           permissions:
+                                             filesystem.read: deny
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: deny
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                       """);
 
         CopilotRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: temp.Path,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            temp.Path,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        SquadDeploymentFile execAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/exec-bot.agent.md");
+        SquadDeploymentFile execAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/exec-bot.agent.md");
         Assert.Equal(
             "tools: [todo, vscode, execute]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(execAgent.Content.Span))));
 
-        SquadDeploymentFile readAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/read-bot.agent.md");
+        SquadDeploymentFile readAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/read-bot.agent.md");
         Assert.Equal(
             "tools: [todo, vscode, read, 'context7/*']",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(readAgent.Content.Span))));
 
-        SquadDeploymentFile lockedAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/locked-bot.agent.md");
+        SquadDeploymentFile lockedAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/locked-bot.agent.md");
         Assert.Equal(
             "tools: [todo, vscode]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(lockedAgent.Content.Span))));
 
-        SquadDeploymentFile conductorAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/conductor.agent.md");
+        SquadDeploymentFile conductorAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/conductor.agent.md");
         Assert.Equal(
             "tools: [todo, vscode, read]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(conductorAgent.Content.Span))));
@@ -401,60 +403,60 @@ public sealed class CopilotRendererTests
 
         foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), overwrite: true);
+            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """
-            schema: kyber-squad.squad/v1
-            name: test-squad
-            version-source: kyber-weave-assembly
-            default-bundle: full
-            bundles:
-              full: bundles/full.yml
-            profiles:
-              models: profiles/models.yml
-              capabilities: profiles/capabilities.yml
-              fallbacks: profiles/fallbacks.yml
-            toolchain: toolchain.yml
-            mcp: mcp.json
-            """);
+                                                           schema: kyber-squad.squad/v1
+                                                           name: test-squad
+                                                           version-source: kyber-weave-assembly
+                                                           default-bundle: full
+                                                           bundles:
+                                                             full: bundles/full.yml
+                                                           profiles:
+                                                             models: profiles/models.yml
+                                                             capabilities: profiles/capabilities.yml
+                                                             fallbacks: profiles/fallbacks.yml
+                                                           toolchain: toolchain.yml
+                                                           mcp: mcp.json
+                                                           """);
 
         File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
-            schema: kyber-squad.toolchain/v1
-            required-features:
-              - agent-ir/v1
-            validated-release: null
-            """);
+                                                               schema: kyber-squad.toolchain/v1
+                                                               required-features:
+                                                                 - agent-ir/v1
+                                                               validated-release: null
+                                                               """);
 
         File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
 
         File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
-            schema: kyber-squad.bundle/v1
-            name: full
-            agents:
-              - exec-bot
-              - read-bot
-              - locked-bot
-              - conductor
-            skills: []
-            """);
+                                                                     schema: kyber-squad.bundle/v1
+                                                                     name: full
+                                                                     agents:
+                                                                       - exec-bot
+                                                                       - read-bot
+                                                                       - locked-bot
+                                                                       - conductor
+                                                                     skills: []
+                                                                     """);
 
         File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
-            schema: kyber-squad.model-profiles/v1
-            profiles:
-              default:
-                default: inherit
-            """);
+                                                                        schema: kyber-squad.model-profiles/v1
+                                                                        profiles:
+                                                                          default:
+                                                                            default: inherit
+                                                                        """);
 
         File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), capabilitiesYaml);
 
         File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
-            schema: kyber-squad.fallback-profiles/v1
-            profiles:
-              none:
-                no-primary-agent: skill
-                no-agent-primitive: skill
-            """);
+                                                                           schema: kyber-squad.fallback-profiles/v1
+                                                                           profiles:
+                                                                             none:
+                                                                               no-primary-agent: skill
+                                                                               no-agent-primitive: skill
+                                                                           """);
 
         WriteAgent(root, "exec-bot", "exec-only", "[execute, todo, vscode]");
         WriteAgent(root, "read-bot", "read-only-custom", "[context7/*, todo, read, vscode]");
@@ -471,20 +473,20 @@ public sealed class CopilotRendererTests
         string delegatesTo = "[]")
     {
         File.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
-            ---
-            schema: kyber-squad.agent/v1
-            name: {name}
-            description: Test agent {name}
-            invocation: {invocation}
-            model-profile: default
-            capability-profile: {capabilityProfile}
-            copilot-tools: {copilotTools}
-            delegates-to: {delegatesTo}
-            fallback: none
-            aliases: []
-            ---
-            Instruction body for {name}.
-            """);
+                                                                       ---
+                                                                       schema: kyber-squad.agent/v1
+                                                                       name: {name}
+                                                                       description: Test agent {name}
+                                                                       invocation: {invocation}
+                                                                       model-profile: default
+                                                                       capability-profile: {capabilityProfile}
+                                                                       copilot-tools: {copilotTools}
+                                                                       delegates-to: {delegatesTo}
+                                                                       fallback: none
+                                                                       aliases: []
+                                                                       ---
+                                                                       Instruction body for {name}.
+                                                                       """);
     }
 
     private static void WritePrimaryDelegationSquad(string root)
@@ -496,89 +498,89 @@ public sealed class CopilotRendererTests
 
         foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), overwrite: true);
+            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """
-            schema: kyber-squad.squad/v1
-            name: test-squad
-            version-source: kyber-weave-assembly
-            default-bundle: full
-            bundles:
-              full: bundles/full.yml
-            profiles:
-              models: profiles/models.yml
-              capabilities: profiles/capabilities.yml
-              fallbacks: profiles/fallbacks.yml
-            toolchain: toolchain.yml
-            mcp: mcp.json
-            """);
+                                                           schema: kyber-squad.squad/v1
+                                                           name: test-squad
+                                                           version-source: kyber-weave-assembly
+                                                           default-bundle: full
+                                                           bundles:
+                                                             full: bundles/full.yml
+                                                           profiles:
+                                                             models: profiles/models.yml
+                                                             capabilities: profiles/capabilities.yml
+                                                             fallbacks: profiles/fallbacks.yml
+                                                           toolchain: toolchain.yml
+                                                           mcp: mcp.json
+                                                           """);
 
         File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
-            schema: kyber-squad.toolchain/v1
-            required-features:
-              - agent-ir/v1
-            validated-release: null
-            """);
+                                                               schema: kyber-squad.toolchain/v1
+                                                               required-features:
+                                                                 - agent-ir/v1
+                                                               validated-release: null
+                                                               """);
 
         File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
 
         File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
-            schema: kyber-squad.bundle/v1
-            name: full
-            agents:
-              - primary-boss
-              - primary-lonely
-              - delegating-sub
-              - worker-a
-            skills: []
-            """);
+                                                                     schema: kyber-squad.bundle/v1
+                                                                     name: full
+                                                                     agents:
+                                                                       - primary-boss
+                                                                       - primary-lonely
+                                                                       - delegating-sub
+                                                                       - worker-a
+                                                                     skills: []
+                                                                     """);
 
         File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
-            schema: kyber-squad.model-profiles/v1
-            profiles:
-              default:
-                default: inherit
-            """);
+                                                                        schema: kyber-squad.model-profiles/v1
+                                                                        profiles:
+                                                                          default:
+                                                                            default: inherit
+                                                                        """);
 
         File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
-            schema: kyber-squad.capability-profiles/v1
-            capabilities:
-              - filesystem.read
-              - filesystem.search
-              - filesystem.write
-              - process.execute
-              - network.read
-              - network.publish
-              - delegate
-            profiles:
-              orchestrator:
-                permissions:
-                  filesystem.read: deny
-                  filesystem.search: deny
-                  filesystem.write: deny
-                  process.execute: deny
-                  network.read: deny
-                  network.publish: deny
-                  delegate: allow
-              plain:
-                permissions:
-                  filesystem.read: deny
-                  filesystem.search: deny
-                  filesystem.write: deny
-                  process.execute: deny
-                  network.read: deny
-                  network.publish: deny
-                  delegate: deny
-            """);
+                                                                              schema: kyber-squad.capability-profiles/v1
+                                                                              capabilities:
+                                                                                - filesystem.read
+                                                                                - filesystem.search
+                                                                                - filesystem.write
+                                                                                - process.execute
+                                                                                - network.read
+                                                                                - network.publish
+                                                                                - delegate
+                                                                              profiles:
+                                                                                orchestrator:
+                                                                                  permissions:
+                                                                                    filesystem.read: deny
+                                                                                    filesystem.search: deny
+                                                                                    filesystem.write: deny
+                                                                                    process.execute: deny
+                                                                                    network.read: deny
+                                                                                    network.publish: deny
+                                                                                    delegate: allow
+                                                                                plain:
+                                                                                  permissions:
+                                                                                    filesystem.read: deny
+                                                                                    filesystem.search: deny
+                                                                                    filesystem.write: deny
+                                                                                    process.execute: deny
+                                                                                    network.read: deny
+                                                                                    network.publish: deny
+                                                                                    delegate: deny
+                                                                              """);
 
         File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
-            schema: kyber-squad.fallback-profiles/v1
-            profiles:
-              none:
-                no-primary-agent: skill
-                no-agent-primitive: skill
-            """);
+                                                                           schema: kyber-squad.fallback-profiles/v1
+                                                                           profiles:
+                                                                             none:
+                                                                               no-primary-agent: skill
+                                                                               no-agent-primitive: skill
+                                                                           """);
 
         WriteAgent(root, "primary-boss", "orchestrator", "[todo, vscode, agent]", "primary", "[worker-a]");
         WriteAgent(root, "primary-lonely", "plain", "[todo, vscode]", "primary");
@@ -660,11 +662,7 @@ public sealed class CopilotRendererTests
     [Fact]
     public async Task RenderAsync_DoesNotEmitAnyPathNamingTheRetiredTaskReviewer()
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project));
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         string[] offenders = result.Files
@@ -687,9 +685,9 @@ public sealed class CopilotRendererTests
         WritePrimaryDelegationSquad(temp.Path);
         CopilotRenderer renderer = new();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: temp.Path,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project));
+            temp.Path,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile file = Assert.Single(
@@ -716,9 +714,9 @@ public sealed class CopilotRendererTests
         WritePrimaryDelegationSquad(temp.Path);
         CopilotRenderer renderer = new();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: temp.Path,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project));
+            temp.Path,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -923,9 +921,10 @@ public sealed class CopilotRendererTests
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Global);
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Global,
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadRenderValidationException exception =
             await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
@@ -934,50 +933,54 @@ public sealed class CopilotRendererTests
     }
 
     private const string MinimalCapabilitiesYaml = """
-        schema: kyber-squad.capability-profiles/v1
-        capabilities:
-          - filesystem.read
-          - filesystem.search
-          - filesystem.write
-          - process.execute
-          - network.read
-          - network.publish
-          - delegate
-        profiles:
-          exec-only:
-            permissions:
-              filesystem.read: deny
-              filesystem.search: deny
-              filesystem.write: deny
-              process.execute: allow
-              network.read: deny
-              network.publish: deny
-              delegate: deny
-          read-only-custom:
-            permissions:
-              filesystem.read: allow
-              filesystem.search: deny
-              filesystem.write: deny
-              process.execute: deny
-              network.read: deny
-              network.publish: deny
-              delegate: deny
-          all-denied:
-            permissions:
-              filesystem.read: deny
-              filesystem.search: deny
-              filesystem.write: deny
-              process.execute: deny
-              network.read: deny
-              network.publish: deny
-              delegate: deny
-        """;
+                                                   schema: kyber-squad.capability-profiles/v1
+                                                   capabilities:
+                                                     - filesystem.read
+                                                     - filesystem.search
+                                                     - filesystem.write
+                                                     - process.execute
+                                                     - network.read
+                                                     - network.publish
+                                                     - delegate
+                                                   profiles:
+                                                     exec-only:
+                                                       permissions:
+                                                         filesystem.read: deny
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: allow
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                     read-only-custom:
+                                                       permissions:
+                                                         filesystem.read: allow
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: deny
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                     all-denied:
+                                                       permissions:
+                                                         filesystem.read: deny
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: deny
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                   """;
 
-    private static Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot) =>
-        RenderGloballyAsync(ProductRoot, copilotRoot);
+    private static Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot)
+    {
+        return RenderGloballyAsync(ProductRoot, copilotRoot);
+    }
 
-    private static Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot) =>
-        RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
+    private static Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot)
+    {
+        return RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
+    }
 
     private static async Task<SquadRenderResult> RenderAsync(
         string sourceDirectory,
@@ -986,10 +989,13 @@ public sealed class CopilotRendererTests
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: sourceDirectory,
-            Targets: [SquadTarget.Copilot],
-            Scope: scope,
-            GlobalRoots: globalRoots);
+            sourceDirectory,
+            [SquadTarget.Copilot],
+            scope,
+            GlobalRoots: globalRoots,
+            PreloadedSource: string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal)
+                ? TestSquadCorpus.CanonicalSource
+                : null);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -1004,18 +1010,15 @@ public sealed class CopilotRendererTests
 
     private sealed class FixedGlobalRootResolver(string root) : ISquadGlobalRootResolver
     {
-        public string ResolveGlobalRoot(SquadTarget target) => root;
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            return root;
+        }
     }
 
     private static async Task<string> RenderFrontmatterAsync(string agentName)
     {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(
