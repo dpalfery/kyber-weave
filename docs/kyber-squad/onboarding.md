@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-30
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering

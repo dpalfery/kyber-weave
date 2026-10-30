@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order

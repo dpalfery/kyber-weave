@@ -5,14 +5,14 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-30
 ---
 
 # Skill-resource dispositions and policy-line ledger
 
 This reference is the content-preservation audit for the 88 supplemental files that sit
 beside the 28 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 89 resources, a reader can answer three questions: what kind of
+that, for every one of those 88 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,

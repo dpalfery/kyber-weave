@@ -2,7 +2,7 @@
 id: plans/2026-10-30-response-preferences-in-agent-body
 title: Response preferences injected into conductor and bug-crusher; response-format skill removed
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-30
@@ -14,7 +14,7 @@ impact-components: [KyberSquad]
 
 # Response preferences injected into conductor and bug-crusher; response-format skill removed
 
-**Status:** Ready — decision-complete as of revision 3 (2026-10-30): the human answered D-B, D-C, D-D and OQ1. Approve-and-execute gate passed: approved and executing, human, 2026-10-30, on branch `feat/response-preferences-in-agent-body` with draft PR #475.
+**Status:** Archived — complete 2026-10-30 (T1–T7 test-first; closeout in the `## Closeout` section below; archived at `docs/archive/plans/`). Decision-complete as of revision 3; approved and executed by the human on 2026-10-30 on branch `feat/response-preferences-in-agent-body` with draft PR #475.
 
 **Autonomy change (D-E, 2026-10-30):** the human switched this run to `autonomous` — verbatim: "you need to go into autonomous mode you are bugging me with issue you or the architect can solve." Frontmatter now reads `autonomy: autonomous`, matching the Config Reg default; D-D's supervised override is **superseded**. From this point every gate is answered by recommendation (recorded as `autonomous: recommendation accepted`), and only a hard block returns to the human.
 
@@ -117,7 +117,11 @@ Default text moves from `products/kyber-squad/skills/response-format/user-guidan
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
-| H1–H5 | See "Decided by the human" | As stated (H3 wording corrected in revision 2, intent unchanged) | H5 risk recorded once | human, 2026-10-30 (relayed by conductor) |
+| H1 | See "Decided by the human" | As stated | Recorded in the human's decision table | human, 2026-10-30 (relayed by conductor) |
+| H2 | See "Decided by the human" | As stated | Recorded in the human's decision table | human, 2026-10-30 (relayed by conductor) |
+| H3 | See "Decided by the human" | As stated (H3 wording corrected in revision 2, intent unchanged) | All 13 targets; see F1 | human, 2026-10-30 (relayed by conductor) |
+| H4 | See "Decided by the human" | As stated | Shipped default fallback; see F0 | human, 2026-10-30 (relayed by conductor) |
+| H5 | See "Decided by the human" | As stated | H5 risk recorded once (verbatim paste, no cap) | human, 2026-10-30 (relayed by conductor) |
 | H6 | Is the home preferences file deleted with the skill? | **No.** Only the `response-format` skill is removed; the home file is created by Squad, preserved across `squad update`, and stays the user's place to edit preferences. Name stays `response-guidance.md` (OQ1). Creation by install → D-C. | F0 | human, 2026-10-30 (relayed by conductor) |
 | D-A | What does the canonical `<response-preferences>` block hold, and what do `squad pack` archives ship? | **Option 1:** empty marker block in canonical sources; install/update fill it with the user's text; `squad pack` fills it with the shipped default. | One copy of the default; deterministic `pack` output. Now applies to three carriers (F1). | Decided: human, 2026-10-30 (relayed by conductor) |
 | D-B | May the operator's personal preferences text land in committed project-scope files on all 13 targets, including canonical skill entry files, the Warp `role-` skills and ZCode commands? | Human answer, verbatim: "**yes.** The operator's personal preferences text may land in committed project-scope files on all 13 targets, including canonical skill entry files, the Warp `role-` skills and ZCode commands." | **Recorded once, applies to every task:** user-specific text is committed to project-scope files on all 13 targets; the operator owns that text; review of those files must not treat its presence or content as a defect. No project-scope warning or default-only fallback is built. | Decided: human, 2026-10-30 (relayed by conductor) |
@@ -166,16 +170,16 @@ The full .NET suite, `review gates . --all`, `docs validate . --merge-ready`, `d
 - `docs/kyber-squad/README.md` line 53; `products/kyber-squad/README.md` 85, 130.
 - `docs/cli-command-surface.md`: `squad install/update/pack` descriptions, if they mention guidance.
 
-### Design harvest
+## Design harvest
 
-| Item | Target component | Doc type | Destination |
-|---|---|---|---|
-| Deploy-time injection, entry-file table, fail-closed block | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
-| Drift and refresh semantics; home file kept (H6), created by install and preserved by update (D-C) | kyber-squad | architecture + onboarding | `docs/kyber-squad/architecture.md` §8 and home-owned files; `docs/kyber-squad/onboarding.md` §"User-home response guidance" |
-| Project-scope files carry the operator's text (D-B) | kyber-squad | onboarding + requirements | `docs/kyber-squad/onboarding.md`; `docs/kyber-squad/requirements.md` R5 |
-| R3/R5 rewrite | kyber-squad | requirements | `docs/kyber-squad/requirements.md` |
-| Session-title matrix (reference) | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
-| Response-shape owner (D6) | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
+| ID | Item | Target component | Doc type | Destination |
+|---|---|---|---|---|
+| DH1 | Deploy-time injection, entry-file table, fail-closed block | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
+| DH2 | Drift and refresh semantics; home file kept (H6), created by install and preserved by update (D-C) | kyber-squad | architecture + onboarding | `docs/kyber-squad/architecture.md` §8 and home-owned files; `docs/kyber-squad/onboarding.md` §"User-home response guidance" |
+| DH3 | Project-scope files carry the operator's text (D-B) | kyber-squad | onboarding + requirements | `docs/kyber-squad/onboarding.md`; `docs/kyber-squad/requirements.md` R5 |
+| DH4 | R3/R5 rewrite | kyber-squad | requirements | `docs/kyber-squad/requirements.md` |
+| DH5 | Session-title matrix (reference) | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
+| DH6 | Response-shape owner (D6) | kyber-squad | architecture | `docs/kyber-squad/architecture.md` §8 |
 
 ADR: likely **no ADR — ADR waiver**; reverses a skill-carrier choice within the existing renderer/receipt architecture, no new boundary, schema or dependency. Closeout confirms.
 
@@ -206,3 +210,94 @@ ADR: likely **no ADR — ADR waiver**; reverses a skill-carrier choice within th
 - Closeout note — **D8 warning as shipped:** `The rendered Squad content has no <response-preferences> block; response preferences were not injected.` (install and update, once; no throw; doctor silent).
 - Closeout note — **Accepted risk (H5):** the operator's text is pasted verbatim, with no size cap and no style-only guard line. The earlier guard is deliberately gone; restoring it is a design change.
 - Closeout note — **Project-scope risk (D-B):** operator text is committed into every entry file on all 13 targets; the operator owns it, and reviewers must not treat it as a defect.
+
+## Closeout
+
+Closed 2026-10-30 by docs-dev on branch `feat/response-preferences-in-agent-body` (draft PR #475). Every task is committed; this closeout verifies the documentation and the decision harvest. The test runs cited for T1–T6 are the counts reported at execution (the implementation session), not re-run by the closeout pass.
+
+### Task outcome
+
+| Task | Outcome | Evidence (as reported at execution) |
+|---|---|---|
+| T1 | Done: `SquadResponseGuidanceSource` and `SquadResponsePreferencesInjector` in `Squad/Deployment`; hard-coded `IsEntryFile` list removed | 15 contract tests (`SquadResponsePreferencesInjectorTests`) |
+| T2 | Done: canonical `<response-preferences>` blocks in `agents/conductor.md`, `agents/bug-crusher.md`, `skills/bug-crusher/SKILL.md`; load-the-skill lines removed | 26 tests over 13 targets × {conductor, bug-crusher}, including the sentinel oracle (D7) |
+| T3 | Done: injection wired into install, update and doctor; install creates the home file (R-DC1); update never overwrites an edit (R-DC2) | 8 wiring tests; global home suite 39 |
+| T4 | Done: shipped default moved to `products/kyber-squad/response-guidance.default.md`; csproj comment and `VerifyResponseGuidanceDefault` repointed | `SquadCanonicalContentTests` guard tests retargeted |
+| T5 | Done: `products/kyber-squad/skills/response-format/` deleted; removed from `bundles/full.yml`; migration digest refreshed | Upgrade test removes unedited owned files and keeps edited ones |
+| T6 | Done: `SquadPacker` fills the block with the shipped default; archives deterministic | Packer tests per D-A |
+| T7 | Done: documentation landed (see Documentation impact above); disposition row retired; OpenCode render count updated; stale "89" corrected to "88" in `docs/kyber-squad/skill-resource-dispositions.md` | This closeout's `docs validate` and `docs drift` runs |
+
+Council: 3 major and 3 minor findings raised; 5 fixed, 1 partial (stale count in prose), fixed at closeout.
+
+### Decision harvest
+
+| Decision | Destination |
+|---|---|
+| H1 remove the skill | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (the skill is retired there) |
+| H2 `<response-preferences>` section | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table, fail-closed block) |
+| H3 all 13 targets | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table) |
+| H4 empty or missing → shipped default | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy); [onboarding §User-home response guidance](../kyber-squad/onboarding.md#user-home-response-guidance) |
+| H5 verbatim paste, no cap | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (accepted risk); [requirements R5](../kyber-squad/requirements.md) |
+| H6 home file kept | [architecture home-owned files](../kyber-squad/architecture.md#home-owned-files-and-the-user-home-response-guidance); [onboarding §User-home response guidance](../kyber-squad/onboarding.md#user-home-response-guidance) |
+| D-A `squad pack` fills with default | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) |
+| D-B project-scope text committed | [onboarding](../kyber-squad/onboarding.md#user-home-response-guidance); [requirements R5](../kyber-squad/requirements.md) |
+| D-C install creates, update preserves | [onboarding §User-home response guidance](../kyber-squad/onboarding.md#user-home-response-guidance); [architecture home-owned files](../kyber-squad/architecture.md#home-owned-files-and-the-user-home-response-guidance) |
+| D-D | Superseded by D-E; run-level, no surviving invariant (documentation waiver: transient) |
+| D-E autonomy | Superseded run-mode decision; no surviving invariant (documentation waiver: transient) |
+| D1 injection mechanism | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table) |
+| D2 no new receipt fields | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (drift and refresh) |
+| D3 stale-owned-file removal, not in `SquadRetiredSkills` | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (retirement) |
+| D4 session-title matrix | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (reference) |
+| D5 default repository home | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (shape owner) |
+| D6 shape owner | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (shape owner) |
+| D7 derived-file classification, fail-closed | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (single-block rule) |
+| D8 pre-block corpus is a no-op with one warning | [architecture §8](../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (pre-block corpus); [onboarding](../kyber-squad/onboarding.md#user-home-response-guidance) (D8 warning) |
+
+### ADR position
+
+no ADR — ADR waiver: reverses a skill-carrier choice within the existing renderer and receipt architecture, with no new boundary, dependency or schema.
+
+### Accepted risks
+
+- **H5:** the operator's text is pasted verbatim into every turn's agent instructions, with no size cap and no style-only guard line. Restoring a guard is a design change.
+- **D-B:** operator text is committed to project-scope files on all 13 targets; the operator owns it and reviewers must not treat its presence as a defect.
+- **D8:** a render with no `<response-preferences>` block is a silent no-op beyond the one lifecycle warning; a renderer that drops the block everywhere is caught by T2 against the real tree, not at runtime.
+
+### Known gap
+
+- `ReplaceManaged` does not report preserved stale entries: under `ReplaceManaged` mode, update does not report stale entries it preserves, and no doctor finding covers it.
+
+## Closeout mapping
+
+Each decision and Design harvest item maps to its live destination. Documentation-impact is `extends-component`; impact component is KyberSquad; last-reviewed is 2026-10-30 for every mapped document; status is archived.
+
+| ID | Destination | Documentation-impact | Impact component | Last-reviewed | Status |
+|---|---|---|---|---|---|
+| H1 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (skill retired) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H2 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H3 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table, 13 targets) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H4 | [onboarding §User-home response guidance](../../kyber-squad/onboarding.md#user-home-response-guidance) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H5 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (accepted risk) | extends-component | KyberSquad | 2026-10-30 | archived |
+| H6 | [architecture home-owned files](../../kyber-squad/architecture.md#home-owned-files-and-the-user-home-response-guidance) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D-A | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (pack ships default) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D-B | [onboarding §User-home response guidance](../../kyber-squad/onboarding.md#user-home-response-guidance); [requirements R5](../../kyber-squad/requirements.md) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D-C | [onboarding §User-home response guidance](../../kyber-squad/onboarding.md#user-home-response-guidance); [architecture home-owned files](../../kyber-squad/architecture.md#home-owned-files-and-the-user-home-response-guidance) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D-D | Documentation waiver: superseded by D-E; run-level decision with no surviving architectural invariant | extends-component | KyberSquad | 2026-10-30 | archived |
+| D-E | Documentation waiver: run-mode switch; no surviving architectural invariant | extends-component | KyberSquad | 2026-10-30 | archived |
+| D1 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (entry-file table) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D2 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (drift and refresh) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D3 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (retirement); [skill-resource-dispositions](../../kyber-squad/skill-resource-dispositions.md) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D4 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (session-title matrix) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D5 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (shape owner, default home) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D6 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (shape owner) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D7 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (fail-closed single-block rule) | extends-component | KyberSquad | 2026-10-30 | archived |
+| D8 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (pre-block corpus); [onboarding](../../kyber-squad/onboarding.md#user-home-response-guidance) (warning) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH1 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH2 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy); [onboarding](../../kyber-squad/onboarding.md#user-home-response-guidance) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH3 | [onboarding](../../kyber-squad/onboarding.md#user-home-response-guidance); [requirements R5](../../kyber-squad/requirements.md) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH4 | [requirements R3 and R5](../../kyber-squad/requirements.md) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH5 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (session-title matrix) | extends-component | KyberSquad | 2026-10-30 | archived |
+| DH6 | [architecture §8](../../kyber-squad/architecture.md#response-preferences-injected-at-deploy) (shape owner) | extends-component | KyberSquad | 2026-10-30 | archived |
+
+ADR position: no ADR — ADR waiver: reverses a skill-carrier choice within the existing renderer and receipt architecture, with no new boundary, dependency or schema.
+
