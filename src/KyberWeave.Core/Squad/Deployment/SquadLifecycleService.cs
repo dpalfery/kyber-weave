@@ -23,6 +23,7 @@ public sealed class SquadLifecycleService
     private readonly SquadModelPresetSelectionStore _selectionStore;
     private readonly SquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>
     ///     Gets the state store associated with this lifecycle service.
@@ -37,7 +38,8 @@ public sealed class SquadLifecycleService
         ISquadTransactionObserver? observer = null,
         ISquadGlobalRootResolver? globalRoots = null,
         SquadModelPresetStore? presetStore = null,
-        SquadModelPresetSelectionStore? selectionStore = null)
+        SquadModelPresetSelectionStore? selectionStore = null,
+        Func<string, string?>? environmentReader = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
         ArgumentNullException.ThrowIfNull(renderer);
@@ -50,6 +52,7 @@ public sealed class SquadLifecycleService
         _globalRoots = globalRoots;
         _presetStore = presetStore ?? new SquadModelPresetStore(stateStore.UserPaths);
         _selectionStore = selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths);
+        _environmentReader = environmentReader;
     }
 
     /// <summary>
@@ -158,7 +161,9 @@ public sealed class SquadLifecycleService
                 userScopeDir,
                 request.Translation,
                 effectiveGlobalRoots,
-                loadedPresets.Count > 0 ? loadedPresets : null);
+                loadedPresets.Count > 0 ? loadedPresets : null,
+                null,
+                _environmentReader);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -360,7 +365,9 @@ public sealed class SquadLifecycleService
                 userScopeDir,
                 request.Translation,
                 effectiveGlobalRoots,
-                loadedPresets.Count > 0 ? loadedPresets : null);
+                loadedPresets.Count > 0 ? loadedPresets : null,
+                null,
+                _environmentReader);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);

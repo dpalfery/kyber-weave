@@ -31,7 +31,7 @@ exit gate run by its own developer agent, never a reviewer. `code-reviewer` neve
 per-task basis unless a human specifically asks it to.**
 
 Not on a failed task gate. Not on a path the policy reserves. Not on a concern that looks
-serious. Every one of those is a per-task council bill — fifteen lenses and a full gate suite
+serious. Every one of those is a per-task council bill — seventeen lenses and a full gate suite
 spent to settle a question about a couple of files, and spent again on the next task. A task
 that cannot converge produces a *finding*, and findings are collected, planned by `architect`,
 and read once by the end-of-run review.
@@ -67,7 +67,7 @@ A single agent reading a whole diff is one attention budget spread across a doze
 concerns, and it produces a verdict that cannot be checked. This splits that into parts that
 fail differently:
 
-- **Fifteen lenses** read the diff in parallel, each owning one concern and each declaring an
+- **Seventeen lenses** read the diff in parallel, each owning one concern and each declaring an
   applicability predicate so it skips diffs holding nothing for it. A change to a Markdown file
   does not pay for a database-migration reviewer to tell it so.
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and

@@ -87,16 +87,18 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>Resolves user paths from environment variables (HOME / USERPROFILE / APPDATA) or system folders.</summary>
-    public static ISquadUserPaths ResolveUserPaths(ISquadUserPaths? userPaths = null)
+    public static ISquadUserPaths ResolveUserPaths(ISquadUserPaths? userPaths = null,
+        Func<string, string?>? environmentReader = null)
     {
         if (userPaths is not null) return userPaths;
 
-        string? home = Environment.GetEnvironmentVariable("HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
+        Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
+        string? home = reader("HOME");
+        if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
 
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        string? appData = Environment.GetEnvironmentVariable("APPDATA");
+        string? appData = reader("APPDATA");
         if (string.IsNullOrWhiteSpace(appData))
             appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
@@ -115,9 +117,10 @@ internal static class SquadCommandComposition
         return [new SquadModelPresetSelectionStore(userPaths)];
     }
 
-    public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null)
+    public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null,
+        Func<string, string?>? environmentReader = null)
     {
-        return new SquadStateStore(userPaths ?? ResolveUserPaths());
+        return new SquadStateStore(userPaths ?? ResolveUserPaths(null, environmentReader));
     }
 
     /// <summary>
@@ -126,15 +129,16 @@ internal static class SquadCommandComposition
     ///     because a global receipt's relative paths are only meaningful beneath each target's
     ///     own root.
     /// </summary>
-    public static ISquadGlobalRootResolver ResolveGlobalRoots()
+    public static ISquadGlobalRootResolver ResolveGlobalRoots(Func<string, string?>? environmentReader = null)
     {
-        string? home = Environment.GetEnvironmentVariable("HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetEnvironmentVariable("USERPROFILE");
+        Func<string, string?> reader = environmentReader ?? Environment.GetEnvironmentVariable;
+        string? home = reader("HOME");
+        if (string.IsNullOrWhiteSpace(home)) home = reader("USERPROFILE");
 
         if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         return new SquadGlobalRoots(
-            Environment.GetEnvironmentVariable,
+            reader,
             home ?? string.Empty,
             ReadFileTextOrNull);
     }
@@ -153,11 +157,12 @@ internal static class SquadCommandComposition
     /// </remarks>
     public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveGlobalTargetRoots(
         IReadOnlyList<SquadTarget> targets,
-        ISquadGlobalRootResolver? injectedGlobalRoots = null)
+        ISquadGlobalRootResolver? injectedGlobalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
         // The injected resolver is the one the lifecycle plans with, so the confirmation must name the
         // same roots. Only an unseamed run falls through to the environment and the real profile.
-        ISquadGlobalRootResolver globalRoots = injectedGlobalRoots ?? ResolveGlobalRoots();
+        ISquadGlobalRootResolver globalRoots = injectedGlobalRoots ?? ResolveGlobalRoots(environmentReader);
         List<(SquadTarget Target, string GlobalRoot)> resolved = [];
         foreach (SquadTarget target in targets)
             try
@@ -315,12 +320,13 @@ internal static class SquadCommandComposition
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "Caller manages lifecycle.")]
-    private static ISquadReleaseSource ResolveDefaultReleaseSource()
+    private static ISquadReleaseSource ResolveDefaultReleaseSource(Func<string, string?>? environmentReader = null)
     {
         string? localProductPath = TryFindLocalProductSquadRoot();
         if (localProductPath is not null) return new LocalCheckoutSquadReleaseSource(localProductPath);
 
-        return new GitHubSquadReleaseSource(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
+        return new GitHubSquadReleaseSource(ReleaseOrigin
+            .Resolve(environmentReader ?? Environment.GetEnvironmentVariable).ApiRoot);
     }
 
     private static string? TryFindLocalProductSquadRoot()
@@ -354,14 +360,17 @@ internal static class SquadCommandComposition
         ISquadRenderer? renderer = null,
         ISquadTransactionObserver? observer = null,
         TimeProvider? timeProvider = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
-        SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths);
+        SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths, environmentReader);
         ISquadReleaseSource resolvedReleaseSource = releaseSource
                                                     ?? new GitHubSquadReleaseSource(ReleaseOrigin
-                                                        .Resolve(Environment.GetEnvironmentVariable).ApiRoot);
+                                                        .Resolve(
+                                                            environmentReader ?? Environment.GetEnvironmentVariable)
+                                                        .ApiRoot);
         ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
-        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots ?? ResolveGlobalRoots();
+        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots ?? ResolveGlobalRoots(environmentReader);
 
         return new SquadLifecycleService(
             resolvedReleaseSource,
@@ -369,7 +378,8 @@ internal static class SquadCommandComposition
             resolvedStateStore,
             timeProvider,
             observer,
-            resolvedGlobalRoots);
+            resolvedGlobalRoots,
+            environmentReader: environmentReader);
     }
 
     /// <summary>

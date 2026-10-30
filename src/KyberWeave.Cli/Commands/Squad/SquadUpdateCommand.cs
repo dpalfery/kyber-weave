@@ -32,6 +32,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadUserPaths? _userPaths;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new update command using default dependencies.</summary>
     public SquadUpdateCommand()
@@ -56,7 +57,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadProjectPicker? picker = null,
         SquadInstanceService? instanceService = null,
-        KyberDashCapturePluginStep? capturePluginStep = null)
+        KyberDashCapturePluginStep? capturePluginStep = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -68,6 +70,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _picker = picker;
         _instanceService = instanceService;
         _capturePluginStep = capturePluginStep;
+        _environmentReader = environmentReader;
     }
 
     /// <summary>
@@ -133,7 +136,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
@@ -207,7 +211,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             stateStore,
             _releaseSource,
             _renderer,
-            globalRoots: _globalRoots);
+            globalRoots: _globalRoots,
+            environmentReader: _environmentReader);
 
         bool interactive = _isInteractive ?? SquadCommandComposition.IsInteractiveConsole();
 
@@ -447,7 +452,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // lifecycle plans with, so the confirmation names the real destinations.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             run.Scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots, _environmentReader)
                 : null;
 
         // The confirmation is the last gate before the lifecycle call — the only

@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -79,7 +79,7 @@ flowchart TD
 
     subgraph Council["LAYER 2 — The council (parallel, auto-skipping)"]
         direction LR
-        RL["review-lens ×12<br/>model-profile: general"]
+        RL["review-lens ×14<br/>model-profile: general"]
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
@@ -130,7 +130,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
 | `code-review` | Skill — the procedure, the lens catalogue, the report format | `products/kyber-squad/skills/code-review/SKILL.md` |
-| Lens files | 15 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
+| Lens files | 17 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
 | Host review guidance | `REVIEW.md` at the repository root, bound as `<review-guidance>` in Config Reg. Recurring defect classes, a lens map, and the attestation format (see [Review guidance](#review-guidance)) | `REVIEW.md` |
 | Technology checklists | 11 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
@@ -164,7 +164,7 @@ failure. There are two sources, and neither copies the other.
 
 The lens map has two axes:
 
-- **By lens**: each of the 15 catalogue lenses names the sections it takes. The three triage
+- **By lens**: each of the 17 catalogue lenses names the sections it takes. The three triage
   seats (`duplicate-implementation`, `static-analysis-triage`, `dependency-supply-chain`) take
   only the Ground rules and *What not to flag*, because they attribute tool output rather than
   judge code.
@@ -203,11 +203,11 @@ correctly, so a claim that does not hold is a review problem, not an engine rule
 
 ## Why lenses are files, not agents
 
-Fifteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
+Seventeen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Fifteen agents would push the canonical roster from 22 to 37, clutter every harness's agent
-picker, and produce fifteen near-identical descriptions that would collide under
+Seventeen agents would push the canonical roster from 22 to 39, clutter every harness's agent
+picker, and produce seventeen near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.
 
@@ -229,6 +229,8 @@ flowchart LR
         J10["supportability"]
         J11["infra-workflow"]
         J12["prior-art"]
+        J13["test-infrastructure"]
+        J14["documentation-accuracy"]
     end
 
     subgraph T["review-triage — attribution · fast"]
@@ -244,7 +246,7 @@ flowchart LR
 
 A triage seat's input is something a tool already produced. Its job — deciding which of that
 output *this change* is responsible for — is bounded and checkable, which is what makes it
-safe to run on the `fast` model profile. Twelve lenses are not that, and would produce worse
+safe to run on the `fast` model profile. Fourteen lenses are not that, and would produce worse
 findings cheaply, which costs more than it saves.
 
 `prior-art` and `duplicate-implementation` sit on opposite sides of that line while holding one
@@ -253,7 +255,7 @@ verbatim is a fact a gate established, so attributing it is triage. A *type* tha
 another is a judgement about responsibility that needs both types read, so it is not.
 
 **Every lens auto-skips.** Each lens file opens with an applicability predicate and returns
-`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes fifteen lenses
+`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes seventeen lenses
 affordable — and the skip is *recorded*, because a dimension that was deliberately skipped and
 one that was quietly never looked at must not read the same in a report.
 
@@ -378,15 +380,24 @@ review:
   coverage:
     file-line-percent: 85
   policy:
+    strictness: balanced   # lenient | balanced | strict
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
         expires: 2026-11-18                # required
 ```
+
+**Strictness.** `policy.strictness` selects a preset for the two numbers the verdict engine reads:
+`lenient` (`min-confidence: 8`, `major-count-blocks: 5`), `balanced` (`7`, `3`, the default) or
+`strict` (`5`, `1`, so one surviving major requests changes). An explicit `min-confidence` or
+`major-count-blocks` in the same block overrides the preset. The code-review skill passes the
+strictness to every lens so a strict host receives lower-confidence findings rather than having
+them withheld at the source. Minor findings never block at any level, which keeps the
+autonomous-gate rule that only critical and major findings gate a change.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
@@ -513,6 +524,10 @@ partitioned by ecosystem:
 
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
+
+#### Fast test git repository fixture template
+
+Review gate integration and command tests (`ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, `DocsInitReviewGatesTests`) initialize test repositories using a shared, pre-seeded template (`TestGitRepositoryTemplate`). The template is seeded once per template key (agent, council, and docs-init variants). Individual test fixtures perform a sub-millisecond filesystem copy of the whole pre-seeded working tree including `.git` via `TestGitRepositoryTemplate.CreateRepositoryCopy` rather than spawning repeated `git init`, `git add`, and `git commit` child processes. Untracked test configuration files (`.kyber-weave/`) are excluded via `.git/info/exclude` only for agent and council templates; docs-init templates commit the host config (`.kyber-weave/kyber-weave.yml`) as part of the fixture.
 
 Unknown keys are not silently dropped: any key outside the tables above loads anyway but
 is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate

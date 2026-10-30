@@ -123,6 +123,82 @@ public class ReviewConfigTests
         Assert.Equal(new DateOnly(2026, 11, 18), Assert.Single(config.Policy.Suppressions).Expires);
     }
 
+    [Fact]
+    public void StrictnessDefaultsToBalancedWithTheProductThresholds()
+    {
+        ReviewPolicy policy = Load("review:\n  policy:\n    max-reviewable-lines: 5000\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Balanced, policy.Strictness);
+        Assert.Equal(7, policy.MinConfidence);
+        Assert.Equal(3, policy.MajorCountBlocks);
+    }
+
+    [Theory]
+    [InlineData("lenient", ReviewStrictness.Lenient, 8, 5)]
+    [InlineData("balanced", ReviewStrictness.Balanced, 7, 3)]
+    [InlineData("strict", ReviewStrictness.Strict, 5, 1)]
+    [InlineData("Strict", ReviewStrictness.Strict, 5, 1)]
+    public void StrictnessSelectsTheConfidenceFloorAndMajorThreshold(
+        string value, ReviewStrictness expected, int floor, int majors)
+    {
+        ReviewPolicy policy = Load($"review:\n  policy:\n    strictness: {value}\n").Policy;
+
+        Assert.Equal(expected, policy.Strictness);
+        Assert.Equal(floor, policy.MinConfidence);
+        Assert.Equal(majors, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnExplicitThresholdOverridesTheStrictnessPreset()
+    {
+        ReviewPolicy policy = Load(
+            "review:\n  policy:\n    strictness: strict\n    min-confidence: 8\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(8, policy.MinConfidence);
+        Assert.Equal(1, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnExplicitMajorThresholdOverridesTheStrictnessPreset()
+    {
+        ReviewPolicy policy = Load(
+            "review:\n  policy:\n    strictness: strict\n    major-count-blocks: 2\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(2, policy.MajorCountBlocks);
+        Assert.Equal(5, policy.MinConfidence);
+    }
+
+    [Fact]
+    public void ThePaddedStrictnessValueIsAcceptedAndAppliesItsPreset()
+    {
+        ReviewPolicy policy = Load("review:\n  policy:\n    strictness: \" strict \"\n").Policy;
+
+        Assert.Equal(ReviewStrictness.Strict, policy.Strictness);
+        Assert.Equal(5, policy.MinConfidence);
+        Assert.Equal(1, policy.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void TheBalancedPresetMatchesTheProductDefaults()
+    {
+        ReviewPolicy balanced = ReviewPolicy.ForStrictness(ReviewStrictness.Balanced);
+
+        Assert.Equal(ReviewPolicy.ProductDefaults.MinConfidence, balanced.MinConfidence);
+        Assert.Equal(ReviewPolicy.ProductDefaults.MajorCountBlocks, balanced.MajorCountBlocks);
+    }
+
+    [Fact]
+    public void AnUnknownStrictnessIsRejectedAndNamesTheValidValues()
+    {
+        string message = Invalid("review:\n  policy:\n    strictness: paranoid\n").Message;
+
+        Assert.Contains("strictness", message, StringComparison.Ordinal);
+        Assert.Contains("lenient", message, StringComparison.Ordinal);
+        Assert.Contains("strict", message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("min-confidence: 0", "min-confidence")]
     [InlineData("min-confidence: 11", "min-confidence")]

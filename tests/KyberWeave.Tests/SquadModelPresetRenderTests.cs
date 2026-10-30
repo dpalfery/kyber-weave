@@ -1,8 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -20,6 +21,9 @@ public sealed class SquadModelPresetRenderTests
 
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> UnpresetRenders = new();
+    private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> ProbePresetRenders = new();
 
     public static TheoryData<SquadTarget> AllTargets()
     {
@@ -61,6 +65,37 @@ public sealed class SquadModelPresetRenderTests
             new WarpRenderer(),
             new ZCodeRenderer()
         ]);
+    }
+
+    private static Task<SquadRenderResult> GetUnpresetRenderAsync(SquadTarget target)
+    {
+        return UnpresetRenders.GetOrAdd(target, static t =>
+        {
+            SquadRendererRegistry registry = CreateRegistry();
+            SquadRenderRequest request = new(
+                ProductRoot,
+                [t],
+                SquadDeploymentScope.Project,
+                ModelPresets: null,
+                PreloadedSource: TestSquadCorpus.CanonicalSource);
+            return registry.RenderAsync(request);
+        });
+    }
+
+    private static Task<SquadRenderResult> GetProbePresetRenderAsync(SquadTarget target)
+    {
+        return ProbePresetRenders.GetOrAdd(target, static t =>
+        {
+            SquadModelPreset probePreset = CreateUniversalProbePreset(TestSquadCorpus.CanonicalSource);
+            SquadRendererRegistry registry = CreateRegistry();
+            SquadRenderRequest request = new(
+                ProductRoot,
+                [t],
+                SquadDeploymentScope.Project,
+                ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [t] = probePreset },
+                PreloadedSource: TestSquadCorpus.CanonicalSource);
+            return registry.RenderAsync(request);
+        });
     }
 
     /// <summary>
@@ -150,24 +185,8 @@ public sealed class SquadModelPresetRenderTests
     [MemberData(nameof(AllTargets))]
     public async Task RenderWithPresetPreservesIdenticalRelativePathsAcrossAllTargets(SquadTarget target)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadModelPreset probePreset = CreateUniversalProbePreset(source);
-        SquadRendererRegistry registry = CreateRegistry();
-
-        SquadRenderRequest requestWithout = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            null);
-
-        SquadRenderRequest requestWith = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            probePreset);
-
-        SquadRenderResult resultWithout = await registry.RenderAsync(requestWithout);
-        SquadRenderResult resultWith = await registry.RenderAsync(requestWith);
+        SquadRenderResult resultWithout = await GetUnpresetRenderAsync(target);
+        SquadRenderResult resultWith = await GetProbePresetRenderAsync(target);
 
         Assert.True(resultWithout.Success, string.Join("; ", resultWithout.Errors));
         Assert.True(resultWith.Success, string.Join("; ", resultWith.Errors));
@@ -182,24 +201,8 @@ public sealed class SquadModelPresetRenderTests
     [MemberData(nameof(AllTargets))]
     public async Task RenderWithPresetPreservesByteIdenticalContentOutsideModelLines(SquadTarget target)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadModelPreset probePreset = CreateUniversalProbePreset(source);
-        SquadRendererRegistry registry = CreateRegistry();
-
-        SquadRenderRequest requestWithout = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            null);
-
-        SquadRenderRequest requestWith = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            probePreset);
-
-        SquadRenderResult resultWithout = await registry.RenderAsync(requestWithout);
-        SquadRenderResult resultWith = await registry.RenderAsync(requestWith);
+        SquadRenderResult resultWithout = await GetUnpresetRenderAsync(target);
+        SquadRenderResult resultWith = await GetProbePresetRenderAsync(target);
 
         Assert.True(resultWithout.Success, string.Join("; ", resultWithout.Errors));
         Assert.True(resultWith.Success, string.Join("; ", resultWith.Errors));
@@ -223,24 +226,8 @@ public sealed class SquadModelPresetRenderTests
     [MemberData(nameof(AllTargets))]
     public async Task EveryTargetExceptWarpChangesAtLeastOneRenderedFileWithPreset(SquadTarget target)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadModelPreset probePreset = CreateUniversalProbePreset(source);
-        SquadRendererRegistry registry = CreateRegistry();
-
-        SquadRenderRequest requestWithout = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            null);
-
-        SquadRenderRequest requestWith = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            probePreset);
-
-        SquadRenderResult resultWithout = await registry.RenderAsync(requestWithout);
-        SquadRenderResult resultWith = await registry.RenderAsync(requestWith);
+        SquadRenderResult resultWithout = await GetUnpresetRenderAsync(target);
+        SquadRenderResult resultWith = await GetProbePresetRenderAsync(target);
 
         Assert.True(resultWithout.Success, string.Join("; ", resultWithout.Errors));
         Assert.True(resultWith.Success, string.Join("; ", resultWith.Errors));
@@ -267,17 +254,9 @@ public sealed class SquadModelPresetRenderTests
     [MemberData(nameof(AllTargets))]
     public async Task RenderedFileContainsProbeModelExactlyWhenModelResolutionReturnsIt(SquadTarget target)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelPreset probePreset = CreateUniversalProbePreset(source);
-        SquadRendererRegistry registry = CreateRegistry();
-
-        SquadRenderRequest requestWith = new(
-            ProductRoot,
-            [target],
-            SquadDeploymentScope.Project,
-            probePreset);
-
-        SquadRenderResult resultWith = await registry.RenderAsync(requestWith);
+        SquadRenderResult resultWith = await GetProbePresetRenderAsync(target);
         Assert.True(resultWith.Success, string.Join("; ", resultWith.Errors));
 
         SquadModelProfiles effectiveProfiles = probePreset.ApplyTo(source.ModelProfiles);
@@ -312,7 +291,7 @@ public sealed class SquadModelPresetRenderTests
     [Fact]
     public async Task RenderWithSelectivePresetOmitsModelWhenResolutionReturnsNull()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = CreateRegistry();
 
         Dictionary<string, SquadModelProfile> selectiveProfiles = new(StringComparer.Ordinal)
@@ -328,7 +307,8 @@ public sealed class SquadModelPresetRenderTests
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
-            selectivePreset);
+            ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = selectivePreset },
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -356,7 +336,7 @@ public sealed class SquadModelPresetRenderTests
     [Fact]
     public async Task RenderExecutionDoesNotMutateCanonicalCorpusOnDisk()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadModelPreset probePreset = CreateUniversalProbePreset(source);
         SquadRendererRegistry registry = CreateRegistry();
 
@@ -367,7 +347,8 @@ public sealed class SquadModelPresetRenderTests
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
-            probePreset);
+            ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = probePreset },
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -383,7 +364,8 @@ public sealed class SquadModelPresetRenderTests
             ProductRoot,
             [SquadTarget.Claude],
             SquadDeploymentScope.Project,
-            ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = null! });
+            ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = null! },
+            PreloadedSource: TestSquadCorpus.CanonicalSource);
 
         SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
         Assert.NotNull(source);

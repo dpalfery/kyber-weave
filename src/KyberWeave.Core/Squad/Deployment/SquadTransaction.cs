@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -86,12 +87,32 @@ public sealed class SquadTransaction
         _observer = observer;
     }
 
+    private static bool _defaultSyncToDisk = true;
+    private static readonly AsyncLocal<bool?> SyncToDiskOverride = new();
+
     /// <summary>
     ///     Whether journal, restore, and artifact writes are forced to stable storage. Always
     ///     <see langword="true" /> in production; the test assembly turns it off because a full
     ///     device flush costs milliseconds per file on macOS and the tests never power-cycle.
     /// </summary>
-    internal static bool SyncToDisk { get; set; } = true;
+    internal static bool SyncToDisk
+    {
+        get => SyncToDiskOverride.Value ?? _defaultSyncToDisk;
+        set => _defaultSyncToDisk = value;
+    }
+
+    /// <summary>
+    ///     Overrides <see cref="SyncToDisk" /> for the duration of the returned scope within the current
+    ///     asynchronous execution flow.
+    /// </summary>
+    /// <param name="enabled">Whether disk synchronization should be enabled in the active scope.</param>
+    /// <returns>An <see cref="IDisposable" /> that restores the prior sync override on disposal.</returns>
+    internal static IDisposable UseSyncToDiskScope(bool enabled)
+    {
+        bool? prior = SyncToDiskOverride.Value;
+        SyncToDiskOverride.Value = enabled;
+        return new SyncToDiskScope(prior);
+    }
 
     /// <summary>
     ///     Warnings raised after a transaction has committed. A committed deployment is never rolled back
@@ -3397,6 +3418,22 @@ public sealed class SquadTransaction
         {
             _journal?.Dispose();
             _journal = null;
+        }
+    }
+
+    private sealed class SyncToDiskScope(bool? prior) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            SyncToDiskOverride.Value = prior;
         }
     }
 

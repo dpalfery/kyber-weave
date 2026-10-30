@@ -46,6 +46,8 @@ Where the lens names a project standard, read the standard rather than inferring
 
 **Apply the review guidance.** The invocation supplies the host's review-guidance sections (from `REVIEW.md`) and their ground rules. Apply them to the diff alongside your lens: they are the host's own rules, and they outrank a generic standard where the two differ. A rule that does not match the change is not a finding. Where a finding applies a rule, name it in the finding's `guidance:` field: the REVIEW.md rule id where the rule has one (`R2` to `R16`), or its section number for an untagged bullet (for example `§1`). If the invocation supplies no guidance sections, say so in your output rather than applying your defaults silently.
 
+**Apply the strictness.** The invocation may supply `strictness` (`lenient`, `balanced`, or `strict`) and the effective `min-confidence`. At `strict`, report every finding you can support at or above that floor, including lower-confidence majors and minors you would otherwise leave out. At `lenient`, report only findings you would defend to the floor. At every level the evidence bar is unchanged: an `excerpt`, `evidence` and `failure_scenario` are required, and `confidence` states how sure you are, never how strict the host is. If no strictness is supplied, treat it as `balanced`.
+
 # 3. Report in one schema
 
 Every finding is one block in this exact shape:

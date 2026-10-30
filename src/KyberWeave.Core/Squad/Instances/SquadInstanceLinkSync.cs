@@ -311,11 +311,17 @@ public static class SquadInstanceLinkSync
 
         try
         {
-            using (FileStream stream = new(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = new(
+                       tempPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       4096,
+                       SquadTransaction.SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
             {
                 byte[] bytes = new UTF8Encoding(false).GetBytes(text);
                 stream.Write(bytes);
-                stream.Flush(true);
+                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
             }
 
             File.Move(tempPath, targetPath, true);
