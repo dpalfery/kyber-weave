@@ -1,6 +1,6 @@
 ---
 name: response-format
-description: "Carries the shape of a user-facing Squad response: a title line, a bottom line of at most 3 sentences for a reader with no prior involvement, and the open decisions — never naming the format itself. Use when composing any reply to a human through a Squad agent. Do not use for digests consumed only by other agents."
+description: "MANDATORY: load this skill at the start of every turn, before any other action and before writing any reply to a human through a Squad agent. It carries the shape of a user-facing Squad response: a title line, a bottom line of at most 3 sentences for a reader with no prior involvement, and the open decisions — never naming the format itself. Do not use for digests consumed only by other agents."
 license: MIT
 metadata:
   author: dpalfery
