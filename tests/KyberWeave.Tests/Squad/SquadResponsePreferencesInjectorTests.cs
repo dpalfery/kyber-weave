@@ -14,14 +14,13 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void ReadEffective_UsesHomeFileWhenPresentAndNonWhitespace()
     {
-        string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-home-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(home);
+        string home = NewHomeDirectory();
         string expected = "Use short tool calls and be explicit about assumptions.";
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
         File.WriteAllText(path, expected, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(warnings);
+        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
 
         Assert.Equal(expected, actual);
         Assert.Empty(warnings);
@@ -33,13 +32,12 @@ public sealed class SquadResponsePreferencesInjectorTests
     [InlineData("\t\n \r\n")]
     public void ReadEffective_UsesShippedDefaultWhenHomeTextIsMissingOrWhitespace(string homeText)
     {
-        string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-empty-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(home);
+        string home = NewHomeDirectory();
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
         File.WriteAllText(path, homeText, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceSource.ReadEffective(warnings);
+        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         Assert.Empty(warnings);
@@ -48,27 +46,19 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void ReadEffective_WhenSourceIsUnreadable_FallsBackToDefaultAndWarnsExactlyOnceWithoutWriting()
     {
-        string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-unreadable-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(home);
+        string home = NewHomeDirectory();
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
-        File.WriteAllText(path, "operator text", Encoding.UTF8);
-
-        string original = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (OperatingSystem.IsWindows())
-        {
-            // No-op: the implementation is expected to read through a user-home resolver rather than mutate
-            // the process environment, so the observable contract is the warning + default fallback.
-        }
+        const string originalText = "operator text";
+        File.WriteAllText(path, originalText, Encoding.UTF8);
 
         List<string> warnings = [];
-
-        string actual = SquadResponseGuidanceSource.ReadEffective(warnings);
+        string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
         Assert.Contains("response-guidance", warning, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(path), "The source must not create, overwrite or delete the home file.");
-        Assert.Equal("operator text", File.ReadAllText(path));
+        Assert.True(File.Exists(path), "The source must not delete or replace the home file while it falls back.");
+        Assert.Equal(originalText, File.ReadAllText(path));
     }
 
     [Fact]
@@ -127,6 +117,13 @@ public sealed class SquadResponsePreferencesInjectorTests
         SquadRenderResult nonEntry = RenderResult(("docs/notes.md", "plain text"));
         SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(nonEntry, "effective");
         Assert.Equal("plain text", Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
+    }
+
+    private static string NewHomeDirectory()
+    {
+        string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-home-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(home);
+        return home;
     }
 
     private static SquadRenderResult RenderResult(params (string RelativePath, string Content)[] entries)
