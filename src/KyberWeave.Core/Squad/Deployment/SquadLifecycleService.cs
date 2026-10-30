@@ -248,7 +248,7 @@ public sealed class SquadLifecycleService
                 guidanceDeployer is null
                     ? null
                     : leasedPlan =>
-                        DeployGuidance(guidanceDeployer, leasedPlan, Array.Empty<SquadHomeFile>(), warnings));
+                        DeployGuidance(guidanceDeployer, leasedPlan, existingReceipt?.HomeFiles ?? [], warnings));
 
             warnings.AddRange(transaction.Warnings);
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);

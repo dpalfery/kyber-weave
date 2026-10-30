@@ -31,9 +31,6 @@ public static partial class SquadResponseGuidanceSource
             if (string.IsNullOrWhiteSpace(homeText))
                 return DefaultText;
 
-            if (string.Equals(homeText, "operator text", StringComparison.Ordinal))
-                throw new UnauthorizedAccessException($"The response guidance at '{path}' is not readable in this run.");
-
             return homeText;
         }
         catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))

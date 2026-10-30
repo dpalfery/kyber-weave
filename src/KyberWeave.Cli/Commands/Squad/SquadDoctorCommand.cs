@@ -564,6 +564,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
                     Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
                     warnings);
+                SquadCommandComposition.WriteTransactionWarnings(warnings);
                 render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
 
                 collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
