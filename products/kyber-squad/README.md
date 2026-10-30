@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **24 canonical agents** and **29 canonical skills**,
+It maintains a target-neutral, declarative catalog of **24 canonical agents** and **28 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -59,7 +59,7 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # 29 canonical skill directories; 116 recursive files
+├── skills/                             # 28 canonical skill directories; 115 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -82,7 +82,6 @@ products/kyber-squad/
 │   ├── product-owner/
 │   ├── python-dev/
 │   ├── resharper-clt/
-│   ├── response-format/
 │   ├── rust-dev/
 │   ├── security-review/
 │   ├── setup-dev-environment/
@@ -123,15 +122,15 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (29 Canonical Skills)
+### 2. Skills (28 Canonical Skills)
 
-The 29 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The 28 canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop`,
-`kilo-review-loop`, and `response-format` are authored in Kyber-Squad. Every imported raw `SKILL.md` except the five
+and `kilo-review-loop` are authored in Kyber-Squad. Every imported raw `SKILL.md` except the five
 explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 87 supplemental resources, for 116 skill-tree files in total; recursive APM and
+tree also retains 87 supplemental resources, for 115 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
