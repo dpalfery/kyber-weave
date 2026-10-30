@@ -119,8 +119,8 @@ public sealed class SquadPerformanceContractTests
             content.Contains("precomputed", StringComparison.OrdinalIgnoreCase),
             $"{relativePath} must specify pre-computed test commands in task packets.");
         Assert.True(
-            content.Contains("plan", StringComparison.OrdinalIgnoreCase) &&
-            content.Contains("worker", StringComparison.OrdinalIgnoreCase),
+            content.Contains("out of worker context", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("out of the worker context", StringComparison.OrdinalIgnoreCase),
             $"{relativePath} must keep plan/spec files out of worker context.");
     }
 

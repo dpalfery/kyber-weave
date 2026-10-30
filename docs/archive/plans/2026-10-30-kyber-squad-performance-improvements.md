@@ -92,10 +92,10 @@ impact-components: [KyberSquad]
 
 | ID | Target component | Target doc type | Proposed location | Summary of durable knowledge |
 |---|---|---|---|---|
-| H1 | KyberSquad | architecture | [`docs/kyber-squad/architecture.md`](../kyber-squad/architecture.md) | Concurrency and scheduling model (maximum parallelization of non-overlapping tasks and test runs via worktree/artifacts isolation; serial branch-head integration); strict adversarial two-agent RED (`test-dev`) vs GREEN (`csharp-dev` / implementation specialist) boundary; bundling small same-role tasks with preserved independent verification pass. |
-| H2 | KyberSquad | onboarding | [`docs/kyber-squad/onboarding.md`](../kyber-squad/onboarding.md) | Task execution runbook: inlined task packets (entry-file table, acceptance checklist), pre-computed assembly test runner command (`-class`), and terse 6-field completion digest contract. |
-| H3 | KyberSquad | requirements | [`docs/kyber-squad/requirements.md`](../kyber-squad/requirements.md) | Conductor execution invariants: strict 6-field digest validation, zero-stashing red proof contract, build-once test-many iteration rules, and adversarial RED/GREEN role separation. |
-| H4 | KyberSquad | coding-standard | [`docs/standards/test/README.md`](../standards/test/README.md) | Fast .NET direct assembly runner invocation (`dotnet <dll> -class ... -reporter quiet`), `--no-build` filtered test iteration, and clean-tree / worktree red proof verification. |
+| H1 | KyberSquad | architecture | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) | Concurrency and scheduling model (maximum parallelization of non-overlapping tasks and test runs via worktree/artifacts isolation; serial branch-head integration); strict adversarial two-agent RED (`test-dev`) vs GREEN (`csharp-dev` / implementation specialist) boundary; bundling small same-role tasks with preserved independent verification pass. |
+| H2 | KyberSquad | onboarding | [`docs/kyber-squad/onboarding.md`](../../kyber-squad/onboarding.md) | Task execution runbook: inlined task packets (entry-file table, acceptance checklist), pre-computed assembly test runner command (`-class`), and terse 6-field completion digest contract. |
+| H3 | KyberSquad | requirements | [`docs/kyber-squad/requirements.md`](../../kyber-squad/requirements.md) | Conductor execution invariants: strict 6-field digest validation, zero-stashing red proof contract, build-once test-many iteration rules, and adversarial RED/GREEN role separation. |
+| H4 | KyberSquad | coding-standard | [`docs/standards/test/README.md`](../../standards/test/README.md) | Fast .NET direct assembly runner invocation (`dotnet <dll> -class ... -reporter quiet`), `--no-build` filtered test iteration, and clean-tree / worktree red proof verification. |
 
 ---
 
