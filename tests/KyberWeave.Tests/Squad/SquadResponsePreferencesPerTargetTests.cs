@@ -41,6 +41,9 @@ public sealed partial class SquadResponsePreferencesPerTargetTests
             { SquadTarget.Antigravity, "conductor", [".agents/agents/conductor/agent.md"] },
             { SquadTarget.Antigravity, "bug-crusher", [".agents/agents/bug-crusher/agent.md"] },
 
+            { SquadTarget.Factory, "conductor", [".factory/droids/conductor.md"] },
+            { SquadTarget.Factory, "bug-crusher", [".factory/droids/bug-crusher.md"] },
+
             { SquadTarget.Warp, "conductor", [".warp/skills/conductor/SKILL.md", ".warp/skills/role-conductor/SKILL.md"] },
             { SquadTarget.Warp, "bug-crusher", [".warp/skills/bug-crusher/SKILL.md", ".warp/skills/role-bug-crusher/SKILL.md"] },
 
