@@ -115,13 +115,13 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
-    /// Guards the isolation rule: packing is a function of the canonical source alone, so the operator's
-    /// home guidance file is neither read into nor written by an archive. The home file is only inspected
-    /// read-only here; a content-level absence check is conditional because it is vacuous while the home
-    /// file equals the shipped default.
+    /// Guards the isolation rule: the packer consults the home seam but ships only the shipped default, so
+    /// the operator's home guidance never reaches an archive and the home file is neither written nor removed.
+    /// The seam must be consulted; a packer that ignores it would make the isolation check vacuous, because
+    /// no home lookup would ever be exercised against a non-default home file.
     /// </summary>
     [Fact]
-    public void Pack_DoesNotReadOrWriteTheOperatorHomeGuidance()
+    public void Pack_ConsultsTheHomeSeamButShipsOnlyTheShippedDefault()
     {
         // The operator's home is a temp directory holding a non-default guidance, so the leak check always
         // has input. The home is supplied through the injectable environment seam, so no process-wide
@@ -149,12 +149,22 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home", readEnvironment);
         string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home", readEnvironment);
 
-        Assert.Empty(homeLookups);
+        Assert.NotEmpty(homeLookups);
         Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
         Assert.True(
             homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
             $"Packing changed the operator home guidance at '{homePath}'.");
         Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
+
+        using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
+        {
+            AssertCarrierShipsDefault(apmArchive, ConductorAgent);
+        }
+
+        using (ZipArchive pluginsArchive = ZipFile.OpenRead(pluginsPath))
+        {
+            AssertCarrierShipsDefault(pluginsArchive, BugCrusherSkill);
+        }
 
         foreach (string archivePath in new[] { apmPath, pluginsPath })
         {

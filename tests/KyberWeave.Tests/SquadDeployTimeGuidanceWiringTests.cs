@@ -177,8 +177,12 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         }
 
         Assert.True(update.Success, DescribeFailure(update));
-        // The degraded path is named in the warnings the CLI prints, not only in the plan.
-        Assert.Contains("conductor.toml", string.Join(Environment.NewLine, update.Warnings ?? []), StringComparison.Ordinal);
+        // The degraded path is named in the warnings the CLI prints, not only in the plan, and the warning
+        // names the target too. The target must appear outside the quoted path: a target-relative path can
+        // carry a ".codex/" prefix, which would otherwise satisfy the check without naming the target.
+        Assert.Contains(
+            update.Warnings ?? [],
+            warning => NamesPathAndTargetOutsideIt(warning, "conductor.toml", "codex"));
     }
 
     [Fact]
@@ -209,7 +213,9 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
 
         Assert.True(dryRun.Success, DescribeFailure(dryRun));
         Assert.True(dryRun.DryRun);
-        Assert.Contains("conductor.toml", string.Join(Environment.NewLine, dryRun.Warnings ?? []), StringComparison.Ordinal);
+        Assert.Contains(
+            dryRun.Warnings ?? [],
+            warning => NamesPathAndTargetOutsideIt(warning, "conductor.toml", "codex"));
     }
 
     [Fact]
@@ -441,6 +447,21 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unexpected target.")
         };
+    }
+
+    /// <summary>
+    ///     True when the warning names the degraded file and the target outside the quoted path. A
+    ///     target-relative path can carry a target prefix such as <c>.codex/</c>, so the target must be
+    ///     named by the warning text itself.
+    /// </summary>
+    private static bool NamesPathAndTargetOutsideIt(string warning, string fileName, string target)
+    {
+        if (!warning.StartsWith("Could not read deployed file", StringComparison.Ordinal))
+            return false;
+
+        string withoutQuotedPath = System.Text.RegularExpressions.Regex.Replace(warning, "'[^']*'", "''");
+        return warning.Contains(fileName, StringComparison.Ordinal)
+            && withoutQuotedPath.Contains(target, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DescribeFailure(SquadLifecycleResult result)
