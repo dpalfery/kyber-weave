@@ -6,6 +6,8 @@
 //     side) and the canon adapter (engine side) both read. `import type` is erased at build
 //     time and carries no behaviour, so it is allowed; any value import is a finding.
 //   - src/capture/harnesses/opencode-plugin/skills-block.ts: no imports of any kind except `node:`.
+//   - src/capture/harnesses/opencode-plugin/contract.ts: the wire contract v3 constants and the id
+//     derivation. The plugin, the receiver and the golden-body tests all read it, so it stays import-free.
 
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -18,6 +20,7 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const LEAVES = [
   'canon/adapters/opencode-envelope.ts',
   'capture/harnesses/opencode-plugin/skills-block.ts',
+  'capture/harnesses/opencode-plugin/contract.ts',
 ]
 
 /** Module specifiers of every non-`node:` import or re-export that survives compilation. */

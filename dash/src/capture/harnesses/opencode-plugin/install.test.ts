@@ -27,6 +27,10 @@ function temp(prefix: string): string {
 /** No OPENCODE_CONFIG_DIR unless a test injects one: tests never read the real process env. */
 const NO_ENV: NodeJS.ProcessEnv = {}
 
+/** The install line for OpenCode 2.x: it picks the plugin up for new sessions; restart is the fallback. */
+const OPENCODE_V2_GUIDANCE =
+  'harness opencode: OpenCode 2.x picks up the capture plugin for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.'
+
 describe('opencodePluginPaths', () => {
   it('defaults to ~/.config/opencode/plugins and keeps receipt and consent under ~/.kyberdash', () => {
     const paths = opencodePluginPaths('/home/me', { platform: 'linux' }, { processEnv: NO_ENV })
@@ -101,7 +105,16 @@ describe('installOpencodePlugin: preserve mode', () => {
     expect(result.exitCode).toBe(0)
     expect(result.disposition).toBe('upgraded')
     expect(readFileSync(paths.pluginFile, 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
-    expect(result.out.join('\n')).toMatch(/restart OpenCode/i)
+    expect(result.out).toContain(OPENCODE_V2_GUIDANCE)
+    expect(result.out.join('\n')).not.toContain('restart OpenCode so it loads')
+  })
+
+  it('a fresh install prints the V2 guidance and never the old restart line', () => {
+    const home = temp('oc-guidance-')
+    const result = preserve(home)
+    expect(result.exitCode).toBe(0)
+    expect(result.out).toContain(OPENCODE_V2_GUIDANCE)
+    expect(result.out.join('\n')).not.toContain('restart OpenCode so it loads')
   })
 
   it('keeps a plugin of ours that the owner edited, warns, and exits 0', () => {

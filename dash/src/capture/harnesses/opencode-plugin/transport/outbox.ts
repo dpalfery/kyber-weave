@@ -1,8 +1,7 @@
 // T5 bounded outbox: offline spool with retry/backoff/jitter, drop-oldest
 // accounting, 429 batch-halving, and a status surface.
 //
-// The host contract is absolute: `enqueue` (and therefore the plugin's
-// `emit` port built on it) is synchronous, never throws, and never blocks.
+// The host contract is absolute: `enqueue` is synchronous, never throws, and never blocks.
 // When the loopback receiver is down, events spool up to `capacity`; beyond
 // that the oldest event is dropped and `dropped_spans` counts it. A
 // background pass retries with exponential backoff and full-range jitter; a
@@ -19,11 +18,10 @@
 // or chatty transport cannot wedge the worker; `close()` aborts the
 // in-flight POST and settles every waiter.
 
-import type { OpencodeHookEvent, OpencodePluginEmitter } from '../plugin.js'
-import { DEFAULT_OTLP_ENDPOINT, OtlpDeliveryError, buildOtlpTracesBody } from './otlp-sender.js'
+import { DEFAULT_OTLP_ENDPOINT, OtlpDeliveryError, buildOtlpTracesBody, type OtlpWireSpan } from './otlp-sender.js'
 
-/** What the outbox carries: plugin hook events, span-anchored downstream. */
-export type OutboxEvent = OpencodeHookEvent
+/** What the outbox carries: finished wire spans, one trace per OpenCode session. */
+export type OutboxEvent = OtlpWireSpan
 
 export type OutboxStatus = {
   /** Events currently spooled, awaiting delivery. Never exceeds `capacity`. */
@@ -65,9 +63,7 @@ export type OutboxOptions = {
 }
 
 export type Outbox = {
-  /** The plugin `emit` port: enqueue fire-and-forget, never blocks the host. */
-  emit: OpencodePluginEmitter
-  /** Synchronous, non-throwing spool; drops oldest-first when full. */
+  /** Synchronous, non-throwing spool, fire-and-forget; never blocks the host. Drops oldest-first when full. */
   enqueue: (event: OutboxEvent) => void
   /** Snapshot of the spool in arrival order (oldest first). */
   peek: () => readonly OutboxEvent[]
@@ -280,8 +276,8 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       lastError = messageOf(error)
       lastStatusCode = error instanceof OtlpDeliveryError ? error.statusCode : null
       if (error instanceof OtlpDeliveryError && error.statusCode === 429) {
-        // The receiver is throttling: halve the next batch, floor 1.
-        effectiveBatchSize = Math.max(1, Math.floor(effectiveBatchSize / 2))
+        // The receiver is throttling: retry at half the size of the batch it refused, floor 1.
+        effectiveBatchSize = Math.max(1, Math.floor(batch.length / 2))
       }
       await sleepOrClosed(backoffDelayMs())
       return 'failed'
@@ -377,10 +373,6 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     triggerFlush()
   }
 
-  const emit: OpencodePluginEmitter = (event) => {
-    enqueue(event)
-  }
-
   /**
    * Wait until the worker is idle with no flagged work. Under a steady
    * arrival stream this waits for a lull, like the old chain tip did — but
@@ -463,5 +455,5 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
 
   const peek = (): readonly OutboxEvent[] => [...queue]
 
-  return { emit, enqueue, peek, status, flushSettled, drain, close }
+  return { enqueue, peek, status, flushSettled, drain, close }
 }

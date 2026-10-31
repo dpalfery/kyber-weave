@@ -885,6 +885,20 @@ public sealed class UpdateCommandTests : IDisposable
         "kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"
     ];
 
+    // The plugin verb's guidance lines are every stdout line that starts with this prefix (D22). The copy after the
+    // prefix belongs to kyberDash, so these tests use neutral text and never pin its wording.
+    private const string HarnessPrefix = "harness opencode: ";
+    private const string GuidanceAlpha = "guidance from the verb, line alpha";
+    private const string GuidanceBeta = "guidance from the verb, line beta";
+
+    /// <summary>The plugin verb's stdout: one verdict line, then each given line.</summary>
+    private static ProcessResult PluginVerbStdout(string verdict, params string[] lines)
+    {
+        string stdout = $"opencode plugin: {verdict} /x/kyberdash-opencode.js\n" +
+                        string.Concat(lines.Select(line => line + "\n"));
+        return new ProcessResult(0, stdout, string.Empty);
+    }
+
     /// <summary>After the binaries commit, the engine runs first, then the tray, then the plugin.</summary>
     [Fact]
     public void RunReconcilesAfterCommitInEngineTrayPluginOrder()
@@ -1062,12 +1076,15 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
-    /// <summary>An installed or upgraded plugin prints the restart line; a kept one does not.</summary>
+    /// <summary>
+    /// The update relays the plugin verb's own guidance line for every verdict, including a kept one when the verb
+    /// sends one. The wording is kyberDash's (ADR 0031); the updater must not print its own.
+    /// </summary>
     [Theory]
-    [InlineData("upgraded", true)]
-    [InlineData("installed", true)]
-    [InlineData("kept-edited", false)]
-    public void RunPrintsTheRestartLineOnlyWhenThePluginChanged(string token, bool expectRestart)
+    [InlineData("upgraded")]
+    [InlineData("installed")]
+    [InlineData("kept-edited")]
+    public void RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string token)
     {
         InstallKyberDash();
         using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1081,10 +1098,95 @@ public sealed class UpdateCommandTests : IDisposable
             new SelfUpdateOptions("0.10.0", false, false),
             log,
             steps,
-            pluginResult: new ProcessResult(0, $"opencode plugin: {token} /x/kyberdash-opencode.js\n", string.Empty));
+            pluginResult: PluginVerbStdout(token, HarnessPrefix + GuidanceAlpha));
 
         Assert.Equal(0, outcome.ExitCode);
-        Assert.Equal(expectRestart, log.Any(line => line.Contains("Restart OpenCode", StringComparison.Ordinal)));
+        Assert.Contains(log, line => line.Contains(GuidanceAlpha, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Every harness line the plugin verb prints is relayed, not only the verdict. The updater used to log the first
+    /// line of stdout and then its own restart line, so a second guidance line was lost.
+    /// </summary>
+    [Fact]
+    public void RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout("installed", HarnessPrefix + GuidanceAlpha, HarnessPrefix + GuidanceBeta));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains(GuidanceAlpha, StringComparison.Ordinal));
+        Assert.Contains(log, line => line.Contains(GuidanceBeta, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The hard-coded "Restart OpenCode to load the upgraded capture plugin." was the updater's own wording, and it
+    /// drifted from kyberDash's. No logged line may begin with it, whatever the verdict.
+    /// </summary>
+    [Theory]
+    [InlineData("upgraded")]
+    [InlineData("installed")]
+    [InlineData("kept-edited")]
+    public void RunNeverPrintsAHardCodedRestartOpenCodeLine(string token)
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout(token, HarnessPrefix + GuidanceAlpha));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(log, line => line.StartsWith("Restart OpenCode", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Only lines that start with the harness prefix are guidance. Verb chatter, and a line that merely mentions the
+    /// prefix, are not relayed. An updater that dumped all of stdout would fail this.
+    /// </summary>
+    [Fact]
+    public void RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout(
+                "upgraded",
+                HarnessPrefix + GuidanceAlpha,
+                "verb chatter that is not guidance",
+                "verb note: harness opencode: mid-line mention"));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(log,
+            line => line.Contains("verb chatter that is not guidance", StringComparison.Ordinal));
+        Assert.DoesNotContain(log, line => line.Contains("mid-line mention", StringComparison.Ordinal));
     }
 
     /// <summary>A KyberDash that predates the engine verb is a named skip, not a failed update.</summary>

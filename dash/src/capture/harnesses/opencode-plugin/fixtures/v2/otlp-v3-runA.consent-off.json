@@ -1,0 +1,526 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "kyberdash-opencode-plugin"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "kyberdash.opencode-plugin",
+            "version": "1.0.0"
+          },
+          "spans": [
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "3aed8276eb41cc1b",
+              "parentSpanId": "24120971bea5fa1c",
+              "name": "opencode.tool",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337362960000000",
+              "endTimeUnixNano": "1793337362993000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "opencode.tool.name",
+                  "value": {
+                    "stringValue": "skill"
+                  }
+                },
+                {
+                  "key": "opencode.tool.call_id",
+                  "value": {
+                    "stringValue": "call_01a18b3c88c87698b38819857e05a98c"
+                  }
+                },
+                {
+                  "key": "opencode.message.id",
+                  "value": {
+                    "stringValue": "msg_18b3c6754001zOaRnFAQ8wClXP"
+                  }
+                },
+                {
+                  "key": "opencode.tool.status",
+                  "value": {
+                    "stringValue": "completed"
+                  }
+                },
+                {
+                  "key": "opencode.tool.input_bytes",
+                  "value": {
+                    "intValue": "23"
+                  }
+                },
+                {
+                  "key": "opencode.tool.result_bytes",
+                  "value": {
+                    "intValue": "448"
+                  }
+                },
+                {
+                  "key": "opencode.skill.id",
+                  "value": {
+                    "stringValue": "kw-probe-skill"
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "24120971bea5fa1c",
+              "parentSpanId": "6153c96c6e4e5e93",
+              "name": "opencode.step",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337355759000000",
+              "endTimeUnixNano": "1793337363002000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "step"
+                  }
+                },
+                {
+                  "key": "opencode.message.id",
+                  "value": {
+                    "stringValue": "msg_18b3c6754001zOaRnFAQ8wClXP"
+                  }
+                },
+                {
+                  "key": "opencode.agent",
+                  "value": {
+                    "stringValue": "build"
+                  }
+                },
+                {
+                  "key": "opencode.model.id",
+                  "value": {
+                    "stringValue": "muse-spark-1.3-contributor"
+                  }
+                },
+                {
+                  "key": "opencode.model.provider",
+                  "value": {
+                    "stringValue": "opencode-go"
+                  }
+                },
+                {
+                  "key": "opencode.request.kind",
+                  "value": {
+                    "stringValue": "primary"
+                  }
+                },
+                {
+                  "key": "opencode.step.finish",
+                  "value": {
+                    "stringValue": "tool-calls"
+                  }
+                },
+                {
+                  "key": "opencode.usage.input",
+                  "value": {
+                    "intValue": "10935"
+                  }
+                },
+                {
+                  "key": "opencode.usage.output",
+                  "value": {
+                    "intValue": "69"
+                  }
+                },
+                {
+                  "key": "opencode.usage.reasoning",
+                  "value": {
+                    "intValue": "957"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_read",
+                  "value": {
+                    "intValue": "1521"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_write",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "opencode.cost",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "kyber.skills.invoked",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "kw-probe-skill"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "729ae80ac6a770d0",
+              "parentSpanId": "9adba53f8c7fa724",
+              "name": "opencode.tool",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337365504000000",
+              "endTimeUnixNano": "1793337365541000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "opencode.tool.name",
+                  "value": {
+                    "stringValue": "read"
+                  }
+                },
+                {
+                  "key": "opencode.tool.call_id",
+                  "value": {
+                    "stringValue": "call_01a18b3c92917069bb0005c1c5cfa496"
+                  }
+                },
+                {
+                  "key": "opencode.message.id",
+                  "value": {
+                    "stringValue": "msg_18b3c8a44001ZD4defsrkMbE3G"
+                  }
+                },
+                {
+                  "key": "opencode.tool.status",
+                  "value": {
+                    "stringValue": "completed"
+                  }
+                },
+                {
+                  "key": "opencode.tool.input_bytes",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "opencode.tool.result_bytes",
+                  "value": {
+                    "intValue": "56"
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "9adba53f8c7fa724",
+              "parentSpanId": "6153c96c6e4e5e93",
+              "name": "opencode.step",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337364169000000",
+              "endTimeUnixNano": "1793337365543000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "step"
+                  }
+                },
+                {
+                  "key": "opencode.message.id",
+                  "value": {
+                    "stringValue": "msg_18b3c8a44001ZD4defsrkMbE3G"
+                  }
+                },
+                {
+                  "key": "opencode.agent",
+                  "value": {
+                    "stringValue": "build"
+                  }
+                },
+                {
+                  "key": "opencode.model.id",
+                  "value": {
+                    "stringValue": "muse-spark-1.3-contributor"
+                  }
+                },
+                {
+                  "key": "opencode.model.provider",
+                  "value": {
+                    "stringValue": "opencode-go"
+                  }
+                },
+                {
+                  "key": "opencode.request.kind",
+                  "value": {
+                    "stringValue": "primary"
+                  }
+                },
+                {
+                  "key": "opencode.step.finish",
+                  "value": {
+                    "stringValue": "tool-calls"
+                  }
+                },
+                {
+                  "key": "opencode.usage.input",
+                  "value": {
+                    "intValue": "1259"
+                  }
+                },
+                {
+                  "key": "opencode.usage.output",
+                  "value": {
+                    "intValue": "65"
+                  }
+                },
+                {
+                  "key": "opencode.usage.reasoning",
+                  "value": {
+                    "intValue": "223"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_read",
+                  "value": {
+                    "intValue": "12401"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_write",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "opencode.cost",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "805cfd6b741c18f5",
+              "parentSpanId": "6153c96c6e4e5e93",
+              "name": "opencode.step",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337366468000000",
+              "endTimeUnixNano": "1793337367419000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "step"
+                  }
+                },
+                {
+                  "key": "opencode.message.id",
+                  "value": {
+                    "stringValue": "msg_18b3c942e001wjgpKdLdgWwk4L"
+                  }
+                },
+                {
+                  "key": "opencode.agent",
+                  "value": {
+                    "stringValue": "build"
+                  }
+                },
+                {
+                  "key": "opencode.model.id",
+                  "value": {
+                    "stringValue": "muse-spark-1.3-contributor"
+                  }
+                },
+                {
+                  "key": "opencode.model.provider",
+                  "value": {
+                    "stringValue": "opencode-go"
+                  }
+                },
+                {
+                  "key": "opencode.request.kind",
+                  "value": {
+                    "stringValue": "primary"
+                  }
+                },
+                {
+                  "key": "opencode.step.finish",
+                  "value": {
+                    "stringValue": "stop"
+                  }
+                },
+                {
+                  "key": "opencode.usage.input",
+                  "value": {
+                    "intValue": "439"
+                  }
+                },
+                {
+                  "key": "opencode.usage.output",
+                  "value": {
+                    "intValue": "19"
+                  }
+                },
+                {
+                  "key": "opencode.usage.reasoning",
+                  "value": {
+                    "intValue": "196"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_read",
+                  "value": {
+                    "intValue": "13553"
+                  }
+                },
+                {
+                  "key": "opencode.usage.cache_write",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "opencode.cost",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "8904c0d412ca24c747721f714f91a091",
+              "spanId": "6153c96c6e4e5e93",
+              "name": "opencode.request",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1793337354060000000",
+              "endTimeUnixNano": "1793337367427000000",
+              "attributes": [
+                {
+                  "key": "opencode.contract_version",
+                  "value": {
+                    "stringValue": "3"
+                  }
+                },
+                {
+                  "key": "opencode.session.id",
+                  "value": {
+                    "stringValue": "ses_e74c398c7ffeVajzhRWZNgfR2n"
+                  }
+                },
+                {
+                  "key": "opencode.span.kind",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "opencode.agent",
+                  "value": {
+                    "stringValue": "build"
+                  }
+                },
+                {
+                  "key": "opencode.version",
+                  "value": {
+                    "stringValue": "2.2.1"
+                  }
+                },
+                {
+                  "key": "opencode.prompt.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

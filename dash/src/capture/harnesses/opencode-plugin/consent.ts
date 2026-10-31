@@ -1,7 +1,7 @@
 // Read side of the KyberDash OpenCode consent file (plan §3.4, Q1/Q2).
 //
 // `~/.kyberdash/opencode-plugin.json` = { "version": 1, "content": <boolean> }.
-// The plugin reads it on every context hook call, so this module takes node
+// The plugin reads it on every event or hook that carries content, so this module takes node
 // built-ins only (it is bundled into the plugin file) and treats any failure
 // as "off". The write side lands with the installer (T4).
 

@@ -416,14 +416,11 @@ describe('SettingsDrawer: rows come only from the server', () => {
     )
   })
 
-  it('names the OpenCode environment variable as a manual step without claiming it is set', async () => {
+  it('offers no OpenCode environment step: the OTLP endpoint is never a manual step for OpenCode', async () => {
     stubFetch({})
     await openedDrawer()
 
-    const manual = screen.getByTestId('settings-harness-manual-opencode')
-    expect(manual.textContent).toContain('OTEL_EXPORTER_OTLP_ENDPOINT')
-    expect(manual.textContent).toMatch(/cannot (see|read|observe)/i)
-    expect(manual.textContent).not.toMatch(/is currently|already set|is set to/i)
+    expect(screen.queryByTestId('settings-harness-manual-opencode')).toBeNull()
   })
 })
 

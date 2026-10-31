@@ -1,0 +1,44 @@
+{
+  "sessionID": "ses_e74c398c7ffeVajzhRWZNgfR2n",
+  "source": "runA/probe-log.jsonl: totals from session.usage.updated (line 61, running total after step 3); per-step values from session.step.ended (lines 26, 46, 60). The session_v2 table was not dumped into the source folder, so these are the bus values the table is written from.",
+  "totals": {
+    "input": 12633,
+    "output": 153,
+    "reasoning": 1376,
+    "cache_read": 27475,
+    "cache_write": 0,
+    "cost": 0
+  },
+  "steps": [
+    {
+      "assistantMessageID": "msg_18b3c6754001zOaRnFAQ8wClXP",
+      "finish": "tool-calls",
+      "cost": 0,
+      "input": 10935,
+      "output": 69,
+      "reasoning": 957,
+      "cache_read": 1521,
+      "cache_write": 0
+    },
+    {
+      "assistantMessageID": "msg_18b3c8a44001ZD4defsrkMbE3G",
+      "finish": "tool-calls",
+      "cost": 0,
+      "input": 1259,
+      "output": 65,
+      "reasoning": 223,
+      "cache_read": 12401,
+      "cache_write": 0
+    },
+    {
+      "assistantMessageID": "msg_18b3c942e001wjgpKdLdgWwk4L",
+      "finish": "stop",
+      "cost": 0,
+      "input": 439,
+      "output": 19,
+      "reasoning": 196,
+      "cache_read": 13553,
+      "cache_write": 0
+    }
+  ]
+}

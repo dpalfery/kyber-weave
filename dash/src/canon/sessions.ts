@@ -31,7 +31,7 @@ import { CanonStore, releaseRecordParts, type ProjectedSessionRecord, type Sessi
 import { antigravitySkillDescription } from './antigravity-skill-text.js'
 import { extractInvokedSkills, readListingOf, skillsForSession, type ListingResult, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
-import { SKILLS_INVOKED_KEY, notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+import { SESSION_LABEL_KEY, SKILLS_INVOKED_KEY, USER_PROMPT_METRIC, notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // The default window and the reported-window rule moved to
 // `./context-window.js` so the finding detector can read the same derivation
@@ -506,6 +506,14 @@ export type RecordPartsView = {
    * the text the reduction just released.
    */
   taskSummary: () => string | undefined
+  /**
+   * The opening of the user's prompt: the first `PROMPT_PREVIEW_LENGTH` characters of the
+   * record's conversation history, or null when the record carries none.
+   *
+   * Read on demand for the same reason as `taskSummary`: it is the conversation's own text,
+   * and only a request root's preview needs it.
+   */
+  promptPreview: () => string | null
 }
 
 /**
@@ -585,6 +593,7 @@ function reduceRecordParts(
     listing,
     carriedBuckets,
     taskSummary: () => taskSummaryOf(record),
+    promptPreview: () => promptPreviewOf(record),
   }
 
   // The text has been counted, parsed and read. The record keeps the values;
@@ -622,6 +631,44 @@ function taskSummaryOf(record: CanonicalRecord): string | undefined {
   } finally {
     releaseRecordParts(record)
   }
+}
+
+/** How much of a request's prompt the session payload carries (D16). */
+const PROMPT_PREVIEW_LENGTH = 200
+
+/**
+ * The first `PROMPT_PREVIEW_LENGTH` characters of a record's conversation history, or null
+ * when it has none. A cut never splits a surrogate pair, so the preview is always valid text.
+ * The parts are released again on the way out, as `taskSummaryOf` does.
+ */
+function promptPreviewOf(record: CanonicalRecord): string | null {
+  try {
+    const history = conversationHistoryTexts(record).find((text) => text.trim() !== '')
+    if (history === undefined) return null
+    if (history.length <= PROMPT_PREVIEW_LENGTH) return history
+    const lastUnit = history.charCodeAt(PROMPT_PREVIEW_LENGTH - 1)
+    const isHighSurrogate = lastUnit >= 0xd800 && lastUnit <= 0xdbff
+    return history.slice(0, isHighSurrogate ? PROMPT_PREVIEW_LENGTH - 1 : PROMPT_PREVIEW_LENGTH)
+  } finally {
+    releaseRecordParts(record)
+  }
+}
+
+/**
+ * The record's conversation-history texts. A record that carries structured parts is read from
+ * them only: its flat `content` is the collapsed form of the same parts, and is left unread.
+ * A record with no parts is read from its flat content.
+ */
+function conversationHistoryTexts(record: CanonicalRecord): string[] {
+  const parts = record.parts
+  if (parts !== undefined && parts.length > 0) {
+    // A part from an untrusted payload can carry a non-string text despite the type.
+    return parts.flatMap((part) =>
+      part.part === 'conversation_history' && typeof part.text === 'string' ? [part.text] : [],
+    )
+  }
+  const flat = record.content?.['conversation_history']
+  return typeof flat === 'string' ? [flat] : []
 }
 
 /**
@@ -1698,7 +1745,11 @@ export function buildSessionRow(
       offeredToolNames.push(name)
     }
   }
-  const toolsOffered: string[] | undefined = hasDefinitionParts ? offeredToolNames : undefined
+  // No definition part was recorded: a source that declared the catalogue withheld (content
+  // capture off) states that, so the summary never reads the missing list as an empty one.
+  const toolsOffered: string[] | NotMeasurable | undefined = hasDefinitionParts
+    ? offeredToolNames
+    : unavailableFor(measurability, 'tool_definitions')
 
   // Issue #185: the session tiles read `cache_hit_ratio` and
   // `cache_creation_coverage`, which no writer ever emitted — one derivation
@@ -1776,7 +1827,16 @@ export function buildSessionRow(
 
   const rawAgentName = attributeOf(first, AGENT_NAME_KEYS) ?? null
   const agentName = options?.agentName !== undefined ? options.agentName : rawAgentName
-  const label = options?.label !== undefined && options.label !== null ? options.label : first.name
+  const label = sessionLabelOf(records, {
+    named: options?.label !== undefined && options.label !== null ? options.label : first.name,
+    harness,
+    sessionId,
+  })
+  // The session's request roots, the turns each one owns, and whether the records nest at
+  // all: a nested session's duration is its requests', not every span's (D3).
+  const requestRoots = records.filter((record) => record.parentSpanId === null)
+  const turnsByRequest = turnsByRequestRoot(records, turnRecords)
+  const isNested = requestRoots.length > 0 && hasNesting(records)
 
   const payload: AsadSessionPayload = {
     id: sessionId,
@@ -1789,7 +1849,7 @@ export function buildSessionRow(
     span_count: records.length,
     summary: {
       turn_count: turnRecords.length,
-      request_count: records.filter((r) => r.parentSpanId === null).length,
+      request_count: requestRoots.length,
       total_input: summaryTotalInput,
       total_output: summaryTotalOutput,
       total_cache_read: summaryTotalCacheRead,
@@ -1798,7 +1858,7 @@ export function buildSessionRow(
       ...(cacheCreationCoverage !== undefined
         ? { cache_creation_coverage: cacheCreationCoverage }
         : {}),
-      duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
+      duration_ms: (isNested ? requestRoots : records).reduce((sum, record) => sum + record.durationMs, 0),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
       ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
@@ -1842,14 +1902,20 @@ export function buildSessionRow(
     // analysis detail and is not part of the wire contract. The attribute maps
     // are dropped on the way out — see `withoutAttributes`.
     timeline: unavailableFor(measurability, 'execution_structure') ?? withoutAttributes(timeline.children),
-    requests: records
-      .filter((record) => record.parentSpanId === null)
-      .map((record) => ({
-        request: record.spanId,
-        timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
-        turns: turnRecords.includes(record) ? 1 : 0,
-        model: attributeOf(record, MODEL_KEYS) ?? null,
-      })),
+    requests: requestRoots.map((record) => ({
+      request: record.spanId,
+      timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
+      turns: turnsByRequest.get(record.spanId)?.length ?? 0,
+      // A request root that is not itself a model call (an OpenCode execution) names the model
+      // of the first turn it owns; a request that owns no turn names none.
+      model:
+        attributeOf(record, MODEL_KEYS) ??
+        (turnsByRequest.get(record.spanId) ?? []).map((turn) => attributeOf(turn, MODEL_KEYS)).find(Boolean) ??
+        null,
+      // A preview when the request kept a prompt; otherwise the source's own declaration that the
+      // prompt was not recorded (content capture off), never an empty string.
+      prompt: viewOf(views, record).promptPreview() ?? unavailableFor(record.measurability, USER_PROMPT_METRIC) ?? null,
+    })),
     servers,
     coverage: {
       schema: schema.measurable ? 1 : 0,
@@ -1900,6 +1966,97 @@ export function buildSessionRow(
 }
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/**
+ * Whether any record's parent is another of the records. A parent that is absent from the
+ * session does not nest anything, and a record that is its own parent has none.
+ */
+function hasNesting(records: readonly CanonicalRecord[]): boolean {
+  const spanIds = new Set(records.map((record) => record.spanId))
+  return records.some(
+    (record) => record.parentSpanId !== null && record.parentSpanId !== record.spanId && spanIds.has(record.parentSpanId),
+  )
+}
+
+/**
+ * The session's title. The latest `kyber.session.label` on its records wins, ranked by the
+ * record's time and not its place in the array: a label the user changed later replaces the
+ * earlier one wherever the records happen to sit. A labelled record with no usable time ranks
+ * below every timed one; among equals the later record wins.
+ *
+ * With no recorded label, `named` (the caller's title, else the first span's name) goes through
+ * the title fallback, so a machine name such as `opencode.request` becomes "OpenCode session"
+ * and a span name is never served as a title.
+ */
+function sessionLabelOf(
+  records: readonly CanonicalRecord[],
+  fallback: { named: string; harness: string; sessionId: string },
+): string {
+  let best: { label: string; time: number } | undefined
+  for (const record of records) {
+    const label = attributeOf(record, [SESSION_LABEL_KEY])?.trim()
+    if (label === undefined || label === '') continue
+    const time = parseTimestamp(record.timestamp)
+    const later =
+      best === undefined ||
+      (Number.isFinite(time) && (!Number.isFinite(best.time) || time >= best.time)) ||
+      (!Number.isFinite(time) && !Number.isFinite(best.time))
+    if (later) best = { label, time }
+  }
+  if (best !== undefined) return best.label
+  return formatSessionTitle({ label: fallback.named, harness: fallback.harness, sessionId: fallback.sessionId })
+}
+
+/**
+ * The turns each request root owns: the turns whose nearest parentless ancestor it is.
+ *
+ * A flat session has no nesting, so a root that is itself a turn owns that one turn and any
+ * other root owns none. A turn whose ancestry leaves the session (a parent that is absent, or a
+ * cycle) belongs to no request. Each span's root is resolved once, so a deep session is still
+ * one pass over its records.
+ */
+function turnsByRequestRoot(
+  records: readonly CanonicalRecord[],
+  turnRecords: readonly CanonicalRecord[],
+): Map<string, CanonicalRecord[]> {
+  const bySpan = new Map<string, CanonicalRecord>()
+  for (const record of records) bySpan.set(record.spanId, record)
+  const rootOf = new Map<string, string | null>()
+
+  const resolve = (start: CanonicalRecord): string | null => {
+    const path: string[] = []
+    const onPath = new Set<string>()
+    let root: string | null = null
+    let cursor: CanonicalRecord | undefined = start
+    while (cursor !== undefined) {
+      const known = rootOf.get(cursor.spanId)
+      if (known !== undefined) {
+        root = known
+        break
+      }
+      if (onPath.has(cursor.spanId)) break
+      path.push(cursor.spanId)
+      onPath.add(cursor.spanId)
+      if (cursor.parentSpanId === null) {
+        root = cursor.spanId
+        break
+      }
+      cursor = bySpan.get(cursor.parentSpanId)
+    }
+    for (const spanId of path) rootOf.set(spanId, root)
+    return root
+  }
+
+  const owned = new Map<string, CanonicalRecord[]>()
+  for (const turn of turnRecords) {
+    const root = resolve(turn)
+    if (root === null) continue
+    const turns = owned.get(root)
+    if (turns === undefined) owned.set(root, [turn])
+    else turns.push(turn)
+  }
+  return owned
+}
 
 /**
  * The reduced listings, one per record.

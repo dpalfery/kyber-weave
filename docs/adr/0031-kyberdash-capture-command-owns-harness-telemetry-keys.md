@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-31
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -43,8 +43,9 @@ click in the dashboard is the user running the same engine. Capture now runs on 
 well, in process in TypeScript, with no `.bat`, `.cmd` or `.ps1` shipped and the previous
 `win32` refusal withdrawn: Claude resolves at `<home>\.claude\settings.json`, VS Code at
 `<appData>\Code\User\settings.json` and `<appData>\Code - Insiders\User\settings.json`
-(appData injected by the caller, else `APPDATA`, else `<home>\AppData\Roaming`), and OpenCode
-at `<home>\.config\opencode\opencode.jsonc`, with XDG variables ignored on every OS. The route
+(appData injected by the caller, else `APPDATA`, else `<home>\AppData\Roaming`), and OpenCode's
+`<home>\.config\opencode\opencode.jsonc` as the target of the one-time restore in the 2026-10-31
+amendment below, with XDG variables ignored on every OS. The route
 couples the receiver to a successful enable where the CLI deliberately does not (D5, D7, D20):
 a non-dry enable that ends in `wrote` or `noop`, or that wrote at least one file before a later
 file refused (a partial write), turns `settings.receiver.hosted` on when it is off, after the config write succeeds, and a setting write that fails is still a 200 carrying
@@ -105,6 +106,16 @@ the same `runEnable` and `runDisable` paths as the Settings switch, so the decis
 capture engine (ADR 0033). The departure is still scoped to KyberDash's own plugin file. Squad and
 update never edit `opencode.jsonc` or the owner's `plugin` array, and every key rule above is
 unchanged.
+
+Amended 2026-10-31 (OpenCode V2-only plugin pipeline, [ADR 0048](0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
+OpenCode writes no telemetry key. Its capture is the plugin file
+`<root>/plugins/kyberdash-opencode.js` and the consent file `~/.kyberdash/opencode-plugin.json`, both owned by
+KyberDash under the 2026-10-26 rules, with the plugin's receipt at `~/.kyberdash/opencode-plugin-receipt.json`.
+`enable` runs a strict plugin install and sets consent on. `disable` sets consent off and removes the plugin
+file. Both also run a one-time migration: they restore the `experimental.openTelemetry` value that earlier
+builds wrote into `opencode.jsonc`, from the key receipt, and drop that receipt entry. A value changed since is
+left in place with a warning. The OpenCode harness declares no key, so `status` renders no OTLP environment
+snippet for it. The key-level rules of decisions 1 to 3 still govern every other harness and this one-time restore.
 
 ## Context
 
