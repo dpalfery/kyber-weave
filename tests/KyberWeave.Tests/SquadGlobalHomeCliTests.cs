@@ -3,12 +3,15 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using Harness = KyberWeave.Tests.Fakes.SquadHomeHarness;
+using HomeUserPaths = KyberWeave.Tests.Fakes.SquadHomeHarness.HomeUserPaths;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -674,13 +677,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // Pinned to this harness's own home rather than to the temp directory it happens to sit under:
         // every fake home in this suite is beneath the temp directory, so a prefix check would pass for
         // a guidance file deployed beside the wrong home. The path is built here instead of through
         // GuidancePath, so the test fails if that helper and the deployer ever agree on the wrong
         // location. The file must be absent first, or its presence afterwards would say nothing about
-        // where the update wrote.
+        // where the update wrote. Install now creates the file, so the precondition is set explicitly.
         string expected = Path.GetFullPath(Path.Combine(h.Home, ".kyber-weave", "response-guidance.md"));
         Assert.False(
             File.Exists(expected),
@@ -880,6 +884,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
         string path = GuidancePath(h);
 
         // A directory at the destination makes the write fail the way a permission error or a full
@@ -931,6 +936,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer installRenderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         InstallGlobal(h, anchor, installRenderer, SquadTarget.Codex);
+        ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // An unowned hand-authored file at a path the update would claim, so plan construction throws
         // before any write — the same portable mechanism the collision tests use.
@@ -998,6 +1004,230 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
         Assert.Equal(superseded, File.ReadAllBytes(guidance));
         Assert.Equal(receiptBefore, File.ReadAllText(RequireFile(GlobalReceiptPath(h))));
+    }
+
+    /// <summary>
+    ///     A same-target reinstall over a receipt that already owns the guidance must keep the recorded
+    ///     digest. Without it the deploy would claim no deployment record exists and leave the file alone,
+    ///     so the receipt would lose the ownership it needs for the next run.
+    /// </summary>
+    [Fact]
+    public void ReinstallGlobalKeepsTheRecordedGuidanceDigestWhenTheReceiptOwnsIt()
+    {
+        using Harness h = NewHarness("reinstall-keeps-digest");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        string shippedDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(SquadResponseGuidanceSource.DefaultText)));
+
+        SquadLifecycleResult reinstall = RunInstall(h, renderer, new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex],
+            Version: InstalledVersion));
+
+        Assert.True(reinstall.Success, DescribeFailure(reinstall));
+        Assert.DoesNotContain(
+            "no deployment record",
+            string.Join(Environment.NewLine, reinstall.Warnings ?? []),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, File.ReadAllText(GuidancePath(h), Encoding.UTF8));
+        Assert.Contains(
+            shippedDigest,
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h))),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     A reinstall over an unedited default an older release wrote must refresh it to the current
+    ///     default. The receipt records the older digest, so the file still matches what Squad owns.
+    /// </summary>
+    [Fact]
+    public void ReinstallGlobalRefreshesAnUneditedOlderDefaultTheReceiptRecords()
+    {
+        using Harness h = NewHarness("reinstall-refreshes-older");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        string path = GuidancePath(h);
+        byte[] shipped = File.ReadAllBytes(path);
+        byte[] older = Encoding.UTF8.GetBytes("An earlier Kyber-Weave release's default.\n");
+        string shippedDigest = Convert.ToHexStringLower(SHA256.HashData(shipped));
+
+        RewriteRecordedDigest(h, shipped, older);
+        File.WriteAllBytes(path, older);
+
+        SquadLifecycleResult reinstall = RunInstall(h, renderer, new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex],
+            Version: InstalledVersion));
+
+        Assert.True(reinstall.Success, DescribeFailure(reinstall));
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, File.ReadAllText(path, Encoding.UTF8));
+        Assert.DoesNotContain(
+            "Kept the edited response guidance",
+            string.Join(Environment.NewLine, reinstall.Warnings ?? []),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            shippedDigest,
+            File.ReadAllText(RequireFile(GlobalReceiptPath(h))),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Doctor reads the home guidance to compare what would be deployed. When the process cannot read
+    ///     that file, doctor must say so rather than report a clean state.
+    /// </summary>
+    [Fact]
+    public void DoctorGlobalSurfacesAGuidanceReadWarningWhenTheHomeFileIsUnreadable()
+    {
+        using Harness h = NewHarness("doctor-unreadable-guidance");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        WriteCanonicalSource(anchor);
+        string path = GuidancePath(h);
+
+        CommandExecution execution;
+        using (SquadHomeHarness.DenyReadOrSkip(path))
+        {
+            execution = Capture(() =>
+                new SquadDoctorCommand(
+                        new FakeProcessExecutor(),
+                        h.UserPaths,
+                        anchor,
+                        h.GlobalRoots,
+                        renderer,
+                        h.Store)
+                    .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
+        }
+
+        Assert.Contains("Failed to read response guidance", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("response-guidance", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     A corpus that predates the response-preferences block must not crash global doctor, and doctor must
+    ///     report the same no-block warning install and update report. Without the doctor's mirror of that
+    ///     check, the three commands disagree about the same tree and doctor stays silent about nothing being
+    ///     injected.
+    /// </summary>
+    [Fact]
+    public void DoctorGlobalReportsTheNoBlockWarningForAPreBlockCorpusWithoutCrashing()
+    {
+        using Harness h = NewHarness("doctor-pre-block");
+        string anchor = h.MakeDirectory("anchor");
+        WriteCanonicalSourceWithoutResponseBlocks(anchor);
+
+        CommandExecution execution = Capture(() =>
+            new SquadDoctorCommand(
+                    new FakeProcessExecutor(),
+                    h.UserPaths,
+                    anchor,
+                    h.GlobalRoots,
+                    SquadCommandComposition.ResolveRenderer(),
+                    h.Store)
+                .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
+
+        Assert.Contains(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     A render that reports failure must stop global doctor the way install and update stop, naming the
+    ///     collision-scan failure. Without the check, an empty failed render reads as a pre-block corpus and
+    ///     doctor prints the no-block warning, which tells the operator the wrong thing about the cause.
+    /// </summary>
+    [Fact]
+    public void DoctorGlobalReportsARenderFailureAsTheCollisionScanFailureNotAsNoBlock()
+    {
+        using Harness h = NewHarness("doctor-failed-render");
+        string anchor = h.MakeDirectory("anchor");
+        WriteCanonicalSourceWithoutResponseBlocks(anchor);
+
+        CommandExecution execution = Capture(() =>
+            new SquadDoctorCommand(
+                    new FakeProcessExecutor(),
+                    h.UserPaths,
+                    anchor,
+                    h.GlobalRoots,
+                    new FailedRenderRenderer(),
+                    h.Store)
+                .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
+
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
+    }
+
+    private sealed class FailedRenderRenderer : ISquadRenderer
+    {
+        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
+
+        public Task<SquadRenderResult> RenderAsync(
+            SquadRenderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new SquadRenderResult(
+                Success: false,
+                Files: [],
+                Degradations: [],
+                Warnings: [],
+                Errors: ["The render failed for the test."]));
+        }
+    }
+
+    /// <summary>
+    ///     Copies the canonical corpus beside a solution marker with every response-preferences block removed,
+    ///     so the render carries no block anywhere. The precondition assertion keeps the test from passing
+    ///     vacuously if the canonical blocks ever move.
+    /// </summary>
+    private static void WriteCanonicalSourceWithoutResponseBlocks(string anchor)
+    {
+        File.WriteAllText(Path.Combine(anchor, "KyberWeave.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string destination = Path.Combine(anchor, "products", "kyber-squad");
+        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+
+        Regex block = ResponsePreferencesBlock();
+        int blocksBefore = 0;
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            if (!file.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(file, target, overwrite: true);
+                continue;
+            }
+
+            string text = File.ReadAllText(file, Encoding.UTF8);
+            blocksBefore += block.Count(text);
+            File.WriteAllText(target, block.Replace(text, string.Empty), Encoding.UTF8);
+        }
+
+        Assert.True(blocksBefore > 0, "The canonical corpus must carry response-preferences blocks for this test to mean anything.");
+        foreach (string file in Directory.EnumerateFiles(destination, "*.md", SearchOption.AllDirectories))
+            Assert.Equal(0, block.Count(File.ReadAllText(file, Encoding.UTF8)));
+    }
+
+    private static Regex ResponsePreferencesBlock()
+        => new("<response-preferences>.*?</response-preferences>", RegexOptions.Singleline);
+
+    /// <summary>
+    ///     Doctor's global collision scan only runs against a canonical source beside the working
+    ///     directory, so the arranged anchor carries the solution marker and a valid copy of the synthetic
+    ///     corpus at <c>products/kyber-squad</c>.
+    /// </summary>
+    private static void WriteCanonicalSource(string anchor)
+    {
+        File.WriteAllText(Path.Combine(anchor, "KyberWeave.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+        string source = SyntheticValidSquadReleaseSource.SyntheticCorpusRoot;
+        string destination = Path.Combine(anchor, "products", "kyber-squad");
+        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), overwrite: true);
     }
 
     /// <summary>
@@ -1265,6 +1495,33 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     private static string GuidancePath(Harness h)
     {
         return Path.Combine(h.Home, ".kyber-weave", "response-guidance.md");
+    }
+
+    /// <summary>
+    ///     Puts the home back in the state a fresh install used to leave: no response guidance file and no
+    ///     ownership record for it. Global install now creates the file, so a scenario that needs the
+    ///     guidance absent must remove both the file and its receipt record itself.
+    /// </summary>
+    private static void ClearResponseGuidanceToAbsentAndUnowned(Harness h)
+    {
+        string path = GuidancePath(h);
+        if (File.Exists(path))
+            File.Delete(path);
+
+        string receiptPath = RequireFile(GlobalReceiptPath(h));
+        JsonNode root = JsonNode.Parse(File.ReadAllText(receiptPath))
+                        ?? throw new InvalidDataException("The global receipt must parse as JSON.");
+        if (root["homeFiles"] is JsonArray homeFiles)
+        {
+            for (int index = homeFiles.Count - 1; index >= 0; index--)
+            {
+                if (homeFiles[index]?["relativePath"]?.GetValue<string>() == "response-guidance.md")
+                    homeFiles.RemoveAt(index);
+            }
+        }
+
+        File.WriteAllText(receiptPath, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+        Assert.False(File.Exists(path), $"The scenario requires no guidance at '{path}' beforehand.");
     }
 
     #endregion
@@ -1624,86 +1881,6 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         }
     }
 
-    private sealed class Harness : IDisposable
-    {
-        public Harness(string root)
-        {
-            Root = root;
-            ApplicationData = Path.Combine(root, "app-data");
-            Home = Path.Combine(root, "home");
-            GlobalRootsDirectory = Path.Combine(root, "global-roots");
-            Directory.CreateDirectory(ApplicationData);
-            Directory.CreateDirectory(Home);
-            Directory.CreateDirectory(GlobalRootsDirectory);
-            UserPaths = new HomeUserPaths(ApplicationData, Home);
-            Store = new SquadStateStore(UserPaths);
-            ReleaseSource = new SyntheticValidSquadReleaseSource();
-            GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
-        }
-
-        public string Root { get; }
-
-        public string Home { get; }
-
-        public string ApplicationData { get; }
-
-        public string GlobalRootsDirectory { get; }
-
-        public HomeUserPaths UserPaths { get; }
-
-        public SquadStateStore Store { get; }
-
-        public SyntheticValidSquadReleaseSource ReleaseSource { get; }
-
-        public TempGlobalRoots GlobalRoots { get; }
-
-        /// <summary>Releases the fake release source; the temp root itself is removed by the test class.</summary>
-        public void Dispose()
-        {
-            ReleaseSource.Dispose();
-        }
-
-        public string MakeDirectory(string name)
-        {
-            string path = Path.Combine(Root, name);
-            Directory.CreateDirectory(path);
-            return path;
-        }
-
-        public string GlobalRoot(SquadTarget target)
-        {
-            return GlobalRoots.ResolveGlobalRoot(target);
-        }
-
-        public SquadLifecycleService Lifecycle(ISquadRenderer renderer)
-        {
-            return new SquadLifecycleService(ReleaseSource, renderer, Store, globalRoots: GlobalRoots);
-        }
-    }
-
-    private sealed class HomeUserPaths : ISquadUserPaths
-    {
-        public HomeUserPaths(string applicationDataDirectory, string homeDirectory)
-        {
-            RequireUnderTemp(applicationDataDirectory);
-            RequireUnderTemp(homeDirectory);
-            ApplicationDataDirectory = applicationDataDirectory;
-            HomeDirectory = homeDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
-
-        public string HomeDirectory { get; }
-    }
-
-    private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
-    {
-        public string ResolveGlobalRoot(SquadTarget target)
-        {
-            return Path.Combine(root, SquadTargetCatalog.GetToken(target));
-        }
-    }
-
     /// <summary>
     ///     Renders one agent file per requested target at a path the test controls, so a receipt and a
     ///     collision can be planned against exact bytes instead of the fake renderer's harness layout.
@@ -1772,15 +1949,6 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         public void Dispose()
         {
         }
-    }
-
-    private static void RequireUnderTemp(string path)
-    {
-        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-        string temp = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
-        if (!full.StartsWith(temp + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"Squad CLI tests must keep every fake home and state root beneath the temp directory; got '{full}'.");
     }
 
     #endregion

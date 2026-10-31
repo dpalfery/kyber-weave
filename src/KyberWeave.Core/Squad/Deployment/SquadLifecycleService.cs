@@ -175,6 +175,14 @@ public sealed class SquadLifecycleService
                 throw new SquadRenderValidationException(error);
             }
 
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                _stateStore.ResolveHomeOwnedFilesRoot(),
+                warnings);
+            if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
+                warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
+            renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
                 request.Bundle,
@@ -218,6 +226,8 @@ public sealed class SquadLifecycleService
                     planGlobalRoots,
                     []);
 
+            warnings.AddRange(DegradedFileWarnings(plan));
+
             if (request.DryRun)
                 return new SquadLifecycleResult(
                     true,
@@ -227,12 +237,22 @@ public sealed class SquadLifecycleService
                     plan.Receipt.Degradations,
                     DryRun: true,
                     ModelChanges: modelChanges,
-                    Warnings: RenderWarningMessages(renderResult.Warnings));
+                    Warnings: warnings);
+
+            SquadResponseGuidanceDeployer? guidanceDeployer =
+                request is { Scope: SquadDeploymentScope.Global, DryRun: false }
+                    ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
+                    : null;
 
             SquadTransaction transaction = new(_stateStore, _observer);
-            transaction.Execute(plan);
+            transaction.Execute(
+                plan,
+                guidanceDeployer is null
+                    ? null
+                    : leasedPlan =>
+                        DeployGuidance(guidanceDeployer, leasedPlan, existingReceipt?.HomeFiles ?? [], warnings));
 
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings), .. transaction.Warnings];
+            warnings.AddRange(transaction.Warnings);
             WriteCanonicalSnapshot(releaseResult.Version, source, warnings);
 
             return new SquadLifecycleResult(
@@ -379,6 +399,14 @@ public sealed class SquadLifecycleService
                 throw new SquadRenderValidationException(error);
             }
 
+            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
+            string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                _stateStore.ResolveHomeOwnedFilesRoot(),
+                warnings);
+            if (!SquadResponsePreferencesInjector.HasAnyBlock(renderResult))
+                warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
+            renderResult = SquadResponsePreferencesInjector.Inject(renderResult, effectiveGuidance);
+
             SquadLock squadLock = BuildLock(
                 releaseResult.Version,
                 request.Bundle,
@@ -413,6 +441,10 @@ public sealed class SquadLifecycleService
                 planGlobalRoots,
                 []);
 
+            ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
+
+            warnings.AddRange(DegradedFileWarnings(plan));
+
             if (request.DryRun)
                 return new SquadLifecycleResult(
                     true,
@@ -422,7 +454,7 @@ public sealed class SquadLifecycleService
                     plan.Receipt.Degradations,
                     DryRun: true,
                     ModelChanges: modelChanges,
-                    Warnings: RenderWarningMessages(renderResult.Warnings));
+                    Warnings: warnings);
 
             // The guidance is classified, written and read back inside the transaction, once it holds the
             // lease and has re-checked the plan against the live tree. Written any earlier, an update that
@@ -431,7 +463,6 @@ public sealed class SquadLifecycleService
             // failure inside the commit leaves the new default on disk under the old receipt. A retry of
             // the same release adopts those bytes; a later release that ships different wording reads them
             // as an operator edit, keeps them, and warns how to take its default.
-            List<string> warnings = [.. RenderWarningMessages(renderResult.Warnings)];
             SquadResponseGuidanceDeployer? guidanceDeployer =
                 request is { Scope: SquadDeploymentScope.Global, DryRun: false }
                     ? new SquadResponseGuidanceDeployer(_stateStore.ResolveHomeOwnedFilesRoot())
@@ -460,6 +491,28 @@ public sealed class SquadLifecycleService
         {
             CleanupTempDirectory(tempExtractDir);
         }
+    }
+
+    private static IEnumerable<string> DegradedFileWarnings(SquadDeploymentPlan plan)
+    {
+        return plan.DegradedFiles.Select(degraded =>
+            $"Could not read deployed file '{degraded.RelativePath}' for target '{SanitizeTargetTokenForWarning(degraded.Target)}'; it was kept on trust and not verified against the release.");
+    }
+
+    /// <summary>
+    ///     Renders a receipt- or render-sourced target token safe for a one-line warning. The token is
+    ///     attacker-influenced input (a hand-edited receipt), so control characters — including the
+    ///     newline that would split one warning into two log lines — are replaced, and the caller
+    ///     single-quotes the result.
+    /// </summary>
+    internal static string SanitizeTargetTokenForWarning(string token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        StringBuilder sanitized = new(token.Length);
+        foreach (char c in token)
+            sanitized.Append(char.IsControl(c) ? '?' : c);
+        return sanitized.ToString();
     }
 
     /// <summary>
@@ -627,6 +680,51 @@ public sealed class SquadLifecycleService
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Warns once per receipt-owned deployed file that the update kept because its bytes were edited
+    ///     locally. The plan has already decided to keep them; this only reports that decision.
+    /// </summary>
+    private static void ReportPreservedEdits(
+        SquadDeploymentPlan plan,
+        SquadReceipt previousReceipt,
+        bool replaceManaged,
+        ICollection<string> warnings)
+    {
+        if (replaceManaged)
+            return;
+
+        foreach (SquadOwnedFile previous in previousReceipt.Files)
+        {
+            if (!plan.Receipt.Files.Contains(previous))
+                continue;
+
+            string fullPath = plan.ResolvePhysicalPath(previous);
+            if (!File.Exists(fullPath))
+                continue;
+
+            string currentDigest;
+            try
+            {
+                currentDigest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(fullPath)));
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // The file is left as it is; naming it here keeps an unreadable deployed entry visible.
+                warnings.Add(
+                    $"Could not read the deployed file '{previous.RelativePath}' ({previous.Target}) to check for local edits. " +
+                    "Squad did not overwrite it during this update.");
+                continue;
+            }
+
+            if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
+                continue;
+
+            warnings.Add(
+                $"Kept the locally edited deployed file '{previous.RelativePath}' ({previous.Target}). " +
+                "Squad did not overwrite it during this update.");
+        }
     }
 
     /// <summary>

@@ -35,7 +35,7 @@ keywords:
   - model-presets
   - instances
   - link-sync
-  - response-format
+  - response-preferences
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -418,8 +418,8 @@ only when it is non-empty, so a receipt written by an earlier CLI still parses a
 existing global deployment is not disturbed by the field's arrival.
 
 The first such file is the user-home response guidance, `<home>/.kyber-weave/response-guidance.md`.
-It belongs to no harness: every agent reaches the one path through the `response-format` skill,
-which is why it is owned as a home file rather than deployed beneath a target's global root.
+It belongs to no harness: every deployed entry file receives its text at install and update
+(see [response preferences](#response-preferences-injected-at-deploy)), which is why it is owned as a home file rather than deployed beneath a target's global root.
 `SquadResponseGuidanceDeployer` decides what a run does with it, and the refresh rules follow
 the staging shape the canonical model-profile snapshot in `SquadCanonicalProfileStore` already
 uses — a file whose bytes still match a recorded digest is Squad's own copy of what it shipped,
@@ -441,12 +441,10 @@ and anything else belongs to the operator:
   with no ownership record was written by the operator or by a release older than the receipt,
   so it is never claimed. Deleting the file is how an operator takes the shipped default back.
 
-The `response-format` skill is a mandatory trigger, not a passive helper. `conductor` and
-`bug-crusher` must load it before any routing action or user-visible write, and the conductor
-must load it before the first intent read. That ordering resolves the earlier failure mode in
-which the router could take an action before the format contract was in scope. Headless
-specialists (`architect`, `product-owner`) remain exempt because they do not speak to the human
-in the same conversational channel.
+The skill-carried mandatory load that used to sit here is gone: response preferences are injected
+into the `conductor` and `bug-crusher` entry files at deploy, so no load step precedes a reply. The
+file is kept as the one place the operator edits preferences; `squad install` creates it when absent,
+and `squad update` never overwrites an edit.
 
 Ownership is recorded only from a digest this run read back from the deployed path, and the order
 follows from that: the deployment plan is built and validated first, then the transaction takes
@@ -884,14 +882,15 @@ and validates.
   contract in [requirements](requirements.md) (KS-001 and the render requirement). The
   earlier 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill canonical bytes and retained resources**: `code-review-loop`, `kilo-review-loop`, and
-  `response-format` are authored in Kyber-Squad.
+- **Skill canonical bytes and retained resources**: `code-review-loop` and `kilo-review-loop` are
+  authored in Kyber-Squad.
   Every imported canonical raw `SKILL.md` except the
   five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 87 skill resources (116 files under
-  `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
+  recursive package formats retain all 88 skill resources (116 files under
+  `products/kyber-squad/skills/`, 28 of them `SKILL.md`) and resolve the retained references. The
+  `response-format` skill is retired (see [response preferences](#response-preferences-injected-at-deploy)). Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
   in its skill directory as its durable home, portable policy lives in the
@@ -930,82 +929,116 @@ Rendering operations resolve source definitions and environment overrides throug
   treating `inherit` as null. `SquadModelDiff.Compute` calculates changed model resolutions across all
   canonical agents between base and preset profiles, powering `--dry-run` and status diffs.
 
-### The response format and its skill carrier
+### Response preferences injected at deploy
 
-Every user-facing reply carries one shape. The standard itself lives in a single canonical skill,
-`response-format`, and not in each agent body: a second copy of the wording in two bodies would
-drift from the first, and that drift is exactly what the standard exists to prevent.
+Every user-facing reply from `conductor` and `bug-crusher` follows the operator's response
+preferences. The shipped default owns the shape, and the operator changes it by editing one file.
+Response preferences are not a skill any more. `squad install` and `squad update` copy the text
+into each deployed entry file of the two agents, so the agent carries its preferences in its own
+instructions on every turn with no load step.
 
-- **The ordered shape**: a title line naming the work, then a bottom line of at most three
-  sentences written for an experienced reader with no prior involvement in the work, then the
-  open decisions whenever a decision is open. The order is the contract, not a preference — the
-  bottom line is what a reader running several agents at once reads first, and the decisions are
-  what they have to act on. No context is assumed: every name, id, and acronym is explained the
-  first time it appears, or left out.
-- **The no-labels rule**: a response never labels, names, mentions, or refers to the format it
-  follows — no tags, no structural headers, no meta-commentary about how the answer is arranged.
-  The shape is for the reader; naming it spends the reader's attention on the format instead of
-  on the work.
-- **Who is bound**: `conductor` and `bug-crusher`, the primary conversational agents, load the
-  skill by name for every user-facing response. `product-owner` is the third primary shared
-  identity and is exempt: it is a headless specification specialist whose output is a persisted
-  artifact and a structured digest for the conductor, never a conversational reply.
-- **The conductor relays**: every specialist digest the conductor surfaces to the human is
-  relayed in the same shape. The digest schemas themselves stay machine-consumed and are
-  unchanged — the format governs how a digest is presented, never which fields it carries.
-  Presentation is the only thing that changes: every status marker, id, path, count, gap, open
-  question, and evidence value reaches the human exactly as the specialist returned it, and
-  nothing is dropped, merged, or paraphrased.
+**The shape owner.** The shipped default is `products/kyber-squad/response-guidance.default.md`.
+It states the ordered shape: a title line naming the work, a bottom line of at most three sentences
+for an experienced reader with no prior involvement, then the open decisions whenever a decision is
+open. It also states the no-labels rule (a response never names the format it follows) and the
+rule that digests stay machine-consumed: the conductor relays every specialist digest in that shape
+and never drops, merges, or paraphrases a field. A content test holds the line that no other
+agent or skill body restates the shape's vocabulary, so a second copy cannot drift.
 
-**Why a name and not a link.** The body resource-closure rule governs local path links: a
-Markdown link in an agent or skill body resolves only to a file inside that owner's own
-directory, and the closure those links form is what a renderer projects beside the principal. A
-skill invoked by name is not reached by a link at all, so binding the standard by name asks
-nothing of the conductor's body — and one canonical skill can carry the standard for every agent
-instead of each body restating it. A content test holds that line: no agent or skill body outside
-`response-format` may use the shape's own vocabulary — the title line, the bottom line, its
-sentence cap, or the rule against naming the format — so a restated copy fails a test instead of
-drifting, and an operator's override is never contradicted by a second copy. The `response-format`
-skill links its own default wording,
-`user-guidance.md`, so that file travels with the skill and stays inside that one closure.
+**The operator's file.** The one place the operator edits preferences is
+`<home>/.kyber-weave/response-guidance.md` (see [home-owned files](#home-owned-files-and-the-user-home-response-guidance)).
+`squad install` creates it from the shipped default when it is absent, and `squad update` never
+overwrites it once it has been edited. The text is pasted into the entry files verbatim: there is
+no size cap and no style-only guard line. That is an accepted risk. The operator owns the text, and
+an operator-written line can ask an agent to do anything; this is the same trust the operator
+already places in their own repository instructions.
 
-**The user-home override.** The shipped wording has a default and an override. The default
-lives in the skill's `user-guidance.md`; the override is the user's own file at
-`<home>/.kyber-weave/response-guidance.md`, deployed and refreshed as described under
-[home-owned files](#home-owned-files-and-the-user-home-response-guidance). Where that file
-exists and is usable, agents follow it in place of the skill's wording — one file the operator
-edits, rather than a deployed skill the next update would replace. Where it is missing, empty,
-unreadable, or longer than about 8 KB, it is ignored and the skill's wording is used, so one stray
-file cannot leave every answer shapeless.
+**Entry-file table.** Every rendered file that carries a `<response-preferences>` block is an entry
+file. A file is classified from the render output, not from a path list: a body copied verbatim
+from a carrier keeps its block, so a new derived file is injected automatically. The table below is
+the project-scope set that the per-target theory pins; global scope uses the same files under each
+target's home root (for Codex, `agents/<name>.toml` under `$CODEX_HOME`, default `~/.codex`).
 
-The override shapes how an agent writes and nothing else. Anything in it that asks an agent to run
-commands, call tools, read or send data, or change permissions or safety rules is ignored: the file
-is a style override, not an instruction channel, and a customisation that carried authority would
-be a way to widen what a deployed agent may do without any of the review that a canonical body
-gets.
+| Target | Entry files that receive the block (project scope) |
+|---|---|
+| Codex | `.codex/agents/conductor.toml`, `.codex/agents/bug-crusher.toml`; `.codex/skills/conductor/SKILL.md`, `.codex/skills/bug-crusher/SKILL.md` |
+| Cursor | `.cursor/skills/conductor/SKILL.md`, `.cursor/skills/bug-crusher/SKILL.md` (lowered) |
+| Claude | `.claude/agents/conductor.md`, `.claude/agents/bug-crusher.md`; `.claude/skills/conductor/SKILL.md`, `.claude/skills/bug-crusher/SKILL.md` |
+| Copilot | `.github/agents/conductor.agent.md`, `.github/agents/bug-crusher.agent.md`; `.github/skills/bug-crusher/SKILL.md` |
+| OpenCode | `.opencode/agents/conductor.md`, `.opencode/agents/bug-crusher.md`; `.opencode/skills/bug-crusher/SKILL.md` |
+| Kilo | `.kilo/agents/conductor.md`, `.kilo/agents/bug-crusher.md`; `.kilo/skills/bug-crusher/SKILL.md` |
+| Antigravity | `.agents/agents/conductor/agent.md`, `.agents/agents/bug-crusher/agent.md`; `.agents/skills/bug-crusher/SKILL.md` |
+| Pi | `.pi/skills/conductor/SKILL.md`, `.pi/skills/bug-crusher/SKILL.md` (lowered) |
+| Factory | `.factory/droids/conductor.md`, `.factory/droids/bug-crusher.md`; `.factory/skills/conductor/SKILL.md`, `.factory/skills/bug-crusher/SKILL.md` |
+| Warp | `.warp/skills/conductor/SKILL.md`, `.warp/skills/bug-crusher/SKILL.md` (role-skill lowering) |
+| ZCode | `.zcode/commands/conductor.md` (lowered); `.zcode/skills/bug-crusher/SKILL.md` |
+| Devin | `.devin/skills/conductor/SKILL.md`, `.devin/skills/bug-crusher/SKILL.md` (lowered) |
+| Command Code | `.commandcode/agents/conductor.md`, `.commandcode/agents/bug-crusher.md`; `.commandcode/skills/conductor/SKILL.md`, `.commandcode/skills/bug-crusher/SKILL.md` |
+
+The exact set is pinned by a theory over all 13 targets: the files that carry the block must equal
+the table, each with exactly one block holding the operator's text. A renderer change that adds or
+drops a derived file fails the test instead of diverging silently.
+
+**Fail-closed rule.** Injection is all-or-nothing per render. Once any file in the render carries a
+block, every target must carry a canonical carrier block, and a file with a block but no canonical
+`conductor` or `bug-crusher` identity throws. A carrier that lost its block on one target throws
+rather than shipping an empty preferences section.
+
+**Pre-block corpus.** A render with no `<response-preferences>` block anywhere (older release
+content, a third-party source, a test fixture) is returned byte-for-byte unchanged and does not
+throw. Install and update then add exactly one lifecycle warning:
+`The rendered Squad content has no <response-preferences> block; response preferences were not injected.`
+`squad doctor` treats it as the same no-op and adds no finding.
+
+**Install, update, and pack.**
+
+- `squad install` fills the blocks with the effective text: the home file when it is present and
+  non-blank, otherwise the shipped default. Global install creates the home file (`Global && !DryRun`,
+  the same transaction step as update); dry run and project-scope install do not.
+- `squad update` refills the blocks the same way. An unchanged home file reproduces the same bytes.
+  A user-edited home file is never overwritten.
+- `squad pack` fills every block with the shipped default, so the archive is deterministic and the
+  home file is not read.
+
+**Drift and refresh.** The receipt records the digest of every injected entry file as written, so
+`squad status` compares disk bytes to the receipt, not to the template. Editing
+`response-guidance.md` and running `squad update` refreshes every unedited entry file, and the
+agents read the new text on their next turn. An entry file that was locally edited after deploy is
+preserved and reported by update, and stops receiving updates until it is deleted or re-deployed.
+
+**Preserved-file reporting.** A locally edited entry file is reported in the update warnings and
+keeps its bytes. Known gap: under `ReplaceManaged` mode, preserved stale entries are not reported.
+
+**Project-scope risk (D-B).** Project-scope installs commit the operator's own text into every
+entry file on all 13 targets. That text is operator-owned, not a defect in the repository, and a
+reviewer must not treat it as one. Review it the way you review any repository instruction.
+
+**Accepted risk (H5).** The text is pasted verbatim, with no size cap and no style-only guard line.
+The earlier style-only guard was deliberately removed. Restoring it is a design change, not a fix.
+
+**Why injection and not a skill.** A skill that the agent is told to load was not reliable: in a
+real session an agent loaded `response-format` and still did not read the home file. Injection
+moves the text into the agent's own instructions. It is also why the earlier skill-carrier rules
+(mandatory load, the skill's own closure, the shape-restating test) no longer exist.
 
 **Enforcement is instruction-based, by necessity.** Nothing in the squad's release model can
-intercept an assistant's prose, so the contract is carried by the skill and the two agent
-bodies that bind it. `schemas/agent.schema.json` has no hooks field — its properties are
-identity, invocation, model and capability profiles, tool lists, delegation, fallback, and
-aliases — the capability lattice in `profiles/capabilities.yml` declares only `filesystem.*`,
-`process.execute`, `network.*`, and `delegate` grants, and a Factory `settings.json` has no
-hooks key. Hooks observed on other harnesses (`PreToolUse` and its peers) intercept tool calls,
-not assistant prose, so none of them can carry this contract even where they exist. Instruction
-adherence is therefore probabilistic. What keeps it checkable is the ordered shape itself: a
-title line, a bounded bottom line, and an explicit decisions section are structure a reviewer can
-see is present or absent, and that reviewability is the determinism accepted here. A
-deterministic prose-format gate is deferred future work, not a delivered claim.
+intercept an assistant's prose, so the contract is carried by the agent instructions that include
+the block. `schemas/agent.schema.json` has no hooks field, and a Factory `settings.json` has no
+hooks key. Hooks observed on other harnesses intercept tool calls, not assistant prose. Instruction
+adherence is therefore probabilistic. What keeps it checkable is the ordered shape itself: a title
+line, a bounded bottom line, and an explicit decisions section are structure a reviewer can see is
+present or absent. A deterministic prose-format gate is deferred future work, not a delivered claim.
 
-**Session titles are set only where a mechanism is confirmed.** The skill carries a conditional
-session-title rule and a per-harness feasibility matrix, and that matrix in
-`products/kyber-squad/skills/response-format/SKILL.md` is the operative copy; this section
-records the decision behind it. On `factory` a title is not agent-settable — it derives from the
-conversation's first message, and no agent-facing mechanism to set one was found.
-On every other target the rule is to set the title to reflect the work only where that target
-exposes a confirmed mechanism, and never to fabricate one. A target that cannot set a title, or
-whose mechanism is unconfirmed, is treated as infeasible rather than guessed at — which is why
-the matrix opens with a target that cannot be set at all.
+**Session-title matrix (reference).** The shipped default carries a conditional session-title rule.
+On `factory` a title is not agent-settable: it derives from the conversation's first message, and no
+agent-facing mechanism to set one was found. On every other target the rule is to set the title to
+reflect the work only where that target exposes a confirmed mechanism, and never to fabricate one. A
+target that cannot set a title, or whose mechanism is unconfirmed, is treated as infeasible rather
+than guessed at.
+
+**No ADR — ADR waiver:** this reverses a skill-carrier choice inside the existing renderer and
+receipt architecture. It adds no boundary, schema, or dependency.
+
 
 ---
 

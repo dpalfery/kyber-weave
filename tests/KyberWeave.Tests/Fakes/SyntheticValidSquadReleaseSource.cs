@@ -112,7 +112,6 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
               - conductor
               - architect
             skills:
-              - response-format
               - task-gate
               - test-dev
             """);
@@ -137,12 +136,9 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
             "delegates-to: []");
         File.WriteAllText(Path.Combine(agentsDir, "architect.md"), architectAdjusted);
 
-        // 6. Skills: response-format, task-gate, test-dev
+        // 6. Skills: task-gate, test-dev
         string skillsDir = Path.Combine(templateRoot, "skills");
         Directory.CreateDirectory(skillsDir);
-        CopyDirectorySafe(
-            Path.Combine(productRoot, "skills", "response-format"),
-            Path.Combine(skillsDir, "response-format"));
         CopyDirectorySafe(
             Path.Combine(productRoot, "skills", "task-gate"),
             Path.Combine(skillsDir, "task-gate"));
