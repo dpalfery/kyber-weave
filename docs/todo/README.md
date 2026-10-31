@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 ---
 
 # Todos
@@ -58,6 +58,7 @@ last-reviewed: YYYY-MM-DD
 | [squad-pack-single-target-render.md](squad-pack-single-target-render.md) | KyberSquad | draft | `kyber-weave squad pack` cannot render a single target to a directory, so the Copilot render total was verified only by invoking `CopilotRenderer` directly from a throwaway program; add single-target render support to `squad pack`. |
 | [adr-0022-conductor-shared-identity-errata.md](adr-0022-conductor-shared-identity-errata.md) | KyberSquad | draft | ADR 0022 decision 1 still calls the conductor a shared identity, but it is unoccupied and the shared list names only `product-owner` and `bug-crusher`; correct the stale clause in ADR 0022 itself, since an accepted ADR is edited in place to state only the decision in force. |
 | [task-gate-test-project-mapping.md](task-gate-test-project-mapping.md) | KyberSquad | draft | Map a task's changed files to the touched test project so task gates can run only the relevant tests; the single test project takes about 25 minutes with coverage, so none run per task today. |
+| [typescript-estree-minimatch-11.md](typescript-estree-minimatch-11.md) | KyberDash | draft | Move `@typescript-eslint/typescript-estree` off the unreachable minimatch 10.2.6 copy once upstream declares `minimatch >= 11.0.1`; reopen earlier if dash enables `projectService` with `allowDefaultProject`. |
 | [adr-in-place-cleanup.md](adr-in-place-cleanup.md) | DocGraph | draft | ADRs 0007, 0008, 0016, 0020, 0023 and 0033 still keep superseded history that the in-place-edit policy says to remove; also decide whether `docs/archive/adrs/` stays. |
 | [task-gate-config-review.md](task-gate-config-review.md) | KyberSquad | draft | Confirm `sql-database-architect` and `github-devops` should run the .NET gate set (the shipped catalogue answers this for installing repositories), and finish verifying `dotnet format --include` with project files on Linux and Windows. |
 | [copilot-cli-output-tokens-skipped-messages.md](copilot-cli-output-tokens-skipped-messages.md) | KyberDash | draft | Copilot CLI 1.0.81 and later omit `outputTokens`, so the parser defaults it to 0 and skips 3,821 of 5,605 journal messages; decide an accounting-safe way to ingest them. |
