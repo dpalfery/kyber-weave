@@ -10,7 +10,7 @@ last-reviewed: 2026-10-30
 
 # Close the known residuals of the KyberDash spawn guard and process ledger
 
-The [test process storm guard plan](../plans/2026-10-30-test-process-storm-guard.md) put
+The [test process storm guard plan](../archive/plans/2026-10-30-test-process-storm-guard.md) put
 every KyberDash self-spawn behind one chokepoint (`dash/src/process/spawn-guard.ts`), added an
 end-of-run process ledger (`dash/tests/setup/process-ledger.ts`), and added two static spawn-site
 audits. Its findings drain on 2026-10-30 left these residuals. None of them reopens the 2026-10

@@ -2,7 +2,7 @@
 id: plans/2026-10-30-test-process-storm-guard
 title: "Test process storm guard — defense in depth so a test run can never fork-bomb the machine"
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-30
@@ -13,7 +13,7 @@ impact-components: [KyberDash, CI Pipelines, ReviewCouncil]
 
 # Test process storm guard — defense in depth so a test run can never fork-bomb the machine
 
-**Status: Ready — approved for execution 2026-10-30 (AP1); no task started.**
+**Status: Archived — complete 2026-10-30.** Closeout mapping is in §10. Approved for execution 2026-10-30 (AP1). Council `NEEDS_HUMAN` under KW-REVIEW-008 approved by the owner in chat on 2026-10-30 ("approved"). Frontmatter status: archived follows the closed status vocabulary (KW-DOC-SPEC-002).
 
 **Development mode:** `test-first` (supplied in the packet). **Autonomy:** `autonomous` (supplied in
 the packet; matches the repository root `AGENTS.md` Config Reg `<autonomy>`).
@@ -110,13 +110,12 @@ No hard-block escalation: every decision has a recommendation this plan stands b
 
 ## Execution state
 
-As of 2026-10-30 (closeout pass): code tasks T0–T8 done on branch `fix/test-process-storm-guard`. G1 final2
-green (the executor's numbers, not re-run here). Council verdict `NEEDS_HUMAN` under KW-REVIEW-008 only (a
-reserved-path change to `.kyber-weave/kyber-weave.yml`, expected by §7). The closeout mapping in §10 is
-complete. **Not yet archived:** G2 (the PR's CI, including `dash-e2e` and its leftover steps) and G3 (local
-Playwright through the watchdog, isolated config) have not run on a PR. §7 places the closeout after G2 and
-G3, so the plan stays in `docs/plans/`. The plan file is also still untracked in this worktree, and `git mv`
-needs it committed first.
+As of 2026-10-30 (closeout): code tasks T0–T8 done on branch `fix/test-process-storm-guard` (PR #477). G1 final2
+green (the executor's numbers, not re-run here). G2 (CI run 41161576863, head `bd4ecf28`): green except the docs
+gate, which failed only on KW-DOC-LIFECYCLE-003 for this open plan. G3 (local Playwright, isolated config):
+`harness-collection.spec.ts` 4 of 4; `refresh-filters.spec.ts` T8 fails on a stale selector, tracked in
+`docs/todo/kyberdash-playwright-webserver-specs.md`. Council verdict `NEEDS_HUMAN` under KW-REVIEW-008 only,
+approved by the owner in chat on 2026-10-30. The closeout mapping in §10 is complete. Archived 2026-10-30.
 
 **Dispatch tally (per failure cluster).**
 
@@ -133,12 +132,12 @@ captured as todos; the rest need no action.
 | Finding | Disposition |
 |---|---|
 | F1 `attachOtelToEngine` writes `receiverHosted=on` before the spawn-target refusal | **Rework R1** (T3 scope: the plan names this caller). Confirmed: `dash/src/cli/register.ts:289-300` opens the store and writes the setting, then refuses. |
-| F2 receiver child stamped `KYBERDASH_SPAWN_ROLE=job` | **Todo** [`kyberdash-spawn-guard-residuals`](../todo/kyberdash-spawn-guard-residuals.md) item 1. Behaviour equals D3 (both roles may neither host nor spawn); `docs/dash/architecture.md` "Known limits" already states it. Correction below. |
-| F3 CI runs only `harness-collection.spec.ts`; webServer specs have no sanctioned invocation | **Rework R3** for one part: the unreferenced `dash/playwright.refresh-filters.config.ts` runs `refresh-filters.spec.ts` with no `deny` and no ledger hooks, a bypass of D8. **Todo** [`kyberdash-playwright-webserver-specs`](../todo/kyberdash-playwright-webserver-specs.md) for `spine`/`deep-links`/`numerals` and for adding `refresh-filters` to CI (the isolation gap §8 already put out of scope). The three `refresh-filters.spec.ts` repairs stand. |
+| F2 receiver child stamped `KYBERDASH_SPAWN_ROLE=job` | **Todo** [`kyberdash-spawn-guard-residuals`](../../todo/kyberdash-spawn-guard-residuals.md) item 1. Behaviour equals D3 (both roles may neither host nor spawn); `docs/dash/architecture.md` "Known limits" already states it. Correction below. |
+| F3 CI runs only `harness-collection.spec.ts`; webServer specs have no sanctioned invocation | **Rework R3** for one part: the unreferenced `dash/playwright.refresh-filters.config.ts` runs `refresh-filters.spec.ts` with no `deny` and no ledger hooks, a bypass of D8. **Todo** [`kyberdash-playwright-webserver-specs`](../../todo/kyberdash-playwright-webserver-specs.md) for `spine`/`deep-links`/`numerals` and for adding `refresh-filters` to CI (the isolation gap §8 already put out of scope). The three `refresh-filters.spec.ts` repairs stand. |
 | F4 .NET audit scans `tests/KyberWeave.Tests` only | **Rework R2**: D11 and the T6 row approved scanning `tests/` and `src/` (about 36 matches in about 18 `src/` files). Spawns reached through a production API from another file go to the residuals todo, item 4. |
 | F5 ledger settle-window forgiveness; dash allow-list per (file, pattern) | **Todo** residuals items 2 and 3. Already documented as known limits in `docs/dash/runbook.md` and `docs/dash/architecture.md`. The .NET key (file, normalised text, count) is adequate. |
 | F6 Windows: no watchdog; ledger checks entries only; pid reuse | **Todo** residuals item 5 (Windows pid reuse could signal an unrelated process). The missing watchdog and scans were accepted in D6, D7 and R5. |
-| F7 task gates `NONE_APPLICABLE` for `.yml`/`.sh` edits | **Todo** [`task-gates-workflow-and-shell-edits`](../todo/task-gates-workflow-and-shell-edits.md) (ReviewCouncil). Not this plan's scope; the T0 and T7 tests read those files. |
+| F7 task gates `NONE_APPLICABLE` for `.yml`/`.sh` edits | **Todo** [`task-gates-workflow-and-shell-edits`](../../todo/task-gates-workflow-and-shell-edits.md) (ReviewCouncil). Not this plan's scope; the T0 and T7 tests read those files. |
 | F8 `artifacts/` appears untracked | **No action.** `.gitignore:17` is `/artifacts/` in this worktree and in the primary checkout, and no negation rule re-includes it, so `artifacts/evidence/` is ignored and must stay out of the commit. Conductor: confirm with `git check-ignore -v artifacts/evidence` and `git ls-files artifacts` (must print nothing); never `git add -f` it. |
 | F9 v2 plan blocked on this plan (D1) | **No action here.** The v2 plan's Execution state does not yet say "blocked on `2026-10-30-test-process-storm-guard`"; that conductor edit is still owed. After this PR merges: rebase `fix/opencode-v2-capture` onto `main`, then run its G1/G2/G3 through `scripts/proc-guard.sh run --` (Playwright with `--config dash/playwright.isolated.config.ts`). |
 
@@ -507,53 +506,40 @@ did not trip. Any trip or survivor fails the gate and returns to the owning task
   `docs/standards/test/README.md`, `docs/ci-pipelines/workflows-runbook.md`,
   `docs/code-review/architecture.md`.
 
-## 10. Closeout mapping (docs-dev, 2026-10-30)
+## Closeout mapping
 
-Status of this section: mapping complete. Archival is **blocked** (see the last subsection). Every
-durable item maps to a destination below. "Waiver" follows the closeout rules: an item is waived only
-when it is transient with no surviving invariant.
+Status: mapping complete; archived 2026-10-30. Each durable item maps to a live destination below. A
+row whose destination starts with "Documentation waiver" is waived only when the item is transient
+with no surviving invariant. Corrections where the code differs from the plan text follow the table.
 
-### 10.1 Decisions (D0–D14), approval (AP1)
-
-| ID | Durable content | Canonical destination | Documentation impact | Status |
-|---|---|---|---|---|
-| D0 | Mode `test-first` | Waiver: transient plan metadata; no surviving invariant. | none | archived-by-waiver |
-| D1 | Separate branch cut from `origin/main`; v2 plan blocked on this plan | Waiver: transient sequencing. Handoff below (§10.3). | none | handoff pending |
-| D2 | One guarded chokepoint, `guardedSpawn` | ADR 0047 decision 1; `docs/dash/architecture.md` "Spawn chokepoint, child roles and refusals" | extends-component | mapped |
-| D3 | Role and depth marker, four rules | ADR 0047 decision 2; architecture "Rules applied in order" table | extends-component | mapped, corrected (below) |
-| D4 | Fail-closed deny mode, `allowRealSpawns` opt-in | ADR 0047 decision 4; `docs/standards/test/README.md` "Tests that start processes" rules 2–3; `dash/AGENTS.md` "Tests that start processes" | extends-component | mapped |
-| D5 | Entry-point rule for self-spawns | ADR 0047 decision 3; architecture "Entry-point refusal"; `kyberdash otel` ordering note | extends-component | mapped, corrected (below) |
-| D6 | Watchdog: `scripts/proc-guard.sh`, caps 128/64, exit 86/87/124 | `docs/dash/runbook.md` "Running tests safely"; root `AGENTS.md` inner loop; `docs/code-review/architecture.md` watchdog section | extends-component | mapped |
-| D7 | Three-detector ledger; Windows handling | ADR 0047 decision 6; runbook "Process ledger"; architecture "Known limits" | extends-component | mapped, corrected (below) |
-| D8 | Isolated Playwright config; `--config` invocation; process-group kill | `dash/AGENTS.md`; runbook "Playwright runs only with the isolated config"; `docs/rules/kyberdash-harness-collection.md` "Running the conformance spec"; `docs/ci-pipelines/workflows-runbook.md` | extends-component | mapped, corrected (below) |
-| D9 | CI leftover step in `ts-gates`, `dash-e2e`, `build-test` | `docs/ci-pipelines/workflows-runbook.md` "Leftover-process steps" | extends-component | mapped, corrected (below) |
-| D10 | Watchdog wired into fast loop and gate argv | root `AGENTS.md` "Before opening a PR"; `docs/code-review/architecture.md` watchdog section; `dash/AGENTS.md` | extends-component | mapped |
-| D11 | Static spawn-site audits with allow-lists | `docs/standards/test/README.md` "The allow-list (dash)" and "(.NET)"; ADR 0047 decision 5; `dash/AGENTS.md` "Adding a spawn site" | extends-component | mapped, corrected (below) |
-| D12 | Execution safety order | Waiver: transient executor sequencing for this plan. The standing rules it protects (no dashboard start in tests; no Playwright without the isolated config) are in the runbook and `dash/AGENTS.md`. | none | archived-by-waiver |
-| D13 | ADR 0047 | ADR 0047; `docs/adr/README.md` index row | extends-component | mapped |
-| D14 | No OS-level limits (`ulimit`, `maxproc`) | ADR 0047 "Alternatives considered" | extends-component | mapped |
-| AP1 | Approval record | Waiver: transient approval record; the decisions it approved are mapped above. | none | archived-by-waiver |
-
-### 10.2 Design harvest (H1–H7)
-
-| ID | Target and destination | Documentation impact | Last reviewed | Status |
-|---|---|---|---|---|
-| H1 | ADR 0047 (new) and `docs/adr/README.md` row | extends-component | 2026-10-30 | mapped |
-| H2 | `docs/dash/architecture.md` "Spawn chokepoint, child roles and refusals (ADR 0047)" | extends-component | 2026-10-30 | mapped |
-| H3 | `docs/dash/runbook.md` "Running tests safely"; isolated-config invocation in "Running Unit & Contract Tests" and the Playwright verification block | extends-component | 2026-10-30 | mapped |
-| H4 | `docs/standards/test/README.md` "Tests that start processes" (dash and .NET allow-lists, production .NET bounds) | extends-component | 2026-10-30 | mapped |
-| H5 | `docs/ci-pipelines/workflows-runbook.md` (`dash-e2e` invocation, leftover steps) | extends-component | 2026-10-30 | mapped |
-| H6 | Root `AGENTS.md` (inner loop, before PR; Config Reg block untouched), `dash/AGENTS.md`, `docs/code-review/architecture.md` | extends-component | 2026-10-30 | mapped |
-| H7 | `docs/rules/kyberdash-harness-collection.md` "Running the conformance spec" | extends-component | 2026-10-30 | mapped |
-
-### 10.3 Reworks R1–R3 and the OpenCode V2 dependency
-
-| ID | Rework | Destination | Status |
-|---|---|---|---|
-| R1 | A legitimate child path refused by the guard (reachability check) | Refusal rules in ADR 0047 decision 2 and the architecture "Rules applied in order" table. The static reachability result is the Execution state record in this plan. | mapped |
-| R2 | False watchdog trips on a loaded machine | Runbook exit-code table (86: raise the matching override and say why). | mapped |
-| R3 | Playwright config resolution from the repository root | Every documented invocation passes `--config dash/playwright.isolated.config.ts` explicitly (runbook, rule, CI runbook, `dash/AGENTS.md`). | mapped |
-| D1 dependency | `fix/opencode-v2-capture` must rebase onto `main` after this merges, then run its gates through `scripts/proc-guard.sh run --`. | Handoff to the conductor. Recorded here; the v2 plan's own Execution state is edited by the conductor. | handoff pending |
+| ID | Destination | Note |
+|---|---|---|
+| D0 | Documentation waiver: transient plan metadata (development mode); no surviving invariant. | Plan header only. |
+| D1 | Documentation waiver: transient sequencing. Handoff to the conductor: after this merges, rebase `fix/opencode-v2-capture` onto `main` and run its gates through `scripts/proc-guard.sh run --`. Recorded in the [plans index](../../plans/README.md). | The paused OpenCode V2 plan's G1–G3 depend on this plan. |
+| D2 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 1; [dash architecture](../../dash/architecture.md) spawn chokepoint section | |
+| D3 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 2; [dash architecture](../../dash/architecture.md) "Rules applied in order" table | Corrected: `ensureEngine` refuses for every spawned child role; the receiver child is stamped `job`. |
+| D4 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 4; [test standard](../../standards/test/README.md) "Tests that start processes" rules 2 and 3; `dash/AGENTS.md` "Tests that start processes" | |
+| D5 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 3; [dash architecture](../../dash/architecture.md) "Entry-point refusal" | Includes the `kyberdash otel` ordering: a refused target exits before the store is opened. |
+| D6 | [dash runbook](../../dash/runbook.md) "Running tests safely"; [code-review architecture](../../code-review/architecture.md) "Test and build gates run under the process watchdog"; root `AGENTS.md` "The inner loop" | |
+| D7 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 6; [dash runbook](../../dash/runbook.md) "Process ledger" | Corrected: env var `KYBERDASH_SPAWN_LEDGER_FILE`; Windows runs in ledger-entry-only mode. |
+| D8 | [dash runbook](../../dash/runbook.md) "Playwright runs only with the isolated config"; [rules](../../rules/kyberdash-harness-collection.md) "Running the conformance spec"; `dash/AGENTS.md` "Tests that start processes" | Corrected: the `refresh-filters` config was deleted; a test pins the two remaining configs. |
+| D9 | [CI runbook](../../ci-pipelines/workflows-runbook.md) "Leftover-process steps in ts-gates, dash-e2e and build-test" | Corrected: any PID-1 orphan whose command contains the workspace path, not a name filter. |
+| D10 | [code-review architecture](../../code-review/architecture.md) "Test and build gates run under the process watchdog"; root `AGENTS.md` "Before opening a PR"; `dash/AGENTS.md` | `.kyber-weave/kyber-weave.yml` is a reserved path (KW-REVIEW-008). |
+| D11 | [test standard](../../standards/test/README.md) "The allow-list (dash)" and "The allow-list (.NET)"; [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 5 | Corrected: the .NET audit scans `tests/` and `src/` with root-prefixed keys. |
+| D12 | Documentation waiver: transient executor sequencing for this plan. The standing rules it protects are in the [dash runbook](../../dash/runbook.md) and `dash/AGENTS.md`. | |
+| D13 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md); [ADR index](../../adr/README.md) row 0047 | |
+| D14 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) "Alternatives considered" | |
+| AP1 | Documentation waiver: transient approval record; the decisions it approved are mapped above. | |
+| H1 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) and [ADR index](../../adr/README.md) | |
+| H2 | [dash architecture](../../dash/architecture.md) "Spawn chokepoint, child roles and refusals (ADR 0047)" | |
+| H3 | [dash runbook](../../dash/runbook.md) "Running tests safely" | |
+| H4 | [test standard](../../standards/test/README.md) "Tests that start processes" | |
+| H5 | [CI runbook](../../ci-pipelines/workflows-runbook.md) "Dash harness-collection e2e" and "Leftover-process steps" | |
+| H6 | [code-review architecture](../../code-review/architecture.md) "Test and build gates run under the process watchdog"; root `AGENTS.md` (inner loop and before-PR sections; Config Reg block untouched) and `dash/AGENTS.md` | |
+| H7 | [rules](../../rules/kyberdash-harness-collection.md) "Running the conformance spec" | |
+| R1 | [ADR 0047](../../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) decision 2; [dash architecture](../../dash/architecture.md) "Rules applied in order" | The reachability result is recorded in the plan's Execution state. |
+| R2 | [dash runbook](../../dash/runbook.md) "Running tests safely", exit-code table | |
+| R3 | [dash runbook](../../dash/runbook.md) "Playwright runs only with the isolated config"; [CI runbook](../../ci-pipelines/workflows-runbook.md) | Every documented invocation passes `--config dash/playwright.isolated.config.ts`. |
 
 ### 10.4 Corrections where the code differs from the plan text
 
@@ -572,7 +558,7 @@ The code is the truth; the canonical docs state what the code does.
 ### 10.5 Evidence and archival status
 
 - **G1 (local, through the watchdog):** green on final2. The executor's numbers are not re-run in this closeout.
-- **Council:** `NEEDS_HUMAN` under KW-REVIEW-008 only (the reserved `.kyber-weave/kyber-weave.yml` path). Two Minor and two Info findings from the second pass are recorded in `docs/todo/kyberdash-spawn-guard-residuals.md` (items 6 to 9).
-- **G2 (CI on the PR):** pending. Requires the PR's Ubuntu jobs green, including `dash-e2e` with the isolated config and the three leftover steps.
-- **G3 (local Playwright, once, after G2):** pending. Requires G2 first.
-- **Archival: blocked.** (a) §7 places closeout after G2 and G3; (b) this plan file is untracked, so `git mv` cannot move it until it is committed; (c) `docs validate . --merge-ready` reports KW-DOC-LIFECYCLE-003 while the plan is open in `docs/plans`. The owner decides when G2 and G3 are accepted, and the archive move follows that decision.
+- **Council:** `NEEDS_HUMAN` under KW-REVIEW-008 only (the reserved `.kyber-weave/kyber-weave.yml` path), approved by the owner in chat on 2026-10-30 ("approved"). Two Minor and two Info findings from the second pass are recorded in `docs/todo/kyberdash-spawn-guard-residuals.md` (items 6 to 9).
+- **G2 (CI, run 41161576863, head `bd4ecf28`, PR #477):** every job passed (build and test; dash harness-collection e2e, including the isolated config and the leftover steps; TypeScript gates; Windows capture tests; tray Rust gates; Squad loops; SBOM; secret scans; SAST; Trivy; CodeQL), except "Skill and docs gate" and the CI Summary aggregate. Those failed only on KW-DOC-LIFECYCLE-003 for this open plan, which this archive clears.
+- **G3 (local, one foreground run through the watchdog, `--max-node 40 --max-tree 30`, 16 s, peak 10 `node` processes against a baseline of 6, no leftovers, no boot or refresh processes afterwards):** `dash/playwright.isolated.config.ts` ran `harness-collection.spec.ts` 4 of 4. `refresh-filters.spec.ts` test T8 failed on the selector `drill-harness-antigravity` (`refresh-filters.spec.ts:160`). This is pre-existing selector rot, not a spawn or isolation defect: ContextDoctor stopped mounting the ScorecardMatrix drill buttons in commit `22895810` (PR #328, 2026-10-10), and `spine.spec.ts:24` is broken the same way. The T8 body is byte-identical to `origin/main`. Tracked in `docs/todo/kyberdash-playwright-webserver-specs.md` (item 3, options A and B). `refresh-filters` is not in CI (same todo, item 2).
+- **Archival:** performed 2026-10-30 with `git mv` to `docs/archive/plans/` after G2 and G3 were recorded. The G2 failure on KW-DOC-LIFECYCLE-003 cleared with the move; the G3 selector failure is carried by the todo, not by this plan.

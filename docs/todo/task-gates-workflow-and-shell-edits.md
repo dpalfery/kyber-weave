@@ -10,7 +10,7 @@ last-reviewed: 2026-10-30
 
 # Add task gates that cover workflow YAML, the review config and shell scripts
 
-During the [test process storm guard plan](../plans/2026-10-30-test-process-storm-guard.md),
+During the [test process storm guard plan](../archive/plans/2026-10-30-test-process-storm-guard.md),
 the task gate reported `NONE_APPLICABLE` (every gate skipped) for a task that edited only
 `.github/workflows/ci.yml`, `.kyber-weave/kyber-weave.yml` and `scripts/*.sh`, and for the first
 run of a .NET test-only task. Nothing deterministic checked those edits at the task boundary.
