@@ -2,7 +2,7 @@
 // a host string is cut to a short label before the plugin retains or sends it. The golden replay pins
 // ordinary values; these pin the edges.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OPENCODE_KEYS } from './contract.js'
 import { createSetup } from './entry.js'
@@ -18,6 +18,7 @@ import {
   mergeBodies,
   noSleep,
   receiver,
+  writeConsent,
   spansOf,
   start,
   stopPlugin,
@@ -131,5 +132,30 @@ describe('host strings kept for a span are cut to a label', () => {
       expect(value, key).toBeDefined()
       expect(Buffer.byteLength(value ?? '', 'utf8'), key).toBeLessThanOrEqual(FIELD_CAP)
     }
+  })
+})
+
+describe('a prompt over the cap is cut before it is copied', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('never encodes a whole oversized prompt to find the 64 KiB to keep', async () => {
+    const consentPath = consentPathIn(tempDir())
+    writeConsent(consentPath, true)
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup({ ...options(rcv), consentPath }), host)
+    await open(host)
+    const encode = vi.spyOn(Buffer, 'from')
+    await host.deliverSession('prompt', hook.prompt(S, 'msg_1', 'a'.repeat(1000)))
+    await host.deliverSession('prompt', hook.prompt(S, 'msg_2', 'b'.repeat(20_000_000)))
+    const widest = Math.max(0, ...encode.mock.calls.map(([value]) => (typeof value === 'string' ? value.length : 0)))
+    await host.deliverEvent(bus.executionSucceeded(S, 1100))
+    await stopPlugin(cleanup)
+    expect(widest).toBeLessThan(1_000_000)
+    const text = stringAttr(spans(rcv, 'request')[0] as OtlpSpan, OPENCODE_KEYS.promptText)
+    expect(Buffer.byteLength(text ?? '', 'utf8')).toBe(64 * 1024)
+    expect(text?.startsWith(`${'a'.repeat(1000)}\n\nbbb`)).toBe(true)
   })
 })

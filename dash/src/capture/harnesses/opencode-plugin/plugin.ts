@@ -395,14 +395,23 @@ function madeUpAnchor(state: SessionState, createdMs: number): string {
   return repeat === 0 ? `created:${createdMs}` : `created:${createdMs}#${repeat}`
 }
 
+/**
+ * The head of a prompt that can survive the cap. Every UTF-16 unit takes at least one UTF-8 byte, so
+ * the first `MAX_PROMPT_BYTES` units already hold every byte that can be kept; the rest of a huge
+ * prompt is never copied or encoded. The copy is independent of the host string.
+ */
+function promptHead(promptText: string): string {
+  return promptText.length > MAX_PROMPT_BYTES ? detachedCopy(promptText.slice(0, MAX_PROMPT_BYTES)) : promptText
+}
+
 /** Adds one prompt: always counted; its text kept (capped, blank-line joined) only when content may be kept. */
 function addPrompt(prompts: Prompts, promptText: string | undefined, keepContent: boolean): void {
   prompts.count += 1
   if (!keepContent || promptText === undefined || promptText === '') return
   if (prompts.text === undefined) {
-    prompts.text = capUtf8(promptText, MAX_PROMPT_BYTES)
+    prompts.text = capUtf8(promptHead(promptText), MAX_PROMPT_BYTES)
   } else if (Buffer.byteLength(prompts.text, 'utf8') < MAX_PROMPT_BYTES) {
-    prompts.text = capUtf8(`${prompts.text}\n\n${promptText}`, MAX_PROMPT_BYTES)
+    prompts.text = capUtf8(`${prompts.text}\n\n${promptHead(promptText)}`, MAX_PROMPT_BYTES)
   }
 }
 
