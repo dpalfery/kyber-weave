@@ -11,6 +11,10 @@ keywords:
   - diagnostic
   - engine
   - sarif
+sections:
+  stable-rule-ids:
+    keywords:
+      - rule ids
 code-refs:
   - Diagnostic
   - DiagnosticReport

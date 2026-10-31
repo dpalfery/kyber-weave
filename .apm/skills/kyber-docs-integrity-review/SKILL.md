@@ -25,7 +25,7 @@ Use this skill when the user wants a repository documentation corpus reviewed cl
 Kyber-Weave is mandatory for this skill.
 
 1. Use the Kyber-Weave documentation explorer before reading or grepping governed documentation.
-2. Retrieve the target document by its governed identity or path, preferably with `maxDocs: 1` and enough character budget for the complete file.
+2. Retrieve the target document by its governed identity or path with `docs_explore`, using the continuation `cursor` when the first answer is marked incomplete.
 3. For each claim, query Kyber-Weave for:
    - whether the claim is in the correct document and location;
    - whether another document is the canonical source;

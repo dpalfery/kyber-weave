@@ -109,7 +109,7 @@ corpus degrades gracefully rather than serving unreviewed metadata as current gu
 
 | Tool | What it does |
 |---|---|
-| `docs_explore(query, maxDocs, charBudget)` | Ranked documents with frontmatter identity, prose within budget, and code joins as `symbol → file:line` |
+| `docs_explore(query, cursor?)` | One leaf answer (preamble or `###` section) with confidence, a single source line, and an optional continuation cursor past 24,000 characters |
 | `docs_for_symbol(symbol)` | Reverse lookup: documents whose `code-refs` **formally claim** a symbol — not those that merely mention it |
 | `docs_analysis_candidates(kind, cursor, limit, charBudget)` | Capped, stable, read-only duplicate/conflict/terminology evidence with local cost metrics |
 | `docs_glossary(term)` | Capped, read-only lookup of managed term senses, scopes, and aliases |

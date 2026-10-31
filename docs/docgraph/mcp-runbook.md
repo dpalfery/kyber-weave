@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-31
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
@@ -327,22 +327,37 @@ context it becomes a prohibition on reading tests. Only `docs_explore` carries a
 exclusion, because it is the broadest of the eight; the narrower seven state their territory
 positively so no request falls between them.
 
-Where a constraint can live on a parameter it goes there instead — how `maxDocs` and
-`charBudget` interact sits on those parameters, because a property description binds at the
-point of use.
+Where a constraint can live on a parameter it goes there instead — for example how
+`charBudget` caps **`agent_coding_standards`** prose sits on that parameter, because a
+property description binds at the point of use. `docs_explore` has no budget parameters.
 
-### `docs_explore(query, maxDocs = 5, charBudget = 12000)`
+### `docs_explore(query, cursor = null)`
 
-Ranked documents for a question, symbol, route, component, or document id. Each hit
-carries its frontmatter identity, its most relevant `##` sections within budget, and its
-resolved code joins as `symbol -> file:line`. The `doc-type:` in that identity is the
-ontology's spelling rather than the enum member's name, so a coding standard comes back as
-`doc-type: CODING-STANDARD`.
+One answer for a question, symbol, route, component, or document id — not a ranked list of
+documents. After the relevance floor, leaves inside qualifying documents compete; the
+winning **leaf** (preamble, lead-in before a `##` section's first `###`, or a `###`) is
+returned whole up to a **24,000-character** ceiling. Past that, the reply is marked
+incomplete and the optional **`cursor`** continues the **same** leaf on the next call with
+the same question.
 
-The response leads with the relevance range so a caller can judge confidence, and warns
-explicitly when no CodeGraph index was readable and joins are therefore unresolved.
-Individual sections are capped at 6000 characters and joins at 20 per document, so one
-enormous document cannot crowd out every other result.
+The response reads, in order:
+
+1. the provenance line (always whole)
+2. `confidence: 0.00`–`1.00` — `tanh((winning topic − best other topic) / 2)`, halved when
+   incomplete; stop at **0.60 or higher** when the answer is not incomplete
+3. a short reading rule (stop, continue with `cursor`, or ask a narrower question)
+4. when incomplete, one line naming the cursor token to pass on the next call
+5. `source: {path} — {## heading} › {### heading}`, or `source: {path}` for the preamble
+6. the leaf prose
+
+There is no frontmatter block, no skipped-heading list, and no code-join list on this
+tool. Index sections (plan inventories, the ADR inventory, the todo inventory, the
+policy-line ledger, the reference inventory) are not answer text — a matching inventory row
+is answered from the document it links to.
+
+Optional frontmatter **`lead`** and **`sections`** on governed documents declare section
+claims; see [the documentation ontology](../documentation-ontology.md) and [ADR
+0046](../adr/0046-docs-explore-section-answer.md).
 
 A miss says so plainly, reports how many documents were considered, and suggests naming a
 component, doc-id, or symbol instead. Treat that as permission to fall back to grep.
@@ -367,8 +382,8 @@ not quietly repaired into a hit.
 `topic` is what the caller is about to do (`naming`, `error handling`, `pull request
 review`). Omitted, the whole standard comes back in document order under budget. Provided,
 the sections that answer it are chosen by the same rarity-weighted section ranking
-[`docs_explore`](#docs_explorequery-maxdocs--5-charbudget--12000) uses. A topic no section
-clears returns no prose — it does not fall back to the whole standard.
+[`Excerpt`](retrieval.md#excerpt-budgeting-agent_coding_standards) uses inside one standard.
+A topic no section clears returns no prose — it does not fall back to the whole standard.
 
 `charBudget` is total characters of prose across the standards returned, clamped to
 1000–120000 and defaulting to 12000. One technology can be answered by more than one
