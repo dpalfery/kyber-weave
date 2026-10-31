@@ -1,6 +1,6 @@
 ---
 id: todo/typescript-estree-minimatch-11
-title: Move typescript-estree off minimatch 10.2.6 when upstream requires 11.0.1
+title: Remove the dash minimatch override once eslint and typescript-eslint accept 11
 doc-type: todo
 component: KyberDash
 status: draft
@@ -8,48 +8,51 @@ owner: dpalfery
 last-reviewed: 2026-10-31
 ---
 
-# Move typescript-estree off minimatch 10.2.6 when upstream requires 11.0.1
+# Remove the dash minimatch override once eslint and typescript-eslint accept 11
 
-`dash/package-lock.json` carries two copies of npm `minimatch` that
-[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) flags by version
-range `< 11.0.1`:
+`dash/package.json` carries a top-level `overrides` entry that forces `minimatch` to `^11.0.1`
+(lockfile: 11.0.3) for every consumer in the package:
 
-| Node | Version | Required by | Range |
-|---|---|---|---|
-| `node_modules/minimatch` | 3.1.5 | `eslint@9` and its `@eslint/*` packages | `^3.1.5` |
-| `node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch` | 10.2.6 | `@typescript-eslint/typescript-estree` (via `typescript-eslint`) | `^10.2.2` |
+```json
+"overrides": {
+  "minimatch": "^11.0.1"
+}
+```
 
-The 3.1.5 copy predates `optimizationLevel` and `firstPhasePreProcess`, the code the advisory
-describes, so it is a range false positive. That one needed no work.
+It is there for [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+(CVE-2026-118764), which flags every minimatch below 11.0.1, and it replaced two lockfile
+copies that no longer exist: 3.1.5 from `eslint@9` and its `@eslint/*` packages, and 10.2.6
+from `@typescript-eslint/typescript-estree`.
 
-The 10.2.6 copy does contain the vulnerable code, but nothing in this repository reaches it.
-The only call site is `@typescript-eslint/typescript-estree/dist/useProgramFromProjectService.js`,
-which `dash/eslint.config.js` never exercises: that config sets no `parserOptions.projectService`
-and no `allowDefaultProject`, and the call there passes no `optimizationLevel`, so minimatch's
-default of 1 applies where the advisory needs 2 or more. The patterns are repository-owned.
-
-Deferred rather than patched because the available change was disproportionate: no 10.x release
-is patched (10.2.6 is the last of the line), so any fix forces minimatch 11 past
-typescript-estree's declared `^10.2.2`, adds a transitive package
-(`@isaacs/nonrecursive-glob-match`), and cannot be proven behaviour-preserving by any gate —
-lint would only prove that minimatch 11 loads. No open Dependabot alert covers this copy.
-Full reasoning and rejected options: the archived plan
+The override sits above what those packages declare — eslint 9 asks for `^3.1.5`,
+typescript-estree for `^10.2.2` — which is why it should not outlive their own movement.
+The measured basis for it is in the archived plan
 [2026-10-31-minimatch-globparts-advisory](../archive/plans/2026-10-31-minimatch-globparts-advisory.md)
-(D2-R1).
+(D2-R2): both eslint consumers reach minimatch only through the `Minimatch` class, which 10
+and 11 still export, and `ts-lint` over the whole dash tree is the behaviour check.
 
 ## When to pick this up
 
-- **Reopen trigger.** A `typescript-eslint` release whose
-  `@typescript-eslint/typescript-estree` declares `minimatch` at `>= 11.0.1`. Then run
-  `npm update --prefix dash typescript-eslint` and the dash gates
-  (`dash-typecheck`, `dash-lint`, the dash test gate, `check:reachable`), and confirm
-  `npm audit --prefix dash --json` no longer lists the typescript-estree node.
-- **Escalation trigger.** Dash enables `parserOptions.projectService` with
-  `allowDefaultProject`, or a future advisory reaches the default `optimizationLevel`.
-  Either makes the call site live, and the scoped-override option in D2-R1 (B) becomes the
-  right answer.
+- **Removal trigger.** An `eslint` release whose minimatch range admits `>= 11.0.1`, and a
+  `typescript-eslint` release whose `@typescript-eslint/typescript-estree` requires
+  `>= 11.0.1`. Check with
+  `npm view eslint dependencies.minimatch` and
+  `npm view @typescript-eslint/typescript-estree dependencies.minimatch`.
+- **Partial trigger.** Only one of the two has moved. Keep the override for the other and
+  narrow it to that parent rather than dropping it, so the finding does not come back.
+- **Escalation trigger.** Lint or typecheck starts failing after an eslint or minimatch
+  upgrade in a way that points at glob matching, which would mean the pinned major is now
+  the problem. Then re-read D2-R2 before choosing a target version.
 
-Use the parent-scoped override form only:
-`"overrides": { "@typescript-eslint/typescript-estree": { "minimatch": "^11.0.1" } }` —
-never a top-level `minimatch` override, which would force 11.x onto eslint 9's `^3.1.5`
-consumers. Never run `npm audit fix`: it proposes `eslint@4.0.0`, a semver-major downgrade.
+## Removing it
+
+1. Delete the `overrides` entry from `dash/package.json`.
+2. `npm install --prefix dash`.
+3. Confirm one deduped `minimatch` at 11.0.1 or later: `npm ls --prefix dash minimatch`.
+4. Confirm `npm audit --prefix dash --json` still reports zero vulnerabilities.
+5. Run the dash gates: `ts-typecheck`, `ts-lint`, `ts-test`, `ts-reachable` via
+   `dotnet run --project src/KyberWeave.Cli -- review gates . --paths dash/package.json`.
+
+Every npm and gate command goes through `scripts/proc-guard.sh run -- <command>`, from the
+repository root. Do not use `npm audit fix`: it still proposes `eslint@4.0.0`, a semver-major
+downgrade.
