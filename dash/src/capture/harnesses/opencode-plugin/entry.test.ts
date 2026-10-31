@@ -71,6 +71,20 @@ describe('setup never fails the host', () => {
     expect(isCleanup(cleanup)).toBe(true)
   })
 
+  it('gives up on a hook registration the host never answers, names it, and still registers the rest', async () => {
+    const errors: string[] = []
+    const host = createHost({ hangSessionHook: true })
+    const cleanup = await start(
+      createSetup({ ...options(), hookRegistrationTimeoutMs: 20, onError: (where) => errors.push(where) }),
+      host,
+    )
+    expect(isCleanup(cleanup)).toBe(true)
+    expect(errors).toEqual(['hook prompt', 'hook context', 'hook model.request'])
+    expect([...host.toolHooks].sort()).toEqual(TOOL_HOOKS)
+    await stopPlugin(cleanup)
+    expect(host.closedSubscriptions).toBe(1)
+  })
+
   it('ignores hook inputs that name no session and never rejects', async () => {
     const rcv = receiver()
     const host = createHost()

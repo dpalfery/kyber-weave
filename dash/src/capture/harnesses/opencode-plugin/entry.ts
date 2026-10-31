@@ -34,6 +34,8 @@ import { DEFAULT_OTLP_ENDPOINT, type OtlpFetch } from './transport/otlp-sender.j
 
 /** How long `Cleanup` waits for the outbox to drain before it gives up and closes it. */
 const DEFAULT_FLUSH_TIMEOUT_MS = 1500
+/** How long `setup` waits for the host to answer one hook registration before it moves on. */
+const DEFAULT_HOOK_REGISTRATION_TIMEOUT_MS = 5000
 /** The sweep timer never fires more often than this, whatever the remaining time. */
 const MIN_SWEEP_MS = 1000
 
@@ -52,6 +54,8 @@ export type EntryOptions = {
   requestTimeoutMs?: number
   /** Bound on the outbox flush inside `Cleanup` (ms). */
   flushTimeoutMs?: number
+  /** Bound on the host's answer to each hook registration during `setup` (ms). */
+  hookRegistrationTimeoutMs?: number
   /** Tap for failures the plugin swallowed. Itself runs swallowed. */
   onError?: (where: string, error: unknown) => void
 }
@@ -129,6 +133,7 @@ async function start(ctx: OpencodeSetupContext | undefined, options: EntryOption
   const env = options.env ?? process.env
   const consentPath = options.consentPath ?? resolveConsentPath()
   const flushTimeoutMs = options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS
+  const hookTimeoutMs = options.hookRegistrationTimeoutMs ?? DEFAULT_HOOK_REGISTRATION_TIMEOUT_MS
 
   const outbox = createOutbox({
     endpoint: options.endpoint ?? DEFAULT_OTLP_ENDPOINT,
@@ -248,13 +253,43 @@ async function start(ctx: OpencodeSetupContext | undefined, options: EntryOption
     report('subscribe', error)
   }
 
+  /** Keeps a registration to dispose at cleanup; one that arrives after cleanup is disposed at once. */
+  const keep = (registration: unknown): void => {
+    if (!isDisposable(registration)) return
+    if (!stopped) {
+      disposables.push(() => registration.dispose())
+      return
+    }
+    try {
+      void Promise.resolve(registration.dispose()).catch((error: unknown) => report('dispose', error))
+    } catch (error) {
+      report('dispose', error)
+    }
+  }
+
   const register = async (registrar: HookRegistrar | undefined, name: string, handle: (input: unknown) => void): Promise<void> => {
     if (typeof registrar?.hook !== 'function') return
+    // A host that never answers must not leave `setup` pending, so the wait is bounded and the
+    // stalled hook is named. An answer that arrives later is still kept so it can be disposed.
+    const timedOut = Symbol('timed out')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), hookTimeoutMs)
+      unref(timer)
+    })
+    const pending = (async (): Promise<unknown> => await registrar.hook?.(name, hookCallback(handle)))()
     try {
-      const registration: unknown = await registrar.hook(name, hookCallback(handle))
-      if (isDisposable(registration)) disposables.push(() => registration.dispose())
+      const registration = await Promise.race([pending, deadline])
+      if (registration === timedOut) {
+        report(`hook ${name}`, new Error(`the host did not answer the registration within ${hookTimeoutMs} ms`))
+        pending.then(keep, (error: unknown) => report(`hook ${name}`, error))
+        return
+      }
+      keep(registration)
     } catch (error) {
       report(`hook ${name}`, error)
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 

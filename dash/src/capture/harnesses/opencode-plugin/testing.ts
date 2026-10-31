@@ -200,6 +200,8 @@ export type HostOptions = {
   directory?: string
   /** `ctx.session.hook` rejects at registration (a host that refuses the surface). */
   rejectSessionHook?: boolean
+  /** `ctx.session.hook` never settles (a host that accepts the call and never answers). */
+  hangSessionHook?: boolean
   /** `ctx.event.subscribe` throws. */
   throwOnSubscribe?: boolean
   /** No session, tool or event surface at all. */
@@ -327,7 +329,9 @@ export function createHost(options: HostOptions = {}): FakeV2Host {
   const session =
     options.rejectSessionHook === true
       ? { hook: () => Promise.reject(new Error('session hook refused (synthetic)')) }
-      : { hook: (name: string, callback: unknown) => register(sessionCallbacks, sessionHooks, name, callback) }
+      : options.hangSessionHook === true
+        ? { hook: () => new Promise<never>(() => undefined) }
+        : { hook: (name: string, callback: unknown) => register(sessionCallbacks, sessionHooks, name, callback) }
   const tool = { hook: (name: string, callback: unknown) => register(toolCallbacks, toolHooks, name, callback) }
   const ctx =
     options.bare === true
