@@ -59,12 +59,14 @@ export const PROMPT_ONE =
 export const PROMPT_TWO = 'Follow the attached kw-gate-skill skill. Do not call any tools; reply with its token and the number 3.'
 
 /**
- * `opencode run <message>` wraps a message that contains whitespace in double quotes before it sends it
- * (inner quotes escaped), so OpenCode records, and the plugin captures, prompt 1 with those quotes. The
- * `api` route sends prompt 2 verbatim.
+ * `opencode run <message>` wraps a message that contains whitespace in double quotes before it sends it, so
+ * OpenCode records, and the plugin captures, prompt 1 with those quotes. The `api` route sends prompt 2
+ * verbatim. The gate's prompts hold no quote or backslash, so the wrapping needs no escaping; a prompt that
+ * did would be recorded differently, and this refuses it rather than guess how OpenCode escapes it.
  */
 export function recordedByRun(prompt) {
-  return /\s/.test(prompt) ? `"${prompt.replace(/"/g, '\\"')}"` : prompt
+  if (/["\\]/.test(prompt)) throw new Error('recordedByRun: a gate prompt must not contain a quote or a backslash')
+  return /\s/.test(prompt) ? `"${prompt}"` : prompt
 }
 
 export const PRIMARY_MODEL = 'opencode-go/muse-spark-1.3-contributor'
