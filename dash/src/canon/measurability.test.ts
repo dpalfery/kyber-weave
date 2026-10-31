@@ -25,6 +25,7 @@ import {
   cacheAvailability,
   contextCompositionAvailability,
   getMeasurability,
+  harnessExportsCacheCounter,
   harnessFamily,
   isFileSource,
   measurabilityFor,
@@ -645,5 +646,36 @@ describe('Copilot CLI declarations (D8)', () => {
       availability: 'not_measurable',
       reason: expect.stringMatching(/Copilot CLI/),
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// OpenCode through the capture plugin (rule 6): cache counters are exported, and no reader remains
+// ---------------------------------------------------------------------------
+
+describe('OpenCode capture survey (rule 6)', () => {
+  it('exports cache read and creation counters through the capture plugin, so its cache survey is supported', () => {
+    expect(cacheAvailability('opencode')).toMatchObject({
+      status: 'supported',
+      cacheRead: true,
+      cacheCreation: true,
+    })
+  })
+
+  it('answers the cache projection that OpenCode exports both cache counters', () => {
+    expect(harnessExportsCacheCounter('opencode', 'read')).toBe(true)
+    expect(harnessExportsCacheCounter('opencode', 'creation')).toBe(true)
+  })
+
+  it('names the KyberDash capture plugin and content consent in the no-capture reason', () => {
+    // The prefix survey carries the OpenCode no-capture reason, which says why no prefix bytes
+    // are exported. The missing condition is the capture plugin, and content needs consent.
+    const reason = prefixAvailability('opencode').reason
+    expect(reason).toMatch(/capture plugin/i)
+    expect(reason).toMatch(/consent/i)
+  })
+
+  it('no longer lists opencode among the readers with unmeasurable buckets', () => {
+    expect(READER_UNMEASURABLE.has('opencode')).toBe(false)
   })
 })

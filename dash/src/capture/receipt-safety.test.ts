@@ -90,16 +90,12 @@ describe('receipt safety', () => {
 
   it('writes the receipt atomically, leaving no temp files behind', async () => {
     const home = makeHome()
-    const path = opencodeHarness.resolvePath(home, env(home))
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, '{}\n')
-    await runCaptureAction(req(home, 'opencode', 'enable'))
+    const stable = copilotFile(home, 'vscode-stable')
+    mkdirSync(dirname(stable), { recursive: true })
+    writeFileSync(stable, '{}\n')
+    await runCaptureAction(req(home, 'copilot', 'enable'))
     expect(existsSync(receiptPathForHome(home))).toBe(true)
-    // The key receipt plus OpenCode's own plugin receipt and consent file (T4); no `.tmp` leftovers.
-    expect(readdirSync(dirname(receiptPathForHome(home))).sort()).toEqual([
-      'capture-receipt.json',
-      'opencode-plugin-receipt.json',
-      'opencode-plugin.json',
-    ])
+    // Only the receipt lives under ~/.kyberdash once the write settles: no `.tmp` leftovers.
+    expect(readdirSync(dirname(receiptPathForHome(home))).sort()).toEqual(['capture-receipt.json'])
   })
 })

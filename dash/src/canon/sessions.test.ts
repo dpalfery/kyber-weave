@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { opencodeAdapter } from './adapters/opencode.js'
 import { rawSpan } from './adapters/testing.js'
+import { SPAN_NAMES } from '../capture/harnesses/opencode-plugin/contract.js'
 import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability, measurabilityFor } from './measurability.js'
 import { CanonStore } from './store.js'
@@ -300,10 +301,32 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
-  // Review re-review #2 (Kilo 7): OpenCode is catalogued `not_measurable`
-  // with documented confidence — a verified negative, not an uncatalogued
-  // gap — so its cache figures stay absent like any unsupported harness.
+  // Review re-review #2 (Kilo 7): Windsurf is catalogued as a documented
+  // negative (cache `unsupported`, prefix `not_measurable`, both documented) —
+  // a verified negative, not an uncatalogued gap — so its cache figures stay
+  // absent like any unsupported harness. OpenCode moved off this list when the
+  // capture plugin began exporting cache counters (see the next test).
   it('omits cache figures for a documented-unmeasurable harness', () => {
+    const row = buildSessionRow(
+      'sess-windsurf-cache',
+      [
+        turn('w1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'windsurf',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Rule 6 (OpenCode capture survey): the KyberDash capture plugin exports
+  // cache read and cache write counters, so an OpenCode session carries a
+  // cache ratio. A stored cache read of 0 is a measured 0%, not an absence.
+  it('emits the cache hit ratio for OpenCode, which exports cache counters', () => {
     const row = buildSessionRow(
       'sess-opencode-cache',
       [
@@ -316,8 +339,7 @@ describe('buildSessionRow', () => {
     )
     const summary = sessionPayload(row).summary as Record<string, unknown>
     expect(summary.total_input).toBe(1200)
-    expect('cache_hit_ratio' in summary).toBe(false)
-    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(summary.cache_hit_ratio).toBe(0)
   })
 
   // Review re-review (Kilo 1): Codex is `supported` yet exports no
@@ -1061,9 +1083,11 @@ describe('what counts as a session', () => {
     const record = opencodeAdapter.normalize(
       rawSpan({
         spanId: 'oc-1',
+        name: SPAN_NAMES.step,
         source: 'opencode',
         attributes: {
-          'opencode.contract_version': '2',
+          'opencode.contract_version': '3',
+          'opencode.span.kind': 'step',
           'opencode.model.id': 'claude-opus-4-6',
           'opencode.session.id': 'ses_t0_opencode',
         },

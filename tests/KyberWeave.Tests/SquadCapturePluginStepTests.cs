@@ -21,6 +21,12 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     private const string InstalledVersion = "1.2.3";
     private const string UpdatedVersion = "1.2.4";
 
+    // The verb's guidance lines are every stdout line that starts with this prefix (D22). The copy after the
+    // prefix belongs to kyberDash, so these tests use neutral text and never pin its wording.
+    private const string HarnessPrefix = "harness opencode: ";
+    private const string GuidanceAlpha = "guidance from the verb, line alpha";
+    private const string GuidanceBeta = "guidance from the verb, line beta";
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose()
@@ -80,19 +86,90 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         Assert.Contains("kyber-weave update", output, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void RunReportsAnInstalledPluginAndPrintsTheRestartLine()
+    /// <summary>
+    ///     The step prints the verb's own guidance line for a changed plugin, and for a kept one when the verb sends
+    ///     one. The restart wording is kyberDash's (ADR 0031), so Squad must not print a line of its own.
+    /// </summary>
+    [Theory]
+    [InlineData("installed")]
+    [InlineData("upgraded")]
+    [InlineData("kept-edited")]
+    public void RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string verdict)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
-            "opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n");
+            $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
         KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
-        Assert.Contains("opencode plugin: installed", output, StringComparison.Ordinal);
-        Assert.Contains("Restart OpenCode", output, StringComparison.Ordinal);
+        Assert.Contains($"opencode plugin: {verdict}", output, StringComparison.Ordinal);
+        Assert.Contains(GuidanceAlpha, output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Every harness line the verb prints is relayed, not only the first one. The step used to print a single
+    ///     verdict line, so a second guidance line was lost.
+    /// </summary>
+    [Fact]
+    public void RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
+    {
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            "opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n" +
+            $"{HarnessPrefix}{GuidanceAlpha}\n" +
+            $"{HarnessPrefix}{GuidanceBeta}\n");
+        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+
+        Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+
+        Assert.Contains(GuidanceAlpha, output, StringComparison.Ordinal);
+        Assert.Contains(GuidanceBeta, output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The hard-coded "Restart OpenCode" line was the step's own wording, which drifted from kyberDash's. No
+    ///     output line may begin with it, whatever the verdict.
+    /// </summary>
+    [Theory]
+    [InlineData("installed")]
+    [InlineData("upgraded")]
+    [InlineData("kept-edited")]
+    public void RunNeverPrintsAHardCodedRestartOpenCodeLine(string verdict)
+    {
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
+        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+
+        Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+
+        Assert.DoesNotContain(
+            output.Split('\n'),
+            line => line.StartsWith("Restart OpenCode", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Only lines that start with the harness prefix are guidance. Verb chatter, and a line that merely mentions
+    ///     the prefix, are not relayed. A step that dumped all of stdout would fail this.
+    /// </summary>
+    [Fact]
+    public void RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
+    {
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            "opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n" +
+            $"{HarnessPrefix}{GuidanceAlpha}\n" +
+            "verb chatter that is not guidance\n" +
+            "verb note: harness opencode: mid-line mention\n");
+        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+
+        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+
+        Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
+        Assert.DoesNotContain("verb chatter that is not guidance", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("mid-line mention", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -327,6 +404,37 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Empty(executor.Calls);
+    }
+
+    [Fact]
+    public void GlobalInstallRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "install-guidance"));
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            $"opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
+
+        CommandExecution execution =
+            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains(GuidanceAlpha, execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalUpdateRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
+    {
+        using Harness h = new(Path.Combine(_temp.Path, "update-guidance"));
+        Assert.Equal(0, Capture(() => h.InstallCommand(new FakeProcessExecutor())
+            .Execute(null!, GlobalInstall(h, ["opencode"])), out _).ExitCode);
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
+            "kyberdash",
+            $"opencode plugin: upgraded /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
+
+        CommandExecution execution = Capture(() => h.UpdateCommand(executor).Execute(null!, GlobalUpdate(h)), out _);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains(GuidanceAlpha, execution.Output, StringComparison.Ordinal);
     }
 
     // ---- fixtures ----

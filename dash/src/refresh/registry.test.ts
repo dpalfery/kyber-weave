@@ -15,6 +15,7 @@ import {
   classifySessionSource,
   descriptorFor,
   parserContractVersionFor,
+  resolveHarnessScope,
   sourceKeyFor,
 } from './registry.js'
 
@@ -111,7 +112,6 @@ const INVENTORY_PROVIDER_NAMES = [
   'forge',
   'goose',
   'cursor',
-  'opencode',
   'cursor-agent',
   'crush',
   'warp',
@@ -144,7 +144,6 @@ describe('HarnessSourceRegistry', () => {
       'copilot-cli',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
-      'opencode',
       'pi',
     ])
     const capabilityByHarness = new Map<string, { reader: boolean; unavailable: string[] }>(
@@ -425,6 +424,16 @@ describe('HarnessSourceRegistry', () => {
     expect(classifySessionSource({
       source: source({ path: '/tmp/.kimi-code/x', provider: 'kimicode' }),
     })).toEqual({ outcome: 'harness', harnessId: 'kimi-code' })
+  })
+
+  it('gives OpenCode no provider and no reader, so refreshing it imports nothing', async () => {
+    const providers = await getAllProviders()
+    expect(providers.map((provider) => provider.name)).not.toContain('opencode')
+    expect(PROVIDER_READERS.has('opencode')).toBe(false)
+  })
+
+  it('keeps opencode a known harness id for scope resolution', () => {
+    expect(resolveHarnessScope(['opencode'])).toMatchObject({ known: ['opencode'], unknown: [] })
   })
 
   it('builds privacy-safe source keys from sourceId or a path digest', () => {

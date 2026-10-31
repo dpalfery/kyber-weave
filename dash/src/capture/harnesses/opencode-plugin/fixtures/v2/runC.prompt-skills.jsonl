@@ -1,0 +1,1 @@
+{"v": 2, "t": "2026-10-30T05:28:17.070Z", "kind": "session.hook:prompt", "payload": {"sessionID": "ses_e74c398c7ffeVajzhRWZNgfR2n", "messageID": "msg_18b47bdad001105vIdWkfk7FH5", "prompt": {"text": "Follow the attached kw-probe-skill skill. Do not call any tools; just reply with its token and the number 3.", "skills": [{"id": "kw-probe-skill"}]}, "delivery": "steer"}}

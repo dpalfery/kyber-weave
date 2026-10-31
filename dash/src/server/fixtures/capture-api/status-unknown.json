@@ -164,36 +164,14 @@
         "config found at /home/example/.config/opencode/opencode.jsonc"
       ],
       "state": "on",
-      "receipt": "recorded",
-      "files": [
-        {
-          "id": "opencode-config",
-          "path": "/home/example/.config/opencode/opencode.jsonc",
-          "applicable": true,
-          "exists": true,
-          "expectedKeys": [
-            "experimental.openTelemetry"
-          ],
-          "presentKeys": [
-            "experimental.openTelemetry"
-          ],
-          "missingKeys": [],
-          "mismatchedKeys": [],
-          "drift": null
-        }
-      ],
+      "receipt": "absent",
+      "files": [],
       "warnings": [],
-      "manualSteps": [
-        {
-          "id": "opencode-otel-endpoint",
-          "text": "OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from",
-          "env": {
-            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "value": "http://127.0.0.1:4318"
-          }
-        }
+      "manualSteps": [],
+      "statusLines": [
+        "plugin: installed",
+        "content consent: on (system prompt, tool definitions and skills are captured)"
       ],
-      "statusLines": [],
       "health": "attention",
       "issues": [
         {
