@@ -978,6 +978,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
       "count": 1,
       "bound": "GuardTimeout (30 s) kills the tree. The wrapped command exits at once; the process table is a fixture and kill is a recording fake."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/SquadPackResponsePreferencesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(CliHostPath())",
+      "count": 1,
+      "bound": "Builds the start info for the single bounded ProcessRunner.Run below; no process starts here."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/SquadPackResponsePreferencesTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(120));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 120 s kills the child tree on expiry; one self-exiting kyber-weave CLI pack invocation in a temp directory."
     }
   ]
 }
