@@ -31,6 +31,13 @@ public static partial class SquadResponsePreferencesInjector
             ? SquadResponseGuidanceSource.DefaultText
             : effectiveText;
 
+        // Operator text that names the tag would close the block early or open a second one, leaving the
+        // entry file with two preference blocks. Refuse it before any replacement happens.
+        if (effective.Contains("<" + ResponsePreferencesTag, StringComparison.OrdinalIgnoreCase) ||
+            effective.Contains("</" + ResponsePreferencesTag + ">", StringComparison.OrdinalIgnoreCase))
+            throw new SquadRenderValidationException(
+                $"The effective response-preferences text must not contain a <{ResponsePreferencesTag}> tag.");
+
         List<SquadDeploymentFile> files = new(renderResult.Files.Count);
         foreach (SquadDeploymentFile file in renderResult.Files)
         {
@@ -50,7 +57,12 @@ public static partial class SquadResponsePreferencesInjector
                         $"The entry file '{file.RelativePath}' must contain exactly one <response-preferences> block.");
 
                 string replacement = $"<{ResponsePreferencesTag}>{effective}</{ResponsePreferencesTag}>";
-                string updated = ResponsePreferencesRegex().Replace(content, replacement, 1);
+                // A MatchEvaluator keeps $&, $$ and ${x} in operator text literal; a string replacement would expand them.
+                string updated = ResponsePreferencesRegex().Replace(content, _ => replacement, 1);
+                if (ResponsePreferencesRegex().Count(updated) != 1)
+                    throw new SquadRenderValidationException(
+                        $"The entry file '{file.RelativePath}' must contain exactly one <response-preferences> block after injection.");
+
                 files.Add(new SquadDeploymentFile(file.RelativePath, Encoding.UTF8.GetBytes(updated), file.Target));
                 continue;
             }
@@ -85,7 +97,8 @@ public static partial class SquadResponsePreferencesInjector
                 (LooksLikeEntryPath(file.RelativePath) || IsCarrierLikePath(file.RelativePath)));
 
             if (!hasEntryCandidate)
-                continue;
+                throw new SquadRenderValidationException(
+                    $"The target '{target}' renders files but none has a recognisable entry layout, so response preferences cannot be placed.");
 
             bool hasCanonicalCarrier = files.Any(file =>
                 string.Equals(file.Target, target, StringComparison.Ordinal) &&

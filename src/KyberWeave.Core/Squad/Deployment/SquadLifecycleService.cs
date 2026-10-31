@@ -678,7 +678,20 @@ public sealed class SquadLifecycleService
             if (!File.Exists(fullPath))
                 continue;
 
-            string currentDigest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(fullPath)));
+            string currentDigest;
+            try
+            {
+                currentDigest = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(fullPath)));
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // The file is left as it is; naming it here keeps an unreadable deployed entry visible.
+                warnings.Add(
+                    $"Could not read the deployed file '{previous.RelativePath}' ({previous.Target}) to check for local edits. " +
+                    "Squad did not overwrite it during this update.");
+                continue;
+            }
+
             if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
                 continue;
 

@@ -15,37 +15,55 @@ public static partial class SquadResponseGuidanceSource
     public static string DefaultText => DefaultTextLazy.Value;
 
     /// <summary>Returns the effective advice text for the current user home.</summary>
+    /// <remarks>
+    ///     Throws the deployer's degradable <c>SquadShippedGuidanceUnavailableException</c> (an
+    ///     <see cref="IOException"/>) when the build shipped without its default, so callers that already
+    ///     degrade on I/O failures handle it without a new path.
+    /// </remarks>
     public static string ReadEffective(string homeDirectory, ICollection<string> warnings)
+        => ReadEffective(homeDirectory, warnings, readDefault: null);
+
+    /// <summary>
+    ///     Resolves the effective text, reading the shipped default through <paramref name="readDefault"/>
+    ///     when given. Injected so a test can drive a build that shipped without its default.
+    /// </summary>
+    internal static string ReadEffective(string homeDirectory, ICollection<string> warnings, Func<string>? readDefault)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         ArgumentNullException.ThrowIfNull(warnings);
 
         string path = Path.Combine(homeDirectory, SquadResponseGuidanceDeployer.FileName);
 
+        // One read, no existence probe: a probe-then-read leaves a window where the file can change or
+        // vanish, and File.Exists answers false for a directory, which must be reported rather than skipped.
+        string homeText;
         try
         {
-            if (!File.Exists(path))
-                return DefaultText;
-
-            string homeText = File.ReadAllText(path, Encoding.UTF8);
-            if (string.IsNullOrWhiteSpace(homeText))
-                return DefaultText;
-
-            return homeText;
+            homeText = File.ReadAllText(path, Encoding.UTF8);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return ShippedDefault(readDefault);
         }
         catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
         {
             warnings.Add($"Failed to read response guidance at '{path}'; using the shipped default instead.");
-            return DefaultText;
+            return ShippedDefault(readDefault);
         }
+
+        return string.IsNullOrWhiteSpace(homeText) ? ShippedDefault(readDefault) : homeText;
     }
+
+    private static string ShippedDefault(Func<string>? readDefault)
+        => readDefault is null ? DefaultText : readDefault();
 
     private static string LoadDefaultText()
     {
         Assembly assembly = typeof(SquadResponseGuidanceDeployer).Assembly;
         string resourceName = "Squad.response-guidance.md";
         using Stream stream = assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException($"The embedded response-guidance resource '{resourceName}' is missing.");
+                              ?? throw new SquadShippedGuidanceUnavailableException(
+                                  $"The embedded response-guidance resource '{resourceName}' is missing.");
         using StreamReader reader = new(stream, Encoding.UTF8);
         return reader.ReadToEnd();
     }

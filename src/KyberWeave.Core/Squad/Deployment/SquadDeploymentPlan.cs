@@ -474,7 +474,20 @@ public sealed class SquadDeploymentPlan
                 continue;
             }
 
-            string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+            byte[] currentBytes;
+            try
+            {
+                currentBytes = File.ReadAllBytes(rendered.FullPath);
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // Bytes that cannot be read cannot be proven unedited, so the record is kept and the file is
+                // left alone; the caller reports it by name.
+                nextOwnedFiles.Add(previous);
+                continue;
+            }
+
+            string currentDigest = Digest(currentBytes);
             bool isLocallyEdited = !string.Equals(
                 currentDigest,
                 previous.Sha256,
@@ -523,7 +536,19 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
                 continue;
 
-            string currentDigest = Digest(File.ReadAllBytes(fullPath));
+            byte[] previousBytes;
+            try
+            {
+                previousBytes = File.ReadAllBytes(fullPath);
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
+                nextOwnedFiles.Add(previous);
+                continue;
+            }
+
+            string currentDigest = Digest(previousBytes);
             if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
             {
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -704,9 +729,9 @@ public sealed class SquadDeploymentPlan
 
         if (siblingGlobalReceipts is not null)
             foreach (SquadReceipt sibling in siblingGlobalReceipts)
-                foreach (SquadOwnedFile file in sibling.Files)
-                    managedIdentities.Add(DeployedFileIdentity(file.Target,
-                        SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+            foreach (SquadOwnedFile file in sibling.Files)
+                managedIdentities.Add(DeployedFileIdentity(file.Target,
+                    SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
 
         List<SquadUnmanagedPathCollision> collisions = [];
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -893,10 +918,10 @@ public sealed class SquadDeploymentPlan
             return false;
 
         foreach (SquadReceipt sibling in siblingReceipts)
-            foreach (SquadOwnedFile owned in sibling.Files)
-                if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
-                    string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
-                    return true;
+        foreach (SquadOwnedFile owned in sibling.Files)
+            if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
+                string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
+                return true;
 
         return false;
     }
