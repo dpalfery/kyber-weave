@@ -93,6 +93,7 @@ const LIMITS = {
   pollMs: 2_000,
   maxMessages: 5_000,
   maxLogStreamChars: 200_000,
+  maxEvidenceFileChars: 5_000_000,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -439,13 +440,28 @@ function createEvidence(dir) {
     log(line) {
       appendFileSync(logPath, `[${new Date().toISOString()}] ${redact(line)}\n`)
     },
+    // The recorded text includes kyberDash and OpenCode responses: that is what the gate is evidence of.
+    // It lands only under a plain file name in the gate-owned evidence directory, redacted and bounded.
     writeText(name, text) {
-      writeFileSync(join(dir, name), redact(text))
+      // codeql[js/http-to-file-access] recorded responses are the evidence; plain name, redacted, bounded.
+      writeFileSync(join(dir, evidenceFileName(name)), boundedEvidence(redact(text)))
     },
     writeJson(name, value) {
-      writeFileSync(join(dir, name), `${redact(JSON.stringify(value, null, 2))}\n`)
+      // codeql[js/http-to-file-access] recorded responses are the evidence; plain name, redacted, bounded.
+      writeFileSync(join(dir, evidenceFileName(name)), `${boundedEvidence(redact(JSON.stringify(value, null, 2)))}\n`)
     },
   }
+}
+
+/** An evidence file is a plain name inside the evidence directory, never a path. */
+function evidenceFileName(name) {
+  if (name === '' || name !== basename(name)) throw new GateError(`evidence file name is not a plain file name: ${name}`)
+  return name
+}
+
+function boundedEvidence(text) {
+  if (text.length <= LIMITS.maxEvidenceFileChars) return text
+  return `${text.slice(0, LIMITS.maxEvidenceFileChars)}\n... [${text.length - LIMITS.maxEvidenceFileChars} more characters not recorded]`
 }
 
 function progress(message) {
