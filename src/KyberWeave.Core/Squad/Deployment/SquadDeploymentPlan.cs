@@ -45,7 +45,8 @@ public sealed class SquadDeploymentPlan
         SquadStateMutation lockMutation,
         SquadStateMutation receiptMutation,
         ISquadGlobalRootResolver? globalRoots = null,
-        bool isSingleRootLayout = false)
+        bool isSingleRootLayout = false,
+        IReadOnlyList<SquadDegradedFile>? degradedFiles = null)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -64,6 +65,7 @@ public sealed class SquadDeploymentPlan
         ReceiptMutation = receiptMutation;
         _globalRoots = globalRoots;
         _isSingleRootLayout = isSingleRootLayout;
+        DegradedFiles = degradedFiles ?? [];
     }
 
     /// <summary>The absolute root into which harness-native files are deployed.</summary>
@@ -97,6 +99,12 @@ public sealed class SquadDeploymentPlan
     ///     only the files it retains, so the planned removals are readable from this list alone.
     /// </summary>
     public IReadOnlyList<SquadPlannedFileChange> PlannedFileChanges { get; }
+
+    /// <summary>
+    ///     Deployed files this plan could not read and therefore kept on trust rather than verifying, each
+    ///     with the raw target token that produced it. Empty for a plan whose every file was read and checked.
+    /// </summary>
+    public IReadOnlyList<SquadDegradedFile> DegradedFiles { get; }
 
     internal IReadOnlyList<SquadFilePrecondition> FilePreconditions { get; }
 
@@ -431,6 +439,7 @@ public sealed class SquadDeploymentPlan
         List<SquadFileMutation> mutations = new();
         List<SquadFilePrecondition> preconditions = new();
         List<SquadOwnedFile> nextOwnedFiles = new();
+        List<SquadDegradedFile> degradedFiles = new();
         HashSet<string> renderedIdentities = new(StringComparer.Ordinal);
 
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -474,7 +483,21 @@ public sealed class SquadDeploymentPlan
                 continue;
             }
 
-            string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+            byte[] currentBytes;
+            try
+            {
+                currentBytes = File.ReadAllBytes(rendered.FullPath);
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // Bytes that cannot be read cannot be proven unedited, so the record is kept and the file is
+                // left alone; the caller reports it by name.
+                nextOwnedFiles.Add(previous);
+                AddDegradedFile(degradedFiles, relativePath, rendered.File.Target);
+                continue;
+            }
+
+            string currentDigest = Digest(currentBytes);
             bool isLocallyEdited = !string.Equals(
                 currentDigest,
                 previous.Sha256,
@@ -523,7 +546,20 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
                 continue;
 
-            string currentDigest = Digest(File.ReadAllBytes(fullPath));
+            byte[] previousBytes;
+            try
+            {
+                previousBytes = File.ReadAllBytes(fullPath);
+            }
+            catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
+            {
+                // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
+                nextOwnedFiles.Add(previous);
+                AddDegradedFile(degradedFiles, previous.RelativePath, previous.Target);
+                continue;
+            }
+
+            string currentDigest = Digest(previousBytes);
             if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
             {
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -575,7 +611,8 @@ public sealed class SquadDeploymentPlan
             SquadStateMutation.Write,
             SquadStateMutation.Write,
             globalRoots,
-            nextLayout == SquadReceiptLayout.SingleRoot);
+            nextLayout == SquadReceiptLayout.SingleRoot,
+            degradedFiles);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>
@@ -884,6 +921,16 @@ public sealed class SquadDeploymentPlan
         return target + '\0' + relativePath;
     }
 
+    /// <summary>
+    /// Records an unreadable deployed file with the raw target token from its receipt or render.
+    /// The token is kept verbatim — never resolved to <see cref="SquadTarget"/> — so an unknown
+    /// token is still reported by name instead of dropped as clean.
+    /// </summary>
+    private static void AddDegradedFile(List<SquadDegradedFile> degradedFiles, string relativePath, string target)
+    {
+        degradedFiles.Add(new SquadDegradedFile(relativePath, target));
+    }
+
     private static bool IsOwnedBySiblingReceipt(
         IReadOnlyList<SquadReceipt>? siblingReceipts,
         string target,
@@ -946,6 +993,9 @@ public enum SquadFileMutationKind
     Write,
     Delete
 }
+
+/// <summary>A deployed file a plan kept on trust, with the raw target token that produced it.</summary>
+public sealed record SquadDegradedFile(string RelativePath, string Target);
 
 /// <summary>
 ///     One planned file change without its payload, for command hosts that report what a plan

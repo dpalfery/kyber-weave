@@ -624,8 +624,11 @@ Requires .NET SDK 10 (pinned in `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ```
+
+Run the test command through `scripts/proc-guard.sh run --`, the process watchdog. See
+[Running tests safely](dash/runbook.md#running-tests-safely).
 
 ## Related
 

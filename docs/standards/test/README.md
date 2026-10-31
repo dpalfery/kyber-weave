@@ -5,7 +5,9 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
+decided-by:
+  - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
 
 # Test coding standard
@@ -118,8 +120,86 @@ not a test to adjust.
 | `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
 | `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
+## Tests that start processes
+
+A test that starts a process can start more of them. In 2026-10 a dashboard test did exactly
+that and fork-bombed `node`. The rules below keep every process a test starts bounded, and the
+two static audits (below) keep the list of such sites honest.
+
+1. **Inject a recording spawner by default.** Every KyberDash self-spawn takes a `spawnFn`
+   (`createNodeSpawner(spawnFn)`, the `DetachedLauncher` constructor). A recording function starts
+   nothing, so the test asserts the argv and environment it would have used.
+2. **Under test the guard is deny.** `dash/tests/setup/spawn-guard-setup.ts` sets
+   `KYBERDASH_SPAWN_GUARD=deny` for every vitest file. A spawn that gets through anyway is recorded,
+   and the test that caused it fails with the hit list. Playwright gets the same setting from
+   `dash/playwright.isolated.config.ts`.
+3. **A real child needs `allowRealSpawns(reason)`.** Call it in the test, from
+   `dash/tests/setup/spawn-guard.ts`. The reason names the bound (for example, "self-exits after
+   30 s" or "fixed argv, one line, exits"). The opt-in ends after the test. Add the site to the
+   allow-list with the same bound.
+4. **Kill the whole group, not only the wrapper.** A Playwright boot is spawned `detached: true` and
+   stopped with `process.kill(-pid, signal)`. Killing only `npx` or `sh` leaves the node process
+   under it running.
+5. **Bound every wait.** Give each readiness wait a timeout, and each `spawnSync`, `execSync` and
+   `execFileSync` a `timeout` with `killSignal: 'SIGKILL'`. A child that exits by itself is better
+   than one the test must kill.
+6. **Run it through the watchdog.** `scripts/proc-guard.sh run -- <command>` from the repository
+   root, as the [runbook](../../dash/runbook.md#running-tests-safely) describes. The watchdog is
+   POSIX-only; on Windows the process ledger still checks the children the run recorded, by pid,
+   but there is no absolute process cap. The guard gives the command stdin from `/dev/null` when
+   its own stdin is a terminal, so a command that reads the terminal does not stop; `--tty` keeps
+   the terminal and is risky. From an agent tool keep `--timeout` at or below 540 seconds, because
+   a longer foreground command is moved to the background.
+7. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/boot-dashboard.ts`.
+
+**The allow-list (dash).** `dash/tests/spawn-sites.allowlist.ts` lists every `child_process`
+spawn, exec and fork call, every `new Worker`, and every Playwright `webServer` under `dash/`. Each
+entry gives the file, the API name, the `bound` and a `note`. The `bound` says how the site is
+limited: a timeout, a tree kill, a single owned child closed on exit, an `afterEach` kill, an
+injected fake, or a bounded external tool. A site with no limit is written with "NO TIMEOUT" in its
+bound and listed as a follow-up. That wording records a residual; it is not a bound.
+`dash/tests/spawn-sites.test.ts` fails on any site with no entry, on any entry that matches no site,
+and on any empty bound. An entry covers one file and one API name, so
+review each new site against the bound it inherits.
+
+**The allow-list (.NET).** `ProcessSpawnSitesTests` scans two roots: `tests/KyberWeave.Tests`
+(C# and shell) and `src/` (C#). It matches `Process.Start`, `new Process`, `new ProcessStartInfo`,
+`ProcessRunner.Run` and `BuildStartInfo`. `tests/KyberWeave.Tests/Fixtures/spawn-sites-allowlist.json`
+keys each entry by root-prefixed file (`tests/...` or `src/...`), normalized line text and count,
+with a `bound`. The test fails on any unlisted start, with a root-prefixed file and line, and on any
+stale entry. Use the `ProcessRunner` test helper, which kills the child tree at its timeout. A raw
+`Process.Start` needs its own timeout and a `Kill(entireProcessTree: true)` in a `finally`.
+
+**Production .NET starts carry bounds too.** The shared process executor defaults to 60 s, and the
+KyberDash plugin verb to 120 s. `docs init`'s `apm install` is 5 min. The self-updater's capture verbs
+are 120 s and its tray menubar update is 5 min; both kill the tree on expiry. The best-effort `xattr`
+call is 30 s. The CodeGraph sqlite read is 60 s. The analysis cache's `git ls-files` is 60 s, the
+analysis sqlite batch 120 s, and its version probe 30 s. **One deliberate exception:**
+`ProcessRunner.RunInteractive`, which runs `squad run` attended by a user at the console, has no
+timeout by design. Do not give it one; a timeout would end a live session.
+
+**Adding a spawn site.** Write the bound first. Add the entry to the allow-list for its language, with
+the file, the API name or line text, and the bound. If the site cannot state a bound, it does not
+belong in a test: remove it or inject a fake.
+
 ## Commands
 
+Run every command through the watchdog, from the repository root:
+
 ```bash
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ```
+
+### Fast Assembly Runner and Iteration Workflow
+
+During task execution and active development, do not invoke the full `dotnet test` suite repeatedly. MSBuild project evaluation and incremental dependency checks introduce multi-second overhead per invocation. Instead, use the direct xUnit assembly runner with class filtering and the quiet reporter:
+
+```bash
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+```
+
+When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
+
+- **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
+- **Reserve full suite for task end / final council**: Running the complete test suite across all classes is reserved for final task completion or pre-push review council gates. Never run the full test suite on inner iteration loops.
+- **Zero-stash RED proofs**: When proving a test fails before implementation (RED proof in TDD), never use `git stash` to toggle between dirty working tree states. `git stash` creates uncommitted stash commits that conflict with parallel task execution and risk race conditions across agents. Instead, run RED proofs against a clean base checkout, throwaway working tree copy, or isolated `git worktree`.

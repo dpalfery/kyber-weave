@@ -44,6 +44,17 @@ internal sealed class SelfUpdater : IDisposable
     /// <summary>Where <c>kyberdash menubar</c> records what it installed.</summary>
     private const string TrayRecordFile = "tray.json";
 
+    /// <summary>
+    /// The bound for a KyberDash verb whose output decides the next step (engine ensure, plugin install). It may
+    /// start or stop an engine, so it gets two minutes; a verb that outlasts that is stopped and named.
+    /// </summary>
+    private static readonly TimeSpan CaptureVerbTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// The bound for the tray update. It quits, replaces and relaunches the tray, so it is the longest step.
+    /// </summary>
+    private static readonly TimeSpan TrayUpdateTimeout = TimeSpan.FromMinutes(5);
+
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
     private readonly Action<string> _log;
@@ -379,6 +390,12 @@ internal sealed class SelfUpdater : IDisposable
         {
             result = _captureProcess(kyberdash, ["engine", "ensure", "--if-running"]);
         }
+        catch (TimeoutException ex)
+        {
+            throw new SelfUpdateException(
+                $"the KyberDash engine step did not finish and was stopped: `{kyberdash} engine ensure --if-running`. " +
+                $"{ex.Message} The binaries are already updated; run `kyberdash engine ensure --if-running` to retry.");
+        }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
                                        or UnauthorizedAccessException)
         {
@@ -426,7 +443,7 @@ internal sealed class SelfUpdater : IDisposable
                 ["kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"]);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
-                                       or UnauthorizedAccessException)
+                                       or UnauthorizedAccessException or TimeoutException)
         {
             _log($"warning: the OpenCode capture plugin step could not run KyberDash: {ex.Message}");
             return;
@@ -499,7 +516,11 @@ internal sealed class SelfUpdater : IDisposable
         return first.Length == 0 ? string.Empty : $": {first}";
     }
 
-    /// <summary>Runs a verb and captures what it printed. A process that cannot start surfaces as the caller's named failure.</summary>
+    /// <summary>
+    /// Runs a verb and captures what it printed. A process that cannot start surfaces as the caller's named failure.
+    /// A verb that outlasts <see cref="CaptureVerbTimeout"/> is killed and throws <see cref="TimeoutException"/>,
+    /// which each caller names.
+    /// </summary>
     private static ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments)
     {
         ProcessStartInfo start = new(fileName)
@@ -512,7 +533,7 @@ internal sealed class SelfUpdater : IDisposable
         foreach (string argument in arguments)
             start.ArgumentList.Add(argument);
 
-        return ProcessRunner.Run(start, string.Empty);
+        return ProcessRunner.Run(start, string.Empty, CaptureVerbTimeout);
     }
 
     private void UpdateTray(bool windows, string version)
@@ -533,6 +554,12 @@ internal sealed class SelfUpdater : IDisposable
             // Same named failure as a non-zero exit: the binaries are committed and nothing is rolled back.
             throw new SelfUpdateException(
                 $"the KyberDash tray step could not start `{kyberdash} menubar --update --version {version}`: {ex.Message}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new SelfUpdateException(
+                $"the KyberDash tray step did not finish and was stopped: `{kyberdash} menubar --update --version {version}`. " +
+                $"{ex.Message} The binaries are already committed and were not rolled back.");
         }
 
         if (exitCode != 0)
@@ -575,8 +602,24 @@ internal sealed class SelfUpdater : IDisposable
         if (process is null)
             throw new SelfUpdateException($"the KyberDash tray step could not start {fileName}.");
 
-        process.WaitForExit();
-        return process.ExitCode;
+        // The tray step writes to this console, so its streams are inherited rather than captured, and the
+        // runner cannot bound it. The wait is bounded instead: a tray that never returns must not hang the update.
+        if (process.WaitForExit(TrayUpdateTimeout))
+            return process.ExitCode;
+
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+            // It exited between the check and the kill. The timeout below still reports the step.
+        }
+
+        process.WaitForExit(TimeSpan.FromSeconds(5));
+        throw new TimeoutException(
+            $"The process did not exit within {(int)TrayUpdateTimeout.TotalSeconds} seconds.");
     }
 
     private (string BaseName, string ExtractedPath, string Destination) StageBinary(

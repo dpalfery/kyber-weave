@@ -6,9 +6,10 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 decided-by:
   - adr/0020-kyberdash-one-time-fork
+  - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
   - adr/0010-keywords-prefix-coverage-and-oov-idf
@@ -1717,6 +1718,101 @@ Live OpenTelemetry streams frequently capture operational span metrics without c
 - **Missing transcript timeout**: If `transcript_path` is null or missing on disk, and more than 24 hours have elapsed since the session ended or started, the session transitions to `sync_status = 'unavailable'`.
 - **Lock arbitration**: Before delta processing, `runTranscriptSync` probes the store refresh lock (`STORE_LOCK_FILE`, `dash/src/refresh/lock.ts`). If an active store refresh holds the lock, transcript sync yields immediately with `{ outcome: 'busy' }`, avoiding database contention.
 - **Display layer boundary**: Following [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md), the transcript sync job runs strictly in the engine (`JobHost`), never in the tray or web frontend.
+
+### Spawn chokepoint, child roles and refusals (ADR 0047)
+
+Every child process KyberDash starts from its own code goes through one function,
+`guardedSpawn` in `dash/src/process/spawn-guard.ts`. Each caller names a `kind` (`job`,
+`receiver`, `engine` or `tool`), and the function applies the rules below before the process
+starts. Nothing else in `dash/src` imports `child_process` spawn for a self-spawn; a static test
+(`dash/tests/spawn-sites.test.ts`) fails any other file that does.
+
+```mermaid
+flowchart TB
+    CALLER["User, tray or terminal<br/>depth 0"]
+    ENG["Engine child: kyberdash web<br/>role engine, depth 1<br/>may host; may not start an engine"]
+    JOB["Job child: dash refresh, import, clean<br/>role job, depth 2<br/>never hosts, never spawns"]
+    RCV["Receiver child: otel --serve<br/>role job, depth 2<br/>never hosts, never spawns"]
+    TOOL["Install tools: codesign, spctl, ditto<br/>role tool"]
+    REFUSE["Refused before any process starts<br/>SpawnRefusedError, or a refused spawn target"]
+
+    CALLER -->|"ensureEngine, DetachedLauncher (kind engine)"| ENG
+    ENG -->|"JobHost, kind job"| JOB
+    ENG -->|"ReceiverHost, kind job (shared spawner)"| RCV
+    CALLER -->|"install/node-deps.ts (kind tool)"| TOOL
+    JOB -.->|"any guarded spawn"| REFUSE
+    RCV -.->|"any guarded spawn"| REFUSE
+```
+
+The guard stamps two environment variables on every child it starts: `KYBERDASH_SPAWN_ROLE`
+is the `kind`, and `KYBERDASH_SPAWN_DEPTH` is the caller's depth plus one (absent means 0). A
+child inherits the rest of the parent's environment. A child whose depth cannot be read is refused.
+
+**Rules applied in order, before the spawn:**
+
+| Rule | Refused when | Outcome |
+|---|---|---|
+| Depth limit | The caller is at depth 2 or deeper | `SpawnRefusedError` |
+| Role | The caller's role is `job` or `receiver` | `SpawnRefusedError` |
+| Engine from engine | The caller's role is `engine` and the kind is `engine` | `SpawnRefusedError` |
+| Test mode | `KYBERDASH_SPAWN_GUARD=deny` and the test has not called `allowRealSpawns(reason)` | `SpawnRefusedError`, and a hit is recorded for the test |
+
+The longest legitimate chain is user or tray (depth 0), then the engine (depth 1), then a job or
+receiver (depth 2). Only the engine may host, because the engine's job host is what spawns the
+job children.
+
+**Hosting refusal.** `runWebDashboard` calls `assertMayHost()` before it opens a socket, binds a
+port or builds a host pair. A `job` or `receiver` child, or any process at depth 2 or deeper,
+throws `SpawnedChildMayNotHostError`. The CLI prints `kyberdash web: <reason>` to stderr and exits 1.
+
+**Entry-point refusal.** A self-spawn target is re-run only when the process is the single-file
+binary, or `argv[1]` resolves to the package's `src/launcher.ts` or `dist/cli.js`, or no
+`argv[1]` is present and the `kyberdash` name on `PATH` is used. `resolveJobSpawnTarget`
+(`dash/src/cli/spawn-target.ts`) otherwise returns `{ refused }` with the path it refused. The job
+host then records a failed run whose stderr is that reason; the receiver host reports the reason as
+its last error. Neither spawns anything.
+An injected program is taken as given; the e2e boot injects an inert one.
+
+`kyberdash otel` (attach mode, without `--serve`) resolves the spawn target before it opens the
+store. A refused target exits 1 with the reason and leaves the store untouched, so a refused run
+never persists `receiverHosted = on`.
+
+**Engine refusal.** `ensureEngine` (`dash/src/engine/ensure.ts`) returns `failed` with the reason
+"engine child may not start an engine" whenever the calling process was itself spawned as any child
+role, not only as an engine. A child started for a single job never starts or replaces an engine.
+
+**Bounded external tools are direct calls, not self-spawns.** These stay direct and are recorded in
+the dash spawn-site allow-list with their bound: the port-owner lookups in `otel/receiver.ts`
+(`lsof`, `ss`, `netstat`, 2 s timeout), the process and port discovery in `providers/antigravity.ts`
+(`execFile`, 3 s or 5 s timeout, 1 MiB buffer), the browser opener in `cli/web.ts` (`open`,
+`xdg-open`, `rundll32`, 10 s timeout), and the parse pool in `ingest/parse-workers.ts`, which starts
+worker threads rather than processes.
+
+**Test processes fail closed.** The vitest setup file and the isolated Playwright config set
+`KYBERDASH_SPAWN_GUARD=deny`. Under `deny` every guarded spawn is refused, and the vitest setup
+fails the test that caused it. A test that needs a real child calls `allowRealSpawns(reason)` from
+`dash/tests/setup/spawn-guard.ts`; the opt-in ends after that test. The self-booting e2e boots
+(`dash/e2e/boot-dashboard.ts`) inject inert job and receiver spawners and an inert receiver prober,
+and keep their state under the test's temp root, so no boot starts a child.
+
+**Child record.** Each child a guarded spawn starts is kept in memory and, when a test run names
+`KYBERDASH_SPAWN_LEDGER_FILE`, appended to that file. The process ledger
+(`dash/tests/setup/process-ledger.ts`) reads it at the end of the run; the runbook describes the
+checks.
+
+**Known limits.** The receiver child is stamped `job`, not `receiver`, because `ReceiverHost` uses
+the same spawner as `JobHost`; the `receiver` kind is defined and refused the same way, but no path
+stamps it today. The dash allow-list is per file and spawn-API name, not per line. The static
+scans match a spawn only where its API name appears in the file, so a spawn reached through another
+module's API is found at that module. On Windows the process ledger runs in ledger-entry-only mode
+(recorded children, checked by pid; no descendant or orphan scan), and there is no watchdog, because
+`scripts/proc-guard.sh` is POSIX-only. The residual risks are listed in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+
+**.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`
+and `src/`, and its product process starts carry their own timeouts. The bounds and the one
+deliberate exception (`ProcessRunner.RunInteractive`, unbounded by design) are in the
+[test standard](../standards/test/README.md#tests-that-start-processes).
 
 ### Web Dashboard (dash/web/)
 

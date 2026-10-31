@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'http'
+import { assertMayHost } from '../process/spawn-guard.js'
 import { randomBytes } from 'crypto'
 import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
@@ -28,7 +29,7 @@ import { storeGeneration } from '../server/store-generation.js'
 import { createCanonAnalyticsSource } from '../analysis/query/canon-source.js'
 import { createAnalyticsService } from '../analysis/query/service.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
-import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
+import { PATH_FALLBACK_PROGRAM, currentSpawnRuntime, isSpawnRefusal, resolveJobSpawnTarget } from './spawn-target.js'
 
 export const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
@@ -309,7 +310,7 @@ export function openBrowser(url: string): void {
         ? ['rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl]]
         : ['xdg-open', [safeUrl]]
   try {
-    execFile(program!, args as string[], () => {
+    execFile(program!, args as string[], { timeout: 10_000 }, () => {
       /* a browser that fails to launch is not an error the server should raise */
     })
   } catch {
@@ -687,6 +688,8 @@ type HostedSeams = {
   readonly receiverProber: ReceiverProber | undefined
   readonly maintenance: (() => Promise<void>) | undefined
   readonly closeJobHost: (jobHost: JobHost) => Promise<void>
+  /** Why the spawn target was refused; both hosts then record it and never spawn. */
+  readonly spawnRefusal?: string
 }
 
 function sameSeams(a: HostedSeams, b: HostedSeams): boolean {
@@ -694,6 +697,7 @@ function sameSeams(a: HostedSeams, b: HostedSeams): boolean {
     && a.program === b.program
     && a.programArgs.length === b.programArgs.length
     && a.programArgs.every((arg, index) => arg === b.programArgs[index])
+    && a.spawnRefusal === b.spawnRefusal
     && a.jobSpawner === b.jobSpawner
     && a.receiverSpawner === b.receiverSpawner
     && a.receiverProber === b.receiverProber
@@ -830,6 +834,9 @@ async function acquireHostedServices(
   release: () => void
 }> {
   const stateDir = opts.stateDir ?? join(homedir(), '.kyberdash')
+  const target = opts.program === undefined
+    ? resolveJobSpawnTarget(currentSpawnRuntime(isSea))
+    : { program: opts.program, programArgs: [] as readonly string[] }
   const seams: HostedSeams = {
     store: await resolveHostStore(opts.store, { yield: opts.migrationYield }),
     // Default to re-running THIS process's own CLI, so a source checkout
@@ -837,9 +844,11 @@ async function acquireHostedServices(
     // not be on PATH - and in a SEA, where process.argv[1] is the unexpanded argv0, to
     // the binary itself. An injected program is taken at face value with no wrapper
     // arguments: its argv is the caller's.
-    ...(opts.program === undefined
-      ? resolveJobSpawnTarget(currentSpawnRuntime(isSea))
-      : { program: opts.program, programArgs: [] as readonly string[] }),
+    // A refused target keeps the PATH fallback name only so the seams stay well-formed; the
+    // refusal makes both hosts record it instead of ever spawning.
+    ...(isSpawnRefusal(target)
+      ? { program: PATH_FALLBACK_PROGRAM, programArgs: [] as readonly string[], spawnRefusal: target.refused }
+      : target),
     jobSpawner: opts.jobSpawner,
     receiverSpawner: opts.receiverSpawner,
     receiverProber: opts.receiverProber,
@@ -964,6 +973,7 @@ function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
       stateDir,
       program,
       programArgs,
+      ...(seams.spawnRefusal === undefined ? {} : { spawnRefusal: seams.spawnRefusal }),
       ...(seams.jobSpawner === undefined ? {} : { spawner: seams.jobSpawner }),
       // The maintenance pass is the central module's, not a copy of it: expiry purging and
       // reprojection are engine work and must not be re-implemented at the call site.
@@ -973,6 +983,7 @@ function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
       store,
       program,
       programArgs,
+      ...(seams.spawnRefusal === undefined ? {} : { spawnRefusal: seams.spawnRefusal }),
       ...(seams.receiverSpawner === undefined ? {} : { spawner: seams.receiverSpawner }),
       ...(seams.receiverProber === undefined ? {} : { prober: seams.receiverProber }),
     }),
@@ -1036,6 +1047,9 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   openUrl?: (url: string) => void
   writeStdout?: (text: string) => void
 }): Promise<Server> {
+  // Before anything is opened, bound or spawned: a job or receiver child must never become a
+  // host, and must not open a listening socket on the way to being refused.
+  assertMayHost()
   if (opts.view !== undefined && !matchesViewPath(opts.view)) {
     throw new UnknownViewError(opts.view, formatValidViewForms())
   }

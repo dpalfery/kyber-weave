@@ -26,24 +26,46 @@ async function waitForAny(dir: string, names: string[], timeoutMs = 5_000): Prom
   throw new Error(`timed out waiting for ${names.join(', ')}; saw ${(await readdir(dir)).join(', ')}`)
 }
 
+/** Longer than any single barrier wait a worker can legitimately need (the fixture's own deadline is 20 s). */
+const WORKER_EXIT_DEADLINE_MS = 25_000
+
+/** Every worker a test starts, so afterEach can kill any still running after a failed assertion. */
+const spawnedWorkers: ChildProcess[] = []
+
 function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return child.exitCode === 0 ? Promise.resolve() : Promise.reject(new Error(`worker exited ${child.exitCode}`))
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return child.exitCode === 0 ? Promise.resolve() : Promise.reject(new Error(`worker exited ${child.exitCode ?? child.signalCode}`))
+  }
   return new Promise((resolve, reject) => {
     let stderr = ''
+    const deadline = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error(`worker did not exit within ${WORKER_EXIT_DEADLINE_MS} ms and was killed: ${stderr}`))
+    }, WORKER_EXIT_DEADLINE_MS)
     child.stderr?.on('data', chunk => { stderr += String(chunk) })
-    child.once('error', reject)
-    child.once('exit', code => code === 0 ? resolve() : reject(new Error(`worker exited ${code}: ${stderr}`)))
+    child.once('error', error => { clearTimeout(deadline); reject(error) })
+    child.once('exit', code => {
+      clearTimeout(deadline)
+      if (code === 0) resolve()
+      else reject(new Error(`worker exited ${code}: ${stderr}`))
+    })
   })
 }
 
 function worker(cacheDir: string, barriers: string, id: string, source: string, bypass = false, exitViaCleanup = false): ChildProcess {
-  return spawn(process.execPath, ['--import', 'tsx', join(process.cwd(), 'tests/fixtures/cache-refresh-worker.ts'), cacheDir, barriers, id, source, String(bypass), String(exitViaCleanup)], {
+  const child = spawn(process.execPath, ['--import', 'tsx', join(process.cwd(), 'tests/fixtures/cache-refresh-worker.ts'), cacheDir, barriers, id, source, String(bypass), String(exitViaCleanup)], {
     cwd: process.cwd(),
     stdio: ['ignore', 'ignore', 'pipe'],
   })
+  spawnedWorkers.push(child)
+  return child
 }
 
 afterEach(async () => {
+  // A failed assertion can leave a barrier-blocked worker running; kill every survivor before the roots go.
+  for (const child of spawnedWorkers.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  }
   delete process.env['KYBERDASH_CACHE_DIR']
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })

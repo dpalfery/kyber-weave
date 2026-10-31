@@ -560,6 +560,25 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     .GetAwaiter()
                     .GetResult();
 
+                if (!render.Success || render.Errors.Count > 0)
+                {
+                    // Mirror install and update: a failed render is a collision-scan failure, not an empty corpus,
+                    // so it must not reach the no-block check below.
+                    string error = render.Errors.Count > 0
+                        ? string.Join(Environment.NewLine, render.Errors)
+                        : "Squad render failed.";
+                    throw new SquadRenderValidationException(error);
+                }
+
+                List<string> warnings = [];
+                string effectiveGuidance = SquadResponseGuidanceSource.ReadEffective(
+                    Path.Combine(stateStore.UserPaths.HomeDirectory, ".kyber-weave"),
+                    warnings);
+                if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
+                    warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
+                SquadCommandComposition.WriteTransactionWarnings(warnings);
+                render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
+
                 collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
                     workingDirectory,
                     SquadDeploymentScope.Global,

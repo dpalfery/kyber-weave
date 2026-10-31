@@ -189,8 +189,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal),
             $"File '{f.RelativePath}' does not start with expected OpenCode directory."));
 
-        // 2. Output counts: exactly 53 principal files (24 agents under .opencode/agents/*.md
-        // + 29 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
+        // 2. Output counts: exactly 52 principal files (24 agents under .opencode/agents/*.md
+        // + 28 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
         int principalAgentCount = result.Files.Count(f =>
             f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) &&
             f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
@@ -202,8 +202,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             !f.RelativePath[".opencode/skills/".Length..^"/SKILL.md".Length].Contains('/', StringComparison.Ordinal));
 
         Assert.Equal(24, principalAgentCount);
-        Assert.Equal(29, principalSkillCount);
-        Assert.Equal(53, principalAgentCount + principalSkillCount);
+        Assert.Equal(28, principalSkillCount);
+        Assert.Equal(52, principalAgentCount + principalSkillCount);
 
         int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =

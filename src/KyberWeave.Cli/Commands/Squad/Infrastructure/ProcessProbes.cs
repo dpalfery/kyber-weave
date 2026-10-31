@@ -53,6 +53,15 @@ internal static class ProcessProbe
         {
             result = executor.Run(startInfo, string.Empty);
         }
+        catch (TimeoutException)
+        {
+            // The tool started but stopped answering. The executor has already killed it, so name the
+            // hang rather than reporting a missing tool.
+            return new ToolProbeResult(
+                IsAvailable: true,
+                Version: null,
+                FailureReason: $"The '{executable} --version' probe did not finish in time and was stopped.");
+        }
         catch (Exception)
         {
             // Startup exceptions can echo PATH values or launch credentials. The probe

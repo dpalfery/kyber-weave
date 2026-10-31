@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PATH_FALLBACK_PROGRAM,
   filterInspectorFlags,
+  isSpawnRefusal,
   resolveJobSpawnTarget,
   type SpawnTarget,
   type SpawnRuntime,
@@ -25,6 +26,18 @@ import {
 const DASH_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const TSX_BIN = join(DASH_ROOT, 'node_modules', '.bin', 'tsx')
 const LAUNCHER = join(DASH_ROOT, 'src', 'launcher.ts')
+
+/**
+ * The target for a runtime that must be accepted. A refusal here is a failed expectation, and
+ * it is thrown with the resolver's reason so the failure names the entry that was refused.
+ */
+function spawnTargetFor(runtime: SpawnRuntime): SpawnTarget {
+  const target = resolveJobSpawnTarget(runtime)
+  if (isSpawnRefusal(target)) {
+    throw new Error(`expected a spawn target for ${runtime.argv[1] ?? '(no entry)'}, but it was refused: ${target.refused}`)
+  }
+  return target
+}
 
 describe('resolveJobSpawnTarget', () => {
   it('gives a SEA the binary alone: argv[1] there is the unexpanded argv0', () => {
@@ -87,7 +100,7 @@ describe('resolveJobSpawnTarget', () => {
 // so `node --inspect src/launcher.ts web` is the shape that breaks job spawning.
 describe('resolveJobSpawnTarget: inspector flags are not inherited by the child', () => {
   function targetFor(execArgv: string[]): SpawnTarget['programArgs'] {
-    return resolveJobSpawnTarget({
+    return spawnTargetFor({
       execPath: '/usr/local/bin/node',
       execArgv,
       argv: ['/usr/local/bin/node', '/repo/dash/src/launcher.ts', 'web'],
@@ -221,7 +234,7 @@ describeCheckout('spawned CLI, end to end', () => {
       argv: [observed.execPath, LAUNCHER],
       isSea: false,
     }
-    const target = resolveJobSpawnTarget(runtime)
+    const target = spawnTargetFor(runtime)
     const result = spawnSync(target.program, [...target.programArgs, 'dash', 'settings', 'show'], {
       cwd: DASH_ROOT,
       env,

@@ -41,8 +41,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///     </para>
 ///     <para>
 ///         The default text is a resource in this assembly rather than the canonical
-///         <c>products/kyber-squad/skills/response-format/user-guidance.md</c>, because a deployed tool
-///         has no product tree to read: the skill file travels with the release, while the binary a host
+///         <c>products/kyber-squad/response-guidance.default.md</c>, because a deployed tool
+///         has no product tree to read: the product file travels with the release, while the binary a host
 ///         already has installed is what performs the deploy. The two files are kept byte-identical by
 ///         the <c>VerifyResponseGuidanceDefault</c> build target, so they cannot drift into two different
 ///         defaults.
@@ -105,7 +105,8 @@ internal sealed class SquadResponseGuidanceDeployer
     internal static bool IsDegradableFailure(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        return exception is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException;
+        return exception is IOException or UnauthorizedAccessException or NotSupportedException
+            or System.Security.SecurityException;
     }
 
     /// <summary>Deploys or refreshes the guidance, returning the ownership record to persist.</summary>
@@ -173,7 +174,7 @@ internal sealed class SquadResponseGuidanceDeployer
             if (recordedDigest.Length == 0)
             {
                 warnings.Add(
-                    $"Kept the response guidance at '{path}' because no deployment record says Squad " +
+                    $"Kept the edited response guidance at '{path}' because no deployment record says Squad " +
                     "wrote it. Delete the file to take the shipped default.");
                 return null;
             }
@@ -222,8 +223,8 @@ internal sealed class SquadResponseGuidanceDeployer
     private static string FindRecordedDigest(IReadOnlyList<SquadHomeFile>? previous)
     {
         return previous?
-                   .FirstOrDefault(file => string.Equals(file.RelativePath, FileName, StringComparison.Ordinal))
-                   ?.Sha256 ?? string.Empty;
+            .FirstOrDefault(file => string.Equals(file.RelativePath, FileName, StringComparison.Ordinal))
+            ?.Sha256 ?? string.Empty;
     }
 
     /// <summary>

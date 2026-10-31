@@ -13,15 +13,19 @@ import { access, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from '
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve } from 'node:path'
 
+import { guardedSpawn } from '../process/spawn-guard.js'
 import { getConfigDir } from '../config.js'
 import { runningAsSea } from '../sea.js'
 import { EXPECTED_TEAM_ID, type CommandResult, type InstallDeps, type InstallFs, type Verifier } from './types.js'
+
+/** Bounds codesign, spctl and ditto: spawn kills a tool that outlives this and reports a failed exit. */
+const TOOL_TIMEOUT_MS = 300_000
 
 async function run(command: string, args: string[]): Promise<CommandResult> {
   return new Promise((resolve) => {
     // No shell: every argument here can contain a user's own path, and a shell
     // would give those paths meaning they must not have.
-    const child = spawn(command, args, { shell: false })
+    const child = guardedSpawn(spawn, { kind: 'tool', program: command, args, options: { shell: false, timeout: TOOL_TIMEOUT_MS } })
     let stdout = ''
     let stderr = ''
     child.stdout?.on('data', (chunk: Buffer) => {

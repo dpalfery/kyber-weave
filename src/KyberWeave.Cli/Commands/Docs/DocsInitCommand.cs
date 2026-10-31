@@ -21,6 +21,12 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
+    /// <summary>
+    ///     The bound for the APM install. It fetches the package over the network, so it gets minutes; a hung
+    ///     fetch is stopped and the skill reported as not deployed.
+    /// </summary>
+    private static readonly TimeSpan ApmInstallTimeout = TimeSpan.FromMinutes(5);
+
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
@@ -172,6 +178,9 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         ProcessStartInfo startInfo = new ProcessStartInfo("apm")
         {
             WorkingDirectory = Path.GetFullPath(settings.Path),
+            // Input is redirected only so the runner can close it at once: an APM prompt then reads end-of-file
+            // rather than waiting on a terminal nobody can see, because its output is captured too.
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -188,14 +197,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         try
         {
-            using Process? process = Process.Start(startInfo);
-            if (process is null)
-            {
-                SkillUnavailable(command, "the 'apm' process could not be started");
-                return;
-            }
-
-            ProcessResult result = ProcessRunner.ReadToEnd(process);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, ApmInstallTimeout);
 
             if (result.ExitCode == 0)
             {
@@ -207,6 +209,15 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             string error = result.StandardError.Trim();
             string detail = error.Length > 0 ? error : result.StandardOutput.Trim();
             SkillUnavailable(command, $"apm exited {result.ExitCode}: {detail}");
+        }
+        catch (TimeoutException)
+        {
+            SkillUnavailable(command, "apm did not finish and was stopped after the time limit");
+        }
+        catch (InvalidOperationException)
+        {
+            // The runner could not start the process, which the skill reports like any other unavailable APM.
+            SkillUnavailable(command, "the 'apm' process could not be started");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
         {

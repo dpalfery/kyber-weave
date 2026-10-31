@@ -86,7 +86,7 @@ if [[ "${1:-}" == "--regenerate" ]]; then
   if [[ -z "${timings}" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings="$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")"
-    dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
+    scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
   fi
   python3 - "${timings}" "${CLASS_LIST}" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -226,7 +226,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
 
   # A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
   test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
-  dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}"
+  scripts/proc-guard.sh run -- dotnet "${TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee "${test_log}"
   if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
     printf 'no tests ran; check the --class / --method filter\n' >&2
     exit 1
@@ -248,14 +248,14 @@ fi
 
 if [[ "${needs_dash}" -eq 1 ]]; then
   step "dash typecheck"
-  npm --prefix dash run typecheck
+  scripts/proc-guard.sh run -- npm --prefix dash run typecheck
 
   step "dash lint"
-  npm --prefix dash run lint
+  scripts/proc-guard.sh run -- npm --prefix dash run lint
 
   if [[ ${#dash_related_files[@]} -gt 0 ]]; then
     step "dash tests (related: ${#dash_related_files[@]} files)"
-    npm --prefix dash run test:related -- "${dash_related_files[@]}"
+    scripts/proc-guard.sh run -- npm --prefix dash run test:related -- "${dash_related_files[@]}"
   fi
 
   if [[ "${needs_tray_ui}" -eq 1 ]]; then
@@ -264,10 +264,10 @@ if [[ "${needs_dash}" -eq 1 ]]; then
       exit 1
     fi
     step "tray ui typecheck"
-    npm --prefix dash/tray/ui run typecheck
+    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
 
     step "tray ui test"
-    npm --prefix dash/tray/ui run test
+    scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
   fi
 fi
 

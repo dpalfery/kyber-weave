@@ -232,8 +232,7 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   implementation's constants.
 - **R14** Structural tests assert structure: scope checks to the job or `needs:` block; compare
   sets, not strings or `IndexOf` order; assert a definition, not a mention. Derive expected counts
-  from the source. Helpers guard JSON `ValueKind` and `Assert.Fail` with the path. (#432, #422,
-  #415, #408)
+  from the source. Helpers guard JSON `ValueKind` and `Assert.Fail` with the path. Enforce contract assertion rigor: flag bare single-word `Assert.Contains` checks that match common boilerplate; flag unguarded boolean `||` assertions where one branch matches unrelated text; flag non-contiguous `foreach` field checks over multi-line schemas (require contiguous schema assertions that verify multi-line block integrity). (#432, #422, #415, #408)
 - **R15** *(low evidence)* On fix PRs, every new guard or parser ships a malformed-input test
   (wrong type, non-finite, negative, CRLF, empty) that fails with the fix reverted. (#439, #414,
   #435)
@@ -252,7 +251,7 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   "no cap"), must name which tool/flag it means, and must not instruct a non-interactive
   agent to run an interactive command or confirm an unspecified thing.
 - **R16** Agent and skill prompts define every outcome, verdict, key, and rubric they refer to,
-  and change together with their sibling contracts. (#424, #434, #429)
+  and change together with their sibling contracts. Require literal parsing of prompt instructions: prohibit charitable reading of prompts, as models interpret instructions literally. Flag any gate deadlock, ambiguity, or contradiction/self-contradiction across rules; enforce cross-document and prompt-to-prompt contract parity. (#424, #434, #429)
 - The reference for a document's claim is the code. Verify each count, size, list, procedure
   and absolute ("once", "only", "always", "all") against the code, then search documents the
   diff did not touch for the old value. An archived plan is corrected, not left false.

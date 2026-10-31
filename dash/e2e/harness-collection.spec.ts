@@ -32,10 +32,54 @@ const scratch = join(dashRoot, '..', '.agent_scratchpad', 'harness-collection-T1
 const dashDist = join(dashRoot, 'dist', 'dash', 'index.html')
 
 let child: ChildProcess | undefined
+let bootPid: number | undefined
 let app = ''
 let dbPath = ''
 
 test.describe.configure({ mode: 'serial' })
+
+/** True while the process group led by `pid` still has a live member. */
+function bootGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Signals the boot's whole process group. The boot is spawned `detached`, so it leads its own
+ * group and every process it forks shares that group id. Signalling only the leader let a forked
+ * child outlive the run, reparented to PID 1. A group that is already gone (ESRCH) is success.
+ */
+function signalBootGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+/** SIGTERM the group, allow a bounded grace to exit, then SIGKILL whatever is still in it. */
+async function stopBootGroup(pid: number): Promise<void> {
+  signalBootGroup(pid, 'SIGTERM')
+  const deadline = Date.now() + 5_000
+  while (bootGroupAlive(pid) && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+  }
+  if (bootGroupAlive(pid)) signalBootGroup(pid, 'SIGKILL')
+}
+
+/** Process 'exit' fallback: runs when the test process exits without reaching afterAll. */
+const killBootGroupOnExit = (): void => {
+  if (bootPid === undefined || !bootGroupAlive(bootPid)) return
+  try {
+    signalBootGroup(bootPid, 'SIGKILL')
+  } catch {
+    // The process is exiting; there is nothing left that could act on the error.
+  }
+}
 
 /**
  * Open one harness from the dashboard root, the app's own client-side route.
@@ -95,7 +139,13 @@ test.beforeAll(async () => {
   test.setTimeout(180_000)
   mkdirSync(scratch, { recursive: true })
   if (!existsSync(dashDist)) {
-    const built = spawnSync('npm', ['run', 'build:web'], { cwd: dashRoot, encoding: 'utf8' })
+    // A synchronous call is not interrupted by test.setTimeout, so the build carries its own bound.
+    const built = spawnSync('npm', ['run', 'build:web'], {
+      cwd: dashRoot,
+      encoding: 'utf8',
+      timeout: 300_000,
+      killSignal: 'SIGKILL',
+    })
     if (built.status !== 0) {
       throw new Error(`build:web failed: ${built.stdout}\n${built.stderr}`)
     }
@@ -106,8 +156,12 @@ test.beforeAll(async () => {
       ...process.env,
       NODE_OPTIONS: '--no-deprecation',
     },
+    // Leads its own process group so teardown can reach every process the boot forks.
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  bootPid = child.pid
+  process.once('exit', killBootGroupOnExit)
 
   app = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('harness-collection dashboard did not become ready')), 150_000)
@@ -144,18 +198,11 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  // SIGTERM is a request, not a completion: wait for the exit the boot script
-  // owes us before deleting the store it was serving from.
-  if (child !== undefined && child.exitCode === null && child.signalCode === null) {
-    const exited = new Promise<void>((resolve) => {
-      child!.once('exit', () => resolve())
-    })
-    child.kill('SIGTERM')
-    const bounded = new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 5_000)
-      timer.unref?.()
-    })
-    await Promise.race([exited, bounded])
+  // SIGTERM is a request, not a completion: stop the whole boot process group and
+  // wait for it to empty before deleting the store it was serving from.
+  if (bootPid !== undefined) {
+    await stopBootGroup(bootPid)
+    process.off('exit', killBootGroupOnExit)
   }
   // The boot script seeds a `mkdtemp` canon store; nothing else removes it, so
   // a run would otherwise leave one temp root per invocation behind.

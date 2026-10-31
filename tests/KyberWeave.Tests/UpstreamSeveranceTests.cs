@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -172,6 +173,7 @@ public sealed class UpstreamSeveranceTests
     {
         ProcessStartInfo start = new("git")
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -180,16 +182,12 @@ public sealed class UpstreamSeveranceTests
         start.ArgumentList.Add("ls-files");
         start.ArgumentList.Add("-z");
 
-        using Process process = Process.Start(start)
-                                ?? throw new InvalidOperationException("git could not be started.");
-        string stdout = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-
-        Assert.True(process.ExitCode == 0, $"git ls-files failed: {process.StandardError.ReadToEnd()}");
+        ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));
+        Assert.True(result.ExitCode == 0, $"git ls-files failed: {result.StandardError}");
 
         // -z separates entries with NUL, so paths with spaces or quotes stay
         // one entry each.
-        return stdout
+        return result.StandardOutput
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .ToList();
     }

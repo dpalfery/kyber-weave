@@ -37,6 +37,10 @@ check-then-act on shared state, an await between a read and the write that depen
 an assumption of single-threaded access in something the framework calls concurrently. Do
 not report theoretical races you cannot construct.
 
+**Operational lifecycle state-machine walk.** Walk the complete lifecycle of any concurrency primitive, worktree allocation, mutex/lock, or temp-path: from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and trace failure paths including `conflict` and `rollback`. Resources allocated during execution or integration must not be leaked or orphaned when operations abort or encounter conflict/rollback; cleanup must be deterministic and guaranteed across all exit branches.
+
+**Literal prompt parsing.** When reviewing agent prompts and markdown instructions, mandate literal parsing of instructions. Prohibit charitable reading of prompts: agents interpret text literally. Flag any gate deadlock, instruction ambiguity, self-contradiction, or impossible precondition that traps an executing model.
+
 **Inverted or dropped conditions.** Negation errors, a short-circuit that skips a necessary
 side effect, an `else` attached to the wrong branch, a condition that can never be true.
 

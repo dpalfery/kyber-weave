@@ -28,6 +28,15 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
+    /// <summary>
+    ///     The bound for one sqlite3 batch, reads and writes alike. A healthy batch, even a large review import,
+    ///     finishes far inside this; a hung child is killed at it and the operation fails.
+    /// </summary>
+    private static readonly TimeSpan SqliteBatchTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>The bound for the sqlite3 version probe that decides whether the cache can be opened.</summary>
+    private static readonly TimeSpan SqliteVersionProbeTimeout = TimeSpan.FromSeconds(30);
+
     // Generated so a hostile sqlite message cannot hang the retry classifier.
     [GeneratedRegex(@"\blocked\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex LockedWordRegex();
@@ -340,11 +349,17 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             ProcessResult result;
             try
             {
-                result = ProcessRunner.Run(startInfo, boundedInput);
+                result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);
             }
             catch (Win32Exception exception)
             {
                 throw new InvalidOperationException("The 'sqlite3' executable is unavailable.", exception);
+            }
+            catch (TimeoutException exception)
+            {
+                throw new InvalidOperationException(
+                    "The documentation analysis cache did not answer within the time limit, so the sqlite3 batch was stopped.",
+                    exception);
             }
 
             if (result.ExitCode == 0) return result.StandardOutput;
@@ -375,10 +390,15 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         startInfo.ArgumentList.Add("--version");
         try
         {
-            return ProcessRunner.Run(startInfo, string.Empty).ExitCode == 0;
+            return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;
         }
         catch (Win32Exception)
         {
+            return false;
+        }
+        catch (TimeoutException)
+        {
+            // A version probe that never answers means the cache cannot be opened; the availability check reports it.
             return false;
         }
     }

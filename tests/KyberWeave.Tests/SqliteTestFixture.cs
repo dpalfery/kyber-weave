@@ -26,7 +26,7 @@ internal static class SqliteTestFixture
         startInfo.ArgumentList.Add("--version");
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
             if (result.ExitCode != 0)
             {
                 throw SkipException.ForSkip(skipMessage);
@@ -51,7 +51,7 @@ internal static class SqliteTestFixture
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
-        return ProcessRunner.Run(startInfo, sql);
+        return ProcessRunner.Run(startInfo, sql, TimeSpan.FromSeconds(60));
     }
 
     private static ProcessStartInfo SqliteStartInfo() => new("sqlite3")

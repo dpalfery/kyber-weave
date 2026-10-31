@@ -65,7 +65,7 @@ review:
     # would come from binaries the suite did not actually gate.
     - id: test
       include: *net-test-paths
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      run: [scripts/proc-guard.sh, run, --, dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       blocking: true
     # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
     # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite
@@ -203,7 +203,7 @@ review:
     # coverage.cobertura.xml only.
     - id: ts-test
       include: ["dash/**"]
-      run: [npm, run, --prefix, dash, test, --, --coverage]
+      run: [scripts/proc-guard.sh, run, --, npm, run, --prefix, dash, test, --, --coverage]
       blocking: true
     # One severity, owned by dash/eslint.config.js: the recommended rules run
     # at error everywhere under dash/. The two-tier split that ran them as
