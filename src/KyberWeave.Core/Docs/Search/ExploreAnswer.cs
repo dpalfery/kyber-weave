@@ -241,11 +241,8 @@ public sealed partial class DocumentIndex
         List<(DocumentModel Document, double Identity, double DocumentScore)> qualifying = new();
         foreach (DocumentModel doc in _corpus.Documents)
         {
-            double identity = ScoreExact(doc, trimmed)
-                              + ScorePartialIdentity(doc, queryVector)
-                              + TitleWeight * ScoreTitle(doc, titleQuery)
-                              + BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
-            double documentScore = Authority(doc) * identity;
+            (double identity, double documentScore) = ScoreDocumentStage(
+                doc, trimmed, queryVector, coverageTerms, titleQuery);
             if (documentScore >= MinRelevanceScore)
             {
                 qualifying.Add((doc, identity, documentScore));
@@ -353,6 +350,20 @@ public sealed partial class DocumentIndex
         return new RankExploreResult(globalWinner, runnerTopic);
     }
 
+    private (double Identity, double DocumentScore) ScoreDocumentStage(
+        DocumentModel doc,
+        string trimmed,
+        IReadOnlyDictionary<string, double> queryVector,
+        IReadOnlyList<string> coverageTerms,
+        IReadOnlyDictionary<string, double> titleQuery)
+    {
+        double identity = ScoreExact(doc, trimmed)
+                          + ScorePartialIdentity(doc, queryVector)
+                          + (TitleWeight * ScoreTitle(doc, titleQuery))
+                          + (BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms));
+        return (identity, Authority(doc) * identity);
+    }
+
     private ScoredLeaf? TryAnswerFromIndexRow(
         string trimmed,
         IReadOnlyDictionary<string, double> queryVector,
@@ -371,6 +382,15 @@ public sealed partial class DocumentIndex
         }
 
         if (!_sectionGraph.DocumentsByPath.TryGetValue(row.TargetRelativePath, out DocumentModel? target))
+        {
+            return null;
+        }
+
+        // The row names the document, and that document still has to clear the same
+        // floor as every other document. Otherwise an index hit is answered from a
+        // plan the question does not match.
+        if (ScoreDocumentStage(target, trimmed, queryVector, coverageTerms, titleQuery).DocumentScore
+            < MinRelevanceScore)
         {
             return null;
         }
