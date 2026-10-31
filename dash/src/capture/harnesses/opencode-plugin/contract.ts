@@ -66,16 +66,25 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
+/**
+ * One field of a derivation string. `|` separates fields and `\` escapes it, so no two distinct
+ * field lists join to the same string. A field with neither character is unchanged, which keeps
+ * every id for an ordinary OpenCode session or message id the same as the bare join gave.
+ */
+function field(value: string): string {
+  return value.replace(/[\\|]/g, '\\$&')
+}
+
 /** The trace id of a session: the first 32 hex of SHA-256 over `opencode|trace|<session>`. */
 export function traceIdFor(sessionId: string): string {
-  return sha256Hex(`opencode|trace|${sessionId}`).slice(0, 32)
+  return sha256Hex(`opencode|trace|${field(sessionId)}`).slice(0, 32)
 }
 
 /**
  * The span id for a kind and anchor within a session: the first 16 hex of SHA-256 over
- * `opencode|<kind>|<session>|<anchor>`. The anchor is the request's execution-started event id,
- * a step's message id, or a tool's call id.
+ * `opencode|<kind>|<session>|<anchor>`, each field escaped (see `field`). The anchor is the
+ * request's execution-started event id, a step's message id, or a tool's call id.
  */
 export function spanIdFor(kind: SpanKind, sessionId: string, anchor: string): string {
-  return sha256Hex(`opencode|${kind}|${sessionId}|${anchor}`).slice(0, 16)
+  return sha256Hex(`opencode|${kind}|${field(sessionId)}|${field(anchor)}`).slice(0, 16)
 }

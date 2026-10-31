@@ -203,6 +203,13 @@ describe('the OpenCode wire contract v3', () => {
     expect(new Set(ids).size).toBe(3)
   })
 
+  it('span ids stay distinct when a session id and an anchor contain the field separator', () => {
+    // Joined with a bare "|", both of these were the string "opencode|tool|s|tool|s2|a".
+    expect(spanIdFor('tool', 's|tool|s2', 'a')).not.toBe(spanIdFor('tool', 's', 'tool|s2|a'))
+    // An escape character in a part must not recreate the collision.
+    expect(spanIdFor('tool', 's\\|', 'a')).not.toBe(spanIdFor('tool', 's\\', '|a'))
+  })
+
   it('contract.ts imports nothing but node: built-ins', () => {
     const source = readFileSync(path.join(HERE, 'contract.ts'), 'utf8')
     const offenders = importSpecifiers(source).filter((specifier) => !specifier.startsWith('node:'))
