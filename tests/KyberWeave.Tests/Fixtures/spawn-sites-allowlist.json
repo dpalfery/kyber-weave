@@ -1026,6 +1026,12 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, HarnessTimeout);",
       "count": 1,
       "bound": "HarnessTimeout (60 s) kills the tree; the guard's own --timeout 20 kills the wrapped read; the inner command exits by itself."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/fake-date-fails-after-marker.sh",
+      "text": "exec /bin/date \"$@\"",
+      "count": 1,
+      "bound": "Fixture-only: /bin/date prints the epoch seconds and exits at once; the script fails before it when the marker file exists."
     }
   ]
 }

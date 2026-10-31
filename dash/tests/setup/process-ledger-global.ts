@@ -70,7 +70,21 @@ export async function endLedgerRun(
   if (file === undefined) {
     warn(`process ledger: ${LEDGER_FILE_ENV} is not set; no spawn records, scanning descendants and orphans only\n`)
   }
-  const entries = file === undefined ? [] : parseEntries(readFileSync(file, 'utf8'))
+  // The scans and the cleanup must run whatever the read does. A missing file is an empty ledger
+  // with a warning; any other read error is kept and thrown after the scans and cleanup.
+  let entries: LedgerEntry[] = []
+  let readError: unknown
+  if (file !== undefined) {
+    try {
+      entries = parseEntries(readFileSync(file, 'utf8'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        warn(`process ledger: ${file} is missing; scanning descendants and orphans only\n`)
+      } else {
+        readError = error
+      }
+    }
+  }
   delete process.env[LEDGER_FILE_ENV]
   delete process.env[RUN_STARTED_ENV]
   const options = {
@@ -88,6 +102,7 @@ export async function endLedgerRun(
   } finally {
     if (file !== undefined) rmSync(dirname(file), { recursive: true, force: true })
   }
+  if (readError !== undefined) throw readError
 }
 
 export function setup(): void {

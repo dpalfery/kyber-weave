@@ -86,9 +86,17 @@ count_node() {
 # Fail closed on a root that is empty, not a directory, or the filesystem root (which would match
 # nearly every command line). Prints the reason on stderr; returns 2 when refused.
 validate_root() {
-  local root="$1"
-  if [[ -z "${root}" || "${root%/}" == "" || ! -d "${root}" ]]; then
+  local root="$1" trimmed physical
+  # Strip every trailing slash: "//" and "///" are the filesystem root as well.
+  trimmed="${root%"${root##*[!/]}"}"
+  if [[ -z "${root}" || -z "${trimmed}" || ! -d "${root}" ]]; then
     printf 'proc-guard: refusing root "%s": it must be an existing directory other than /\n' "${root}" >&2
+    return 2
+  fi
+  # A symlink or ".." can still resolve to the filesystem root.
+  physical="$(cd -P "${root}" 2>/dev/null && pwd -P)" || physical=""
+  if [[ -z "${physical}" || "${physical}" == "/" ]]; then
+    printf 'proc-guard: refusing root "%s": it resolves to the filesystem root or cannot be resolved\n' "${root}" >&2
     return 2
   fi
   return 0
@@ -97,7 +105,7 @@ validate_root() {
 # Real wall clock in epoch seconds; non-zero (nothing printed) when date fails.
 real_now() {
   local value
-  value="$(date +%s 2>/dev/null)"
+  value="$("${KW_PROC_GUARD_DATE:-date}" +%s 2>/dev/null)"
   if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
     printf 'proc-guard: cannot read the clock (date +%%s failed)\n' >&2
     return 1
@@ -460,7 +468,12 @@ run_guarded() {
   # Leftover check: tracked descendants still alive, members of the command's process group,
   # and re-parented processes that carry the repo root and started after this run began.
   local candidates="" linked="" candidate age run_age row
-  run_age=$(($(real_now || printf '%s' "${started_at}") - started_at))
+  if ! now="$(real_now)"; then
+    # Fail closed: a zero fallback would drop genuinely old orphans and hide survivors.
+    trap - INT TERM
+    return 2
+  fi
+  run_age=$((now - started_at))
   for candidate in "${tracked[@]+"${tracked[@]}"}"; do
     if kill -0 "${candidate}" 2>/dev/null; then
       candidates+="${candidate}"$'\n'

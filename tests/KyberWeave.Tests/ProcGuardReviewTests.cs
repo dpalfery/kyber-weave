@@ -78,6 +78,45 @@ public sealed class ProcGuardReviewTests
         Assert.Contains("max-node", result.StandardError, StringComparison.Ordinal);
     }
 
+    /// <summary>Several trailing slashes still name the filesystem root, so they are refused too.</summary>
+    [Theory]
+    [InlineData("//")]
+    [InlineData("///")]
+    public void CheckLeftovers_WhenRootIsFilesystemRootWithExtraSlashes_RefusesWithExit2(string root)
+    {
+        SkipIfBashUnavailable();
+
+        ProcessResult result = RunGuard(["check-leftovers", "--root", root], "ps-orphan.sh", null);
+
+        Assert.Equal(UsageExitCode, result.ExitCode);
+    }
+
+    /// <summary>
+    /// A clock that fails at the leftover scan must make the run exit 2 rather than fall back to an elapsed time
+    /// of zero, which would drop a genuinely old orphan and let the run report success.
+    /// </summary>
+    /// <remarks>
+    /// The fake dotnet runs only after the wrapped command ends and creates a marker file. From then on the fake
+    /// date fails, so the clock breaks exactly at the scan and never inside the poll loop.
+    /// </remarks>
+    [Fact]
+    public void RunWhenClockFailsAtLeftoverScan_Exits2InsteadOfHidingOldOrphan()
+    {
+        SkipIfBashUnavailable();
+        using TempDirectory directory = new();
+        Dictionary<string, string> environment = new()
+        {
+            ["KW_PROC_GUARD_DOTNET"] = FixturePath("fake-dotnet-creates-marker.sh"),
+            ["KW_PROC_GUARD_DATE"] = FixturePath("fake-date-fails-after-marker.sh"),
+            ["KW_PROC_GUARD_TEST_MARKER"] = Path.Combine(directory.Path, "scan-started")
+        };
+
+        ProcessResult result = RunGuard(["run", "--", "sh", "-c", "exit 0"], "ps-orphan.sh", "etime-old.sh", environment);
+
+        Assert.Equal(UsageExitCode, result.ExitCode);
+        Assert.Contains("clock", result.StandardError, StringComparison.Ordinal);
+    }
+
     private static void SkipIfBashUnavailable()
     {
         if (OperatingSystem.IsWindows() || !File.Exists("/bin/bash"))
@@ -91,7 +130,11 @@ public sealed class ProcGuardReviewTests
         return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests", "Fixtures", "proc-guard", fixtureName);
     }
 
-    private static ProcessResult RunGuard(string[] guardArguments, string psFixtureName, string? etimeFixtureName)
+    private static ProcessResult RunGuard(
+        string[] guardArguments,
+        string psFixtureName,
+        string? etimeFixtureName,
+        IReadOnlyDictionary<string, string>? extraEnvironment = null)
     {
         ProcessStartInfo startInfo = new("/bin/bash")
         {
@@ -112,6 +155,14 @@ public sealed class ProcGuardReviewTests
         if (etimeFixtureName is not null)
         {
             startInfo.Environment["KW_PROC_GUARD_ETIME"] = FixturePath(etimeFixtureName);
+        }
+
+        if (extraEnvironment is not null)
+        {
+            foreach (KeyValuePair<string, string> pair in extraEnvironment)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
         }
 
         return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);

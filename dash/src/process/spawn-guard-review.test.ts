@@ -87,9 +87,40 @@ describe('C2: the child keeps the guard when the caller supplies its own env', (
     expect(calls[0]?.env?.KYBERDASH_LEDGER_RUN_STARTED_AT).toBe('123')
   })
 
-  it('keeps a value the caller set explicitly', () => {
+  it('keeps a non-empty ledger value the caller set explicitly', () => {
     const { spawnFn, calls } = recorder()
     allowRealSpawns('review test: explicit value wins')
+    process.env.KYBERDASH_SPAWN_LEDGER_FILE = '/parent/ledger'
+
+    spawnAs('job', spawnFn, { KYBERDASH_SPAWN_LEDGER_FILE: '/caller/ledger' })
+
+    expect(calls[0]?.env?.KYBERDASH_SPAWN_LEDGER_FILE).toBe('/caller/ledger')
+  })
+
+  it.each(['', '   ', 'allow', 'custom'])('a parent in deny mode makes the child deny whatever the caller sets (%j)', (value) => {
+    const { spawnFn, calls } = recorder()
+    allowRealSpawns('review test: deny cannot be weakened')
+
+    spawnAs('job', spawnFn, { KYBERDASH_SPAWN_GUARD: value })
+
+    expect(calls[0]?.env?.KYBERDASH_SPAWN_GUARD).toBe('deny')
+  })
+
+  it.each(['', '   '])('an empty ledger value %j counts as omitted and takes the parent value', (value) => {
+    const { spawnFn, calls } = recorder()
+    allowRealSpawns('review test: empty ledger value')
+    process.env.KYBERDASH_SPAWN_LEDGER_FILE = '/parent/ledger'
+    process.env.KYBERDASH_LEDGER_RUN_STARTED_AT = '123'
+
+    spawnAs('job', spawnFn, { KYBERDASH_SPAWN_LEDGER_FILE: value, KYBERDASH_LEDGER_RUN_STARTED_AT: value })
+
+    expect(calls[0]?.env?.KYBERDASH_SPAWN_LEDGER_FILE).toBe('/parent/ledger')
+    expect(calls[0]?.env?.KYBERDASH_LEDGER_RUN_STARTED_AT).toBe('123')
+  })
+
+  it('leaves the caller guard value alone when the parent is not in deny mode', () => {
+    const { spawnFn, calls } = recorder()
+    process.env.KYBERDASH_SPAWN_GUARD = 'allow'
 
     spawnAs('job', spawnFn, { KYBERDASH_SPAWN_GUARD: 'custom' })
 

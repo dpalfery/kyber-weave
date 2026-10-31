@@ -186,7 +186,14 @@ export function guardedSpawn<T>(spawnFn: SpawnFn<T>, request: GuardedSpawnReques
   // A caller's own env must not turn the guard off in the child by leaving the variable out.
   if (callerEnv !== undefined) {
     for (const key of INHERITED_ENV_KEYS) {
-      if (callerEnv[key] === undefined && env[key] !== undefined) inherited[key] = env[key]
+      const parentValue = env[key]
+      if (parentValue === undefined) continue
+      const callerValue = callerEnv[key]
+      // An empty or whitespace-only value counts as omitted: it would otherwise blank the variable.
+      const omitted = callerValue === undefined || callerValue.trim() === ''
+      // Deny mode can only be tightened, never loosened, by a caller's env.
+      const weakensDeny = key === 'KYBERDASH_SPAWN_GUARD' && parentValue === 'deny' && callerValue !== 'deny'
+      if (omitted || weakensDeny) inherited[key] = parentValue
     }
   }
   const childEnv: NodeJS.ProcessEnv = {

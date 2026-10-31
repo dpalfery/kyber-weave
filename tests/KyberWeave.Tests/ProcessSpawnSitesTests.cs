@@ -127,6 +127,12 @@ public sealed class ProcessSpawnSitesTests
     [InlineData("        Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;", "ProcessRunner.RunInteractive")]
     [InlineData("        return ProcessRunner.RunInteractive(startInfo);", "ProcessRunner.RunInteractive")]
     [InlineData("        // Func<ProcessStartInfo, int> runner = ProcessRunner.RunInteractive;", null)]
+    // A namespace-qualified ProcessRunner is still the repository's ProcessRunner: \b matches after the dot.
+    [InlineData("        ProcessResult r = Acme.Core.ProcessRunner.Run(startInfo, string.Empty);", "ProcessRunner.Run")]
+    [InlineData("        Func<ProcessStartInfo, int> runner = Acme.Core.ProcessRunner.RunInteractive;", "ProcessRunner.RunInteractive")]
+    // Deliberate negative: MyProcessRunner is a different identifier, not the repository's type. Its spawns
+    // still surface, because any process it starts goes through Process.Start or ProcessStartInfo, which are matched.
+    [InlineData("        ProcessResult r = MyProcessRunner.Run(startInfo, string.Empty);", null)]
     [InlineData("        // ProcessRunner.Run(startInfo, string.Empty);", null)]
     [InlineData("    /// <c>ProcessRunner.Run</c> copies exactly this environment.", null)]
     [InlineData("        return ProcessRunner.ReadToEnd(process);", null)]

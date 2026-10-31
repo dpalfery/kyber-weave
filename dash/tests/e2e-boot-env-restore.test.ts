@@ -71,4 +71,41 @@ describe('bootIsolatedDashboard restores KYBER_CANON_DB', () => {
     ).rejects.toBeDefined()
     expect(process.env[KEY]).toBe('/previous/canon.db')
   })
+
+  it('restores the value and still closes the hosted pair when the server close reports an error', async () => {
+    process.env[KEY] = '/previous/canon.db'
+    const root = createTempRoot()
+    createdRoots.push(root)
+    const world = await refreshTempCanon(root)
+    world.store.close()
+    const handle = await bootIsolatedDashboard({
+      root: world.root,
+      canonDbPath: world.dbPath,
+      port: 0,
+      period: 'all',
+      provider: 'all',
+      project: [],
+      exclude: [],
+      maintenance: async () => {},
+    })
+
+    // A seam on the live server: its first close reports an error; the real close still runs
+    // afterwards so this test leaves nothing listening.
+    const realClose = handle.server.close.bind(handle.server)
+    let failedOnce = false
+    handle.server.close = ((callback?: (err?: Error) => void) => {
+      if (!failedOnce) {
+        failedOnce = true
+        // The real close runs (so the server really stops and the pair is released); only the
+        // outcome reported to the caller is replaced by an error.
+        realClose(() => callback?.(new Error('close failed')))
+        return handle.server
+      }
+      return realClose(callback)
+    }) as typeof handle.server.close
+
+    await expect(handle.close()).rejects.toThrow('close failed')
+    expect(process.env[KEY], 'a failed close must still restore the variable').toBe('/previous/canon.db')
+    expect(handle.closedJobHostCount(), 'a failed server close must not skip the job host close').toBe(1)
+  })
 })

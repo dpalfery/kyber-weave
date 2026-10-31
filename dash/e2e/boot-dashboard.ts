@@ -134,12 +134,20 @@ export async function bootIsolatedDashboard(options: BootIsolatedOptions): Promi
     firstTick: Promise.resolve(),
     closedJobHostCount: () => closedJobHosts,
     close: async () => {
-      await new Promise<void>((resolve, reject) => {
+      // Every step runs even when an earlier one fails, and the env var is restored whatever
+      // happens; the first failure is rethrown afterwards.
+      const serverClosed = new Promise<void>((resolve, reject) => {
         server.close((err) => (err === undefined ? resolve() : reject(err)))
         server.closeAllConnections()
       })
-      await Promise.all(closing)
-      restoreCanonDb()
+      try {
+        const results = await Promise.allSettled([serverClosed])
+        results.push(...(await Promise.allSettled(closing)))
+        const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+        if (failed !== undefined) throw failed.reason
+      } finally {
+        restoreCanonDb()
+      }
     },
   }
 }

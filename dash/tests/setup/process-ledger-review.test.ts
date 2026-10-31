@@ -1,5 +1,6 @@
 // Process ledger review fixes (storm guard T5, PR #477 C8-C10). Fakes only; no real process.
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -67,5 +68,24 @@ describe('C10: playwright.config.ts denies spawns for spec workers', () => {
     const config = readFileSync(join(dashRoot, 'playwright.config.ts'), 'utf8')
 
     expect(config).toMatch(/^process\.env\.KYBERDASH_SPAWN_GUARD\s*=\s*'deny'/m)
+  })
+})
+
+describe('R2: ledger file set but missing', () => {
+  it('warns, still scans and kills survivors, and removes the temp dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kyberdash-ledger-test-'))
+    const saved = process.env.KYBERDASH_SPAWN_LEDGER_FILE
+    process.env.KYBERDASH_SPAWN_LEDGER_FILE = join(dir, 'spawns.jsonl')
+    const warnings: string[] = []
+    const { deps, signals } = fakeDeps([{ pid: 778, ppid: process.pid, startedAt: 2_000, command: 'node stray2.js' }])
+    try {
+      await expect(endLedgerRun(deps, (message) => void warnings.push(message))).rejects.toThrow(/778.*stray2\.js/)
+    } finally {
+      if (saved === undefined) delete process.env.KYBERDASH_SPAWN_LEDGER_FILE
+      else process.env.KYBERDASH_SPAWN_LEDGER_FILE = saved
+    }
+    expect(signals).toContain('SIGTERM 778')
+    expect(warnings.join('')).toMatch(/spawns\.jsonl/)
+    expect(existsSync(dir), 'the temp dir must be removed').toBe(false)
   })
 })
