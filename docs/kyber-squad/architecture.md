@@ -1144,7 +1144,7 @@ execution throughput, conductor does not serialize all task execution or test ru
   symbol scopes do not overlap execute concurrently up to `review.max-concurrent-workers`.
 - **Worktree and artifact isolation**: Each concurrent worker executes in an isolated git
   worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses dedicated per-task
-  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and review gates `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
+  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
   assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
   targeted tests simultaneously without mutual interference or file locks.
 - **Serialized branch-head integration**: Only final integration and branch-head mutations are
