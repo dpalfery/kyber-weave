@@ -26,9 +26,11 @@ repeated a query term could outrank the ontology that actually governed frontmat
 runbook exposed `maxDocs` and `charBudget` on `docs_explore`, which encouraged callers to
 tune truncation instead of asking a sharper question.
 
-Operators need one authoritative answer per question: the best matching **leaf** (preamble or
-`##` section, including nested `###` claims inside it), with honest confidence when another
-topic nearly tied.
+Operators need one authoritative answer per question: the best matching **leaf**, with honest
+confidence when another topic nearly tied. A leaf is the preamble, the prose before a `##`
+section's first `###`, or a `###` subsection. A `####` heading stays inside its `###`. A
+topic is the `##` section, or the preamble, and its score is its best leaf. Sibling leaves
+under one `##` are not rivals.
 
 ## Decision
 
@@ -39,8 +41,10 @@ topic nearly tied.
    other MCP tools keep their existing budgets.
 
 2. **Section identity is `{doc-id}#{github-slug}`.** The slug is the GitHub auto-identifier for
-   each `##` heading. The preamble uses slug `#` (leaf id `{doc-id}#`). Continuation cursors
-   name the relative path, leaf id, and character offset when prose exceeds one response.
+   that leaf's heading: the `##` lead-in or the `###` subsection. The preamble uses slug `#`
+   (leaf id `{doc-id}#`). The source line names the `##` topic and, when the winner is a
+   `###`, that subsection. Continuation cursors name the relative path, leaf id, and character
+   offset when prose exceeds one response.
 
 3. **Optional `lead` and `sections` frontmatter declare section identity.** `lead` names the
    slug returned for an exact document `id` query; default is `#`. `sections` maps each slug
