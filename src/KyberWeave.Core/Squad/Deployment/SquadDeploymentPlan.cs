@@ -45,7 +45,8 @@ public sealed class SquadDeploymentPlan
         SquadStateMutation lockMutation,
         SquadStateMutation receiptMutation,
         ISquadGlobalRootResolver? globalRoots = null,
-        bool isSingleRootLayout = false)
+        bool isSingleRootLayout = false,
+        IReadOnlyList<string>? degradedFiles = null)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -64,6 +65,7 @@ public sealed class SquadDeploymentPlan
         ReceiptMutation = receiptMutation;
         _globalRoots = globalRoots;
         _isSingleRootLayout = isSingleRootLayout;
+        DegradedFiles = degradedFiles ?? [];
     }
 
     /// <summary>The absolute root into which harness-native files are deployed.</summary>
@@ -97,6 +99,12 @@ public sealed class SquadDeploymentPlan
     ///     only the files it retains, so the planned removals are readable from this list alone.
     /// </summary>
     public IReadOnlyList<SquadPlannedFileChange> PlannedFileChanges { get; }
+
+    /// <summary>
+    ///     Relative paths of deployed files this plan could not read and therefore kept on trust rather than
+    ///     verifying. Empty for a plan whose every file was read and checked.
+    /// </summary>
+    public IReadOnlyList<string> DegradedFiles { get; }
 
     internal IReadOnlyList<SquadFilePrecondition> FilePreconditions { get; }
 
@@ -431,6 +439,7 @@ public sealed class SquadDeploymentPlan
         List<SquadFileMutation> mutations = new();
         List<SquadFilePrecondition> preconditions = new();
         List<SquadOwnedFile> nextOwnedFiles = new();
+        List<string> degradedFiles = new();
         HashSet<string> renderedIdentities = new(StringComparer.Ordinal);
 
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -484,6 +493,7 @@ public sealed class SquadDeploymentPlan
                 // Bytes that cannot be read cannot be proven unedited, so the record is kept and the file is
                 // left alone; the caller reports it by name.
                 nextOwnedFiles.Add(previous);
+                degradedFiles.Add(relativePath);
                 continue;
             }
 
@@ -545,6 +555,7 @@ public sealed class SquadDeploymentPlan
             {
                 // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
                 nextOwnedFiles.Add(previous);
+                degradedFiles.Add(previous.RelativePath);
                 continue;
             }
 
@@ -600,7 +611,8 @@ public sealed class SquadDeploymentPlan
             SquadStateMutation.Write,
             SquadStateMutation.Write,
             globalRoots,
-            nextLayout == SquadReceiptLayout.SingleRoot);
+            nextLayout == SquadReceiptLayout.SingleRoot,
+            degradedFiles);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>

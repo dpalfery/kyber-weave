@@ -20,7 +20,11 @@ public static class SquadPacker
     /// <summary>
     /// Creates the APM distribution archive containing canonical manifests, profiles, agents, and skills.
     /// </summary>
-    public static string PackApm(string sourcePath, string outDirectory, string version)
+    public static string PackApm(
+        string sourcePath,
+        string outDirectory,
+        string version,
+        Func<string, string?>? readEnvironment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -34,7 +38,9 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(CollectApmEntries(sourcePath));
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectApmEntries(sourcePath),
+            readEnvironment ?? Environment.GetEnvironmentVariable);
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -44,7 +50,11 @@ public static class SquadPacker
     /// <summary>
     /// Creates the Agent Plugins v1.0.0 distribution archive containing canonical skills, MCP configuration, and plugin manifest.
     /// </summary>
-    public static string PackPlugins(string sourcePath, string outDirectory, string version)
+    public static string PackPlugins(
+        string sourcePath,
+        string outDirectory,
+        string version,
+        Func<string, string?>? readEnvironment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -58,7 +68,9 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(CollectPluginsEntries(sourcePath, version));
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectPluginsEntries(sourcePath, version),
+            readEnvironment ?? Environment.GetEnvironmentVariable);
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -171,9 +183,16 @@ public static class SquadPacker
     /// never consults the operator's home guidance: the archive is a function of the canonical
     /// source alone. A corpus with no block is passed through unchanged (injector no-op).
     /// </summary>
+    /// <remarks>
+    ///     The packer ships the shipped default only. It never reads the operator's home guidance, so the
+    ///     <paramref name="readEnvironment"/> seam exists to let tests prove that no home lookup happens.
+    /// </remarks>
     private static List<(string RelativePath, byte[] Content)> FillResponsePreferences(
-        List<(string RelativePath, byte[] Content)> entries)
+        List<(string RelativePath, byte[] Content)> entries,
+        Func<string, string?> readEnvironment)
     {
+        ArgumentNullException.ThrowIfNull(readEnvironment);
+
         List<SquadDeploymentFile> files = entries
             .Select(entry => new SquadDeploymentFile(entry.RelativePath, entry.Content, PackTarget))
             .ToList();

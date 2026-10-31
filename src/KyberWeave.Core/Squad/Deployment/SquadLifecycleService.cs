@@ -226,6 +226,8 @@ public sealed class SquadLifecycleService
                     planGlobalRoots,
                     []);
 
+            warnings.AddRange(DegradedFileWarnings(plan));
+
             if (request.DryRun)
                 return new SquadLifecycleResult(
                     true,
@@ -441,6 +443,8 @@ public sealed class SquadLifecycleService
 
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
 
+            warnings.AddRange(DegradedFileWarnings(plan));
+
             if (request.DryRun)
                 return new SquadLifecycleResult(
                     true,
@@ -488,6 +492,10 @@ public sealed class SquadLifecycleService
             CleanupTempDirectory(tempExtractDir);
         }
     }
+
+    private static IEnumerable<string> DegradedFileWarnings(SquadDeploymentPlan plan)
+        => plan.DegradedFiles.Select(path =>
+            $"Could not read deployed file '{path}'; it was kept on trust and not verified against the release.");
 
     /// <summary>
     ///     Performs an uninstallation of Kyber-Squad from the target root.

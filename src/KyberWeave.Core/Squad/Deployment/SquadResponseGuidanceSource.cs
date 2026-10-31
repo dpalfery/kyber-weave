@@ -51,7 +51,14 @@ public static partial class SquadResponseGuidanceSource
             return ShippedDefault(readDefault);
         }
 
-        return string.IsNullOrWhiteSpace(homeText) ? ShippedDefault(readDefault) : homeText;
+        if (!string.IsNullOrWhiteSpace(homeText))
+        {
+            return homeText;
+        }
+
+        // A present-but-blank file is operator input the run is ignoring; say so once instead of falling back silently.
+        warnings.Add($"Response guidance at '{path}' is blank; using the shipped default instead.");
+        return ShippedDefault(readDefault);
     }
 
     private static string ShippedDefault(Func<string>? readDefault)
