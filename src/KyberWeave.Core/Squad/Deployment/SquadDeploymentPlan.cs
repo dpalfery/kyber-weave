@@ -729,9 +729,9 @@ public sealed class SquadDeploymentPlan
 
         if (siblingGlobalReceipts is not null)
             foreach (SquadReceipt sibling in siblingGlobalReceipts)
-            foreach (SquadOwnedFile file in sibling.Files)
-                managedIdentities.Add(DeployedFileIdentity(file.Target,
-                    SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+                foreach (SquadOwnedFile file in sibling.Files)
+                    managedIdentities.Add(DeployedFileIdentity(file.Target,
+                        SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
 
         List<SquadUnmanagedPathCollision> collisions = [];
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -918,10 +918,10 @@ public sealed class SquadDeploymentPlan
             return false;
 
         foreach (SquadReceipt sibling in siblingReceipts)
-        foreach (SquadOwnedFile owned in sibling.Files)
-            if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
-                string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
-                return true;
+            foreach (SquadOwnedFile owned in sibling.Files)
+                if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
+                    string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
+                    return true;
 
         return false;
     }
