@@ -3,10 +3,11 @@
 // override must not outlive the handle: a leaked path would aim the next test at a deleted
 // temp DB.
 import { rmSync } from 'node:fs'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { bootIsolatedDashboard } from '../e2e/boot-dashboard.js'
 import { createTempRoot, refreshTempCanon } from '../e2e/harness-collection-world.js'
+import { JobHost } from '../src/jobs/host.js'
 
 const KEY = 'KYBER_CANON_DB'
 const createdRoots: string[] = []
@@ -17,6 +18,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   if (original === undefined) delete process.env[KEY]
   else process.env[KEY] = original
   for (const root of createdRoots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -107,5 +109,46 @@ describe('bootIsolatedDashboard restores KYBER_CANON_DB', () => {
     await expect(handle.close()).rejects.toThrow('close failed')
     expect(process.env[KEY], 'a failed close must still restore the variable').toBe('/previous/canon.db')
     expect(handle.closedJobHostCount(), 'a failed server close must not skip the job host close').toBe(1)
+  })
+
+  it('reports every failed close, not only the first, and still restores the variable', async () => {
+    process.env[KEY] = '/previous/canon.db'
+    const root = createTempRoot()
+    createdRoots.push(root)
+    const world = await refreshTempCanon(root)
+    world.store.close()
+    const handle = await bootIsolatedDashboard({
+      root: world.root,
+      canonDbPath: world.dbPath,
+      port: 0,
+      period: 'all',
+      provider: 'all',
+      project: [],
+      exclude: [],
+      maintenance: async () => {},
+    })
+
+    // Both closes really run (nothing is left open); only their reported outcome is an error.
+    const realClose = handle.server.close.bind(handle.server)
+    handle.server.close = ((callback?: (err?: Error) => void) => {
+      realClose(() => callback?.(new Error('server close failed')))
+      return handle.server
+    }) as typeof handle.server.close
+    const realJobClose = JobHost.prototype.close
+    vi.spyOn(JobHost.prototype, 'close').mockImplementation(async function (this: JobHost) {
+      await realJobClose.call(this)
+      throw new Error('job host close failed')
+    })
+
+    const thrown: unknown = await handle.close().then(
+      () => undefined,
+      (err: unknown) => err,
+    )
+    expect(thrown).toBeInstanceOf(AggregateError)
+    const reasons = (thrown as AggregateError).errors.map((reason: unknown) => String((reason as Error).message))
+    expect(reasons).toContain('server close failed')
+    expect(reasons).toContain('job host close failed')
+    expect((thrown as AggregateError).message).toContain('2')
+    expect(process.env[KEY]).toBe('/previous/canon.db')
   })
 })

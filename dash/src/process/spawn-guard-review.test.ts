@@ -118,6 +118,30 @@ describe('C2: the child keeps the guard when the caller supplies its own env', (
     expect(calls[0]?.env?.KYBERDASH_LEDGER_RUN_STARTED_AT).toBe('123')
   })
 
+  it.each([
+    ['number 0', 0],
+    ['null', null],
+    ['false', false],
+    ['an object', {}],
+  ])('a non-string caller value (%s) counts as omitted and takes the parent value', (_label, value) => {
+    const { spawnFn, calls } = recorder()
+    allowRealSpawns('review test: non-string env value')
+    process.env.KYBERDASH_SPAWN_LEDGER_FILE = '/parent/ledger'
+    process.env.KYBERDASH_LEDGER_RUN_STARTED_AT = '123'
+    // A JavaScript caller can hand over anything; the type says string, the runtime does not.
+    const bad = value as unknown as string
+
+    spawnAs('job', spawnFn, {
+      KYBERDASH_SPAWN_GUARD: bad,
+      KYBERDASH_SPAWN_LEDGER_FILE: bad,
+      KYBERDASH_LEDGER_RUN_STARTED_AT: bad,
+    })
+
+    expect(calls[0]?.env?.KYBERDASH_SPAWN_GUARD).toBe('deny')
+    expect(calls[0]?.env?.KYBERDASH_SPAWN_LEDGER_FILE).toBe('/parent/ledger')
+    expect(calls[0]?.env?.KYBERDASH_LEDGER_RUN_STARTED_AT).toBe('123')
+  })
+
   it('leaves the caller guard value alone when the parent is not in deny mode', () => {
     const { spawnFn, calls } = recorder()
     process.env.KYBERDASH_SPAWN_GUARD = 'allow'

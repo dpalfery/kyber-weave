@@ -143,8 +143,13 @@ export async function bootIsolatedDashboard(options: BootIsolatedOptions): Promi
       try {
         const results = await Promise.allSettled([serverClosed])
         results.push(...(await Promise.allSettled(closing)))
-        const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-        if (failed !== undefined) throw failed.reason
+        const failures = results
+          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+          .map((result) => result.reason as unknown)
+        if (failures.length === 1) throw failures[0]
+        if (failures.length > 1) {
+          throw new AggregateError(failures, `${failures.length} closes failed while stopping the isolated dashboard`)
+        }
       } finally {
         restoreCanonDb()
       }

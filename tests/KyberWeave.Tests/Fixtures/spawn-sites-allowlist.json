@@ -1032,6 +1032,30 @@
       "text": "exec /bin/date \"$@\"",
       "count": 1,
       "bound": "Fixture-only: /bin/date prints the epoch seconds and exits at once; the script fails before it when the marker file exists."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"pgrep\")",
+      "count": 1,
+      "bound": "Started by the Run below: 10 s timeout; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 10 s kills the tree; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"kill\")",
+      "count": 1,
+      "bound": "Started by the Run below: 5 s timeout; kill -KILL of a sleep 7 this test caused, in finally, result ignored."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a sleep 7 this test caused, result ignored."
     }
   ]
 }

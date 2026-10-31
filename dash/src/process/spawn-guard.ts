@@ -189,8 +189,8 @@ export function guardedSpawn<T>(spawnFn: SpawnFn<T>, request: GuardedSpawnReques
       const parentValue = env[key]
       if (parentValue === undefined) continue
       const callerValue = callerEnv[key]
-      // An empty or whitespace-only value counts as omitted: it would otherwise blank the variable.
-      const omitted = callerValue === undefined || callerValue.trim() === ''
+      // An empty, whitespace-only or non-string value (a JavaScript caller can pass any) counts as omitted: it would otherwise blank the variable.
+      const omitted = typeof callerValue !== 'string' || callerValue.trim() === ''
       // Deny mode can only be tightened, never loosened, by a caller's env.
       const weakensDeny = key === 'KYBERDASH_SPAWN_GUARD' && parentValue === 'deny' && callerValue !== 'deny'
       if (omitted || weakensDeny) inherited[key] = parentValue

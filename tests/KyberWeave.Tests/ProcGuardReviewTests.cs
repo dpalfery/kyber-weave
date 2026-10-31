@@ -117,6 +117,106 @@ public sealed class ProcGuardReviewTests
         Assert.Contains("clock", result.StandardError, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A clock failure at the leftover scan must kill what the run left behind before exiting 2, exactly like the
+    /// poll-loop failure path, so failing closed does not leak a process.
+    /// </summary>
+    /// <remarks>
+    /// The wrapped command leaves one <c>sleep 7</c> in the background and exits. The test kills any new
+    /// <c>sleep 7</c> in <c>finally</c>, so a failed assertion never leaves a real child running.
+    /// </remarks>
+    [Fact]
+    public async Task RunWhenClockFailsAtLeftoverScan_KillsWhatTheCommandLeftBehind()
+    {
+        SkipIfBashUnavailable();
+        using TempDirectory directory = new();
+        IReadOnlyList<int> baseline = ListSleepSevenPids();
+        Dictionary<string, string> environment = new()
+        {
+            ["KW_PROC_GUARD_DOTNET"] = FixturePath("fake-dotnet-creates-marker.sh"),
+            ["KW_PROC_GUARD_DATE"] = FixturePath("fake-date-fails-after-marker.sh"),
+            ["KW_PROC_GUARD_TEST_MARKER"] = Path.Combine(directory.Path, "scan-started")
+        };
+        try
+        {
+            ProcessResult result = RunGuard(
+                ["run", "--", "sh", "-c", "sleep 7 >/dev/null 2>&1 & exit 0"], "ps-clean.sh", null, environment);
+            IReadOnlyList<int> survivors = await WaitForNewSleepSevenGoneAsync(baseline, TimeSpan.FromSeconds(4));
+
+            Assert.Equal(UsageExitCode, result.ExitCode);
+            Assert.True(
+                survivors.Count == 0,
+                $"sleep 7 survived the scan-time clock failure: pids {string.Join(", ", survivors)}");
+        }
+        finally
+        {
+            KillNewSleepSevenPids(baseline);
+        }
+    }
+
+    private static IReadOnlyList<int> ListSleepSevenPids()
+    {
+        ProcessStartInfo startInfo = new("pgrep")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("-f");
+        startInfo.ArgumentList.Add("^sleep 7$");
+
+        // pgrep exits 1 when nothing matches, which is the normal case, so the exit code is not checked.
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));
+
+        List<int> pids = [];
+        foreach (string text in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int pid))
+            {
+                pids.Add(pid);
+            }
+        }
+
+        return pids;
+    }
+
+    private static async Task<IReadOnlyList<int>> WaitForNewSleepSevenGoneAsync(IReadOnlyList<int> baseline, TimeSpan deadline)
+    {
+        Stopwatch clock = Stopwatch.StartNew();
+        while (true)
+        {
+            IReadOnlyList<int> survivors = ListSleepSevenPids().Where(pid => !baseline.Contains(pid)).ToArray();
+            if (survivors.Count == 0 || clock.Elapsed >= deadline)
+            {
+                return survivors;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+    }
+
+    private static void KillNewSleepSevenPids(IReadOnlyList<int> baseline)
+    {
+        foreach (int pid in ListSleepSevenPids().Where(pid => !baseline.Contains(pid)))
+        {
+            ProcessStartInfo startInfo = new("kill")
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            startInfo.ArgumentList.Add("-KILL");
+            startInfo.ArgumentList.Add(pid.ToString(CultureInfo.InvariantCulture));
+
+            // A pid that already exited makes kill fail. That is the outcome wanted, so the result is ignored.
+            _ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));
+        }
+    }
+
     private static void SkipIfBashUnavailable()
     {
         if (OperatingSystem.IsWindows() || !File.Exists("/bin/bash"))

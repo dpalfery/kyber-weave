@@ -469,7 +469,9 @@ run_guarded() {
   # and re-parented processes that carry the repo root and started after this run began.
   local candidates="" linked="" candidate age run_age row
   if ! now="$(real_now)"; then
-    # Fail closed: a zero fallback would drop genuinely old orphans and hide survivors.
+    # Fail closed: a zero fallback would drop genuinely old orphans and hide survivors. Kill what
+    # the run left behind first, the same way the poll-loop clock failure does.
+    kill_tree "${pid}"
     trap - INT TERM
     return 2
   fi

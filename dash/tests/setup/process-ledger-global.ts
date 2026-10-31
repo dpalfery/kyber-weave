@@ -9,7 +9,7 @@
 // begin/end functions (see process-ledger-global-playwright.ts).
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
@@ -55,23 +55,48 @@ function parseEntries(text: string): LedgerEntry[] {
   return entries
 }
 
+const LEDGER_DIR_PREFIX = 'kyberdash-ledger-'
+
+/**
+ * The ledger file comes from the environment, so it is trusted only when it is the file
+ * beginLedgerRun creates: absolute, unchanged by normalize (no ..), and directly inside a
+ * kyberdash-ledger- directory under the OS temp directory. The same rule spawn-guard.ts applies
+ * to appends (duplicated here: that module is not edited from this one).
+ */
+export function isLedgerPath(file: string): boolean {
+  if (!isAbsolute(file) || normalize(file) !== file) return false
+  const dir = dirname(file)
+  return basename(dir).startsWith(LEDGER_DIR_PREFIX) && resolve(dirname(dir)) === resolve(tmpdir())
+}
+
+function removeDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true })
+}
+
 /**
  * Ends the ledger run: tears down survivors, removes the temp dir, throws if any survived.
- * With no ledger file (the wiring is missing) it warns on stderr and still runs the descendant
- * and PID-1 orphan scans with no entries: warning and scanning is safer than a silent pass, and
- * it does not fail a run that left nothing behind.
+ * Fails closed on the path: a ledger file that fails isLedgerPath is warned about, never read,
+ * and nothing is deleted. A missing variable, a missing file, or an invalid path still runs the
+ * descendant and PID-1 orphan scans with an empty ledger: scanning and warning is safer than a
+ * silent pass. Only the validated ledger directory is ever removed (via the injectable remove).
  */
 export async function endLedgerRun(
   deps: ProcessLedgerDeps = systemLedgerDeps,
   warn: (message: string) => void = (message) => void process.stderr.write(message),
+  remove: (dir: string) => void = removeDir,
 ): Promise<void> {
-  const file = process.env[LEDGER_FILE_ENV]
+  const raw = process.env[LEDGER_FILE_ENV]
   const runStartedAt = Number(process.env[RUN_STARTED_ENV])
-  if (file === undefined) {
+  let file: string | undefined
+  if (raw === undefined) {
     warn(`process ledger: ${LEDGER_FILE_ENV} is not set; no spawn records, scanning descendants and orphans only\n`)
+  } else if (isLedgerPath(raw)) {
+    file = raw
+  } else {
+    warn(`process ledger: ${LEDGER_FILE_ENV}=${raw} is not a ledger file path; not read, nothing deleted, scanning only\n`)
   }
   // The scans and the cleanup must run whatever the read does. A missing file is an empty ledger
-  // with a warning; any other read error is kept and thrown after the scans and cleanup.
+  // with a warning; any other read error is kept and thrown, chained with any survivor report.
   let entries: LedgerEntry[] = []
   let readError: unknown
   if (file !== undefined) {
@@ -95,13 +120,21 @@ export async function endLedgerRun(
     repoRoot: dashRoot,
     graceMs: GRACE_MS,
   }
+  let teardownError: unknown
   try {
     // Pool workers can still be exiting when the global teardown runs; give them a bounded moment.
     await settleProcessLedger(options, deps, { maxWaitMs: SETTLE_MS, pollMs: 100 })
     await teardownProcessLedger(options, deps)
+  } catch (error) {
+    teardownError = error
   } finally {
-    if (file !== undefined) rmSync(dirname(file), { recursive: true, force: true })
+    if (file !== undefined) remove(dirname(file))
   }
+  if (teardownError !== undefined && readError !== undefined) {
+    const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+    throw new Error(`${describe(teardownError)}\nledger read failed: ${describe(readError)}`, { cause: readError })
+  }
+  if (teardownError !== undefined) throw teardownError
   if (readError !== undefined) throw readError
 }
 
