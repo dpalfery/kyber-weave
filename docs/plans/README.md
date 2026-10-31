@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-31-factory-mcp-server-visibility.md](2026-10-31-factory-mcp-server-visibility.md) | Ready — approved for execution 2026-10-31 (AP1, `autonomous: recommendation accepted`); `docs validate .` and `docs drift .` pass 0 findings each against this checkout (conductor run, provenance `root=` confirmed; plan GAPS G2/G3 closed, G1/G4 open and not gate conditions) | 2026-10-31 | Give Factory-rendered droids MCP visibility: `FactoryRenderer` derives a per-droid `mcpServers` whitelist from the squad's own `mcp.json` (today `kyber-weave`) for agents whose capability profile allows `filesystem.read` and is not the pure orchestrator (the condition `ClaudeRenderer`/`ZCodeRenderer` already grant under), keeps `mcpServers: []` fail-closed for every other droid, distinguishes the whitelisted non-degraded outcome in the `permission-not-expressible` record, extends the toolchain-roster parity guard (`mcp.json` servers ⊆ `required-mcp-tools`), adds the Factory row and wiring section to the DocGraph MCP runbook (user-owned `.factory/mcp.json` / `~/.factory/mcp.json`; D-no-settings stands — `squad install` writes no Factory settings file), and updates the governed kyber-squad docs plus an ADR 0034 in-place amendment. No `products/kyber-squad/**` changes; the architect's `process.execute: deny` is untouched. `development-mode: test-first`; `autonomy: autonomous` (packet). |
 
 ## Archived Plans
 

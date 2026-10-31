@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -82,6 +83,21 @@ public sealed class FactoryRendererContractTests : IDisposable
     ];
 
     /// <summary>
+    /// The capability profile whose holder routes work rather than researching it, which
+    /// <c>ClaudeRenderer</c> also excludes from the standard MCP grant. Declared here rather
+    /// than read from the renderer so the expectation cannot drift with the implementation.
+    /// </summary>
+    private const string PureOrchestratorProfile = "orchestrator";
+
+    /// <summary>
+    /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
+    /// Keeping the empty case word-for-word is what makes the withholding visible and
+    /// distinguishable from a deliberate whitelist.
+    /// </summary>
+    private const string McpWithheldSentence =
+        "mcpServers: [] excludes every MCP server so parent MCP was not inherited.";
+
+    /// <summary>
     /// Shared identities are read from the loaded fallback profile so the test follows the
     /// same generic single-projection contract as the renderer.
     /// </summary>
@@ -158,7 +174,8 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+SquadSource source = TestSquadCorpus.CanonicalSource;
+        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -247,8 +264,23 @@ public sealed class FactoryRendererContractTests : IDisposable
                 Assert.DoesNotContain(forbidden, tools, StringComparer.Ordinal);
             }
 
+            // The whitelist is computed from the loaded source — the servers the squad's own
+            // mcp.json declares plus the entitlement rule — never from the renderer. A blanket
+            // mcpServers: [] satisfies an Assert.Empty here but not this.
+            IReadOnlyList<string> expectedMcpServers =
+                ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
             IReadOnlyList<string> mcpServers = RequireSequence(frontmatter, "mcpServers", agent.Name);
-            Assert.Empty(mcpServers);
+            Assert.True(
+                expectedMcpServers.SequenceEqual(mcpServers, StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') rendered "
+                + $"mcpServers [{string.Join(", ", mcpServers)}] but the declared servers plus the "
+                + $"entitlement rule require [{string.Join(", ", expectedMcpServers)}].");
+            Assert.All(
+                mcpServers,
+                server => Assert.Contains(
+                    server,
+                    declaredMcpServers,
+                    StringComparer.Ordinal));
 
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("factory", out string? factoryHarnessModel))
@@ -393,8 +425,14 @@ public sealed class FactoryRendererContractTests : IDisposable
                     d => string.Equals(d.Code, "safety-narrowed", StringComparison.Ordinal));
             }
 
-            if (prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
-                publishDecision != SquadPermissionDecision.Deny)
+            bool networkPublishNotExpressible =
+                prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                publishDecision != SquadPermissionDecision.Deny;
+            bool delegateNotExpressible =
+                prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision != SquadPermissionDecision.Deny;
+
+            if (networkPublishNotExpressible)
             {
                 Assert.Contains(
                     agentRecords,
@@ -403,8 +441,7 @@ public sealed class FactoryRendererContractTests : IDisposable
                          d.Details.Contains("network.publish", StringComparison.Ordinal));
             }
 
-            if (prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
-                delegateDecision != SquadPermissionDecision.Deny)
+            if (delegateNotExpressible)
             {
                 Assert.Contains(
                     agentRecords,
@@ -412,15 +449,6 @@ public sealed class FactoryRendererContractTests : IDisposable
                          d.Details is not null &&
                          d.Details.Contains("delegate", StringComparison.Ordinal));
             }
-
-            SquadDegradationRecord mcpRecord = Assert.Single(
-                agentRecords,
-                d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal) &&
-                     d.Details is not null &&
-                     (d.Details.Contains("mcpServers", StringComparison.Ordinal) ||
-                      d.Details.Contains("MCP", StringComparison.Ordinal)));
-            Assert.Equal(agent.BodyDigest, mcpRecord.InstructionDigest);
-            Assert.Equal(agent.Name, mcpRecord.OutputIdentity);
 
             foreach (SquadDegradationRecord degradation in agentRecords)
             {
@@ -438,6 +466,292 @@ public sealed class FactoryRendererContractTests : IDisposable
             d => Assert.True(
                 agentsByName.ContainsKey(d.CanonicalIdentity),
                 $"Degradation names unknown identity '{d.CanonicalIdentity}'."));
+    }
+
+    /// <summary>
+    /// A droid entitled to read renders the servers the squad's own <c>mcp.json</c> declares;
+    /// every other droid renders the empty list. The key is always present and always a
+    /// sequence, so neither omission — which inherits the parent session's MCP tools — nor a
+    /// blanket <c>[]</c> can return.
+    /// </summary>
+    /// <remarks>
+    /// The expectation is computed from the loaded source model and never from the renderer.
+    /// That independence is the point: an assertion that reads the renderer's own answer
+    /// cannot disagree with it, which is how <c>mcpServers: []</c> survived for every droid
+    /// while the squad declared a server entitled roles could call.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_WhitelistsDeclaredMcpServersForEntitledDroids()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        Assert.NotEmpty(declaredMcpServers);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, agent.Name);
+            Assert.True(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+                $"Agent '{agent.Name}' omits 'mcpServers'. Omission inherits the parent session's "
+                + "MCP tools, which is the widening the explicit key exists to prevent; the "
+                + "entitled value is the declared servers, never an absent key.");
+            IReadOnlyList<string> expected =
+                ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
+            IReadOnlyList<string> actual = RequireSequence(frontmatter, "mcpServers", agent.Name);
+            Assert.True(
+                expected.SequenceEqual(actual, StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') rendered "
+                + $"mcpServers [{string.Join(", ", actual)}], but the declared servers plus the "
+                + $"entitlement rule require [{string.Join(", ", expected)}].");
+            Assert.All(
+                actual,
+                server => Assert.True(
+                    declaredMcpServers.Contains(server, StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' renders mcpServers entry '{server}', which the squad's "
+                    + "mcp.json does not declare. Squad does not invent Factory MCP server names."));
+        }
+
+        // The shipped claims: the read-entitled specialists carry the documentation server,
+        // and the pure orchestrator carries none.
+        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "architect"));
+        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "code-reviewer"));
+        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "review-lens"));
+        Assert.Empty(RenderedMcpServers(result, "conductor"));
+    }
+
+    /// <summary>
+    /// The <c>permission-not-expressible</c> record reports MCP withholding exactly when the
+    /// rendered whitelist is empty, and exists exactly when it has something to express.
+    /// </summary>
+    /// <remarks>
+    /// The blanket sentence existed to make the withholding visible. A deliberately whitelisted
+    /// droid is a non-degraded outcome, so it carries no MCP claim — otherwise the two outcomes
+    /// are indistinguishable in the degradation stream, which is the only place a review or a
+    /// <c>squad doctor</c> run can see them without re-deriving the entitlement rule.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_RecordsMcpWithholdingOnlyWhenTheWhitelistIsEmpty()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            SquadDegradationRecord[] agentRecords = [.. result.Degradations
+                .Where(d => string.Equals(d.CanonicalIdentity, agent.Name, StringComparison.Ordinal))];
+            SquadDegradationRecord[] permissionRecords = [.. agentRecords
+                .Where(d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal))];
+
+            bool networkPublishNotExpressible =
+                prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                publishDecision != SquadPermissionDecision.Deny;
+            bool delegateNotExpressible =
+                prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision != SquadPermissionDecision.Deny;
+
+            IReadOnlyList<string> expectedMcpServers =
+                ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
+
+            if (expectedMcpServers.Count == 0)
+            {
+                SquadDegradationRecord withheld = Assert.Single(permissionRecords);
+                Assert.Equal(agent.BodyDigest, withheld.InstructionDigest);
+                Assert.Equal(agent.Name, withheld.OutputIdentity);
+                Assert.NotNull(withheld.Details);
+                Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+                continue;
+            }
+
+            bool primaryAgentEntryPointNote =
+                agent.Invocation == SquadInvocation.Primary &&
+                string.Equals(
+                    source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
+                    "skill",
+                    StringComparison.Ordinal);
+
+            if (networkPublishNotExpressible || delegateNotExpressible || primaryAgentEntryPointNote)
+            {
+                Assert.Single(permissionRecords);
+            }
+            else
+            {
+                Assert.True(
+                    permissionRecords.Length == 0,
+                    $"Agent '{agent.Name}' rendered mcpServers "
+                    + $"[{string.Join(", ", expectedMcpServers)}] and its profile raises no other "
+                    + "inexpressible decision, so it must carry no permission-not-expressible "
+                    + "record. Got: "
+                    + string.Join(" | ", permissionRecords.Select(record => record.Details)));
+            }
+
+            foreach (SquadDegradationRecord record in permissionRecords)
+            {
+                Assert.NotNull(record.Details);
+                Assert.DoesNotContain(McpWithheldSentence, record.Details, StringComparison.Ordinal);
+                Assert.DoesNotContain("parent MCP", record.Details, StringComparison.Ordinal);
+            }
+
+            // A subagent carries no entry-point caveat, so once its whitelist is non-empty
+            // nothing in its degradations may mention MCP at all. The caveat on a primary agent
+            // is the one place the value is named, and it is pinned separately.
+            if (agent.Invocation != SquadInvocation.Primary)
+            {
+                foreach (SquadDegradationRecord record in agentRecords)
+                {
+                    Assert.NotNull(record.Details);
+                    Assert.DoesNotContain("mcpServers", record.Details, StringComparison.Ordinal);
+                    Assert.DoesNotContain("MCP", record.Details, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A primary agent's entry-point caveat names the droid's actual <c>mcpServers</c> value.
+    /// The entry-point skill runs in the main session under the session's permissions, so the
+    /// caveat has to describe what the droid beside it really withholds. <c>conductor</c>'s
+    /// wording stays verbatim because its whitelist is empty.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        int whitelistedPrimaries = 0;
+        foreach (SquadAgent agent in source.Agents.Where(
+                     candidate => candidate.Invocation == SquadInvocation.Primary))
+        {
+            IReadOnlyList<string> expected =
+                ExpectedFactoryMcpServers(source, agent, declaredMcpServers);
+            if (expected.Count == 0)
+            {
+                continue;
+            }
+
+            whitelistedPrimaries++;
+            SquadDegradationRecord record = Assert.Single(
+                result.Degradations,
+                d => string.Equals(d.CanonicalIdentity, agent.Name, StringComparison.Ordinal) &&
+                     string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+            Assert.NotNull(record.Details);
+            Assert.Contains(
+                $"mcpServers: [{string.Join(", ", expected)}]",
+                record.Details,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("mcpServers: []", record.Details, StringComparison.Ordinal);
+        }
+
+        Assert.True(
+            whitelistedPrimaries > 0,
+            "The shipped squad renders no whitelisted primary agent, so the entry-point caveat is "
+            + "never exercised with a non-empty mcpServers value.");
+
+        SquadDegradationRecord conductorRecord = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, "conductor", StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(conductorRecord.Details);
+        Assert.Contains(
+            "The same-name entry point at .factory/skills/conductor/SKILL.md runs under the "
+            + "session's permissions; the droid's explicit tools allow-list and mcpServers: [] do "
+            + "not apply to it.",
+            conductorRecord.Details,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A squad that declares no MCP server at all fails closed: every droid renders
+    /// <c>mcpServers: []</c> and every droid keeps the withholding sentence, so an empty
+    /// declaration can never turn into a grant.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_EmptyMcpDeclarationFailsClosedForEveryDroid()
+    {
+        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers();
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        Assert.Empty(DeclaredMcpServerNames(source));
+        Assert.NotEmpty(source.Agents);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = RenderedAgentFrontmatter(result, agent.Name);
+            Assert.Empty(RequireSequence(frontmatter, "mcpServers", agent.Name));
+
+            SquadDegradationRecord withheld = Assert.Single(
+                result.Degradations,
+                d => string.Equals(d.CanonicalIdentity, agent.Name, StringComparison.Ordinal) &&
+                     string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+            Assert.NotNull(withheld.Details);
+            Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A multi-server declaration renders in ordinal order regardless of the order
+    /// <c>mcp.json</c> happens to declare it in, so a rendered droid is byte-stable across an
+    /// edit that only reorders the declaration.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_OrdersTheWhitelistOrdinalWhateverTheDeclarationOrder()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("zeta-reader", "alpha-reader");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        IReadOnlyList<string> declared = DeclaredMcpServerNames(source);
+        Assert.Equal(["alpha-reader", "zeta-reader"], declared);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        int whitelistedDroids = 0;
+        foreach (SquadAgent agent in source.Agents)
+        {
+            IReadOnlyList<string> expected =
+                ExpectedFactoryMcpServers(source, agent, declared);
+            IReadOnlyList<string> actual = RenderedMcpServers(result, agent.Name);
+            if (expected.Count > 0)
+            {
+                whitelistedDroids++;
+            }
+
+            Assert.True(
+                expected.SequenceEqual(actual, StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') rendered "
+                + $"mcpServers [{string.Join(", ", actual)}], but the declared servers plus the "
+                + $"entitlement rule require [{string.Join(", ", expected)}] in ordinal order.");
+        }
+
+        Assert.True(
+            whitelistedDroids > 0,
+            "No droid is entitled to the declared servers, so nothing about the emission order "
+            + "was exercised.");
     }
 
     /// <summary>
@@ -939,6 +1253,79 @@ public sealed class FactoryRendererContractTests : IDisposable
         return granted;
     }
 
+    /// <summary>
+    /// The server names the squad's own <c>mcp.json</c> declares, in ordinal order. Read from
+    /// the loaded source model, so a renderer that invents a name cannot satisfy a test that
+    /// compares against this list.
+    /// </summary>
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    {
+        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. servers.EnumerateObject()
+                .Select(server => server.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+        ];
+    }
+
+    /// <summary>
+    /// The <c>mcpServers</c> value a droid must render: every declared server when the agent's
+    /// capability profile allows <c>filesystem.read</c> and the profile is not the pure
+    /// orchestrator, otherwise the empty list.
+    /// </summary>
+    /// <remarks>
+    /// This is the entitlement condition the other MCP-granting renderers already implement.
+    /// It is restated here rather than called from the renderer so the test states the contract
+    /// instead of echoing the implementation.
+    /// </remarks>
+    private static IReadOnlyList<string> ExpectedFactoryMcpServers(
+        SquadSource source,
+        SquadAgent agent,
+        IReadOnlyList<string> declaredServers)
+    {
+        if (string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        if (!source.CapabilityProfiles.Profiles.TryGetValue(
+                agent.CapabilityProfile,
+                out SquadCapabilityProfile? profile))
+        {
+            return [];
+        }
+
+        bool grantsDocumentRead =
+            profile.Permissions.TryGetValue(
+                "filesystem.read",
+                out SquadPermissionDecision decision) &&
+            decision == SquadPermissionDecision.Allow;
+
+        return grantsDocumentRead ? declaredServers : [];
+    }
+
+    /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>
+    private static YamlMappingNode RenderedAgentFrontmatter(SquadRenderResult result, string agentName)
+    {
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            candidate => candidate.RelativePath == $".factory/droids/{agentName}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agentName);
+        return frontmatter;
+    }
+
+    /// <summary>The <c>mcpServers</c> sequence a rendered droid's frontmatter carries.</summary>
+    private static IReadOnlyList<string> RenderedMcpServers(SquadRenderResult result, string agentName) =>
+        RequireSequence(RenderedAgentFrontmatter(result, agentName), "mcpServers", agentName);
+
     private static void AssertDoesNotClaimGuessedFactoryField(string details, string identity)
     {
         Assert.DoesNotContain("guessed", details, StringComparison.OrdinalIgnoreCase);
@@ -998,4 +1385,57 @@ public sealed class FactoryRendererContractTests : IDisposable
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
+}
+
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus and replaces its <c>mcp.json</c> server
+/// declaration with the one a test names, so the declaration is the only variable.
+/// </summary>
+/// <remarks>
+/// A copy rather than an edit keeps the canonical corpus as the thing under test: everything
+/// except the declaration stays real, including the agent roster the whitelist is projected
+/// onto. <see cref="WithServers"/> keeps the declaration order the caller passes, so a test can
+/// tell ordinal emission from insertion order.
+/// </remarks>
+internal sealed class McpDeclarationCorpusFixture : IDisposable
+{
+    private readonly TempDirectory _temp = new();
+
+    private McpDeclarationCorpusFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static McpDeclarationCorpusFixture WithServers(params string[] serverNames)
+    {
+        McpDeclarationCorpusFixture fixture = new();
+        PiCorpusFixtureHelpers.CopyDirectory(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            fixture.ProductRoot);
+
+        Dictionary<string, Dictionary<string, object>> servers = new(StringComparer.Ordinal);
+        foreach (string name in serverNames)
+        {
+            servers[name] = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["command"] = $"{name}-mcp",
+                ["args"] = new[] { "--repo-root", "." }
+            };
+        }
+
+        Dictionary<string, Dictionary<string, Dictionary<string, object>>> root =
+            new(StringComparer.Ordinal) { ["mcpServers"] = servers };
+        File.WriteAllText(
+            Path.Combine(fixture.ProductRoot, "mcp.json"),
+            JsonSerializer.Serialize(root, JsonSerializerOptions) + "\n",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        return fixture;
+    }
+
+    private static readonly JsonSerializerOptions JsonSerializerOptions = new() { WriteIndented = true };
+
+    public void Dispose() => _temp.Dispose();
 }

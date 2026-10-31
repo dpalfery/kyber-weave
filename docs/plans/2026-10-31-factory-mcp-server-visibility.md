@@ -1,0 +1,209 @@
+---
+id: plans/2026-10-31-factory-mcp-server-visibility
+title: "Factory droids see the kyber-weave MCP server through a declared per-droid whitelist"
+doc-type: plan
+status: current
+component: KyberSquad
+owner: dpalfery
+last-reviewed: 2026-10-31
+development-mode: test-first
+autonomy: autonomous
+documentation-impact: extends-component
+impact-components: [KyberSquad, DocGraph]
+---
+
+# Factory droids see the kyber-weave MCP server through a declared per-droid whitelist
+
+**Status: Ready — approved for execution 2026-10-31 (AP1, `AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`).** Every decision row below is answered. Both documentation checks passed against this checkout in the conductor's run (2026-10-31): `docs validate .` (no `--merge-ready`, plan still active) — `result: pass`, 0 errors, 0 warnings — and `docs drift .` — `result: pass`, 0 errors, 0 warnings — each reporting `provenance: root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=140`, a root identical to this checkout; G2 and G3 are closed with that evidence below. G1 and G4 remain open and are not gate conditions. Frontmatter `status` stays `current` because the frontmatter vocabulary has no `ready` value; the lifecycle Ready is this body status line and the plan index. **Development mode:** `test-first` (packet value; no user opt-out). **Autonomy:** `autonomous` (packet value and repository Config Reg `<autonomy>`).
+
+**Scale:** `extends-component`, components `KyberSquad` and `DocGraph`.
+
+**Recommendation:** Stop rendering `mcpServers: []` unconditionally. `FactoryRenderer` derives a per-droid whitelist from what the squad already declares — the server names in the squad's own `mcp.json` (today `kyber-weave`) — for agents whose capability profile allows `filesystem.read` and is not the pure orchestrator, mirroring the entitlement condition `ClaudeRenderer` and `ZCodeRenderer` already implement. Every other droid keeps `mcpServers: []` (fail-closed stands). A whitelisted droid's `permission-not-expressible` record loses the "parent MCP was not inherited" sentence, because a deliberately whitelisted server is a non-degraded outcome and must be distinguishable from the withheld one. Add the Factory row and wiring section to the DocGraph MCP runbook (user-owned `.factory/mcp.json` / `~/.factory/mcp.json`; `squad install` still writes no Factory settings file — D-no-settings stands). No `products/kyber-squad/**` file changes; the capability lattice, the architect's `process.execute: deny`, all `KW-*` ids, and the dependency list are untouched.
+
+> Discovery: codegraph 0, docs 0, direct reads 26 files plus 1 live external fetch. The CodeGraph and kyber-weave docs MCP tools are absent from this session (confirmed through the harness tool search; no server is connected), so the repository `AGENTS.md` fallback applied: text search and direct reads, with the documentation index as the entry point, and every direct read labelled below. Reads of indexed code were required because `codegraph_explore` was unavailable.
+>
+> - Code: `FactoryRenderer.cs` (full), `ClaudeRenderer.cs` (MCP grant and pure-orchestrator idiom), `ZCodeRenderer.cs` (roster-driven MCP grant, `PureOrchestratorProfile`), `SquadSource.cs` (`SquadToolchain`, `McpConfiguration`, `SquadCapabilityProfile`), `SquadRenderSource.cs`, `SquadSourceLoader.cs` (mcp.json load and validation), `schemas/agent.schema.json`.
+> - Canonical source: `products/kyber-squad/mcp.json`, `toolchain.yml`, `squad.yml`, `profiles/capabilities.yml`, `agents/architect.md`, agent `capability-profile` frontmatter across all 27 agents.
+> - Tests: `FactoryRendererContractTests.cs`, `SquadToolchainRosterGuardTests.cs`, plus a tests-tree sweep for every other `mcpServers` pin (`ZCodeRendererContractTests`, `CommandCodeRendererContractTests`, `McpPackagingTests`, fixture `mcp.json` shapes).
+> - Docs: `docs/docgraph/mcp-runbook.md`, `docs/kyber-squad/architecture.md` (§2, §4, per-target MCP bullet), `docs/kyber-squad/onboarding.md` (Factory notes), `docs/kyber-squad/requirements.md` (degradation table, Factory row), `docs/adr/0034-factory-droid-entry-point-skill.md`, `docs/catalog.md` (component names), `docs/plans/README.md`.
+> - Prior art: archived plans `2026-09-16-factory-renderer-droids-and-global.md` (D-no-settings, the 2026-09-16 Factory doc quotes, D-mcp), `2026-10-28-architect-docs-gates-mcp.md` (plan shape, D8 roster-is-per-server), `2026-10-14-mcp-agent-coding-standards-tool.md` (DEC-4, the source of the reporter's claim 4 wording).
+> - External, self-gathered (no research-agent tool in this harness): `https://docs.factory.ai/harness/subagents` fetched live 2026-10-31; the "Selecting MCP servers" section is quoted in §1.1 and D1.
+
+## 1. Problem and goal
+
+### 1.1 Problem
+
+`FactoryRenderer` emits `mcpServers: []` in every rendered droid's frontmatter (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs:289-290`, comment "Omitting mcpServers inherits parent MCP. Emit [] so that widening does not happen."), and its `<remarks>` records the same policy. Factory's documented semantics make that an unconditional exclusion. Live Factory documentation (docs.factory.ai/harness/subagents, "Selecting MCP servers", fetched 2026-10-31) states verbatim:
+
+> - Server names must match entries in `~/.factory/mcp.json` or `.factory/mcp.json`.
+> - Omitting `mcpServers` keeps the parent session's MCP tool availability.
+> - Setting `mcpServers: []` excludes every MCP server, even globally configured ones.
+
+The repository's own 2026-09-16 fetch of the same page (archived plan `2026-09-16-factory-renderer-droids-and-global.md`, §4.1) carries the same two sentences, so the semantics are confirmed from two independent recordings of Factory's documentation. Consequence: every Task-dispatched Factory droid is structurally MCP-blind even when the user has connected the server at app level — an `architect` droid cannot run its mandatory post-plan-write `docs_validate` / `docs_drift` checks and must return `STATUS: BLOCKED` naming their absence, exactly as the reporter's session did.
+
+No wiring recipe exists either: `docs/docgraph/mcp-runbook.md`'s "Wiring it up" table has rows for Claude Code, Cursor, VS Code, Copilot coding agent, Codex CLI, and opencode, and no Factory row — even though `.factory/mcp.json` and `~/.factory/mcp.json` have been known in this repository since the 2026-09-16 factory-renderer plan. Combined with D-no-settings (squad install writes no Factory settings file — the correct, standing decision), there is currently no path at all for a Factory droid to see the kyber-weave server.
+
+The blanket `[]` was a deliberate fail-closed choice (D-mcp, 2026-09-16 plan: "Squad does not own Factory MCP server names... Do not invent server names"). That reason no longer holds for the whole roster: the squad's own `mcp.json` declares the server (`kyber-weave`, `kyber-weave-mcp --repo-root .`), the toolchain roster declares `required-mcp-tools.kyber-weave` (pinned against the server's exposed `[McpServerTool]` names by `SquadToolchainRosterGuardTests`), and three sibling renderers already grant kyber-weave MCP tools to read-entitled agents. The fail-closed default has become an incorrect denial for exactly the agents whose role contracts require those tools.
+
+### 1.2 Goal
+
+Acceptance criteria, restated from the requester:
+
+> on a Factory session with kyber-weave connected at .factory/mcp.json, a Task-dispatched architect droid can call docs_status/docs_validate/docs_drift (and code-reviewer/review-lens can call docs_explore), with provenance root= matching the checkout; droids with no declared grants still render mcpServers: []; the runbook's table tells a Factory user exactly what to add; all squad contract/canonical-content tests pass.
+
+Delivered by: a renderer-derived per-droid whitelist (§Decisions D2, D3), distinguishable degradation semantics (D4), a Factory row and wiring section in the MCP runbook plus the governed kyber-squad docs brought back in line (D8), and deliberately-changed contract tests with an extended roster parity guard (D7). `squad install` writes no Factory settings file (D6). No `products/kyber-squad/**` file changes (D9).
+
+### 1.3 Reporter's claims, verified against the code
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | `FactoryRenderer` always emits `mcpServers: []` (~lines 289-290) with the stated widening rationale; `[]` means no MCP servers ever while omission would inherit. | **Verified.** Code at `FactoryRenderer.cs:289-290` and remarks lines 34-39; semantics confirmed live 2026-10-31 (quote in §1.1) and in the repository's recorded 2026-09-16 fetch. |
+| 2 | `docs/docgraph/mcp-runbook.md` has a "Wiring it up" table with six client rows and no Factory row, though Factory's config files are known and documented since the 2026-09-16 plan. | **Verified.** Six rows; D-no-settings in the archived 2026-09-16 plan names `.factory/mcp.json` and `~/.factory/mcp.json` explicitly. |
+| 3 | Squad install deliberately writes no Factory settings file (D-no-settings), and that decision stays. | **Verified.** D-no-settings (archived 2026-09-16 plan §2); the renderer emits only droids and skills; nothing in this plan changes install, update, or doctor output. |
+| 4 | The squad already declares the server (`mcp.json`: `kyber-weave`), the roster declares `required-mcp-tools.kyber-weave`, and "agent capability profiles already grant `kyber-weave/*`", so a granting agent is rendered with that grant silently erased. | **Verified, with the mechanism corrected.** The declaration facts hold, and the erasure is real. But the shared capability profiles (`profiles/capabilities.yml`) carry **no** `kyber-weave/*` entry — the capability lattice has no MCP capability. What the 2026-10-14 plan's DEC-4 wording ("Agent capability profiles already grant `kyber-weave/*`") refers to is renderer-derived entitlement: `copilot-tools` on agents carries the `kyber-weave/*` wildcard for Copilot, `ClaudeRenderer` grants `mcp__kyber-weave__*` to any agent allowed `filesystem.read` except the pure orchestrator, and `ZCodeRenderer`/`DevinRenderer` grant the roster's fully-qualified names under the same condition. Consequence for this fix: the Factory whitelist keys off that same derived condition (D2), because there is no lattice entry to key off. |
+
+The reporter's session experience (an architect droid returning `STATUS: BLOCKED` for the missing `docs_validate`/`docs_drift`) is consistent with the code and cannot be independently re-observed from the repository; it is accepted as reported.
+
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+| D1 | Are the `mcpServers: []` vs omission semantics confirmed by an authoritative source? | Yes. `[]` excludes every MCP server, even globally configured ones; omitting the key keeps the parent session's MCP availability; server names must match entries in `.factory/mcp.json` / `~/.factory/mcp.json`. | Two independent recordings of Factory's documentation agree: the live page fetched 2026-10-31 (§1.1) and the 2026-09-16 fetch preserved in the archived factory-renderer plan §4.1. The change therefore does not rest on an unverified reading. The one undocumented behaviour — what Factory does with a listed name the user has not configured — is avoided by D3 and recorded as G1. | `autonomous: recommendation accepted` |
+| D2 | Which agents receive the whitelist? | The same entitlement condition the other MCP-granting renderers already implement: the agent's capability profile allows `filesystem.read` **and** the profile id is not the pure orchestrator (`orchestrator`). On the shipped squad that whitelists `architect`, `code-reviewer`, `review-lens`, `review-triage`, `research-agent`, `azure-reader`, `docs-dev`, `product-owner`, `bug-crusher`, `bug-crusher-investigator`, and every `worker`-profile specialist; `conductor` keeps `mcpServers: []`. | `ClaudeRenderer` grants its MCP wildcards under exactly this condition (`ClaudeRenderer.cs:450-461`), and `ZCodeRenderer` copies it with a named constant `PureOrchestratorProfile = "orchestrator"` and a `permission-not-expressible` record explaining the withholding; `docs/kyber-squad/architecture.md` documents both as the per-target MCP grant pattern, including why a pure orchestrator must not get a research surface its profile denies. There is no lattice MCP capability to key off instead (claim 4 correction), and inventing a new per-agent declaration key would be a schema change with no consumer. The acceptance criteria's named agents (architect, code-reviewer, review-lens) all satisfy the condition. | `autonomous: recommendation accepted` |
+| D3 | What is the server-name source for the whitelist? | The server names declared in the squad's own `mcp.json` (`SquadSource.McpConfiguration`), enumerated once per render and emitted in ordinal order — today exactly `[kyber-weave]`. Not the `toolchain.yml` roster keys (`codegraph`, `context7`, `kyber-weave`) and not a hardcoded literal. | Factory requires whitelist names to match entries the user configured (D1). `mcp.json` is the one server the squad ships a config for and the runbook will tell the Factory user to wire; deriving from it keeps "Squad does not invent Factory MCP server names" true in letter and spirit, and it is drift-proof (a future server added to `mcp.json` flows through with no renderer edit). The roster is an entitlement statement — Claude/ZCode/Devin can grant `codegraph`/`context7` because a *tool allow-list* tolerates a server the harness does not have (withheld names simply never match), whereas Factory's server-name list referencing an unconfigured server is undocumented behaviour (G1) and plausibly a `DroidValidator` load error. Widening the whitelist later is a one-line declared edit: add the server to `mcp.json`, and the extended guard (D7) forces its roster entry to exist. | `autonomous: recommendation accepted` |
+| D4 | What happens to the `permission-not-expressible` record? | The sentence "mcpServers: [] excludes every MCP server so parent MCP was not inherited." is emitted **only when the rendered whitelist is empty**, and is then unchanged verbatim. A droid with a non-empty whitelist is a non-degraded outcome: it carries no MCP sentence in `permission-not-expressible` at all (the record still exists when `network.publish`, `delegate`, or the entry-point caveat apply). The two outcomes are distinguishable in both places: the frontmatter value, and the presence or absence of the MCP sentence in the record. The entry-point note in `BuildPrimaryAgentDegradationRecords` stops hardcoding `mcpServers: []` and names the droid's actual rendered value. | The record's documented meaning is "a non-deny capability decision cannot be expressed in the target's native permission model" (`requirements.md` degradation table); the lattice declares no MCP capability, so a deliberate whitelist is not an inexpressible decision — the blanket sentence existed to make the *withholding* visible, and it stays exactly where a withholding still happens. Keeping the empty-case sentence verbatim means the conductor (orchestrator) primary-agent assertions and the `requirements.md` citation stay true. A squad whose `mcp.json` declares no servers renders `[]` for everyone, so fixture squads (`"mcpServers": {}`) keep today's behaviour and records. | `autonomous: recommendation accepted` |
+| D5 | May the key ever be omitted, or the empty case changed to inheritance? | Never. The key is always emitted — explicit array, never omitted (omit = inherit = widening, KS-002 non-broadening) and never a scalar. Non-entitled agents keep exactly `mcpServers: []`. | Same emission discipline as `tools` in this renderer, and the `FactoryYamlFlowSequence` flow-sequence form already produces `[]` and `[kyber-weave]` in the documented YAML shape; Factory's own example uses a flow sequence (`mcpServers: ["linear", "github"]`). | `autonomous: recommendation accepted` |
+| D6 | Does anything here change what Squad writes to a Factory checkout or home? | No. `squad install`/`update` still write no `.factory/mcp.json`, `~/.factory/mcp.json`, or any Factory settings file. D-no-settings stands; the renderer change alters only the content of receipt-owned droid files. | D-no-settings (archived 2026-09-16 plan) is the correct user-ownership boundary; the runbook (T3) is what tells the Factory user what to add, keeping instruction in docs and ownership with the user. | `autonomous: recommendation accepted` |
+| D7 | How do the tests change, and how is the drift class guarded? | `FactoryRendererContractTests` replaces the blanket `Assert.Empty(mcpServers)` with an independently computed expectation: the `mcp.json` server names when the D2 condition holds, else `[]`. Degradation assertions become conditional on the same expectation (MCP sentence iff empty whitelist). `SquadToolchainRosterGuardTests` gains a containment guard: every server named in `products/kyber-squad/mcp.json` must be a key in `required-mcp-tools`. | The new pin is strictly stronger than the old one: computing the expectation from the source rather than from the renderer is what would have caught the blanket `[]` in the first place, and it means a profile entitled under D2 can never again render without the server unless `mcp.json` itself stops declaring it — which the containment guard plus `McpPackagingTests` (pins `kyber-weave` with `kyber-weave-mcp --repo-root .`) and the existing roster guard (server tools vs `[McpServerTool]` names) then make a loud, deliberate change. No assertion is weakened; the empty-list pin survives as the non-entitled and empty-declaration case. | `autonomous: recommendation accepted` |
+| D8 | Which governed documents change? | `docs/docgraph/mcp-runbook.md` (Factory row in the wiring table + a Factory wiring section + a troubleshooting row); `docs/kyber-squad/architecture.md` (the per-target MCP bullet gains the Factory sentence; §4 states what Squad does and does not own for Factory MCP wiring); `docs/kyber-squad/onboarding.md` (Factory notes: the entry-point sentence and an MCP wiring ownership paragraph); `docs/kyber-squad/requirements.md` (the `permission-not-expressible` row and the Factory Droids row currently teach the blanket `mcpServers: []` and become stale); `docs/adr/0034-factory-droid-entry-point-skill.md` amended in place (its line 43 names `mcpServers: []` as the droid value). | The requester named the runbook, onboarding, and architecture; requirements.md rows 138/160 and ADR 0034 line 43 restate the blanket `[]` as current behaviour and must change with it — leaving them would be a stale governed claim, which the corpus does not carry. In-place ADR amendment is the repository's precedent (ADR 0028, ADR 0019). `last-reviewed` is updated on every file edited. | `autonomous: recommendation accepted` |
+| D9 | What is deliberately untouched? | No `products/kyber-squad/**` file (no agent body, no `capabilities.yml`, no `toolchain.yml`, no `mcp.json` edit is needed — the whitelist derives from what is already declared). The shared `architect` profile keeps `process.execute: deny`; the 2026-10-28 architect-docs-gates design (gates through read-only MCP, never a shell) is precisely what this fix makes usable on Factory. No new `KW-*` id, no new dependency, no other renderer, no CLI flag or exit-code change, no ontology value. | Because the diff touches no `products/kyber-squad/agents/**` or `capabilities.yml` path, the KW-REVIEW-008 reserved-path `NEEDS_HUMAN` verdict is not expected; the requester's constraint stands as a contingency — if review requires a product edit, that expected `NEEDS_HUMAN` is acceptable and is not a failure. Byte-pinned canonical agent bodies keep their pins because no canonical body changes. | `autonomous: recommendation accepted` |
+| D10 | What is explicitly out of scope? | Whitelisting `codegraph` and `context7` on Factory (the declared widening path exists: add the server to `mcp.json` plus its roster entry); `squad doctor` verification of Factory MCP wiring; ZCode-style hard-fail enforcement anywhere; changing other targets' MCP grants; emitting MCP tool IDs into `tools`. | Factory's `tools` array already documents exact MCP tool IDs as a finer control, but Squad's tools array is capability-lowered and the lattice has no MCP capability — adding tool IDs there would reintroduce invention. The runbook will state the codegraph visibility boundary honestly instead (T3). | `autonomous: recommendation accepted` |
+| AP1 | Approve and execute this plan at the declared scale? | Approved. Execute at the declared scale `extends-component`, components `KyberSquad` and `DocGraph`. D1–D10 are unchanged by the gate. | Conductor gate `AUTONOMOUS_APPROVAL: approve-and-execute` on 2026-10-31. Gate evidence, from the conductor's run against this checkout (2026-10-31): `docs_status` reported `root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=140`, identical to `git rev-parse --show-toplevel` for this checkout (branch `feat/squad-response-format`, HEAD `8943b6a`) — the provenance root matches; `docs validate .` (no `--merge-ready`, plan still in the active folder) passed with 0 errors and 0 warnings; `docs drift .` passed with 0 errors and 0 warnings. Both checks were run by the conductor because the planning session's harness had no kyber-weave docs MCP tools (G2, closed by this run); the results stand for this checkout. Frontmatter ontology `status` stays `current` because that vocabulary has no `ready` value; the lifecycle Ready is the body status line and the plan index. | `autonomous: recommendation accepted` |
+
+Rejected alternatives, recorded above: keying eligibility off a literal `kyber-weave/*` profile grant (claim 4 correction — no such lattice entry exists; D2); the toolchain roster keys or a hardcoded literal as the server source (D3); emitting roster servers the user was never told to configure (D3, G1); omitting `mcpServers` for entitled agents (D5 — omit is inherit, silent widening); keeping the MCP sentence on whitelisted droids (D4 — it would record a non-degradation as a degradation); a new degradation-record code or frontmatter key (D4, D9 — the existing vocabulary carries the distinction); extending `squad doctor` to Factory MCP (D10).
+
+## Design harvest
+
+| ID | Durable item | Target component | Target doc type | Target document |
+|---|---|---|---|---|
+| H1 | The Factory `mcpServers` whitelist contract: server names from the squad's `mcp.json`, granted when the capability profile allows `filesystem.read` and is not the pure orchestrator; `mcpServers: []` for everyone else; the key never omitted | KyberSquad | architecture | `docs/kyber-squad/architecture.md` (per-target MCP grants bullet; §4 deployment-scope ownership statement) |
+| H2 | `permission-not-expressible` semantics: the "parent MCP was not inherited" sentence appears only when the rendered whitelist is empty; a whitelist is a distinguishable, non-degraded outcome | KyberSquad | requirements | `docs/kyber-squad/requirements.md` (degradation table `permission-not-expressible` row; Factory Droids row) |
+| H3 | The Factory wiring recipe: `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json` (global scope), the same stdio entry as Claude Code, the provenance `root=` check, and the explicit note that droid-level visibility comes from the renderer whitelist, not app-level configuration alone; CodeGraph wired the same way (`codegraph serve --mcp`), with `docs drift` needing a `.codegraph/` index and `codegraph init .` pre-authorized by the root `AGENTS.md` | DocGraph | runbook | `docs/docgraph/mcp-runbook.md` (Wiring it up table + Factory section + troubleshooting row) |
+| H4 | What Squad does and does not own for Factory MCP wiring: install writes no Factory settings file (D-no-settings), the renderer owns droid visibility, the user owns app-level config, and the runbook tells them what to add | KyberSquad | onboarding | `docs/kyber-squad/onboarding.md` (Factory notes) |
+| H5 | ADR 0034 amended in place: the entry-point skill is not governed by the droid's `mcpServers` whitelist (value-dependent, not the blanket `[]`) | KyberSquad | adr | `docs/adr/0034-factory-droid-entry-point-skill.md` |
+
+No new ADR. ADR waiver: the whitelist refines the already-documented per-target MCP grant pattern (architecture.md's Claude/ZCode/Devin condition) under the existing KS-002 non-broadening guarantee; it changes no capability-lattice entry, boundary, dependency, or schema. The superseded blanket policy (D-mcp) lived in an archived plan, not an ADR; ADR 0034 is amended in place (H5), not replaced.
+
+No documentation waiver.
+
+## 4. Test contract
+
+After `dotnet build KyberWeave.sln -c Release`:
+
+- **C1:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~FactoryRendererContractTests"`
+- **C2:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~SquadToolchainRosterGuardTests"`
+- **C3:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~McpPackagingTests"` (guard, unchanged; passes before and after)
+- **CF:** the full suite through the declared gate suite (see Verification gates)
+
+The suites load `products/kyber-squad` through `SquadSourceLoader.Load` and assert against the loaded `SquadSource` model; expectations are computed from the source, never from the renderer.
+
+| Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
+|---|---|---|---|---|---|
+| T1 | `tests/KyberWeave.Tests/FactoryRendererContractTests.cs`, `tests/KyberWeave.Tests/SquadToolchainRosterGuardTests.cs` | C1, C2 | See T1 scenarios below. | C1 fails: entitled agents (e.g. `architect`) still render `mcpServers: []`, still carry the blanket MCP sentence in `permission-not-expressible`, and the entry-point note still hardcodes `mcpServers: []`. Capture the failing run before T2. | C1 and C2 pass with no assertion weakened: the old empty pin survives as the non-entitled case, and the new conditional pin is stronger than what it replaces. C3 still passes. |
+| T2 | Same files, no new file | C1, C2, C3 | The renderer emits the derived whitelist; the guard holds. | T1's RED is already recorded. T2 does not start until that RED exists. | Same filters pass. No file outside `src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs` changes in `src/`. `McpPackagingTests` untouched and passing. No package reference added. |
+| T3 | No new test. The governed pages are the contract. | `dotnet run --project src/KyberWeave.Cli -c Release -- docs validate .` and `dotnet run --project src/KyberWeave.Cli -c Release -- docs drift .` (no `--merge-ready` while this plan is in the active folder) | H1–H5 state the D2–D6 contract and the D6/D8 ownership boundary. | No-test task: documentation. RED does not apply; verification is the two docs commands plus reading the five targets against H1–H5. | Both commands exit 0. Each harvest target contains its durable item. |
+| T4 | No new test. Closeout is the archive mapping. | Same two docs commands, then `docs validate . --merge-ready` after the plan has been archived. | Closeout mapping names every decision id and H1–H5. The plan file is no longer under `docs/plans/`. | No-test task: closeout. Verification is the mapping table and the merge-ready validate after archive. | `docs validate . --merge-ready` and `docs drift .` exit 0. The index lists the plan under Archived Plans. |
+
+### T1 scenarios
+
+Assert observable results, not wiring. The expected whitelist is computed independently: `expected = source.McpConfiguration`'s `mcpServers` property names (ordinal order) when the agent's capability profile allows `filesystem.read` and `agent.CapabilityProfile != "orchestrator"`, else `[]`.
+
+1. Every droid's `mcpServers` equals `expected`: `["kyber-weave"]` for the D2-entitled agents named in D2 (including `architect`, `code-reviewer`, `review-lens`), `[]` for `conductor`. The key is always present, is a YAML sequence, and is never omitted.
+2. Every name in a rendered whitelist is a server declared in `source.McpConfiguration` (no invented names; follows from 1 but stated as its own assertion for the failure message).
+3. Degradation records: when `expected` is empty, the agent's `permission-not-expressible` record (if any) still contains the verbatim sentence "mcpServers: [] excludes every MCP server so parent MCP was not inherited."; when `expected` is non-empty, no degradation detail on that agent mentions `mcpServers` or parent MCP. The record itself exists exactly when it has content: non-deny `network.publish`, non-deny `delegate`, the empty-whitelist MCP sentence, or the entry-point caveat. `conductor` (orchestrator, primary) keeps its current two-code record shape.
+4. Entry-point caveat: for a primary agent rendered with a non-empty whitelist, the entry-point note names the droid's actual `mcpServers` value rather than a hardcoded `[]`; for `conductor` the current wording is unchanged.
+5. Guard, expected to pass before and after: every server name in `products/kyber-squad/mcp.json` is a key in `toolchain.yml` `required-mcp-tools` (new test method in `SquadToolchainRosterGuardTests`).
+6. Guard, expected to pass before and after: a squad fixture declaring `"mcpServers": {}` renders `mcpServers: []` for every agent, and those agents' records keep the MCP sentence (fail-closed when nothing is declared).
+
+## 5. Tasks
+
+### T1 — RED: whitelist contract tests
+
+- **Objective:** Add the T1 scenarios. Compute every expectation from the loaded `SquadSource`, not from the renderer. Do not touch production code.
+- **Files:** `tests/KyberWeave.Tests/FactoryRendererContractTests.cs`, `tests/KyberWeave.Tests/SquadToolchainRosterGuardTests.cs` (new guard method).
+- **Skill:** `test-dev`.
+- **Depends on:** none.
+- **Acceptance:** C1 fails on scenarios 1, 3, and 4 for the missing whitelist; scenario 5 and 6 guards pass on current source. No production file changes. The worker's `task-gate` is run on this task's files; a failing gate returns to this worker.
+
+### T2 — GREEN: renderer whitelist
+
+- **Objective:** Make T1 pass without weakening an assertion. Implement D2, D3, D4, and D5: enumerate the `mcp.json` server names once in `RenderAsync` from `source.McpConfiguration`, thread them plus the entitlement condition through `RenderAgent`, `BuildDegradationRecords`, and `BuildPrimaryAgentDegradationRecords`; emit the whitelist for entitled agents and `[]` for everyone else; emit the MCP sentence only for an empty whitelist; make the entry-point note name the actual value. Update the `<remarks>` `<para>` that documents the always-`[]` behavior (both the mcpServers paragraph and the entry-point paragraph), and the emission comment at the former lines 289-290, citing the live-verified Factory semantics (§1.1) and the D2 sibling condition.
+- **Files:** `src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs` (only).
+- **Skill:** `csharp-dev`.
+- **Depends on:** T1.
+- **Acceptance:** C1, C2, C3 pass. The pure-orchestrator condition follows the `ClaudeRenderer`/`ZCodeRenderer` idiom (ordinal comparison against a named constant). No `products/kyber-squad/**` file, no `capabilities.yml`, no `toolchain.yml`, no other renderer, no CLI file changes. No new `KW-*` id, no new dependency, no new frontmatter key beyond the existing documented Factory set. The worker's `task-gate` is run on this task's files; a failing gate returns to this worker.
+
+### T3 — Canonical docs for the whitelist contract and the wiring recipe
+
+- **Objective:** Write H1–H5. Do not widen the ontology. Do not add a rule id. Do not change CLI flags or exit codes.
+- **Files:** `docs/docgraph/mcp-runbook.md` (Factory row: File `.factory/mcp.json` repo / `~/.factory/mcp.json` global, Server key `mcpServers`, note "same shape as Claude Code; droid visibility is a per-droid whitelist, not inherited"; a Factory section with the same stdio entry as Claude Code — `"command": "kyber-weave-mcp", "args": ["--repo-root", "."]` — the provenance `root=` check via `docs_status` compared to `git rev-parse --show-toplevel`, the explicit note that a Task-dispatched droid sees MCP servers only through the `mcpServers` whitelist its droid file carries (renderer-derived from the squad's declared servers; app-level configuration alone is not enough, and omitting the key would inherit — which Squad never does), the CodeGraph entry (`"codegraph": { "command": "codegraph", "args": ["serve", "--mcp"] }`) with the honest boundary that a whitelisted droid sees only the renderer-whitelisted servers so `codegraph_explore` is session-level on Factory today, and the notes that `docs drift` needs a `.codegraph/` index and `codegraph init .` from the repository root is pre-authorized by the root `AGENTS.md`; a troubleshooting row "A Factory Task-dispatched droid lists no MCP tools" → check the droid's `mcpServers` whitelist and `.factory/mcp.json`); `docs/kyber-squad/architecture.md` (per-target MCP bullet: the Factory sentence; §4: Squad owns the droid whitelist, owns no Factory settings file, the user owns `.factory/mcp.json` / `~/.factory/mcp.json`); `docs/kyber-squad/onboarding.md` (Factory notes: fix the entry-point sentence; add the MCP wiring ownership paragraph per D6/H4); `docs/kyber-squad/requirements.md` (`permission-not-expressible` row and Factory Droids row per H2); `docs/adr/0034-factory-droid-entry-point-skill.md` (in-place amendment per H5; edit `docs/adr/README.md` only if its row needs an amendment pointer). Update `last-reviewed` on each file edited.
+- **Skill:** `docs-dev`.
+- **Depends on:** none. File set does not overlap T1 or T2. The wording is fixed by D2–D6 and H1–H5.
+- **Acceptance:** T3's two docs commands exit 0. The five targets state the harvest items. The runbook's Factory section does not claim droid-level CodeGraph visibility. The worker's `task-gate` is run on this task's files; a failing gate returns to this worker.
+
+### T4 — Closeout
+
+- **Objective:** After the whole-change review is approved, map every decision id and H1–H5 into the Closeout mapping, archive this plan, and move the index row.
+- **Files:** this plan, `docs/plans/README.md`, and the archive path `docs/archive/plans/2026-10-31-factory-mcp-server-visibility.md`.
+- **Skill:** `docs-dev`.
+- **Depends on:** T2, T3, and an approved whole-change review.
+- **Acceptance:** Closeout mapping is complete. `docs validate . --merge-ready` and `docs drift .` exit 0. No documentation waiver is introduced. The permanent `## Decisions` section is preserved intact.
+
+## 6. Dependency graph
+
+```text
+T1 ──► T2 ──┐
+T3 ────────┼─► review ─► T4
+```
+
+T1 and T3 may run together (disjoint file sets). T2 waits for T1 (RED before GREEN). T4 waits for T2, T3, and the approved whole-change review. No other edges. `review.max-concurrent-workers` is 4; this graph is ready for two workers at the start (T1, T3) and one afterwards.
+
+## 7. Risks, scope, verification, review
+
+### Risks
+
+- A whitelisted name the user has not configured at `.factory/mcp.json` / `~/.factory/mcp.json` is undocumented Factory behaviour (G1). Mitigation: the whitelist only ever emits servers the squad's `mcp.json` declares (D3), the runbook instructs wiring them before use, and Factory documents that a listed server's tools are exposed "in addition to anything in `tools`" — an allow-list entry cannot conjure a server the harness does not have.
+- An enterprise MCP policy can block a listed server (live Factory docs); out of Squad's control. Mitigation: the runbook keeps the provenance `root=` check as the authoritative trust step, as for every other client.
+- The test change reads like a weakened pin. Mitigation: the conditional pin is computed from the source and is strictly stronger (D7); T1's RED demonstrates it fails against today's renderer.
+- Rendered droid frontmatter changes, so installed droids differ from a re-render until `squad update` runs. Mitigation: none needed beyond the normal receipt-owned update path; canonical agent bodies and their byte pins are untouched (D9).
+- Docs drift between the renderer remarks and the governed pages. Mitigation: T3 updates every page that names the blanket `[]` (found by sweeping `mcpServers: []` / "parent MCP" across `docs/`), and the gate suite runs `docs drift` with this checkout's `.codegraph/` index.
+- The Factory semantics evidence is documentation, not a live droid run. Mitigation: two independent doc recordings agree (D1); the mechanism never depends on the undocumented case (G1); acceptance is re-checked in a live Factory session by the owner, recorded as `[NOT LIVE-VERIFIED]` until then.
+
+### Out of scope
+
+- Whitelisting `codegraph` / `context7` on Factory (declared widening path, D10); `squad doctor` Factory MCP checks; any `products/kyber-squad/**` edit; any capability-lattice change; weakening the architect profile's `process.execute: deny`; new `KW-*` ids, dependencies, or ontology values; other renderers; the CLI command surface; writing any Factory settings file.
+
+### Verification gates
+
+Per task, the runner in the Test contract, then that worker's `task-gate`. Before the whole-change review, the declared suite the review cites:
+
+```bash
+dotnet run --project src/KyberWeave.Cli -c Release -- review gates . --out artifacts/gates.json
+```
+
+While this plan remains under `docs/plans/`, documentation checks are `docs validate .` and `docs drift .` without `--merge-ready`; `--merge-ready` is the closeout command in T4, after the archive move. A usable `.codegraph/` index exists in this checkout, so `docs drift` is runnable.
+
+### Review and closeout
+
+The conductor runs `code-reviewer` over the whole change after T2 and T3, before T4. T4 is the `docs-dev` closeout. Closeout fills the mapping below, archives the plan, and does not delete this Decisions section. No `products/kyber-squad/**` path is in scope, so KW-REVIEW-008's reserved-path `NEEDS_HUMAN` is not expected; if one becomes necessary anyway, that verdict is acceptable and is not a failure (requester's constraint).
+
+## Closeout mapping
+
+_To be completed at T4: every decision id (D1–D10, AP1) and harvest item (H1–H5) mapped to its destination, with the ADR disposition ("no ADR — ADR waiver", per the Design harvest) and the two merge-ready documentation checks recorded._
+
+## GAPS
+
+- **G1:** What Factory does with a `mcpServers` entry the user has not configured is not documented ("Server names must match entries in `~/.factory/mcp.json` or `.factory/mcp.json`"; `DroidValidator` reports unknown *tools* as errors, unknown *servers* unverified). The chosen mechanism does not depend on it (D3); the runbook instructs wiring first. If a live check later shows unconfigured names are load errors, that confirms the design.
+- **G2 (closed 2026-10-31):** The planning session could not run the two documentation checks: the kyber-weave docs MCP server tools (`docs_validate`, `docs_drift`, and the rest of the roster) and `codegraph_explore` are absent from this harness (verified via the harness tool search), so the architect had no way to call them — the same structural blindness this plan fixes, encountered while authoring it. **Closed by the conductor's run against this checkout (2026-10-31):** `docs validate .` (no `--merge-ready`, plan still active) — `result: pass`, 0 errors, 0 warnings; `docs drift .` — `result: pass`, 0 errors, 0 warnings; both reporting `provenance: root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=140`. The results stand for this checkout and are the gate evidence recorded in AP1. The task gates re-run both checks on every subsequent documentation edit (T3's runner, the declared gate suite, and T4's merge-ready closeout).
+- **G3 (closed 2026-10-31):** The repository root for this plan was originally taken from the session's recorded workspace state (this harness exposes no shell tool to re-run `git rev-parse --show-toplevel`). **Closed by the conductor's independent confirmation (2026-10-31):** `docs_status` reported `root=/Users/dave/git/personal/factory/kyber-weave` (rev `8943b6a`, dirty), identical to the conductor's `git rev-parse --show-toplevel` for this checkout on branch `feat/squad-response-format`. The provenance root matches this checkout; every answer the checks returned is trusted for it.
+- **G4:** Live acceptance (a real Factory session with the server wired, an architect droid calling `docs_status`/`docs_validate`/`docs_drift`) cannot be exercised from this planning session; it stays an owner live check and the delivery notes remain `[NOT LIVE-VERIFIED]` until it is performed, consistent with prior renderer plans.

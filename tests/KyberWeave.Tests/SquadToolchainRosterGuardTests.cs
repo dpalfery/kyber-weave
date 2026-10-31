@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Mcp;
@@ -53,6 +54,66 @@ public sealed class SquadToolchainRosterGuardTests
             + "required-mcp-tools.kyber-weave; the renderers grant from this roster and `squad doctor` "
             + "checks an install against it, so an omitted tool is silently unavailable to every "
             + "canonical agent.");
+    }
+
+    /// <summary>
+    /// Every MCP server the squad declares in its own <c>mcp.json</c> must be a key under
+    /// <c>required-mcp-tools</c> in <c>toolchain.yml</c>.
+    /// </summary>
+    /// <remarks>
+    /// The Factory renderer derives a droid's <c>mcpServers</c> whitelist from the squad's own
+    /// <c>mcp.json</c>, so a declared server is one some droid is granted. The roster is what
+    /// the renderers grant tools from and what <c>squad doctor</c> checks an install against,
+    /// so a server named in one and absent from the other is a droid pointed at a server no
+    /// roster entry covers — and it fails silently, because a merely short roster reports
+    /// nothing. This guard closes that class of defect the same way the tool-parity guard above
+    /// does, and carries no exception list for the same reason.
+    /// </remarks>
+    [Fact]
+    public void ShippedToolchainRosterCoversEveryMcpServerTheSquadDeclares()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        IReadOnlyList<string> declaredServers = DeclaredMcpServerNames(source);
+
+        Assert.True(
+            declaredServers.Count > 0,
+            "products/kyber-squad/mcp.json declares no MCP server, so no canonical agent can be "
+            + "granted one. The Factory renderer derives its whitelist from this declaration.");
+
+        string[] missing =
+        [
+            .. declaredServers
+                .Where(server => !source.Toolchain.RequiredMcpTools.ContainsKey(server))
+                .OrderBy(server => server, StringComparer.Ordinal)
+        ];
+
+        Assert.True(
+            missing.Length == 0,
+            $"products/kyber-squad/toolchain.yml declares no required-mcp-tools entry for "
+            + $"{missing.Length} MCP server(s) the squad's mcp.json declares: {string.Join(", ", missing)}. "
+            + "Add each server as a key under required-mcp-tools; the Factory renderer whitelists "
+            + "the declared servers per droid and `squad doctor` checks an install against that "
+            + "roster, so an unrostered server is granted to a droid with no tools behind it.");
+    }
+
+    /// <summary>
+    /// The server names the squad's own <c>mcp.json</c> declares, read from the loaded source so
+    /// the guard tracks the declaration rather than a transcription of it.
+    /// </summary>
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    {
+        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. servers.EnumerateObject()
+                .Select(server => server.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+        ];
     }
 
     /// <summary>
