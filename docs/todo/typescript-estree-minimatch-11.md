@@ -56,3 +56,9 @@ and 11 still export, and `ts-lint` over the whole dash tree is the behaviour che
 Every npm and gate command goes through `scripts/proc-guard.sh run -- <command>`, from the
 repository root. Do not use `npm audit fix`: it still proposes `eslint@4.0.0`, a semver-major
 downgrade.
+
+No gate fails if the override is removed too early — `ts-lint` passes on the old resolution
+too, because eslint never reaches the vulnerable call path here. Dependabot is the check that
+catches it: dropping the override while either parent still declares a range below 11.0.1
+brings alert #103 back on the next scan, so confirm `npm audit --prefix dash --json` reports
+zero before removing it.
