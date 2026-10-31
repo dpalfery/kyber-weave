@@ -2,10 +2,10 @@
 id: plans/2026-10-30-docs-explore-answer
 title: docs_explore returns one answer
 doc-type: plan
-status: draft
+status: archived
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 development-mode: test-first
 documentation-impact: extends-component
 impact-components: [DocGraph]
@@ -13,7 +13,7 @@ impact-components: [DocGraph]
 
 # docs_explore returns one answer
 
-**Status: Ready.** Approved for execution 2026-10-30 (AP4: autonomous: recommendation accepted). AP1, AP2, and AP3 stay withdrawn. D9 stays withdrawn. Cluster `retrieval-answer-12` is not resumed. Frontmatter `status` stays `draft` so this plan stays demoted in retrieval. The body status is the lifecycle.
+**Status: Archived.** Closeout 2026-10-31. AP4 approved execution; `RetrievalRegressionTests` 19/19 at closeout (12 answerable, 7 unanswerable). Frontmatter `status` is `archived`. Harvest in canonical docs and the Closeout mapping below.
 
 **Development mode:** `test-first`.  
 **Autonomy:** `autonomous` (packet; matches Config Reg `<autonomy>`).  
@@ -332,7 +332,7 @@ T7 and T11 may run together. Their files do not overlap. T12 waits for both T8 a
 - **Acceptance:** `docs validate . --merge-ready` and `docs drift .` report 0 findings. The Decisions table is still present.
 - **Dependencies:** T23
 
-## 6. Design harvest
+## Design harvest
 
 ```yaml
 documentation-impact: extends-component
@@ -365,3 +365,38 @@ No documentation waiver. Execution is approved by AP4. AP1, AP2, and AP3 stay wi
 ## 9. Review
 
 The conductor runs the council over the whole change after T23. This draft does not authorize that run. Task-gates are not that review.
+
+## Closeout mapping
+
+Each decision and Design harvest item maps to its destination. Documentation-impact is
+`extends-component`, impact component is DocGraph, last-reviewed is 2026-10-31 for every
+row, and status is archived.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D2 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null) | extends-component | DocGraph | 2026-10-31 | archived |
+| D3 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D4 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D5 | Documentation waiver: eval contract lives in `RetrievalRegressionTests.cs` (not edited); requirement stated in plan only. | extends-component | DocGraph | 2026-10-31 | archived |
+| D6 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D7 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D8 | [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D9 | Documentation waiver: withdrawn `paragraphPeak` winner rule; shipped scoring is D14 at [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore). | extends-component | DocGraph | 2026-10-31 | archived |
+| D10 | [mcp-runbook.md](../../docgraph/mcp-runbook.md#agent_coding_standardstechnology-topic--null-charbudget--12000); [retrieval.md](../../docgraph/retrieval.md#excerpt-budgeting-agent_coding_standards) | extends-component | DocGraph | 2026-10-31 | archived |
+| D11 | [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D12 | Documentation waiver: autonomy provenance for AP4; no separate canonical page. | extends-component | DocGraph | 2026-10-31 | archived |
+| D14 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D15 | [documentation-ontology.md](../../documentation-ontology.md); [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| D16 | [ADR 0046](../../adr/0046-docs-explore-section-answer.md); graph behaviour in implementation (H3) | extends-component | DocGraph | 2026-10-31 | archived |
+| D17 | [documentation-ontology.md](../../documentation-ontology.md); [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [code-review/architecture.md](../../code-review/architecture.md); [dash/architecture.md](../../dash/architecture.md); [kyber-squad/architecture.md](../../kyber-squad/architecture.md); [ci-pipelines/architecture.md](../../ci-pipelines/architecture.md); [docgraph/architecture.md](../../docgraph/architecture.md) (corpus `lead` and `sections` declarations per D17) | extends-component | DocGraph | 2026-10-31 | archived |
+| D18 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore); [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null) | extends-component | DocGraph | 2026-10-31 | archived |
+| D19 | Documentation waiver: approved change to `ExploreAnswerTests` only; behaviour described in retrieval and ADR. | extends-component | DocGraph | 2026-10-31 | archived |
+| AP1 | Documentation waiver: withdrawn approval provenance only. | extends-component | DocGraph | 2026-10-31 | archived |
+| AP2 | Documentation waiver: withdrawn approval provenance only. | extends-component | DocGraph | 2026-10-31 | archived |
+| AP3 | Documentation waiver: withdrawn approval provenance only. | extends-component | DocGraph | 2026-10-31 | archived |
+| AP4 | [ADR 0046](../../adr/0046-docs-explore-section-answer.md) (AP4 execution approval for the shipped contract) | extends-component | DocGraph | 2026-10-31 | archived |
+| H1 | [retrieval.md](../../docgraph/retrieval.md#one-leaf-answer-docs_explore) | extends-component | DocGraph | 2026-10-31 | archived |
+| H2 | [mcp-runbook.md](../../docgraph/mcp-runbook.md#docs_explorequery-cursor--null) | extends-component | DocGraph | 2026-10-31 | archived |
+| H3 | [ADR 0046](../../adr/0046-docs-explore-section-answer.md) | extends-component | DocGraph | 2026-10-31 | archived |
+| H4 | [documentation-ontology.md](../../documentation-ontology.md) | extends-component | DocGraph | 2026-10-31 | archived |
