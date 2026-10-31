@@ -10,7 +10,7 @@ last-reviewed: 2026-10-31
 
 # Per-source "last emitted" status for capture, so a stopped exporter is visible
 
-Narrowed from the [KyberDash OTel harness coverage plan](../archive/plans/2026-10-27-kyberdash-otel-harness-coverage.md)
+Narrowed from the [KyberDash OTel harness coverage plan](../archive/plans/2026-10-27-kyberdash-otel-harness-coverage.md).
 The usage and content items that were first recorded here are delivered: the OpenCode
 plugin now sends per-step usage and consent-gated content through the V2 pipeline
 ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md),

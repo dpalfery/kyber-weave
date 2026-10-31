@@ -78,8 +78,9 @@ The plugin is the single source of OpenCode data:
   for other harnesses.
 - The plugin depends on OpenCode 2.x bus and hook surfaces. An OpenCode change to them breaks capture until the
   plugin changes. The wire contract version invalidates stored rows when the plugin's shape changes.
-- Until the OpenCode live gate records a passing run on the owner's machine, live capture is unverified. Replay
-  tests prove the pipeline on recorded events only.
+- The OpenCode live gate passed on the owner's Mac on 2026-10-31 (OpenCode CLI 2.2.3, one scripted session): every
+  compared figure matched OpenCode's own, and the session title was waived. Replay tests prove the pipeline on
+  recorded events; the live gate proves it on a real session and runs only on request.
 - Any future OpenCode source, such as a V2 importer or a new event feed, is a new decision. It must state how it
   avoids double counting against the plugin.
 - The shared projection now sums session duration over request roots whenever records nest. That rule applies to

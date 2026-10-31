@@ -2,10 +2,10 @@
 id: plans/2026-10-30-opencode-v2-capture
 title: "OpenCode V2-only capture — rebuild kyberDash's OpenCode collection as a V2 plugin pipeline"
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 development-mode: test-first
 documentation-impact: extends-component
 impact-components: [KyberDash, KyberSquad]
@@ -13,8 +13,8 @@ impact-components: [KyberDash, KyberSquad]
 
 # OpenCode V2-only capture — rebuild kyberDash's OpenCode collection as a V2 plugin pipeline
 
-**Status: In progress — Wave 0 verification (code present; T15 docs open). Approved for
-execution 2026-10-30 (AP1).**
+**Status: Archived — complete 2026-10-31.** Approved for execution 2026-10-30 (AP1). Live acceptance (G3)
+passed 2026-10-31 with one waived row (§8.4). Closeout mapping: see the last section.
 
 **Development mode:** `test-first` (supplied in the packet). **Autonomy:** `autonomous` (supplied in
 the packet; matches the repository root `AGENTS.md` Config Reg `<autonomy>`).
@@ -120,16 +120,17 @@ shared-projection changes (D3, D11) carry regression pins and a scope-change rul
 
 ## Execution state
 
-As of 2026-10-30. Scope, design, decisions D0–D25 and the §5 Test contract are unchanged by this
-section. D26–D28 are execution-time rulings within the AP1 scope.
+As of 2026-10-31. Scope, design, decisions D0–D25 and the §5 Test contract are unchanged by this
+section. D26–D28 are execution-time rulings within the AP1 scope. T15 (documentation) is done; every
+task T1–T15 is complete.
 
 **Assessment result (architect, read-only, 2026-10-30).**
 
 - T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12a, T12b, T13a, T13b, T14a and T14b: code is
   on disk on `fix/opencode-v2-capture` and matches the plan's file scopes and constraints.
-- T15 (documentation, H1–H10, todo archiving): not started.
-- Gates G1, G2 and G3: not run at assessment. G3 later passed on 2026-10-31 (section 8.4); G1 and G2 are the
-  CI jobs on the pull request head.
+- T15 (documentation, H1–H10, todo archiving, index): done 2026-10-31. Closeout mapping in the last section.
+- Gates G1, G2 and G3: G3 passed on 2026-10-31 (section 8.4). G1 and G2 are the CI jobs on the pull request
+  head; this closeout does not run or claim them.
 
 **Recorded deviation — RED evidence (Q1).** RED evidence required by §5 was not captured for
 T1–T14: the code was written in earlier session work before the failing runs were saved. Accepted
@@ -816,3 +817,60 @@ should receive the rename; that was not tested. The comparator reports the row a
   `2026-10-27-kyberdash-otel-harness-coverage.md`,
   `2026-10-28-kyberdash-harness-collection-standard.md`,
   `2026-10-28-opencode-telemetry-fill.md` (PR #457).
+
+## Closeout mapping
+
+Closeout 2026-10-31 (T15). Every row is archived; the destination is the canonical document or ADR that
+now carries the item. Links are written from this archive location (`docs/archive/plans/`).
+
+**Live evidence (G3).** PASS on 2026-10-31, OpenCode CLI 2.2.3, one session (§8.4), with the session-label row
+WAIVED. Evidence: `artifacts/evidence/opencode-v2-live-gate/20261031T133823Z/` (git-ignored, secrets stripped).
+
+**Not claimed by this closeout.** G1 and G2 are the CI jobs on the pull request head, and the whole-change
+review in §8.5 runs after the pull request is pushed. Neither is run or claimed here.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D0 | Documentation waiver: transient execution-mode record for this plan; no surviving architectural, operational or behavioural invariant. | no-design-change | KyberDash | 2026-10-31 | archived |
+| D1 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Decision, Consequences); [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (verified versions, known limits) | extends-component | KyberDash | 2026-10-31 | archived |
+| D2 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Trace shape) | extends-component | KyberDash | 2026-10-31 | archived |
+| D3 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Request duration; Projection); [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Consequences: nested-harness rule) | extends-component | KyberDash | 2026-10-31 | archived |
+| D4 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Cost); [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Alternative 5) | extends-component | KyberDash | 2026-10-31 | archived |
+| D5 | [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (Content consent); [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Consent) | extends-component | KyberDash | 2026-10-31 | archived |
+| D6 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Decision, Alternative 1); [dash/architecture.md](../../dash/architecture.md#opencode-native-opentelemetry-is-not-collected); [rules/kyberdash-harness-collection.md](../../rules/kyberdash-harness-collection.md) (ground truth table) | extends-component | KyberDash | 2026-10-31 | archived |
+| D7 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Decision, Alternative 2); [dash/architecture.md](../../dash/architecture.md#opencode-native-opentelemetry-is-not-collected) (V1 import removed); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (OpenCode rows) | extends-component | KyberDash | 2026-10-31 | archived |
+| D8 | [ADR 0031](../../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) (2026-10-31 amendment); [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Capture writer); [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) | extends-component | KyberDash | 2026-10-31 | archived |
+| D9 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Version) | extends-component | KyberDash | 2026-10-31 | archived |
+| D10 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Ownership and duplicates; Bounds) | extends-component | KyberDash | 2026-10-31 | archived |
+| D11 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Raw metadata and timeline). No ADR — ADR waiver: refines the timeline evidence rule for one reserved namespace, inside the existing timeline contract. | extends-component | KyberDash | 2026-10-31 | archived |
+| D12 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Projection: label); [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (title limitation). No ADR — ADR waiver: a single additive label key, cheap to reverse. | extends-component | KyberDash | 2026-10-31 | archived |
+| D13 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Usage) | extends-component | KyberDash | 2026-10-31 | archived |
+| D14 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Content; Known limits); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (OpenCode row) | extends-component | KyberDash | 2026-10-31 | archived |
+| D15 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Skills invoked); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (skill availability table) | extends-component | KyberDash | 2026-10-31 | archived |
+| D16 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Projection: `requests[i].prompt`) | extends-component | KyberDash | 2026-10-31 | archived |
+| D17 | [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (Old OpenCode rows); [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (Consequences) | extends-component | KyberDash | 2026-10-31 | archived |
+| D18 | [distribution.md](../../distribution.md#verifying-a-release-locally) (existing local release path, unchanged; the gate ran it as documented). No ADR — ADR waiver: applies an established release path. | no-design-change | KyberDash | 2026-10-31 | archived |
+| D19 | [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (Live gate: evidence location, secrets stripped) | extends-component | KyberDash | 2026-10-31 | archived |
+| D20 | [rules/kyberdash-harness-collection.md](../../rules/kyberdash-harness-collection.md) (replay scenario and rendering-only seed); [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md#dash-harness-collection-e2e-dash-e2e) (dash-e2e); [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (Test replay) | extends-component | KyberDash | 2026-10-31 | archived |
+| D21 | [ci-pipelines/workflows-runbook.md](../../ci-pipelines/workflows-runbook.md#dash-harness-collection-e2e-dash-e2e) (the Ubuntu CI jobs already documented). No new document: the Linux evidence is the pull request's CI run, which this closeout does not claim. | no-design-change | KyberDash | 2026-10-31 | archived |
+| D22 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) (Guidance wording); [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md); [install.md](../../install.md#updating); [cli-command-surface.md](../../cli-command-surface.md) (update) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D23 | [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) (approved model pair; no Anthropic model; no session left running) | extends-component | KyberDash | 2026-10-31 | archived |
+| D24 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) (new); [ADR 0031](../../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) (amended in place); [adr/README.md](../../adr/README.md) (index row) | extends-component | KyberDash | 2026-10-31 | archived |
+| D25 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Bounds and terminal events); [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (plugin row) | extends-component | KyberDash | 2026-10-31 | archived |
+| D26 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Request duration; Projection: generic nested-harness rule) | extends-component | KyberDash | 2026-10-31 | archived |
+| D27 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Projection: `requests[i].prompt` taken literally) | extends-component | KyberDash | 2026-10-31 | archived |
+| D28 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) (Projection: not-measurable object for withheld content) | extends-component | KyberDash | 2026-10-31 | archived |
+| AP1 | Documentation waiver: approval record for this execution, transient; the decisions it approved are mapped above. | no-design-change | KyberDash, KyberSquad | 2026-10-31 | archived |
+| H1 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) | extends-component | KyberDash | 2026-10-31 | archived |
+| H2 | [ADR 0031](../../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) (2026-10-31 amendment) | extends-component | KyberDash | 2026-10-31 | archived |
+| H3 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) | extends-component | KyberDash | 2026-10-31 | archived |
+| H4 | [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (OpenCode rows, skill table, per-harness matrix, plugin API pins) | extends-component | KyberDash | 2026-10-31 | archived |
+| H5 | [dash/runbook.md](../../dash/runbook.md#1b-opencode-capture-enable-and-verify) | extends-component | KyberDash | 2026-10-31 | archived |
+| H6 | [dash/onboarding.md](../../dash/onboarding.md#opencode-capture-plugin) | extends-component | KyberDash | 2026-10-31 | archived |
+| H7 | [cli-command-surface.md](../../cli-command-surface.md) (`capture` rows; `update` line) | extends-component | KyberDash | 2026-10-31 | archived |
+| H8 | [rules/kyberdash-harness-collection.md](../../rules/kyberdash-harness-collection.md) | extends-component | KyberDash | 2026-10-31 | archived |
+| H9 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md) (Guidance wording); [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) (plugin step) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H10 | [install.md](../../install.md#updating) (plugin step guidance line) | extends-component | KyberDash | 2026-10-31 | archived |
+| T15-todo-1 | [todo/README.md](../../todo/README.md): `opencode-1x-runtime-support` and `opencode-plugin-per-message-tokens` archived as superseded (`docs/archive/todo/`) | no-design-change | KyberDash | 2026-10-31 | archived |
+| T15-todo-2 | [todo/opencode-plugin-token-usage-capture.md](../../todo/opencode-plugin-token-usage-capture.md) narrowed to the per-source "last emitted" signal | no-design-change | KyberDash | 2026-10-31 | archived |
+| T15-todo-3 | [todo/kyberdash-skills-view-follow-ups.md](../../todo/kyberdash-skills-view-follow-ups.md) item (c): OpenCode removed, Pi, Copilot CLI and Claude Desktop remain | no-design-change | KyberDash | 2026-10-31 | archived |

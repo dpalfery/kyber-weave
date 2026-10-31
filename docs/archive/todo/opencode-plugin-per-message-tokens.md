@@ -30,7 +30,7 @@ name and payload fields must be read from the installed runtime before any code 
 
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
-| OCTOK-1 | Should the capture plugin send per-message token counts? | Yes, and the V2 plugin now does: every model step carries OpenCode's own input, output, reasoning and cache counters, read from the `session.step.ended` bus event, plus reported cost. | A turn is one model step (`session.step.started` to `session.step.ended`), so per-step usage is the per-message usage this todo asked for. The plugin no longer depends on OpenCode's native OpenTelemetry export for usage. | Plan [2026-10-30-opencode-v2-capture](../plans/2026-10-30-opencode-v2-capture.md) decisions D2 and D4, approved in AP1 on 2026-10-30. |
+| OCTOK-1 | Should the capture plugin send per-message token counts? | Yes, and the V2 plugin now does: every model step carries OpenCode's own input, output, reasoning and cache counters, read from the `session.step.ended` bus event, plus reported cost. | A turn is one model step (`session.step.started` to `session.step.ended`), so per-step usage is the per-message usage this todo asked for. The plugin no longer depends on OpenCode's native OpenTelemetry export for usage. | Plan [2026-10-30-opencode-v2-capture](../plans/2026-10-30-opencode-v2-capture.md) decisions D2, D4 and D13, approved in AP1 on 2026-10-30. |
 
 ## Closeout mapping
 

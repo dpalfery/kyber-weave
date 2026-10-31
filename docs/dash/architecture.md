@@ -333,7 +333,8 @@ outbox: 500 spans held at most, 50 per POST, 250 ms to 5 s backoff with jitter, 
 timeout. Delivery never blocks or fails OpenCode. If a V2 surface is absent, the plugin keeps the
 surfaces that exist (hooks only, when there is no bus).
 
-The plugin is verified on OpenCode CLI 2.2.1 and Desktop 2.2.2. Versions below 2.2.1 are unverified.
+The wire contract was measured on OpenCode CLI 2.2.1 and Desktop 2.2.2. The live gate passed on CLI 2.2.3 on
+2026-10-31. Versions below 2.2.1 are unverified.
 OpenCode 1.x support, native OpenCode OpenTelemetry ingestion and the V1 table import are removed.
 The plugin is the single source of OpenCode data, so nothing else writes OpenCode rows into
 `canon.db`. The plugin writes no database directly and serves no API: rows reach `canon.db` only
@@ -473,7 +474,7 @@ and `dash/src/canon/adapters/opencode.ts`; every wire key, span name and id deri
   request roots when a session's records nest, and sums every record otherwise.
   `requests[i].turns` counts the turn records under request `i`. `label` is the latest
   `kyber.session.label`, else the existing fallback. `requests[i].prompt` is a preview of at most
-  200 characters of the request's prompt. With content withheld it is the not-measurable object
+  200 characters of the request's prompt, taken literally: nothing unquotes or rewrites it. With content withheld it is the not-measurable object
   `{ availability: 'not_measurable', reason }`, never zero or an empty string. The same object stands for `summary.tools_offered` when tool definitions are withheld.
 - **Measurability.** Token usage, cost and the cache counters come from the step's reported
   figures. The plugin exports cache read and cache write whenever OpenCode reports them.
@@ -496,8 +497,9 @@ dimensions carry reasons, and its unchartable turns are counted (`unmeasuredTurn
 [the shared canonical projection](#the-shared-canonical-projection). Operator steps are in the
 [runbook](runbook.md#1b-opencode-capture-enable-and-verify).
 
-The end-to-end check is the OpenCode live gate: a scripted two-prompt session on the owner's machine
-whose figures must equal OpenCode's own totals. The `dash/e2e/harness-collection.spec.ts` OpenCode
+The end-to-end check of live capture is the OpenCode live gate: a scripted two-prompt session on the owner's
+machine whose figures must equal OpenCode's own totals. It passed on 2026-10-31 (OpenCode CLI 2.2.3), with the
+session title waived. The `dash/e2e/harness-collection.spec.ts` OpenCode
 scenario replays recorded OpenCode 2.2.1 events through the production plugin, receiver, adapter and
 projection. It proves what the dashboard renders from that replay. It is not proof of live capture.
 
@@ -509,8 +511,11 @@ projection. It proves what the dashboard renders from that replay. It is not pro
 - The plugin sends no context window. `opencode.model.context_limit` is declared in `contract.ts`,
   but no code produces it in this build, so the window follows the existing catalog and declared-window
   rules ([ADR 0030](../adr/0030-kyberdash-declared-context-window-provenance.md)).
-- Whether OpenCode reloads an edited global plugin file without a restart is unverified until the live
-  gate records it. The install guidance tells the owner to restart OpenCode when new sessions do not appear.
+- OpenCode did not reload an edited global plugin file without a restart in the 2026-10-31 live gate: no plugin
+  load line followed the install, and the running service's file watcher had stopped. Restart OpenCode after an
+  install or upgrade. The install guidance says the same when new sessions do not appear.
+- A session whose project instance loads late can miss its title. The plugin then labels it "OpenCode session"
+  (the 2026-10-31 live gate waived this row).
 
 ### OpenCode native OpenTelemetry is not collected
 

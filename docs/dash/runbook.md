@@ -226,8 +226,8 @@ consent. The consent file is created with content off when it is absent, and an 
 it. `KYBERDASH_OPENCODE_CONTEXT=1` or `0` overrides the file.
 
 If new OpenCode sessions do not appear in KyberDash after an install or an upgrade, restart OpenCode.
-KyberDash cannot restart it for you. Whether OpenCode reloads the plugin without a restart is recorded by
-the live gate.
+KyberDash cannot restart it for you. The 2026-10-31 live gate did not see OpenCode reload the plugin without
+a restart, so restart it.
 
 There is no OpenCode import. `dash refresh` does not read OpenCode data, and the plugin is the only source.
 What each path measures is in the [telemetry inventory](telemetry-inventory.md).
@@ -271,7 +271,7 @@ No Anthropic model is used, and no OpenCode session may be left running.
 
 A run passed on 2026-10-31 on macOS with OpenCode 2.2.3 and a local build of this pipeline: every token class,
 cost, duration, request and turn count, tool, system-prompt and skill row matched OpenCode's own database
-(plan section 8.4 has the table). Two behaviours of OpenCode 2.2.x shape the gate. It takes a session's
+(the row-by-row result is in the plan's closeout, archived under `docs/archive/plans/`). Two behaviours of OpenCode 2.2.x shape the gate. It takes a session's
 directory from `$PWD`, so the runner sets `PWD` for each child it starts. It leaves `time_busy` set after an
 execution ends, so a session is busy only while `time_busy` is newer than `time_idle`.
 
