@@ -31,8 +31,10 @@ public sealed class SquadResponsePreferencesInjectorTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("\t\n \r\n")]
-    public void ReadEffective_UsesShippedDefaultWhenHomeTextIsMissingOrWhitespace(string homeText)
+    public void ReadEffective_WhenTheHomeFileIsPresentButBlank_UsesTheShippedDefaultAndWarnsExactlyOnce(string homeText)
     {
+        // A blank file is operator input that was accepted as empty. Falling back silently would hide that
+        // the operator's edit is being ignored, so the run must say so once.
         string home = NewHomeDirectory();
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
         File.WriteAllText(path, homeText, Encoding.UTF8);
@@ -41,7 +43,8 @@ public sealed class SquadResponsePreferencesInjectorTests
         string actual = SquadResponseGuidanceSource.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
-        Assert.Empty(warnings);
+        string warning = Assert.Single(warnings);
+        Assert.Contains("response-guidance", warning, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -1135,6 +1135,49 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
+    ///     A render that reports failure must stop global doctor the way install and update stop, naming the
+    ///     collision-scan failure. Without the check, an empty failed render reads as a pre-block corpus and
+    ///     doctor prints the no-block warning, which tells the operator the wrong thing about the cause.
+    /// </summary>
+    [Fact]
+    public void DoctorGlobalReportsARenderFailureAsTheCollisionScanFailureNotAsNoBlock()
+    {
+        using Harness h = NewHarness("doctor-failed-render");
+        string anchor = h.MakeDirectory("anchor");
+        WriteCanonicalSourceWithoutResponseBlocks(anchor);
+
+        CommandExecution execution = Capture(() =>
+            new SquadDoctorCommand(
+                    new FakeProcessExecutor(),
+                    h.UserPaths,
+                    anchor,
+                    h.GlobalRoots,
+                    new FailedRenderRenderer(),
+                    h.Store)
+                .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
+
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
+    }
+
+    private sealed class FailedRenderRenderer : ISquadRenderer
+    {
+        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
+
+        public Task<SquadRenderResult> RenderAsync(
+            SquadRenderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new SquadRenderResult(
+                Success: false,
+                Files: [],
+                Degradations: [],
+                Warnings: [],
+                Errors: ["The render failed for the test."]));
+        }
+    }
+
+    /// <summary>
     ///     Copies the canonical corpus beside a solution marker with every response-preferences block removed,
     ///     so the render carries no block anywhere. The precondition assertion keeps the test from passing
     ///     vacuously if the canonical blocks ever move.

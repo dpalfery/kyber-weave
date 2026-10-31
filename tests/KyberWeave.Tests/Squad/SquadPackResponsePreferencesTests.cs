@@ -124,46 +124,47 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     public void Pack_DoesNotReadOrWriteTheOperatorHomeGuidance()
     {
         // The operator's home is a temp directory holding a non-default guidance, so the leak check always
-        // has input. The packer takes no home parameter, so the override goes through the home variables
-        // that the platform resolves the user profile from, and is restored on exit.
+        // has input. The home is supplied through the injectable environment seam, so no process-wide
+        // variable is mutated and parallel test classes are unaffected.
         string home = Path.Combine(_temp.Path, "home");
         string homePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
         Directory.CreateDirectory(Path.GetDirectoryName(homePath)!);
         File.WriteAllText(homePath, OperatorText, Encoding.UTF8);
 
-        string? previousHome = Environment.GetEnvironmentVariable("HOME");
-        string? previousProfile = Environment.GetEnvironmentVariable("USERPROFILE");
-        Environment.SetEnvironmentVariable("HOME", home);
-        Environment.SetEnvironmentVariable("USERPROFILE", home);
-        try
+        List<string> homeLookups = [];
+        Func<string, string?> readEnvironment = name =>
         {
-            byte[] homeBytesBefore = File.ReadAllBytes(homePath);
-            DateTime homeWriteBefore = File.GetLastWriteTimeUtc(homePath);
-
-            string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
-            string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
-
-            Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
-            Assert.True(
-                homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
-                $"Packing changed the operator home guidance at '{homePath}'.");
-            Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
-
-            foreach (string archivePath in new[] { apmPath, pluginsPath })
+            if (name is "HOME" or "USERPROFILE")
             {
-                using ZipArchive archive = ZipFile.OpenRead(archivePath);
-                foreach (ZipArchiveEntry entry in archive.Entries)
-                {
-                    Assert.False(
-                        ReadEntryText(entry).Contains(OperatorText, StringComparison.Ordinal),
-                        $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
-                }
+                homeLookups.Add(name);
+                return home;
             }
-        }
-        finally
+
+            return null;
+        };
+
+        byte[] homeBytesBefore = File.ReadAllBytes(homePath);
+        DateTime homeWriteBefore = File.GetLastWriteTimeUtc(homePath);
+
+        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home", readEnvironment);
+        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home", readEnvironment);
+
+        Assert.Empty(homeLookups);
+        Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
+        Assert.True(
+            homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
+            $"Packing changed the operator home guidance at '{homePath}'.");
+        Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
+
+        foreach (string archivePath in new[] { apmPath, pluginsPath })
         {
-            Environment.SetEnvironmentVariable("HOME", previousHome);
-            Environment.SetEnvironmentVariable("USERPROFILE", previousProfile);
+            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                Assert.False(
+                    ReadEntryText(entry).Contains(OperatorText, StringComparison.Ordinal),
+                    $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
+            }
         }
     }
 

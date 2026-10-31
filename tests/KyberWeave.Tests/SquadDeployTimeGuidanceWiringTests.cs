@@ -152,6 +152,67 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateSurfacesAnUnreadableDeployedEntryPathInWarnings()
+    {
+        using Harness h = NewHarness("unreadable-entry-warning");
+        string anchor = h.MakeDirectory("anchor");
+        WriteHomeGuidance(h, "Version 1 guidance.");
+
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex],
+            Version: "1.2.3"))).Success);
+
+        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
+        SquadLifecycleResult update;
+        using (Harness.DenyReadOrSkip(conductor))
+        {
+            update = await lifecycle.UpdateAsync(new SquadUpdateRequest(
+                anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex],
+                Version: "1.2.4"));
+        }
+
+        Assert.True(update.Success, DescribeFailure(update));
+        // The degraded path is named in the warnings the CLI prints, not only in the plan.
+        Assert.Contains("conductor.toml", string.Join(Environment.NewLine, update.Warnings ?? []), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DryRunUpdateSurfacesAnUnreadableDeployedEntryPathInWarnings()
+    {
+        using Harness h = NewHarness("unreadable-entry-dry-run");
+        string anchor = h.MakeDirectory("anchor");
+        WriteHomeGuidance(h, "Version 1 guidance.");
+
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex],
+            Version: "1.2.3"))).Success);
+
+        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
+        SquadLifecycleResult dryRun;
+        using (Harness.DenyReadOrSkip(conductor))
+        {
+            dryRun = await lifecycle.UpdateAsync(new SquadUpdateRequest(
+                anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex],
+                Version: "1.2.4",
+                DryRun: true));
+        }
+
+        Assert.True(dryRun.Success, DescribeFailure(dryRun));
+        Assert.True(dryRun.DryRun);
+        Assert.Contains("conductor.toml", string.Join(Environment.NewLine, dryRun.Warnings ?? []), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DoctorParityMatchesDeployedBytesAfterInjection()
     {
         using Harness h = NewHarness("doctor-parity");

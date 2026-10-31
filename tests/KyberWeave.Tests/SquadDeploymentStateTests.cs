@@ -1063,6 +1063,38 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    ///     An unreadable deployed entry cannot be proven unedited, so the plan keeps its record and leaves the
+    ///     bytes alone. The path must also be named in <c>DegradedFiles</c>; without that the caller has no way
+    ///     to tell a preserved-but-unverified file from one that was checked and found unchanged.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateWithAnUnreadableDeployedEntryRecordsThePathInDegradedFiles()
+    {
+        using TempDirectory fixture = new();
+        const string entry = ".codex/agents/conductor.toml";
+        SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), "codex", false));
+        Write(fixture.Path, entry, "installed body");
+        string fullPath = Path.Combine(fixture.Path, entry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(entry, "updated body")],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.Contains(entry, plan.DegradedFiles);
+        Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
+    }
+
+    /// <summary>
     ///     Progressively disclosed references are ordinary deployment files. Their rendered paths
     ///     must therefore receive the same exact-byte ownership and status guarantees as principals.
     /// </summary>
