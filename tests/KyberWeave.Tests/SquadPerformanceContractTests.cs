@@ -230,7 +230,7 @@ public sealed class SquadPerformanceContractTests
     /// enum are defined in the execution-and-review contract reference.
     /// </summary>
     [Fact]
-    public void ConductorFrontmatterDescriptionContainsNoDigestSchemaAndBodyDefinesFullFiveStateTaskGate()
+    public void ExecutionAndReviewReference_DeclaresDeterministicTaskGate_AndConductorOffloadsIt()
     {
         string content = ReadRepoFile(ConductorAgentPath);
         int firstMarker = content.IndexOf("---", StringComparison.Ordinal);
@@ -362,6 +362,47 @@ public sealed class SquadPerformanceContractTests
             StringComparison.Ordinal);
         Assert.Contains("verify GREEN against the independent RED contract authored by test-dev", content,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    public void SpecialistPromptsClarifyArtifactAndBaselinePathsBelongInAccompanyingMessageBody(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(
+            @"(?i)\b(?:explanatory\s+message\s+body|message\s+body)\s+accompanying\s+(?:the\s+|your\s+)?(?:completion\s+)?digest\b",
+            content);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\bartifacts?\s+paths?\b)(?=[^\r\n]*\b(?:explanatory\s+message\s+body|accompanying\s+(?:the\s+|your\s+)?(?:completion\s+)?digest)\b)[^\r\n]+",
+            content);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\bbaseline\b)(?=[^\r\n]*\b(?:explanatory\s+message\s+body|accompanying\s+(?:the\s+|your\s+)?(?:completion\s+)?digest)\b)[^\r\n]+",
+            content);
+        Assert.Matches(
+            @"(?i)\bpreserv(?:e|ing)\s+(?:the\s+)?(?:rigid\s+)?(?:6|six)-field\s+(?:completion\s+)?digest\s+schema\b",
+            content);
+    }
+
+    [Fact]
+    public void TestDevPromptClarifiesCoverageGapsBelongInAccompanyingMessageBody()
+    {
+        string content = ReadRepoFile(TestDevAgentPath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\bCOVERAGE_GAPS\b)(?=[^\r\n]*\b(?:explanatory\s+message\s+body|accompanying\s+(?:the\s+|your\s+)?(?:completion\s+)?digest)\b)[^\r\n]+",
+            content);
+        Assert.Matches(
+            @"(?i)\bpreserv(?:e|ing)\s+(?:the\s+)?(?:rigid\s+)?(?:6|six)-field\s+(?:completion\s+)?digest\s+schema\b",
+            content);
+    }
+
+    [Theory]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    public void SpecialistPromptsDoNotContainMalformedArtifactsPathOptionTypo(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.DoesNotContain("option--artifacts-path", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -506,6 +547,14 @@ public sealed class SquadPerformanceContractTests
         Assert.Matches(@"(?i)\bGround\s+Rule\s+1\b", content);
         Assert.Matches(@"(?i)\b(?:'repo-idiom'|repo-idiom)\b", content);
         Assert.Matches(@"(?i)\bmissing\s+operational\s+lifecycle\s+cleanup\s+paths?\b", content);
+    }
+
+    [Fact]
+    public void CodeReviewSkillDoesNotContainMalformedScratchpadPathTypo()
+    {
+        string content = ReadRepoFile(CodeReviewSkillPath);
+        Assert.DoesNotContain("path`.agent_scratchpad", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("path.agent_scratchpad", content, StringComparison.Ordinal);
     }
 
     private static string ReadRepoFile(string relativePath)
