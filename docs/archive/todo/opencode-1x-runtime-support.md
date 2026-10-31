@@ -1,14 +1,18 @@
 ---
-id: todo/opencode-1x-runtime-support
+id: archive/todo/opencode-1x-runtime-support
 title: OpenCode 1.x runtime support for the KyberDash capture plugin is unverified
 doc-type: todo
 component: KyberDash
-status: draft
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-31
+status: superseded
 ---
 
 # OpenCode 1.x runtime support for the KyberDash capture plugin is unverified
+
+Superseded: OpenCode capture is V2-only, and OpenCode 1.x support is removed rather than added
+([ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The shipped behaviour is in
+[the architecture](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
 The KyberDash OpenCode capture plugin (`kyberdash-opencode.js`) is shaped for the OpenCode
 2.1.4 loader: a single default export `{ id: 'kyberdash-opencode', setup }`, with one
@@ -27,6 +31,5 @@ fixture that records the 2.1.4 pin, then add a load test per shape and confirm t
 loads on both 1.x and 2.1.4.
 
 The decision record for the 2.1.4 shape is in the archived plan
-[2026-10-25-opencode-capture-deploy-kyberdash](../archive/plans/2026-10-25-opencode-capture-deploy-kyberdash.md)
-(decisions D1 and D2). The shipped behaviour is described in
-[dash/architecture.md](../dash/architecture.md), section "OpenCode plugin span/turn envelope".
+[2026-10-25-opencode-capture-deploy-kyberdash](../plans/2026-10-25-opencode-capture-deploy-kyberdash.md)
+(decisions D1 and D2).

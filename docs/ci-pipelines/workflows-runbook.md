@@ -204,6 +204,10 @@ enforces the per-harness completeness predicate continuously:
   and serve an empty dashboard. Each test also asserts the runs payload carries
   the fixture run, which is what proves the served data came from the temp
   store rather than the operator's own `~/.kyberdash/canon.db`.
+- **Scenarios:** the OpenCode scenario replays recorded OpenCode 2.2.1 events through the production
+  plugin, receiver, adapter and projection. The honest-empty row and the other rows are rendering-only
+  seeds. None of them is capture proof. Live OpenCode capture is verified only by the OpenCode live gate,
+  which runs on the owner's machine and not in CI ([runbook §1b](../dash/runbook.md#1b-opencode-capture-enable-and-verify)).
 - **Steps:** install dash deps (`npm ci`), `npx playwright install
   --with-deps`, then the conformance spec. The spec runs from the repository
   root with the pinned `dash` Playwright and the isolated config (`npx

@@ -6,8 +6,10 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 decided-by:
+  - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
+  - adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 code-refs:
   - registerKyberCommands
@@ -200,56 +202,73 @@ accept that exposure. What the receiver then does with the text — and the reas
 when a body is redacted, truncated, or arrives as a `body_ref` it will not open — is in the
 [telemetry inventory](telemetry-inventory.md#claude-code-otlp-content-live).
 
-### 1b. OpenCode paths: enable, import/refresh, and verification
+### 1b. OpenCode capture: enable and verify
 
-Enable native collection and the capture plugin together:
+OpenCode is captured by one plugin, for OpenCode 2.x only ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+Turn it on and check it:
 
 ```bash
 kyberdash kyber capture enable --harness opencode
 kyberdash kyber capture status --harness opencode
 ```
 
-`enable` writes only `experimental.openTelemetry` in `opencode.jsonc`, installs the
-`kyberdash-opencode` plugin file, and sets consent `content: true` in
-`~/.kyberdash/opencode-plugin.json`. `disable` restores the keys, sets consent
-`content: false`, and removes the plugin file. The OTLP endpoint stays process-env-only:
-`OTEL_EXPORTER_OTLP_ENDPOINT` must be set where OpenCode launches. Restart OpenCode after
-an install or upgrade so the new plugin loads. The consent file is created with
-`content: false` when absent and never rewritten by install; content (system prompt, tool
-definitions, skills listing) flows only under consent. Opencode enable/disable flips that consent file (there is no independent content toggle — the on/off switch is the content path). What each path
-measures is in the [telemetry inventory](telemetry-inventory.md).
+`enable` installs the `kyberdash-opencode` plugin file in OpenCode's global plugin directory and sets
+content consent to on in `~/.kyberdash/opencode-plugin.json`. It writes no key into `opencode.jsonc`. The first
+enable or disable after an upgrade also restores the `experimental.openTelemetry` value that older KyberDash
+builds wrote there, using the capture receipt. A value you have changed since is left alone, with a warning. `disable`
+sets consent off, removes the plugin file, and runs the same restore. `status` reports the plugin state,
+the consent, and whether the receiver is up. The Settings switch "OpenCode Enabled" runs the same
+`enable` and `disable`.
 
-Import local history through refresh (orchestrator untouched, scan window current):
+The plugin posts to the loopback receiver directly, so `OTEL_EXPORTER_OTLP_ENDPOINT` plays no part.
+Content (system prompt, tool definitions, skills listing, prompt text, session title) flows only under
+consent. The consent file is created with content off when it is absent, and an install never rewrites
+it. `KYBERDASH_OPENCODE_CONTEXT=1` or `0` overrides the file.
+
+If new OpenCode sessions do not appear in KyberDash after an install or an upgrade, restart OpenCode.
+KyberDash cannot restart it for you. Whether OpenCode reloads the plugin without a restart is recorded by
+the live gate.
+
+There is no OpenCode import. `dash refresh` does not read OpenCode data, and the plugin is the only source.
+What each path measures is in the [telemetry inventory](telemetry-inventory.md).
+
+**Old OpenCode rows.** Rows written before this pipeline (from contract-2 spans or the removed table import)
+stay in the store until you remove them. The removal is yours to run, and it does not re-ingest:
 
 ```bash
-node dash/dist/cli.js dash refresh
-node dash/dist/cli.js dash import-history --harness opencode
+kyberdash dash clean --harness opencode --no-reingest --yes
 ```
 
-Current-shape `opencode.db`/JSON session files yield measured calls (model qualified,
-tokens, costUSD). Shifted schemas yield honest `not_measurable` errors, never zeros.
-
-Verify without touching the live store. The e2e conformance proof is GREEN 4/4 including
-the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts`, spec header):
+**Test replay.** The e2e spec `dash/e2e/harness-collection.spec.ts` replays recorded OpenCode 2.2.1 events
+through the production plugin, receiver, adapter and projection, against an isolated dashboard and temp
+`canon.db`. It proves what the dashboard renders from that replay. It is not proof of live capture. Run it
+through the watchdog with the isolated config:
 
 ```bash
 scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
-Always pass `--config dash/playwright.isolated.config.ts` and run through the watchdog; see
-[Running tests safely](#running-tests-safely). The spec boots an isolated dashboard against a temp
-`canon.db`, never `~/.kyberdash/canon.db` (see `dash/e2e/harness-collection.spec.ts` and
-`dash/e2e/harness-collection-world.ts`). The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens` (`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output (`dash/src/server/bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only (`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044).
+**Live gate (the proof of live capture).** The gate drives a real OpenCode session on this machine and checks
+kyberDash against OpenCode's own totals. It calls a real model, so it is never part of the test suite. Run it
+only when the owner asks for it. It is started with `npm --prefix dash run gate:opencode-live`, and
+`node dash/scripts/opencode-live-gate/run.mjs --dry-run` prints the plan without running anything. It needs
+the build under test installed and the live kyberDash on `127.0.0.1:4747`. The runner does this, in order:
 
-Manual live-turn gate (manual procedure only — DO NOT run here, DO NOT touch live state,
-DO NOT change consent; durable copy of `dash/e2e/harness-collection.spec.ts`, spec header):
+1. Creates a scratch project outside the repository, with one skill and a three-line file.
+2. Sends prompt 1 (tool and skill) through the shared OpenCode background service, with an explicit model.
+3. Sends prompt 2 in the same session, with the skill attached.
+4. Waits for the session to go idle in `opencode.db`, read only. It interrupts the session on timeout.
+5. Waits for `canon.db` to hold one step record per assistant message, then projects.
+6. Reads kyberDash's API and `opencode.db`, both read only.
+7. Compares them row by row (`compare.mjs`) and writes `comparison.json`.
+8. Runs the UI spec `dash/e2e/opencode-live-gate.spec.ts` against the live dashboard, which writes a screenshot.
+9. Cleans up: no gate `opencode run` left, the session not busy, the scratch project removed.
 
-1. In the owner's OpenCode, pick a cheap already-consented model and run exactly one trivial turn (e.g. ask "say hi" or read one small file, no edits, no network).
-2. Run `kyberdash refresh` (or `kyber dash refresh`) for the opencode harness only, then open the dashboard HarnessDetail for `opencode` and drill into the newest run/session for that turn.
-3. The tiles that must show real numbers (never `—`, never `$0.00` for a missing rate, never `unknown` for the model): the row names the cheap model used; Total Input / Total Output (and the run turns Tokens cell) carry non-zero measured counters; Tool Calls counts >= 1 with the invoked tool listed; Cost renders a `$` figure with basis `published` (or `harness`).
-4. The spec never runs that turn; it pins the same contract against the `hc-opencode-measured-*` fixture (temp DB + booted dashboard, no live host, no real network).
-
-Token capture via response/generate hooks remains unverified.
+The gate passes only when every comparison row, the UI spec and the cleanup pass. Evidence goes to
+`artifacts/evidence/opencode-v2-live-gate/<UTC-stamp>/`, which git ignores, with secrets stripped. The models
+are the approved pair only: `opencode-go/muse-spark-1.3-contributor`, falling back to `opencode/big-pickle`.
+No Anthropic model is used, and no OpenCode session may be left running. Until a recorded run passes, live
+OpenCode capture is not verified.
 
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
@@ -1500,15 +1519,12 @@ pre- and post-edit hashes in a receipt. `disable` restores only keys that still 
 `enable` wrote and otherwise refuses, naming the drift. The CLI has no store, so it never
 touches the receiver setting.
 
-**Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
-and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
-**Codex**, **pi** and **Antigravity** are status-only: status reports them, `enable` and
-`disable` do not write them, and the drawer shows them read-only. **Kilo Code** is a file plugin
-rather than a key writer: `enable` installs one plugin file, `disable` removes it, and the drawer
-shows it with Enable and Disable. OpenCode reads its
-OTLP endpoint from the process environment, so `enable` writes only its flag; the drawer and
-`status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
-KyberDash cannot see whether the shell that launches OpenCode has it set.
+**Which harnesses are written.** Two are managed key writers that can be switched: **Copilot** (VS Code
+and VS Code Insiders `settings.json`) and **Claude Code**. **OpenCode** and **Kilo Code** are file plugins
+rather than key writers: `enable` installs one plugin file, `disable` removes it, and the drawer shows
+them with Enable and Disable. OpenCode writes no key into `opencode.jsonc`. Its enable also sets content
+consent, and its disable turns that consent off. **Codex**, **pi** and **Antigravity** are status-only:
+status reports them, `enable` and `disable` do not write them, and the drawer shows them read-only.
 
 **Kilo Code row.** The `kilo` row is not a key writer (ADR 0031, 2026-10-21 amendments): Kilo
 has no config key that turns on local telemetry export, and `experimental.openTelemetry` is its
@@ -1543,10 +1559,11 @@ env export. Even without the flag, a plugin Squad installed
 into a custom root is still found by `capture status` and `capture disable`, which follow the path in
 the receipt, but only when that path is `<dir>/plugins/kyberdash-opencode.js`, a regular file (not a
 symlink) that carries the KyberDash marker. To re-enable into that custom root, pass
-`--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. OpenCode 2.1.4 loads its default export
-`{ id: 'kyberdash-opencode', setup }`, and `setup` registers one `context` hook that sends each
-request's identity, system prompt, tool definitions and skills listing to the loopback receiver
-through the bounded outbox. The hook only reads OpenCode's request. OpenCode 1.x is not supported yet.
+`--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. The plugin loads the default export
+`{ id: 'kyberdash-opencode', setup }` of OpenCode 2.x, and it posts contract-3 request, step and tool spans to
+the loopback receiver through a bounded outbox. It reads OpenCode's events and hooks and never changes them.
+OpenCode 1.x is not supported ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The
+pipeline is described in [the architecture](architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
 **Install and update: one command.**
 
@@ -1563,9 +1580,10 @@ through the bounded outbox. The hook only reads OpenCode's request. OpenCode 1.x
 - Strict mode (no `--preserve`) refuses to overwrite such a file and exits 1. Add `--dry-run` to
   preview either mode without writing.
 
-**Restart OpenCode after every install or upgrade.** KyberDash cannot restart your OpenCode
-process. The install prints `restart OpenCode to load the upgraded capture plugin` when the file
-changed. Until you restart, OpenCode runs the old plugin or none.
+**If new OpenCode sessions do not show, restart OpenCode.** KyberDash cannot restart your OpenCode
+process. The install prints `harness opencode: OpenCode 2.x picks up the capture plugin for new sessions; if
+KyberDash shows no new OpenCode sessions, restart OpenCode.` Squad and `kyber-weave update` relay that same
+line. Until you restart, a running OpenCode may keep the old plugin or none.
 
 **Content consent.** Consent controls whether the system prompt, tool definitions and skills
 listing are sent. It lives in `~/.kyberdash/opencode-plugin.json` (`{ "version": 1, "content": <bool> }`).
@@ -1573,23 +1591,23 @@ listing are sent. It lives in `~/.kyberdash/opencode-plugin.json` (`{ "version":
 - Install creates that file with `content: false` only if it does not exist. An existing file is
   never rewritten by install or update.
 - **On:** turn OpenCode on in the KyberDash Settings drawer, or run
-  `kyberdash kyber capture enable --harness opencode`. This sets `content: true`, writes
-  `experimental.openTelemetry`, and ensures the engine is running.
+  `kyberdash kyber capture enable --harness opencode`. This installs the plugin, sets `content: true`,
+  and ensures the engine is running.
 - **Off:** turn OpenCode off in the Settings drawer, or run
   `kyberdash kyber capture disable --harness opencode`. This sets `content: false` and removes the
-  plugin file and its JSONC key.
+  plugin file.
 - The plugin reads the consent file on each request, so a change applies without reinstalling. A
   restart is still needed for an upgraded plugin file, not for consent.
 - `KYBERDASH_OPENCODE_CONTEXT=1` forces content on and `0` forces it off. Unset defers to the file.
   This is a debugging override only: a Desktop app started from the Dock does not inherit shell variables.
-- While consent is off, identity and token counts still flow. The system prompt, tool definitions
-  and skills read "not measurable".
+- While consent is off, usage, cost, timings, request structure and tool names still flow. The system
+  prompt, tool definitions, skills listing and prompt text read "not measurable", with a reason.
 
-**Confirm it works.** Restart OpenCode, run one turn, and open the session in the dashboard. The
-Context view should show the system prompt and tool definitions, and the Skills view the listing.
-The tray should show token counts and a context window. The window comes from the plugin when
-OpenCode reports its model limit; otherwise KyberDash's model-window catalog supplies it and the
-view labels it as catalog-derived. A green `capture enable` is still not capture: confirm with a turn.
+**Confirm it works.** Run one turn in OpenCode, then open the session in the dashboard. Usage, cost and
+the request list should show the turn. Under consent, the Context view shows the system prompt and tool
+definitions, and the Skills view shows the listing. The plugin sends no context window, so the window
+follows KyberDash's model-window catalog or its declared-window rules, and the view labels which. A green
+`capture enable` is still not capture: confirm with a turn, then with the live gate in §1b.
 
 **Engine check.** `kyberdash engine ensure --if-running` replaces a live engine of another version and
 starts nothing when none runs. It prints one line: `engine: not-running`, `engine: attached <version>`,
@@ -1819,8 +1837,8 @@ here.
   from your instruction files.
 - **Do not set `OTEL_EXPORTER_OTLP_ENDPOINT` for Kilo to "turn OTel on".** Kilo's OTLP stream
   carries no model spans, usage or content (AI SDK span recording is off upstream), and its
-  `Session.*` spans are claimed by the OpenCode adapter, so they land as quarantined non-model
-  spans attributed to the **OpenCode** source. That is noise, not Kilo records. The Settings row
+  `Session.*` spans are claimed by no adapter, so they land in the unclaimed quarantine. That is
+  noise, not Kilo records. The Settings row
   says the same and deliberately offers no endpoint variable.
 - **Settings row says "not detected":** see the three probe paths under
   [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS

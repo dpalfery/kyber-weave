@@ -563,7 +563,13 @@ kyberdash kyber capture plugin install --harness opencode --preserve --config-di
 - **Scope and opt-out.** Project-scope runs do not run the step. `--no-capture-plugin` on `squad install`
   or `squad update` skips it, and `--dry-run` passes `--dry-run` through to the verb.
 - **Consent.** Install never turns content capture on. The Settings switch (or `kyberdash kyber capture
-  enable --harness opencode`) does that. Until then Squad's output says so in one line.
+  enable --harness opencode`) does that. Until then the verb's own consent line, which Squad relays, says so.
+- **Guidance wording.** Squad prints no OpenCode restart line of its own. It relays the `harness opencode: `
+  lines the verb prints, and KyberDash owns their wording (ADR 0031). After an install or
+  upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
+  for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.`
+- **Support.** The plugin targets OpenCode 2.x only. Squad does not check the OpenCode version before it
+  runs the verb ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 
 ---
 

@@ -89,8 +89,8 @@ wrap `install.sh`, and it refuses `dotnet run` and `dotnet tool` installs. After
 commit, it reconciles KyberDash in one run: `kyberdash engine ensure --if-running`, the tray
 relaunch when needed, then `kyberdash kyber capture plugin install --harness opencode --preserve
 --if-installed`. The reconciliation also runs when the release is unchanged ("already on").
-When the plugin file changed, it prints a line to restart OpenCode. See
-[Updating](install.md#updating).
+When the plugin file changed, it prints a line saying to restart OpenCode if new OpenCode sessions do not
+appear. See [Updating](install.md#updating).
 
 ```bash
 kyber-weave update                      # latest stable, all components
@@ -352,8 +352,8 @@ Owned by the [KyberDash runbook](dash/runbook.md) and
 |---|---|---|
 | [`kyber otel`](dash/runbook.md#1-starting-the-otlp-ingest-receiver) | `--port <number>` (default `4318`), `--host <host>` (default `127.0.0.1`), `--db <path>`, hidden `--serve` | Start the OTLP trace receiver. |
 | [`kyber capture status`](dash/runbook.md) | `--harness <id>` (repeatable), `--endpoint <url>` (default `http://127.0.0.1:4318`), `--config-dir <dir>` (OpenCode plugin root: flag, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`) | Report per-harness capture state and receiver liveness. |
-| [`kyber capture enable`](dash/runbook.md) | capture flags + `--dry-run` + `--config-dir <dir>` (OpenCode plugin root, same precedence as status) | Write harness OTLP exporter keys and record the receipt. For OpenCode also installs the plugin file and sets consent `content: true`. |
-| [`kyber capture disable`](dash/runbook.md) | capture flags + `--dry-run` + `--config-dir <dir>` (OpenCode plugin root, same precedence as status) | Restore pre-enable values per key; refuse on drift. For OpenCode also sets consent `content: false` and removes the plugin file. |
+| [`kyber capture enable`](dash/runbook.md) | capture flags + `--dry-run` + `--config-dir <dir>` (OpenCode plugin root, same precedence as status) | Write harness OTLP exporter keys and record the receipt. For OpenCode, installs the plugin file, sets consent `content: true`, and restores any `experimental.openTelemetry` key that older builds wrote (no key is written). |
+| [`kyber capture disable`](dash/runbook.md) | capture flags + `--dry-run` + `--config-dir <dir>` (OpenCode plugin root, same precedence as status) | Restore pre-enable values per key; refuse on drift. For OpenCode, sets consent `content: false`, removes the plugin file, and runs the same restore of any older `experimental.openTelemetry` key. |
 | [`kyber capture plugin install`](dash/runbook.md) | `--harness opencode` (only value), `--preserve`, `--if-installed`, `--config-dir <dir>`, `--dry-run` | Install or upgrade the OpenCode capture plugin file. `--preserve` keeps an edited, foreign, or receipt-unproven older file (exit 0) and creates the consent file with `content: false` only when absent. `--if-installed` acts only when the file is present. `--config-dir` overrides `$OPENCODE_CONFIG_DIR` and `~/.config/opencode`. Never writes `opencode.jsonc`. |
 | [`kyber backfill`](dash/runbook.md#3-raw-content-backfill-and-re-normalization) | `--db <path>` | Re-derive canonical content for stored records from their raw payloads. |
 | [`kyber renormalize`](dash/runbook.md#3-raw-content-backfill-and-re-normalization) | `--db`, `--source <source>` (repeatable) | Re-derive harness attribution and token conversion. |
