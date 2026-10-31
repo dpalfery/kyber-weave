@@ -265,7 +265,7 @@ public sealed partial class DocumentIndex
             foreach (DocumentLeaf leaf in ExpandScoringLeaves(doc))
             {
                 LeafTopicAssignment assignment = context.Assign(leaf);
-                double claim = ScoreLeafClaim(assignment, doc, trimmed, queryVector);
+                double claim = ScoreLeafClaim(assignment, doc, leaf, trimmed, queryVector);
                 double body = ScoreLeafBody(doc, leaf, queryVector, coverageTerms, corpusAverageLength);
                 string leadLeafId = doc.LeadLeafId;
                 double lead = exactId && string.Equals(leaf.Id, leadLeafId, StringComparison.Ordinal) ? IdWeight : 0;
@@ -297,7 +297,7 @@ public sealed partial class DocumentIndex
             foreach (DocumentLeaf leaf in ExpandScoringLeaves(docWinner))
             {
                 LeafTopicAssignment assignment = context.Assign(leaf);
-                double claim = ScoreLeafClaim(assignment, docWinner, trimmed, queryVector);
+                double claim = ScoreLeafClaim(assignment, docWinner, leaf, trimmed, queryVector);
                 double body = ScoreLeafBody(docWinner, leaf, queryVector, coverageTerms, corpusAverageLength);
                 string leadLeafId = docWinner.LeadLeafId;
                 double lead = exactId && string.Equals(leaf.Id, leadLeafId, StringComparison.Ordinal) ? IdWeight : 0;
@@ -464,24 +464,23 @@ public sealed partial class DocumentIndex
     private static double ScoreLeafClaim(
         LeafTopicAssignment assignment,
         DocumentModel document,
+        DocumentLeaf leaf,
         string trimmed,
         IReadOnlyDictionary<string, double> queryVector)
     {
         List<string> labels = new();
-        if (assignment.IsPreamble)
-        {
-            // Preamble labels come from # declarations only — not implemented in this task.
-        }
-        else
+        AppendSectionVocabularyLabels(document, leaf, labels, out List<string> sectionCodeRefs);
+        if (!assignment.IsPreamble)
         {
             if (!string.IsNullOrEmpty(assignment.TopicHeading))
             {
-                labels.Add(assignment.TopicHeading);
+                labels.Insert(0, assignment.TopicHeading);
             }
 
             if (!string.IsNullOrEmpty(assignment.SubHeading))
             {
-                labels.Add(assignment.SubHeading);
+                int insertAt = string.IsNullOrEmpty(assignment.TopicHeading) ? 0 : 1;
+                labels.Insert(insertAt, assignment.SubHeading);
             }
         }
 
@@ -498,16 +497,89 @@ public sealed partial class DocumentIndex
 
         coverageSum = Math.Min(coverageSum, 4.5);
 
-        foreach (string label in labels)
+        bool exactSectionCodeRef = false;
+        foreach (string reference in sectionCodeRefs)
         {
-            if (string.Equals(trimmed, label, StringComparison.OrdinalIgnoreCase))
+            if (SymbolKeys(reference).Contains(trimmed, StringComparer.Ordinal))
             {
-                coverageSum += 4.0;
+                coverageSum += CodeRefWeight;
+                exactSectionCodeRef = true;
                 break;
             }
         }
 
+        if (!exactSectionCodeRef)
+        {
+            foreach (string label in labels)
+            {
+                if (string.Equals(trimmed, label, StringComparison.OrdinalIgnoreCase))
+                {
+                    coverageSum += KeywordWeight;
+                    break;
+                }
+            }
+        }
+
         return coverageSum;
+    }
+
+    private static void AppendSectionVocabularyLabels(
+        DocumentModel document,
+        DocumentLeaf leaf,
+        List<string> labels,
+        out List<string> sectionCodeRefs)
+    {
+        sectionCodeRefs = [];
+        if (document.Frontmatter.Sections is not { Count: > 0 } sections)
+        {
+            return;
+        }
+
+        string docId = document.Frontmatter.Id ?? document.RelativePath;
+        string preambleId = string.Create(CultureInfo.InvariantCulture, $"{docId}#");
+        string sectionSlug;
+        if (string.Equals(leaf.Id, preambleId, StringComparison.Ordinal))
+        {
+            sectionSlug = "#";
+        }
+        else if (leaf.Id.StartsWith(preambleId, StringComparison.Ordinal))
+        {
+            sectionSlug = leaf.Id[(docId.Length + 1)..];
+        }
+        else
+        {
+            return;
+        }
+
+        if (!sections.TryGetValue(sectionSlug, out DocumentSectionVocabulary? vocabulary))
+        {
+            return;
+        }
+
+        if (vocabulary.Keywords is not null)
+        {
+            foreach (string keyword in vocabulary.Keywords)
+            {
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    labels.Add(keyword);
+                }
+            }
+        }
+
+        if (vocabulary.CodeRefs is not null)
+        {
+            foreach (string reference in vocabulary.CodeRefs)
+            {
+                if (string.IsNullOrWhiteSpace(reference))
+                {
+                    continue;
+                }
+
+                labels.Add(reference);
+                sectionCodeRefs.Add(reference);
+            }
+        }
     }
 
     private double ScoreLeafBody(

@@ -44,10 +44,11 @@ public sealed class DocLinkFragmentValidationTests
     private static LinkFragmentFinding ToFinding(DocumentSet set, Diagnostic diagnostic)
     {
         DocumentModel source = set.Documents.Single(doc => doc.RelativePath == diagnostic.FilePath);
-        BodyLink link = source.LinkTargets.Single(bodyLink =>
-            bodyLink.Line == diagnostic.StartLine - source.BodyStartLine + 1
-            && diagnostic.Message.Contains(
-                $"'#{bodyLink.Fragment}'",
+        int bodyLine = diagnostic.StartLine!.Value - source.BodyStartLine + 1;
+        BodyLink link = source.LinkTargets.First(bodyLink =>
+            bodyLink.Line == bodyLine
+            && diagnostic.Message.StartsWith(
+                $"Link fragment '#{bodyLink.Fragment}' does not match",
                 StringComparison.Ordinal));
 
         string targetPath = string.IsNullOrEmpty(link.Path)
