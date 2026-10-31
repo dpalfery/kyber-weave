@@ -122,6 +122,36 @@ public sealed class SquadTargetResolutionTests : IDisposable
         Assert.Contains("all", exception.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    ///     TryResolve is the single-token recovery path; it must apply the same trimming Parse
+    ///     applies to each comma-separated segment, so a token Parse accepts is never rejected here.
+    /// </summary>
+    [Theory]
+    [InlineData("codex")]
+    [InlineData(" codex")]
+    [InlineData("codex ")]
+    [InlineData("  CODEX  ")]
+    [InlineData("github-copilot")]
+    [InlineData(" github-copilot ")]
+    public void TryResolveAcceptsPaddedTokensThatParseAccepts(string token)
+    {
+        Assert.True(SquadTargetCatalog.TryResolve(token, out SquadTarget target));
+        Assert.Equal(SquadTargetCatalog.Parse([token]).Single(), target);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-a-harness")]
+    [InlineData("codex,claude")]
+    [InlineData("all")]
+    [InlineData(" ALL ")]
+    public void TryResolveRejectsNullBlankUnknownMultiAndAllTokens(string? token)
+    {
+        Assert.False(SquadTargetCatalog.TryResolve(token, out _));
+    }
+
     [Fact]
     public void InstallExplicitTargetsReplaceConfigurationAndMarkers()
     {

@@ -88,8 +88,15 @@ public static class SquadTargetCatalog
     /// </summary>
     public static bool TryResolve(string? token, out SquadTarget target)
     {
-        if (token is not null && TargetsByToken.TryGetValue(token, out target))
-            return true;
+        if (token is not null)
+        {
+            // Same normalization Parse applies to each comma-separated segment (TrimEntries):
+            // surrounding whitespace is not part of the token. Comma-containing input and "all"
+            // expand to zero or more than one target, so they never resolve to a single target.
+            string trimmed = token.Trim();
+            if (trimmed.Length != 0 && TargetsByToken.TryGetValue(trimmed, out target))
+                return true;
+        }
 
         target = default;
         return false;
