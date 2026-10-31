@@ -74,6 +74,9 @@ not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered. Mechanics live 
 | **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. |
 | **Adversarial RED/GREEN role separation** | The two-agent adversarial boundary between `test-dev` (RED) and the implementation specialist (GREEN) is strictly preserved; collapsing RED and GREEN into a single worker dispatch is forbidden. Small adjacent task bundling is permitted strictly for same-role micro-tasks, and an independent verification pass (`task-gate` deterministic exit check and final council review) is mandatory on the integrated working tree. |
 
+Circuit-breaker escalation digests (`STATUS: ESCALATION`) are explicitly exempted from the 6-field completion requirements (`FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`).
+When a worker returns `STATUS: ESCALATION`, the conductor accepts the escalation payload without rejecting it for missing completion fields or missing `TASK_GATE` and routes it directly to architect mediation without rejection.
+
 ---
 
 ## User-facing response format

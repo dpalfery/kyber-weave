@@ -13,7 +13,7 @@ impact-components: [KyberSquad, ReviewCouncil]
 
 # Kyber-Squad performance improvements and execution latency reduction
 
-**Status: Archived — complete 2026-10-30.** All tasks T1–T5 delivered under test-first development mode. Contract tests pass 26/26 in SquadPerformanceContractTests; full suite passes 4,278 total / 4,251 passed / 0 failed; deterministic gates and doc checks pass clean with 0 findings.
+**Status: Archived — complete 2026-10-30.** All tasks T1–T5 delivered under test-first development mode. Contract tests pass 68/68 in SquadPerformanceContractTests (68 tests); full suite passes 4,278 total / 4,251 passed / 0 failed; deterministic gates and doc checks pass clean with 0 findings.
 
 **Development mode:** `test-first` (default; no user opt-out).  
 **Autonomy:** `autonomous` (resolved from repository Config Reg `<autonomy>`).  
