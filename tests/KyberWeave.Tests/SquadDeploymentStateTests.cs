@@ -1090,8 +1090,77 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
         }
 
-        Assert.Contains(entry, plan.DegradedFiles);
+        Assert.True(
+            OwningTargetsOf(plan, entry).Contains("Codex"),
+            $"The degraded '{entry}' must record its owning target 'Codex'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
         Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
+    }
+
+    /// <summary>
+    ///     A plan can span several targets, and a degraded path is only meaningful with its owner: the warning
+    ///     must name the target that owns the unreadable file. Without the owner recorded, a caller naming all
+    ///     targets would blame a healthy harness for another target's unreadable file.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateRecordsTheOwningTargetOfEachDegradedFileWhenThePlanCoversSeveralTargets()
+    {
+        using TempDirectory fixture = new();
+        const string codexEntry = ".codex/agents/conductor.toml";
+        const string claudeEntry = ".claude/agents/conductor.md";
+        SquadReceipt oldReceipt = Receipt(
+            new SquadOwnedFile(codexEntry, Digest("codex body"), "codex", false),
+            new SquadOwnedFile(claudeEntry, Digest("claude body"), "claude", false));
+        Write(fixture.Path, codexEntry, "codex body");
+        Write(fixture.Path, claudeEntry, "claude body");
+        string codexPath = Path.Combine(fixture.Path, codexEntry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(codexPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [
+                    Rendered(codexEntry, "codex body", "codex"),
+                    Rendered(claudeEntry, "claude body", "claude")
+                ],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.Single(plan.DegradedFiles);
+        IReadOnlyList<string> owners = OwningTargetsOf(plan, codexEntry);
+        Assert.True(
+            owners.SequenceEqual(ExpectedCodexOwner),
+            $"The degraded '{codexEntry}' must record exactly its owning target 'Codex'; it records [{string.Join(", ", owners)}].");
+        Assert.Empty(OwningTargetsOf(plan, claudeEntry));
+    }
+
+    private static readonly string[] ExpectedCodexOwner = ["Codex"];
+
+    /// <summary>
+    ///     Reads each degraded record's owning target. Until <c>DegradedFiles</c> carries its owner, the entries
+    ///     are bare paths and no owner can be read, so the assertion fails for the stated reason rather than
+    ///     compiling against a shape that does not exist yet.
+    /// </summary>
+    private static IReadOnlyList<string> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath)
+    {
+        List<string> owners = [];
+        foreach (object degraded in plan.DegradedFiles.Cast<object>())
+        {
+            if (degraded is string)
+                continue;
+
+            string? path = degraded.GetType().GetProperty("RelativePath")?.GetValue(degraded) as string;
+            object? target = degraded.GetType().GetProperty("Target")?.GetValue(degraded);
+            if (path == relativePath && target is not null)
+                owners.Add(target.ToString()!);
+        }
+
+        return owners;
     }
 
     /// <summary>

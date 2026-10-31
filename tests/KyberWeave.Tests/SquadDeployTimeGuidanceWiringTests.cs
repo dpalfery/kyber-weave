@@ -218,6 +218,48 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
             warning => NamesPathAndTargetOutsideIt(warning, "conductor.toml", "codex"));
     }
 
+    /// <summary>
+    ///     A request can cover several targets, and the degraded warning must name only the target that owns the
+    ///     unreadable file. Naming every requested target would send the operator to a healthy harness, such as
+    ///     Claude, to look for a file that was never unreadable there.
+    /// </summary>
+    [Fact]
+    public async Task UpdateNamesOnlyTheOwningTargetOfAnUnreadableEntryWhenTheRequestCoversSeveralTargets()
+    {
+        using Harness h = NewHarness("unreadable-entry-owner-multi");
+        string anchor = h.MakeDirectory("anchor");
+        WriteHomeGuidance(h, "Version 1 guidance.");
+
+        SquadLifecycleService lifecycle = h.Lifecycle(SquadCommandComposition.ResolveRenderer());
+        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
+            anchor,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Codex, SquadTarget.Claude],
+            Version: "1.2.3"))).Success);
+
+        string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
+        SquadLifecycleResult update;
+        using (Harness.DenyReadOrSkip(conductor))
+        {
+            update = await lifecycle.UpdateAsync(new SquadUpdateRequest(
+                anchor,
+                SquadDeploymentScope.Global,
+                [SquadTarget.Codex, SquadTarget.Claude],
+                Version: "1.2.4"));
+        }
+
+        Assert.True(update.Success, DescribeFailure(update));
+        string warning = Assert.Single(
+            update.Warnings ?? [],
+            line => line.StartsWith("Could not read deployed file", StringComparison.Ordinal));
+        Assert.True(
+            NamesPathAndTargetOutsideIt(warning, "conductor.toml", "codex"),
+            $"The degraded warning must name the owning target 'codex'; it reads: {warning}");
+        Assert.False(
+            NamesTargetOutsideQuotedPath(warning, "claude"),
+            $"The degraded warning must not name the healthy target 'claude'; it reads: {warning}");
+    }
+
     [Fact]
     public async Task DoctorParityMatchesDeployedBytesAfterInjection()
     {
@@ -462,6 +504,12 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         string withoutQuotedPath = System.Text.RegularExpressions.Regex.Replace(warning, "'[^']*'", "''");
         return warning.Contains(fileName, StringComparison.Ordinal)
             && withoutQuotedPath.Contains(target, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool NamesTargetOutsideQuotedPath(string warning, string target)
+    {
+        string withoutQuotedPath = System.Text.RegularExpressions.Regex.Replace(warning, "'[^']*'", "''");
+        return withoutQuotedPath.Contains(target, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DescribeFailure(SquadLifecycleResult result)

@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Packaging;
@@ -115,41 +116,25 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
-    /// Guards the isolation rule: the packer consults the home seam but ships only the shipped default, so
-    /// the operator's home guidance never reaches an archive and the home file is neither written nor removed.
-    /// The seam must be consulted; a packer that ignores it would make the isolation check vacuous, because
-    /// no home lookup would ever be exercised against a non-default home file.
+    /// Guards the isolation rule: the packer takes no home or environment input at all, so the operator's
+    /// home guidance cannot reach an archive and the home file is neither written nor removed. The home
+    /// guidance is planted in a temp directory that is never handed to the packer and no process variable is
+    /// touched, so the packed block must equal the shipped default and the marker must appear nowhere.
     /// </summary>
     [Fact]
-    public void Pack_ConsultsTheHomeSeamButShipsOnlyTheShippedDefault()
+    public void Pack_OfTheShippedSourceIgnoresTheOperatorHomeGuidanceBecauseItTakesNoHomeInput()
     {
-        // The operator's home is a temp directory holding a non-default guidance, so the leak check always
-        // has input. The home is supplied through the injectable environment seam, so no process-wide
-        // variable is mutated and parallel test classes are unaffected.
         string home = Path.Combine(_temp.Path, "home");
         string homePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
         Directory.CreateDirectory(Path.GetDirectoryName(homePath)!);
         File.WriteAllText(homePath, OperatorText, Encoding.UTF8);
 
-        List<string> homeLookups = [];
-        Func<string, string?> readEnvironment = name =>
-        {
-            if (name is "HOME" or "USERPROFILE")
-            {
-                homeLookups.Add(name);
-                return home;
-            }
-
-            return null;
-        };
-
         byte[] homeBytesBefore = File.ReadAllBytes(homePath);
         DateTime homeWriteBefore = File.GetLastWriteTimeUtc(homePath);
 
-        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home", readEnvironment);
-        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home", readEnvironment);
+        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
+        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
 
-        Assert.NotEmpty(homeLookups);
         Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
         Assert.True(
             homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
@@ -174,6 +159,29 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
                 Assert.False(
                     ReadEntryText(entry).Contains(OperatorText, StringComparison.Ordinal),
                     $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Guards the isolation proof itself: a packer that accepted an environment or home resolver would make the
+    /// no-leak check circular, because a test could only show the seam was consulted, never that it was ignored.
+    /// Removing the parameter from the public surface makes "the packer reads no home input" a structural fact.
+    /// </summary>
+    [Fact]
+    public void Packer_PublicSurfaceAcceptsNoEnvironmentOrHomeParameter()
+    {
+        MethodInfo[] packerMethods = typeof(SquadPacker)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static);
+
+        Assert.NotEmpty(packerMethods);
+        foreach (MethodInfo method in packerMethods)
+        {
+            foreach (ParameterInfo parameter in method.GetParameters())
+            {
+                Assert.False(
+                    parameter.ParameterType == typeof(Func<string, string?>),
+                    $"SquadPacker.{method.Name} takes an environment resolver parameter '{parameter.Name}'; the packer must take no home or environment input.");
             }
         }
     }
