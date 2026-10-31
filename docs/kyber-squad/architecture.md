@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -1158,10 +1158,13 @@ invent a reason. `KS-001`–`KS-008` are unchanged; this contract does not add a
 
 ### Escalation (Q5)
 
-When the breaker trips — or a worker returns `STATUS: ESCALATION` — the conductor
+When the breaker trips — or a worker returns a valid escalation (`STATUS: ESCALATION` with
+exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set) — the conductor
 immediately halts rework for that task, does not dispatch further workers for that
 cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
-prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
+prefix as `ESCALATION: end-of-run`). A valid escalation never completes the task or clears its
+exit gate; a `STATUS: ESCALATION` without a valid trigger is not an escalation and is rejected
+like any completion digest. Non-dependent queue tasks may continue. The run
 cannot complete while an unresolved circuit-breaker finding exists in supervised mode. At queue drain,
 `architect` investigates the cluster and authors an intake recommendation or Draft plan.
 In autonomous mode the breaker is not a run stop. Its halt on rework is unchanged, and an

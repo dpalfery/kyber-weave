@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 ---
 
 # Test coding standard
@@ -131,6 +131,8 @@ During task execution and active development, do not invoke the full `dotnet tes
 ```bash
 dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
 ```
+
+When the build used `--artifacts-path <dir>`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll`, not `bin/Release`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
 
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
 - **Reserve full suite for task end / final council**: Running the complete test suite across all classes is reserved for final task completion or pre-push review council gates. Never run the full test suite on inner iteration loops.

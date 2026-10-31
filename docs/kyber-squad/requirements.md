@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -71,11 +71,11 @@ not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered. Mechanics live 
 |---|---|
 | **Build-once, test-many iteration** | Workers build the test project once before iteration (`dotnet build KyberWeave.sln -c Release`) and use `--no-build` or direct assembly runner invocations (`dotnet <dll> -class ... -reporter quiet`) during inner-loop RED/GREEN cycles. Running the full test suite during inner iteration is forbidden; full-suite execution is reserved for task exit gates (`task-gate`) and final council review. |
 | **Zero-stash RED proofs** | Capturing honest RED proof evidence must never use `git stash` or `git stash pop` on dirty working trees. RED proofs are captured by running newly authored tests against a clean base checkout, a throwaway working tree copy, or an isolated `git worktree` before production implementation begins. |
-| **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL` (unless explicitly escalating a blocking issue). |
+| **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. The only exemption is a valid escalation (`STATUS: ESCALATION` with a valid `CIRCUIT_BREAKER_TRIGGER`), defined in [the rule below this table](#conductor-execution-and-worker-invariants). |
 | **Adversarial RED/GREEN role separation** | The two-agent adversarial boundary between `test-dev` (RED) and the implementation specialist (GREEN) is strictly preserved; collapsing RED and GREEN into a single worker dispatch is forbidden. Small adjacent task bundling is permitted strictly for same-role micro-tasks, and an independent verification pass (`task-gate` deterministic exit check and final council review) is mandatory on the integrated working tree. |
 
-Circuit-breaker escalation digests (`STATUS: ESCALATION`) are explicitly exempted from the 6-field completion requirements (`FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`).
-When a worker returns `STATUS: ESCALATION`, the conductor accepts the escalation payload without rejecting it for missing completion fields or missing `TASK_GATE` and routes it directly to architect mediation without rejection.
+A valid escalation is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set (`ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`) and its payload lines (`FAILURE_CLUSTER`, `CONTRADICTORY_INVARIANTS`, `BLAST_RADIUS`, `RECOMMENDED_ACTION`); only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules. A `STATUS: ESCALATION` without a valid `CIRCUIT_BREAKER_TRIGGER` is not an escalation: it is checked and rejected like any completion digest. A valid escalation wins the routing (halt rework, record `ESCALATION: circuit-breaker`, architect mediation) but never completes the task or clears its exit gate; a `TASK_GATE: FAIL` it carries is recorded in the finding with its gate ids, and the task stays open until a later dispatch returns a fresh passing `TASK_GATE:` line against the current tree.
+When a worker returns a valid escalation, the conductor accepts the escalation payload without rejecting it for missing completion fields or missing `TASK_GATE` and routes it directly to architect mediation without rejection.
 
 ---
 
