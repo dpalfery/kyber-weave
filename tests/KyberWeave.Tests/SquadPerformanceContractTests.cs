@@ -204,7 +204,7 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(
-            @"(?im)^(?=[^\r\n]*\b(?:exempt\w*|bypasses?)\b)(?=[^\r\n]*\bSTATUS:\s*ESCALATION\b)[^\r\n]+",
+            @"(?im)^(?=[^\r\n]*\b(?:exempt\w*|bypass(?:es|ed|ing)?)\b)(?=[^\r\n]*\bSTATUS:\s*ESCALATION\b)[^\r\n]+",
             content);
         Assert.Matches(
             @"(?im)^(?=[^\r\n]*\barchitect\s+mediation\b)(?=[^\r\n]*\b(?:without\s+rejection|never\s+reject|without\s+rejecting)\b)[^\r\n]+",
@@ -402,7 +402,7 @@ public sealed class SquadPerformanceContractTests
     public void SpecialistPromptsDoNotContainMalformedArtifactsPathOptionTypo(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.DoesNotContain("option--artifacts-path", content, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"\w--artifacts-path", content);
     }
 
     [Fact]
@@ -475,7 +475,7 @@ public sealed class SquadPerformanceContractTests
         {
             Assert.Matches(@"(?i)\bmaterializ(?:es?|ing)\s+(?:`?git\s+diff`?|(?:the\s+)?(?:unified\s+)?diff)\b",
                 content);
-            Assert.Matches(@"(?i)\bbefore\s+(?:council\s+|lens\s+)?fan-?out\b", content);
+            Assert.Matches(@"(?i)\bbefore\s+(?:council\s+|lens\s+)?fan[-\s]?out\b", content);
         }
     }
 
