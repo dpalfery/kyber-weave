@@ -89,6 +89,17 @@ describe('the request span', () => {
     expect((request['status'] as { code: string }).code).toBe('STATUS_CODE_ERROR')
   })
 
+  it('leaves the status unset for an execution that ended with no terminal event: unknown is not a failure', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await stopPlugin(cleanup)
+    const request = requestOf(rcv)
+    expect(attr(request, OPENCODE_KEYS.executionOutcome)).toEqual({ stringValue: 'unknown' })
+    expect(request['status']).toBeUndefined()
+  })
+
   it('maps an interrupted execution to outcome interrupted and carries the reason', async () => {
     const rcv = receiver()
     const host = createHost()

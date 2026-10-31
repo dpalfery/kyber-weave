@@ -170,6 +170,15 @@ function span(
 // ---------------------------------------------------------------------------------------------
 // Spans
 
+/**
+ * The request span's status. `unknown` means no terminal event was seen, which is not a failure,
+ * so it carries no status (OTLP unset) instead of an error.
+ */
+function requestStatus(outcome: RequestOutcome): OtlpWireStatus | undefined {
+  if (outcome === 'unknown') return undefined
+  return { code: outcome === 'succeeded' ? 'STATUS_CODE_OK' : 'STATUS_CODE_ERROR' }
+}
+
 /** The request span: parentless, covering one execution. */
 export function mapRequestSpan(record: RequestRecord): OtlpWireSpan {
   const attributes = identity(record.sessionId, 'request')
@@ -182,8 +191,9 @@ export function mapRequestSpan(record: RequestRecord): OtlpWireSpan {
   }
   if (nonEmpty(record.promptText)) attributes.push(str(OPENCODE_KEYS.promptText, record.promptText))
   if (nonEmpty(record.label)) attributes.push(str(OPENCODE_KEYS.sessionLabel, record.label))
+  const status = requestStatus(record.outcome)
   return span(record.sessionId, 'request', record.anchorId, record.startMs, record.endMs, attributes, {
-    status: { code: record.outcome === 'succeeded' ? 'STATUS_CODE_OK' : 'STATUS_CODE_ERROR' },
+    ...(status !== undefined ? { status } : {}),
   })
 }
 
