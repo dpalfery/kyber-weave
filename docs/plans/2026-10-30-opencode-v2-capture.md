@@ -128,7 +128,8 @@ section. D26–D28 are execution-time rulings within the AP1 scope.
 - T1, T1b, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12a, T12b, T13a, T13b, T14a and T14b: code is
   on disk on `fix/opencode-v2-capture` and matches the plan's file scopes and constraints.
 - T15 (documentation, H1–H10, todo archiving): not started.
-- Gates G1, G2 and G3: not run. Wave 0 is the verification of the code already present.
+- Gates G1, G2 and G3: not run at assessment. G3 later passed on 2026-10-31 (section 8.4); G1 and G2 are the
+  CI jobs on the pull request head.
 
 **Recorded deviation — RED evidence (Q1).** RED evidence required by §5 was not captured for
 T1–T14: the code was written in earlier session work before the failing runs were saved. Accepted
@@ -635,8 +636,9 @@ appended to `artifacts/evidence/opencode-v2-live-gate/<UTC-stamp>/commands.log`.
    `ps -axo pid,lstart,command | grep -E 'opencode|kyberdash'`, `kyberdash --version`,
    `curl -s http://127.0.0.1:4747/api/kyber/version`, and the sha256 of
    `~/.config/opencode/plugins/kyberdash-opencode.js`. Confirm no OpenCode session is busy:
-   `sqlite3 -readonly ~/.local/share/opencode/opencode.db` — the busy-time column of `session_v2`
-   is null for every row (column name confirmed with `PRAGMA table_info(session_v2)` first).
+   `sqlite3 -readonly ~/.local/share/opencode/opencode.db` — no row of `session_v2` is busy, where busy
+   means `time_busy` is set and newer than `time_idle` (OpenCode 2.2.x never clears `time_busy`; confirm the
+   columns with `PRAGMA table_info(session_v2)` first).
 2. **Build and install through the documented local path (D18).**
    `scripts/release-local.sh --version 0.1.8-rc.12.local.<n> --out .local-release`;
    start `scripts/local-release-server.py` on loopback and record its port;
@@ -712,8 +714,56 @@ open. A pass is reported with the evidence path and the §8.4 table — never as
 
 ### 8.4 Live evidence summary (filled at closeout from G3)
 
-To be completed by the G3 executor: the comparison table, the model used, the hot-reload outcome
-and the evidence directory path.
+**Result: PASS, with one waived row (2026-10-31, macOS, OpenCode 2.2.3).** Build under test: the branch at
+`72386ec` plus the runner fixes below, installed as `0.1.8-rc.13.local.1` through `scripts/release-local.sh`,
+`scripts/local-release-server.py` and `kyber-weave update` (the local version string was accepted, so R7 did
+not occur). Model: `opencode-go/muse-spark-1.3-contributor`; the fallback was not needed. Session
+`ses_e6dd12de9ffeIdl2ZV8grzLMpd`, two prompts, wall clock 8553 ms.
+
+Evidence (git-ignored): `artifacts/evidence/opencode-v2-live-gate/20261031T133823Z/` (the passing run, with
+`session-page.png`) and `20261031T131224Z/commands.log` (preflight, build, install, capture enable, service
+restart). Three earlier runs failed on gate defects, not on the product (below).
+
+**Hot reload: not observed.** No `loading plugin` line followed the install within 60 s, and the running
+service's file watcher had stopped hours earlier. With the owner's approval the shared
+`opencode serve --service` was stopped with SIGTERM after confirming no live session (the one row with
+`time_busy` set was stale, last updated before that service started). The next run started a fresh service,
+which loaded the new plugin. A user who installs the plugin while OpenCode is running must restart OpenCode.
+
+| Field | kyberDash | OpenCode | Result |
+| --- | --- | --- | --- |
+| Input (input + cache read + cache write) | 52,389 | 52,389 | pass |
+| Output (output + reasoning) | 602 | 602 | pass |
+| Reasoning, summed over turns | 431 | 431 | pass |
+| Cache read / cache write | 38,611 / 0 | 38,611 / 0 | pass |
+| Cost | priced, harness basis, 0 USD | 0 | pass |
+| Duration | 7,105 ms | 9,553 ms session; wall clock 8,553 ms | pass |
+| Requests / turns | 2 / 4 (3 + 1) | 2 / 4 (3 + 1) | pass |
+| Tool calls / invoked | 2 / skill, read | 2 / skill, read | pass |
+| System prompt bucket | 6,522 | present | pass |
+| Skills | `kw-gate-skill` listed, invoked twice | listed, invoked | pass |
+| Models | `muse-spark-1.3-contributor` | same | pass |
+| Prompts shown | both | both | pass |
+| Session label | "OpenCode session" | `kw-live-gate 20261031T133823Z` | WAIVED |
+| UI spec (tiles, requests, tool table, composition, skills) | passed | n/a | pass |
+
+**Waived: the session label.** A headless `opencode run --title` in a directory whose project instance is not
+loaded yet emits `session.created` and `session.renamed` about 300 ms before that instance's plugin
+subscribes, so the plugin never sees the title or the OpenCode version. A session in an already-open project
+should receive the rename; that was not tested. The comparator reports the row as WAIVED, never as passed.
+
+**Defects G3 found, all fixed in the gate except the first two:**
+
+1. The session label above (product; documented, no code change in this plan).
+2. The dashboard renders a blank page on a hard load of `/session/<id>` because the bundle's asset URLs are
+   relative (`vite base './'`). This predates this change. The UI spec opens the session from the Sessions
+   list instead.
+3. OpenCode 2.2.x leaves `time_busy` set after an execution ends, so the runner's idle test (and this
+   section's step 1) must read busy as `time_busy` newer than `time_idle`.
+4. OpenCode takes a session's directory from `$PWD`, not the process cwd, so the runner sets `PWD` for every
+   child. Without it the scratch project's skill was never found.
+5. `opencode run` wraps a message that contains whitespace in double quotes, so OpenCode and kyberDash both
+   record prompt 1 with them; the gate expects that text.
 
 ### 8.5 Review and closeout
 

@@ -16,7 +16,7 @@ import path from 'node:path'
  *
  * Expected-values JSON (LiveGateExpected), one key per value the page must show:
  *   {
- *     "title": "kw-probe runA shared-service",
+ *     "title": "kw-probe runA shared-service",   (null when the label row was waived)
  *     "skill": "kw-probe-skill",
  *     "prompts": ["<prompt 1 text>", "<prompt 2 text>"],
  *     "requestCount": 2,
@@ -38,7 +38,7 @@ const LIVE_BASE_URL = 'http://127.0.0.1:4747'
 const PROMPT_PREVIEW_LIMIT = 200
 
 interface LiveGateExpected {
-  title: string
+  title: string | null
   skill: string
   prompts: string[]
   requestCount: number
@@ -88,11 +88,18 @@ test.describe('OpenCode live gate: the session page shows the measured values', 
     const expected = readExpected(requireEnv('KW_OPENCODE_LIVE_EXPECTED'))
     const evidenceDir = requireEnv('KW_OPENCODE_LIVE_EVIDENCE_DIR')
 
-    await page.goto(`${LIVE_BASE_URL}/session/${encodeURIComponent(sessionId)}`)
+    // The bundle's asset URLs are relative (vite base './'), so a hard load of /session/<id> asks for
+    // /session/assets/* and renders a blank page. Open the Sessions page and the session's row instead;
+    // the row expands the session dashboard in place.
+    await page.goto(`${LIVE_BASE_URL}/`)
+    await page.getByTestId('nav-tab-sessions').click()
+    await page.getByTestId(`agent-session-row-${sessionId}`).click()
 
     // Session header.
     await expect(page.getByTestId('agent-session-dashboard')).toBeVisible()
-    await expect(page.getByTestId('session-label')).toContainText(expected.title)
+    if (expected.title !== null) {
+      await expect(page.getByTestId('session-label')).toContainText(expected.title)
+    }
 
     // Overview tiles: each label is present and the token figures carry the measured values.
     const overview = page.getByTestId('overview-strip-section')

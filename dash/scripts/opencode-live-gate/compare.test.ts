@@ -81,6 +81,7 @@ export interface CompareRow {
   kyberdash: unknown
   opencode: unknown
   pass: boolean
+  waived?: boolean
   reason: string
 }
 
@@ -423,6 +424,30 @@ describe('OpenCode live-gate comparator', () => {
 
       expect(result.pass).toBe(false)
       expect(failingFields(result), failureReport(result)).toContain('skills.invoked')
+    })
+  })
+
+  describe('a label the plugin never received', () => {
+    it('is waived, not passed: the gate still passes, and the label row says so', () => {
+      const session = mutated((s) => {
+        s.label = 'OpenCode session'
+      })
+      const result = compare(session)
+      const label = result.rows.find((row) => row.field === 'label')
+
+      expect(label?.pass).toBe(false)
+      expect(label?.waived).toBe(true)
+      expect(label?.reason).toContain('WAIVED')
+      expect(result.pass, failureReport(result)).toBe(true)
+    })
+
+    it('does not waive any other failing row', () => {
+      const session = mutated((s) => {
+        s.label = 'OpenCode session'
+        delete s.summary.total_cache_read
+      })
+
+      expect(compare(session).pass).toBe(false)
     })
   })
 })

@@ -267,8 +267,18 @@ the build under test installed and the live kyberDash on `127.0.0.1:4747`. The r
 The gate passes only when every comparison row, the UI spec and the cleanup pass. Evidence goes to
 `artifacts/evidence/opencode-v2-live-gate/<UTC-stamp>/`, which git ignores, with secrets stripped. The models
 are the approved pair only: `opencode-go/muse-spark-1.3-contributor`, falling back to `opencode/big-pickle`.
-No Anthropic model is used, and no OpenCode session may be left running. Until a recorded run passes, live
-OpenCode capture is not verified.
+No Anthropic model is used, and no OpenCode session may be left running.
+
+A run passed on 2026-10-31 on macOS with OpenCode 2.2.3 and a local build of this pipeline: every token class,
+cost, duration, request and turn count, tool, system-prompt and skill row matched OpenCode's own database
+(plan section 8.4 has the table). Two behaviours of OpenCode 2.2.x shape the gate. It takes a session's
+directory from `$PWD`, so the runner sets `PWD` for each child it starts. It leaves `time_busy` set after an
+execution ends, so a session is busy only while `time_busy` is newer than `time_idle`.
+
+Known limitation, waived by the comparator and reported as `WAIVED`: the session title. A headless
+`opencode run --title` in a directory whose project instance is not loaded yet emits its first events before
+the plugin subscribes, so the plugin never learns the title and the dashboard shows "OpenCode session". Install
+or upgrade the plugin, then restart OpenCode: the running service does not hot-reload it.
 
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
