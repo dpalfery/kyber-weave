@@ -340,6 +340,8 @@ type SessionState = {
   version?: string
   label?: string
   execution?: ExecutionState
+  /** The last anchor made up for an execution-started event that carried no id. */
+  madeUpAnchor?: { createdMs: number; repeat: number }
   /** Prompts seen while no execution was open: they belong to the next one. */
   pendingPrompts: Prompts
   pendingSkills: Set<string>
@@ -355,6 +357,16 @@ type SessionState = {
 function oldest<K>(keys: IterableIterator<K>): K | undefined {
   const first = keys.next()
   return first.done === true ? undefined : first.value
+}
+
+/**
+ * The anchor for an execution-started event the host gave no id: its time, and a repeat number when
+ * the previous such event in the session had the same time, so two executions never share a span id.
+ */
+function madeUpAnchor(state: SessionState, createdMs: number): string {
+  const repeat = state.madeUpAnchor?.createdMs === createdMs ? state.madeUpAnchor.repeat + 1 : 0
+  state.madeUpAnchor = { createdMs, repeat }
+  return repeat === 0 ? `created:${createdMs}` : `created:${createdMs}#${repeat}`
 }
 
 /** Adds one prompt: always counted; its text kept (capped, blank-line joined) only when content may be kept. */
@@ -591,7 +603,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
       case 'execution.started':
         flushUnknown(state)
         state.execution = {
-          anchorId: event.id ?? `created:${event.created}`,
+          anchorId: event.id ?? madeUpAnchor(state, event.created),
           startMs: event.created,
           lastCreatedMs: event.created,
           prompts: state.pendingPrompts,
