@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -174,7 +175,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
-SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
@@ -752,6 +753,67 @@ SquadSource source = TestSquadCorpus.CanonicalSource;
             whitelistedDroids > 0,
             "No droid is entitled to the declared servers, so nothing about the emission order "
             + "was exercised.");
+    }
+
+    /// <summary>
+    /// A profile that denies <c>filesystem.read</c> withholds the whitelist while a read-allowed
+    /// sibling keeps it, so the read-entitlement clause is load-bearing rather than a
+    /// restatement of the shipped corpus.
+    /// </summary>
+    /// <remarks>
+    /// Every non-orchestrator profile in the shipped squad allows <c>filesystem.read</c>, which
+    /// leaves the clause indistinguishable from "every non-orchestrator profile is entitled":
+    /// dropping it from the renderer, or narrowing a profile to deny reads, would keep the rest
+    /// of this suite green while a role whose own profile withholds file reads was handed a
+    /// documentation server it has no grant to use. This case is what makes the clause fail a
+    /// build instead.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_WithholdsTheWhitelistWhenTheProfileDeniesFileRead()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        IReadOnlyList<string> declared = DeclaredMcpServerNames(source);
+        Assert.NotEmpty(declared);
+
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+        SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal(
+            SquadPermissionDecision.Deny,
+            source.CapabilityProfiles.Profiles[denied.CapabilityProfile].Permissions["filesystem.read"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[entitled.CapabilityProfile].Permissions["filesystem.read"]);
+        Assert.Empty(ExpectedFactoryMcpServers(source, denied, declared));
+        Assert.Equal(declared, ExpectedFactoryMcpServers(source, entitled, declared));
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.Empty(RenderedMcpServers(result, denied.Name));
+        Assert.Equal(declared, RenderedMcpServers(result, entitled.Name));
+
+        SquadDegradationRecord withheld = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(withheld.Details);
+        Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            IReadOnlyList<string> expected = ExpectedFactoryMcpServers(source, agent, declared);
+            IReadOnlyList<string> actual = RenderedMcpServers(result, agent.Name);
+            Assert.True(
+                expected.SequenceEqual(actual, StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') rendered "
+                + $"mcpServers [{string.Join(", ", actual)}], but the declared servers plus the "
+                + $"entitlement rule require [{string.Join(", ", expected)}].");
+        }
     }
 
     /// <summary>
@@ -1393,12 +1455,20 @@ SquadSource source = TestSquadCorpus.CanonicalSource;
 /// </summary>
 /// <remarks>
 /// A copy rather than an edit keeps the canonical corpus as the thing under test: everything
-/// except the declaration stays real, including the agent roster the whitelist is projected
-/// onto. <see cref="WithServers"/> keeps the declaration order the caller passes, so a test can
-/// tell ordinal emission from insertion order.
+/// except the one variable a variant names stays real, including the agent roster the whitelist
+/// is projected onto. <see cref="WithServers"/> keeps the declaration order the caller passes,
+/// so a test can tell ordinal emission from insertion order.
 /// </remarks>
 internal sealed class McpDeclarationCorpusFixture : IDisposable
 {
+    /// <summary>
+    /// The profile <see cref="WithFileReadDeniedAgent"/> points its agent at: the corpus's own
+    /// <c>read-only</c> profile with <c>filesystem.read</c> flipped to deny.
+    /// </summary>
+    private const string FileReadDeniedProfile = "read-only-no-file-read";
+
+    private const string ReadOnlyProfile = "read-only";
+
     private readonly TempDirectory _temp = new();
 
     private McpDeclarationCorpusFixture()
@@ -1410,10 +1480,7 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
 
     internal static McpDeclarationCorpusFixture WithServers(params string[] serverNames)
     {
-        McpDeclarationCorpusFixture fixture = new();
-        PiCorpusFixtureHelpers.CopyDirectory(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
-            fixture.ProductRoot);
+        McpDeclarationCorpusFixture fixture = CopyCanonical();
 
         Dictionary<string, Dictionary<string, object>> servers = new(StringComparer.Ordinal);
         foreach (string name in serverNames)
@@ -1433,6 +1500,128 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
         return fixture;
+    }
+
+    /// <summary>
+    /// Copies the canonical corpus, adds
+    /// <see cref="FileReadDeniedProfile"/> as a clone of <c>read-only</c> with
+    /// <c>filesystem.read: deny</c>, and points <paramref name="agentName"/> at it.
+    /// </summary>
+    /// <remarks>
+    /// The profile is a clone rather than a fresh declaration so the read decision is the only
+    /// difference from a profile the corpus already ships — the test then isolates the
+    /// entitlement clause instead of also changing search, execute, and delegation. The Copilot
+    /// roster is narrowed with it because the source validator checks every Copilot tool against
+    /// the shared profile, and a read-denied profile cannot justify a read tool.
+    /// </remarks>
+    internal static McpDeclarationCorpusFixture WithFileReadDeniedAgent(string agentName)
+    {
+        McpDeclarationCorpusFixture fixture = CopyCanonical();
+        fixture.AddReadDeniedVariantOf(ReadOnlyProfile);
+        fixture.RepointAgent(agentName);
+        return fixture;
+    }
+
+    private static McpDeclarationCorpusFixture CopyCanonical()
+    {
+        McpDeclarationCorpusFixture fixture = new();
+        PiCorpusFixtureHelpers.CopyDirectory(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            fixture.ProductRoot);
+        return fixture;
+    }
+
+    private void AddReadDeniedVariantOf(string sourceProfileName)
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        string[] lines = File.ReadAllLines(path);
+
+        int start = Array.IndexOf(lines, $"  {sourceProfileName}:");
+        if (start < 0)
+        {
+            throw new InvalidOperationException(
+                $"Expected '{path}' to declare profile '{sourceProfileName}' to clone.");
+        }
+
+        int end = start + 1;
+        while (end < lines.Length && !IsProfileHeader(lines[end]))
+        {
+            end++;
+        }
+
+        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
+        {
+            end--;
+        }
+
+        List<string> clone = [.. lines[start..end]];
+        clone[0] = $"  {FileReadDeniedProfile}:";
+
+        bool rewroteRead = false;
+        for (int index = 0; index < clone.Count; index++)
+        {
+            if (clone[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
+            {
+                clone[index] = "      filesystem.read: deny";
+                rewroteRead = true;
+            }
+        }
+
+        if (!rewroteRead)
+        {
+            throw new InvalidOperationException(
+                $"Profile '{sourceProfileName}' in '{path}' declares no 'filesystem.read' permission "
+                + $"to deny, so '{FileReadDeniedProfile}' would not differ from it.");
+        }
+
+        File.WriteAllText(
+            path,
+            File.ReadAllText(path).TrimEnd('\n') + "\n" + string.Join("\n", clone) + "\n",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private void RepointAgent(string agentName)
+    {
+        string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
+        string text = File.ReadAllText(path);
+
+        string repointed = Regex.Replace(
+            text,
+            "^capability-profile: .*$",
+            $"capability-profile: {FileReadDeniedProfile}",
+            RegexOptions.Multiline);
+        if (string.Equals(repointed, text, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{path}' to declare a 'capability-profile' line to repoint.");
+        }
+
+        string narrowed = Regex.Replace(
+            repointed,
+            "^copilot-tools: .*$",
+            "copilot-tools: [vscode, todo, search, web]",
+            RegexOptions.Multiline);
+        if (string.Equals(narrowed, repointed, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{path}' to declare a 'copilot-tools' line to narrow.");
+        }
+
+        File.WriteAllText(path, narrowed, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// A profile entry sits at the mapping's own indent: two spaces, then a non-space, ending
+    /// with a colon. Every nested line is indented further, so this separates one block from the
+    /// next without a YAML parse of a file the loader will parse anyway.
+    /// </summary>
+    private static bool IsProfileHeader(string line)
+    {
+        return line.Length > 2
+            && line[0] == ' '
+            && line[1] == ' '
+            && line[2] != ' '
+            && line[^1] == ':';
     }
 
     private static readonly JsonSerializerOptions JsonSerializerOptions = new() { WriteIndented = true };
