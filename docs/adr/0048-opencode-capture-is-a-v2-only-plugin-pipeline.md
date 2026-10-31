@@ -1,5 +1,5 @@
 ---
-id: adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline
+id: adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
 title: OpenCode Capture Is a V2-Only Plugin Pipeline
 doc-type: adr
 status: current
@@ -11,7 +11,7 @@ code-refs:
   - OPENCODE_KEYS
 ---
 
-# ADR 0046: OpenCode Capture Is a V2-Only Plugin Pipeline
+# ADR 0048: OpenCode Capture Is a V2-Only Plugin Pipeline
 
 ## Status
 

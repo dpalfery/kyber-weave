@@ -10,7 +10,7 @@ last-reviewed: 2026-10-31
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
-  - adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
@@ -32,7 +32,6 @@ keywords:
   - codeburn
   - display layer
   - jobhost
-  - tauri
   - desktop
   - menubar
   - projection
@@ -42,6 +41,11 @@ keywords:
   - tool_yield
   - tool_calls
   - skills
+lead: the-kyberdash-tray-dashtray
+sections:
+  the-kyberdash-tray-dashtray:
+    keywords:
+      - tauri
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -306,7 +310,7 @@ Measured behaviour, residuals, and the counts behind them are in the
 ### OpenCode V2 capture plugin pipeline (`kyberdash-opencode`)
 
 KyberDash captures OpenCode through one pipeline, and it supports OpenCode 2.x only
-([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
+([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
 
 ```mermaid
 flowchart LR
@@ -516,7 +520,7 @@ KyberDash therefore maps no native OpenCode span. The AI SDK, OpenInference and 
 and their fixtures are removed, and native spans fall to the unclaimed quarantine. The V1 table import
 (`opencode.db` and JSON session files) is removed too, so the plugin is the one source of OpenCode data.
 The decision and the alternatives it rejected are in
-[ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md). The per-source outcome is in the
+[ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md). The per-source outcome is in the
 [telemetry inventory](telemetry-inventory.md).
 
 ## Local harness-source refresh
@@ -2202,6 +2206,8 @@ permission and no analysis logic, and the popover's TypeScript takes no value im
 `dash/src/**` beyond the commented allowlist in the guard test. The macOS status item is the
 KyberDash lightsaber projected as a monochrome template image
 (`icons/tray-template.svg`/`.png`).
+
+### macOS tray placement and launchd
 
 On macOS, tray click positions are converted from backing pixels using the status
 item window's scale before monitor lookup. Cursor fallback uses the primary display's

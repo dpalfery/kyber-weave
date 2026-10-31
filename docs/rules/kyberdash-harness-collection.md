@@ -6,7 +6,7 @@ status: current
 owner: dpalfery
 last-reviewed: 2026-10-31
 decided-by:
-  - adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
 ---
 
 # KyberDash harness collection standard
@@ -31,7 +31,7 @@ zero, never silently skipped, and never labelled complete.
 | Harness | Collection | Dashboard must show |
 |---|---|---|
 | `claude-code` | Reference harness. Counters plus content through the primary mechanism. | Measured counters and content-derived dimensions as real values. The completeness bar for every other row. |
-| `opencode` native OpenTelemetry | Not collected by design. OpenCode 2.2.x exports no usage in native spans, and no adapter claims them ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)). | Documented absence. Native spans appear only as unclaimed quarantine, never as an OpenCode session, never as a zero. |
+| `opencode` native OpenTelemetry | Not collected by design. OpenCode 2.2.x exports no usage in native spans, and no adapter claims them ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). | Documented absence. Native spans appear only as unclaimed quarantine, never as an OpenCode session, never as a zero. |
 | `opencode` V2 plugin | Contract-3 request, step and tool spans from the `kyberdash-opencode` plugin. Usage and reported cost are measured; system prompt, tool definitions, skills listing and prompt text are content, captured only under consent. | Every OpenCode request is a visible session with its usage, cost, duration and turn count. With consent off, content dimensions render `not_measurable` with a reason, never zero. Live capture is verified only by the OpenCode live gate. |
 | `pi` | Capture-side stopped exporter. Environment fact, not a pipeline defect. | Honest-empty with the stated reason. No fabricated values. |
 | `copilot (chat)` | Capture-side stopped exporter. Environment fact, not a pipeline defect. | Honest-empty with the stated reason. No fabricated values. |

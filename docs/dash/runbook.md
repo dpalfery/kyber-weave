@@ -9,7 +9,7 @@ owner: dpalfery
 last-reviewed: 2026-10-31
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
-  - adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 code-refs:
   - registerKyberCommands
@@ -204,7 +204,7 @@ when a body is redacted, truncated, or arrives as a `body_ref` it will not open 
 
 ### 1b. OpenCode capture: enable and verify
 
-OpenCode is captured by one plugin, for OpenCode 2.x only ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+OpenCode is captured by one plugin, for OpenCode 2.x only ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 Turn it on and check it:
 
 ```bash
@@ -1562,7 +1562,7 @@ symlink) that carries the KyberDash marker. To re-enable into that custom root, 
 `--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. The plugin loads the default export
 `{ id: 'kyberdash-opencode', setup }` of OpenCode 2.x, and it posts contract-3 request, step and tool spans to
 the loopback receiver through a bounded outbox. It reads OpenCode's events and hooks and never changes them.
-OpenCode 1.x is not supported ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The
+OpenCode 1.x is not supported ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The
 pipeline is described in [the architecture](architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
 **Install and update: one command.**

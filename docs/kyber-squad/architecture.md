@@ -19,11 +19,14 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
+sections:
+  "#":
+    keywords:
+      - multi-harness
+      - deployment
+      - agent
+      - skill
 keywords:
-  - multi-harness
-  - deployment
-  - agent
-  - skill
   - circuit-breaker
   - JEV
   - oscillation
@@ -569,7 +572,7 @@ kyberdash kyber capture plugin install --harness opencode --preserve --config-di
   upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
   for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.`
 - **Support.** The plugin targets OpenCode 2.x only. Squad does not check the OpenCode version before it
-  runs the verb ([ADR 0046](../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+  runs the verb ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 
 ---
 

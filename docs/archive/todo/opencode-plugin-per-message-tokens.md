@@ -13,7 +13,7 @@ documentation-impact: no-design-change
 
 Superseded: the V2 capture plugin sends per-step usage. Each model step carries OpenCode's own
 input, output, reasoning and cache counters, read from the `session.step.ended` bus event, so this
-question no longer applies ([ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+question no longer applies ([ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 The shipped behaviour is in
 [the architecture](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
@@ -38,7 +38,7 @@ Links are written from this archive entry's location (`docs/archive/todo/`).
 
 | ID | Destination |
 |---|---|
-| OCTOK-1 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) describes the per-step usage the plugin sends; [ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md) records the decision. |
+| OCTOK-1 | [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) describes the per-step usage the plugin sends; [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) records the decision. |
 
 ## Design harvest
 

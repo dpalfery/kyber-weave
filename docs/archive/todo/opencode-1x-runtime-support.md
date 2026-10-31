@@ -12,7 +12,7 @@ documentation-impact: no-design-change
 # OpenCode 1.x runtime support for the KyberDash capture plugin is unverified
 
 Superseded: OpenCode capture is V2-only, and OpenCode 1.x support is removed rather than added
-([ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The shipped behaviour is in
+([ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The shipped behaviour is in
 [the architecture](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
 
 The KyberDash OpenCode capture plugin (`kyberdash-opencode.js`) is shaped for the OpenCode
@@ -47,9 +47,9 @@ Links are written from this archive entry's location (`docs/archive/todo/`).
 
 | ID | Destination |
 |---|---|
-| OC1X-1 | [ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md) records the V2-only decision; [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) describes the shipped plugin pipeline. |
+| OC1X-1 | [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) records the V2-only decision; [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) describes the shipped plugin pipeline. |
 
 ## Design harvest
 
 Documentation waiver: no new design survives from this todo. The question it raised is closed by
-removing 1.x support, which [ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md) and the architecture section above already state.
+removing 1.x support, which [ADR 0048](../../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md) and the architecture section above already state.

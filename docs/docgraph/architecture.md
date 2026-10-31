@@ -19,6 +19,7 @@ code-refs:
   - ConfigRegEntry
   - ConfigRegEntryKind
   - ConfigRegMarkdown
+lead: retrieval-has-no-database
 ---
 
 # DocGraph architecture

@@ -107,7 +107,7 @@ capture engine (ADR 0033). The departure is still scoped to KyberDash's own plug
 update never edit `opencode.jsonc` or the owner's `plugin` array, and every key rule above is
 unchanged.
 
-Amended 2026-10-31 (OpenCode V2-only plugin pipeline, [ADR 0046](0046-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
+Amended 2026-10-31 (OpenCode V2-only plugin pipeline, [ADR 0048](0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
 OpenCode writes no telemetry key. Its capture is the plugin file
 `<root>/plugins/kyberdash-opencode.js` and the consent file `~/.kyberdash/opencode-plugin.json`, both owned by
 KyberDash under the 2026-10-26 rules, with the plugin's receipt at `~/.kyberdash/opencode-plugin-receipt.json`.
