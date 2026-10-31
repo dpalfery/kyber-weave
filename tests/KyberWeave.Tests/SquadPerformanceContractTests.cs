@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -24,6 +25,7 @@ public sealed class SquadPerformanceContractTests
     private const string CodeReviewSkillPath = "products/kyber-squad/skills/code-review/SKILL.md";
     private const string CodeReviewerAgentPath = "products/kyber-squad/agents/code-reviewer.md";
     private const string ReviewLensAgentPath = "products/kyber-squad/agents/review-lens.md";
+    private const string ReviewCouncilArchitecturePath = "docs/code-review/architecture.md";
 
     private const string DocumentationAccuracyLensPath =
         "products/kyber-squad/skills/code-review/references/lenses/documentation-accuracy.md";
@@ -47,16 +49,17 @@ public sealed class SquadPerformanceContractTests
     private const string NoBuildFlag = "--no-build";
 
     private const string DirectAssemblyRegex =
-        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+""?<[^""\r\n]+>?";
+        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+(?:""(?:<[^"">\r\n]+>|[^""\s\r\n]+)""|<[^"">\s\r\n]+>|[^""\s\r\n]+)\s+-reporter\s+quiet";
 
     private const string DigestTestCountersRegex =
-        @"TESTS:\s*total=[^\r\n]+failed=[^\r\n]+passed=";
+        @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
 
     private const string ContiguousSixFieldDigestRegex =
-        @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=[^\r\n]+failed=[^\r\n]+passed=[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha\s*\|\s*NONE>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
+        @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha\s*\|\s*NONE>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
 
-    private const string BuildOnceReservationRegex =
-        @"(?i)\b(?:reserve|reserving|reserved)\b[^\r\n]{0,80}\bfull\b[^\r\n]{0,80}\b(?:task end|council)\b";
+    private static readonly Regex CouncilDiffCleanupRegex = new(
+        @"(?im)^(?=[^\r\n]*\bcode-reviewer\b)(?=[^\r\n]*\b(?:remov\w+|clean\w*|delet\w+)\b)(?=[^\r\n]*\b(?:after\s+(?:the\s+)?(?:review\s+)?(?:council|run|completion)|following\s+(?:the\s+)?(?:review\s+)?(?:council|run|completion)|upon completion|post-council|post-run)\b)[^\r\n]+",
+        RegexOptions.Compiled);
 
     private static readonly string[] RequiredDigestFields =
     [
@@ -67,6 +70,29 @@ public sealed class SquadPerformanceContractTests
         "REMOTE_HEAD:",
         "TASK_GATE:"
     ];
+
+    internal static bool HasBuildOnceReservationClause(string content)
+    {
+        string[] lines = content.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+        foreach (string line in lines)
+            if (Regex.IsMatch(line, @"\b(?:reserve|reserved|reserving)\b", RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(line, @"\bfull\b", RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(line, @"\b(?:task end|council)\b", RegexOptions.IgnoreCase))
+                return true;
+
+        return false;
+    }
+
+    [Theory]
+    [InlineData("reserve full suite for task end", true)]
+    [InlineData("full suite runs are reserved for task end", true)]
+    [InlineData("reserving full test suite execution for task end or council", true)]
+    [InlineData("council meeting and full menu", false)]
+    [InlineData("reserve full suite\nfor task end", false)]
+    public void BuildOnceReservationHelperValidatesOrderIndependenceAndProximity(string input, bool expected)
+    {
+        Assert.Equal(expected, HasBuildOnceReservationClause(input));
+    }
 
     [Theory]
     [InlineData(ConductorExecutionPath)]
@@ -91,7 +117,9 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Contains("build once", content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
-        Assert.Matches(BuildOnceReservationRegex, content);
+        Assert.True(
+            HasBuildOnceReservationClause(content),
+            $"{relativePath} must specify reserving full test suite execution for task end or council.");
     }
 
     [Theory]
@@ -302,7 +330,9 @@ public sealed class SquadPerformanceContractTests
         Assert.Matches(DirectAssemblyRegex, content);
         Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
-        Assert.Matches(BuildOnceReservationRegex, content);
+        Assert.True(
+            HasBuildOnceReservationClause(content),
+            $"{TestCodingStandardPath} must specify reserving full test suite execution for task end or council.");
     }
 
     [Theory]
@@ -346,24 +376,22 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Contains("dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts", content,
             StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("artifacts/task-gate-<task-id>.json", StringComparison.Ordinal) ||
-            content.Contains("--out artifacts/task-gate-<task-id>.json", StringComparison.Ordinal),
-            $"{relativePath} must specify review-gates output path artifacts/task-gate-<task-id>.json.");
-        Assert.True(
-            content.Contains("review gates", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("kyber-weave review gates", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must explicitly distinguish review gates invocation.");
+        Assert.Contains("--out artifacts/task-gate-<task-id>.json", content, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave review gates", content, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
     [InlineData(CodeReviewSkillPath)]
     [InlineData(CodeReviewerAgentPath)]
     [InlineData(ReviewLensAgentPath)]
+    [InlineData(ReviewCouncilArchitecturePath)]
     public void CouncilSurfacesSpecifyMaterializedDiffContract(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("artifacts/review-diff.patch", content, StringComparison.Ordinal);
+        Assert.Contains(".agent_scratchpad/<task-id>/review-diff.patch", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("artifacts/review-diff.patch", content, StringComparison.Ordinal);
+        Assert.Matches(CouncilDiffCleanupRegex, content);
+
         if (relativePath == ReviewLensAgentPath)
         {
             Assert.True(
@@ -371,12 +399,7 @@ public sealed class SquadPerformanceContractTests
                 content.Contains("filesystem.read: allow", StringComparison.Ordinal) ||
                 content.Contains("filesystem.read", StringComparison.Ordinal),
                 $"{relativePath} must specify reading diff via view_file / filesystem.read: allow.");
-            Assert.True(
-                content.Contains("without executing git", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("no git", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("never execute git", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("do not execute git", StringComparison.OrdinalIgnoreCase),
-                $"{relativePath} must forbid executing git commands.");
+            Assert.Matches(@"(?i)\b(?:never|not|without)\s+(?:execut\w+|run\w*)\s+git\b", content);
         }
         else
         {
