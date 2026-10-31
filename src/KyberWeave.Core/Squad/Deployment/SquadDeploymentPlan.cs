@@ -102,7 +102,7 @@ public sealed class SquadDeploymentPlan
 
     /// <summary>
     ///     Deployed files this plan could not read and therefore kept on trust rather than verifying, each
-    ///     with the target that produced it. Empty for a plan whose every file was read and checked.
+    ///     with the raw target token that produced it. Empty for a plan whose every file was read and checked.
     /// </summary>
     public IReadOnlyList<SquadDegradedFile> DegradedFiles { get; }
 
@@ -922,13 +922,13 @@ public sealed class SquadDeploymentPlan
     }
 
     /// <summary>
-    /// Records a degraded file only when its target token resolves. An unknown token keeps the owned
-    /// record (already added by the caller), so recovery never throws from inside a catch.
+    /// Records an unreadable deployed file with the raw target token from its receipt or render.
+    /// The token is kept verbatim — never resolved to <see cref="SquadTarget"/> — so an unknown
+    /// token is still reported by name instead of dropped as clean.
     /// </summary>
     private static void AddDegradedFile(List<SquadDegradedFile> degradedFiles, string relativePath, string target)
     {
-        if (SquadTargetCatalog.TryResolve(target, out SquadTarget resolved))
-            degradedFiles.Add(new SquadDegradedFile(relativePath, resolved));
+        degradedFiles.Add(new SquadDegradedFile(relativePath, target));
     }
 
     private static bool IsOwnedBySiblingReceipt(
@@ -994,8 +994,8 @@ public enum SquadFileMutationKind
     Delete
 }
 
-/// <summary>A deployed file a plan kept on trust, with the target that produced it.</summary>
-public sealed record SquadDegradedFile(string RelativePath, SquadTarget Target);
+/// <summary>A deployed file a plan kept on trust, with the raw target token that produced it.</summary>
+public sealed record SquadDegradedFile(string RelativePath, string Target);
 
 /// <summary>
 ///     One planned file change without its payload, for command hosts that report what a plan

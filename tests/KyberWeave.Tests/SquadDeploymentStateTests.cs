@@ -1091,8 +1091,42 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         Assert.True(
-            OwningTargetsOf(plan, entry).Contains(SquadTarget.Codex),
-            $"The degraded '{entry}' must record its owning target 'Codex'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
+            OwningTargetsOf(plan, entry).Contains("codex"),
+            $"The degraded '{entry}' must record its owning target 'codex'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
+        Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
+    }
+
+    /// <summary>
+    ///     An unreadable file with an unknown target token is still reported by name: the degraded
+    ///     record keeps the raw token verbatim, so a corrupt or future token never reads as clean.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateWithAnUnreadableDeployedEntryWithAnUnknownTargetStillRecordsTheRawToken()
+    {
+        using TempDirectory fixture = new();
+        const string entry = ".codex/agents/conductor.toml";
+        const string unknownTarget = "future-harness";
+        SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), unknownTarget, false));
+        Write(fixture.Path, entry, "installed body");
+        string fullPath = Path.Combine(fixture.Path, entry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(entry, "updated body", unknownTarget)],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.True(
+            OwningTargetsOf(plan, entry).Contains(unknownTarget),
+            $"The degraded '{entry}' must record its raw owning token '{unknownTarget}'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
         Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
     }
 
@@ -1132,20 +1166,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         Assert.Single(plan.DegradedFiles);
-        IReadOnlyList<SquadTarget> owners = OwningTargetsOf(plan, codexEntry);
+        IReadOnlyList<string> owners = OwningTargetsOf(plan, codexEntry);
         Assert.True(
             owners.SequenceEqual(ExpectedCodexOwner),
-            $"The degraded '{codexEntry}' must record exactly its owning target 'Codex'; it records [{string.Join(", ", owners)}].");
+            $"The degraded '{codexEntry}' must record exactly its owning target 'codex'; it records [{string.Join(", ", owners)}].");
         Assert.Empty(OwningTargetsOf(plan, claudeEntry));
     }
 
-    private static readonly SquadTarget[] ExpectedCodexOwner = [SquadTarget.Codex];
+    private static readonly string[] ExpectedCodexOwner = ["codex"];
 
     /// <summary>
-    ///     Reads the owning targets recorded for a degraded path from the typed <see cref="SquadDegradedFile"/>
-    ///     contract, so a change to its shape fails at compile time rather than returning empty owners.
+    ///     Reads the raw owning target tokens recorded for a degraded path from the
+    ///     <see cref="SquadDegradedFile"/> contract, so a change to its shape fails at compile
+    ///     time rather than returning empty owners.
     /// </summary>
-    private static IReadOnlyList<SquadTarget> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath) =>
+    private static IReadOnlyList<string> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath) =>
         plan.DegradedFiles
             .Where(degraded => degraded.RelativePath == relativePath)
             .Select(degraded => degraded.Target)

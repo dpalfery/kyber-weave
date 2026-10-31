@@ -496,7 +496,7 @@ public sealed class SquadLifecycleService
     private static IEnumerable<string> DegradedFileWarnings(SquadDeploymentPlan plan)
     {
         return plan.DegradedFiles.Select(degraded =>
-            $"Could not read deployed file '{degraded.RelativePath}' for target {SquadTargetCatalog.GetToken(degraded.Target)}; it was kept on trust and not verified against the release.");
+            $"Could not read deployed file '{degraded.RelativePath}' for target {degraded.Target}; it was kept on trust and not verified against the release.");
     }
 
     /// <summary>
