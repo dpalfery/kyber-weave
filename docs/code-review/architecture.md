@@ -201,6 +201,14 @@ findings. The verdict engine reads no attestation and is unchanged. The attestat
 human reader what the seat claimed to check. It does not prove the seat applied the sections
 correctly, so a claim that does not hold is a review problem, not an engine rule.
 
+### Council hardening and contract verification
+
+The review council enforces explicit contract verification disciplines across its lenses:
+- **Cross-document and prompt-to-prompt contract parity (`documentation-accuracy`):** Verifies parity across modified markdown instructions, runbooks, and reference contracts. Invariants, schemas, and rejection rules must agree across modified documents, not only doc-vs-code.
+- **Contract assertion rigor (`test-adequacy`, `R14`):** Flags bare single-word `Assert.Contains` checks that match common boilerplate, unguarded boolean `||` assertions where one branch matches unrelated text, and non-contiguous `foreach` loops over multi-line schemas; requires contiguous block assertions.
+- **Operational lifecycle state-machine walks (`correctness`, `supportability`):** Walks the complete resource lifecycle from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and verifies error paths including `conflict` and `rollback` for concurrency primitives, worktrees, locks, and temp-paths.
+- **Literal prompt parsing (`correctness`, `R16`):** Prohibits charitable reading of agent prompt instructions; parses prompt directives literally as executed by language models, flagging any gate deadlock, self-contradiction, or missing recovery step.
+
 ## Why lenses are files, not agents
 
 Seventeen concerns, but only **two** canonical agents carry them. The lens is a reference file;
@@ -300,6 +308,16 @@ suppression is how a review system quietly stops reviewing, the reason ageing ou
 while the exemption stays. On the day after it lapses the finding returns on its own, and
 `KW-REVIEW-004` says why.
 
+### Adversarial confirmation and refutation guardrails
+
+Step 3 spends one more `review-lens` invocation attempting to refute every surviving finding of severity `major` or `critical`. However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
+- Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
+- Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.
+- Refuters are strictly forbidden from dropping:
+  1. Contract assertion rigor findings under `R14` (e.g., bare keyword substring checks, unguarded boolean `||` assertions matching unrelated text, or non-contiguous multi-line loops).
+  2. Cross-document and prompt-to-prompt schema contradictions under `R16`.
+  3. Missing operational lifecycle cleanup paths (unpruned worktree, orphaned temp-path, unreleased concurrency lock).
+
 ## How the verdict is computed
 
 `VerdictEngine.Evaluate` is a pure function of (scope, findings, gates, config, date). Same
@@ -365,6 +383,10 @@ stays `deny`. **The role that judges a change never ships it.**
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
 seat cannot re-enter the council.
+
+### Materialized diff contract (Option A)
+
+Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, `code-reviewer` materializes `git diff <base>...<head>` to task-scoped `.agent_scratchpad/<task-id>/review-diff.patch` before council fan-out, passes this path in each `review-lens` and `review-triage` packet, and removes it after the review council completes (including on failure). Seats read `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
 
 ## Configuration
 

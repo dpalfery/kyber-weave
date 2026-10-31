@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -914,6 +914,54 @@ cluster identity, JEV checkpoints, and the closed trigger set are in
 [architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and the
 [requirements harvest](requirements.md#conductor-execution-circuit-breaker).
 Kyber-Squad has no separate runbook; this onboarding page is the operator pointer.
+
+---
+
+## Task execution runbook: inlined packets, fast testing, and completion digests
+
+Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
+and standardized completion digests to minimize token consumption and eliminate validation churn:
+
+### Inlined task packets (zero plan context hunting)
+
+Conductor task packets are self-contained. Rather than pointing workers to large plan or
+specification documents under `<plan-index>` or `<specification-index>` (which workers are
+forbidden from reading), the conductor inlines five essential items directly into each dispatch packet:
+
+1. **Objective and strict boundary**: Explicit statement of what to change and what must not be touched.
+2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
+3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
+4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
+5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+
+### Fast assembly runner invocation
+
+Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
+
+```bash
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+```
+
+Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
+against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
+on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
+runs are reserved strictly for task exit gates and final council review.
+
+### Standardized 6-field completion digest
+
+Workers report dispatch completion using an unambiguous 6-field schema:
+
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
+```
+
+Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
+Standardizing this schema eliminates rejection rework caused by formatting variations.
 
 ---
 
