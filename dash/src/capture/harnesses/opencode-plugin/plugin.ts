@@ -31,17 +31,24 @@
 // check and a clock (`entry.ts`). It never throws; a failure goes to `onError`.
 
 import {
+  MAX_FIELD_BYTES,
   MAX_PROMPT_BYTES,
   capContent,
   capUtf8,
+  costOf,
   detachedCopy,
+  epochMs,
+  isRecord,
   jsonBytes,
+  labelOf,
   mapRequestSpan,
   mapStepSpan,
   mapToolSpan,
   systemTextOf,
+  textOf,
   textPartsBytes,
   toolsJsonOf,
+  wholeOf,
   type RequestOutcome,
   type StepContent,
   type StepUsage,
@@ -72,8 +79,6 @@ const MAX_OPEN_TOOLS = 256
 const MAX_DONE_TOOLS = 512
 /** Skill ids waiting for the next step, per session. */
 const MAX_PENDING_SKILLS = 64
-/** The session label is a short title; anything longer is cut. */
-const MAX_LABEL_BYTES = 1024
 
 export type CaptureEngineOptions = {
   /** This instance's project directory; absent when the host did not say. */
@@ -107,21 +112,11 @@ export type CaptureEngine = {
 // ---------------------------------------------------------------------------------------------
 // Input parsing: every host value is `unknown` until narrowed here
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
-function finite(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function whole(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
-}
+// The guards themselves live in `mapper.ts`, shared with the wire mapping. `text` is an identifier
+// or an opaque string kept as given; `label` is a host string cut to `MAX_FIELD_BYTES`.
+const text = textOf
+const label = labelOf
+const whole = wholeOf
 
 /** What one bus event means to this plugin, reduced to the small values it needs. */
 type Fact =
@@ -168,7 +163,7 @@ function usageOf(tokens: unknown): StepUsage {
 function factOf(type: string, data: Record<string, unknown>): Fact {
   switch (type) {
     case 'session.created': {
-      const version = text(data['version'])
+      const version = label(data['version'])
       return { kind: 'session.created', ...(version !== undefined ? { version } : {}) }
     }
     case 'session.renamed': {
@@ -182,16 +177,16 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
     case 'session.execution.failed':
       return { kind: 'execution.ended', outcome: 'failed' }
     case 'session.execution.interrupted': {
-      const reason = text(data['reason'])
+      const reason = label(data['reason'])
       return { kind: 'execution.ended', outcome: 'interrupted', ...(reason !== undefined ? { reason } : {}) }
     }
     case 'session.step.started': {
       const messageId = text(data['assistantMessageID'])
       if (messageId === undefined) return { kind: 'other' }
       const model = isRecord(data['model']) ? data['model'] : undefined
-      const agent = text(data['agent'])
-      const modelId = text(model?.['id'])
-      const modelProvider = text(model?.['providerID'])
+      const agent = label(data['agent'])
+      const modelId = label(model?.['id'])
+      const modelProvider = label(model?.['providerID'])
       return {
         kind: 'step.started',
         messageId,
@@ -203,8 +198,8 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
     case 'session.step.ended': {
       const messageId = text(data['assistantMessageID'])
       if (messageId === undefined) return { kind: 'other' }
-      const finish = text(data['finish'])
-      const cost = finite(data['cost'])
+      const finish = label(data['finish'])
+      const cost = costOf(data['cost'])
       return {
         kind: 'step.ended',
         messageId,
@@ -216,7 +211,7 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
     case 'session.tool.input.started': {
       const callId = text(data['id'])
       if (callId === undefined) return { kind: 'other' }
-      const name = text(data['name'])
+      const name = label(data['name'])
       return { kind: 'tool.input', callId, ...(name !== undefined ? { name } : {}) }
     }
     case 'session.tool.called': {
@@ -249,7 +244,7 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
       const callId = text(data['id'])
       if (callId === undefined) return { kind: 'other' }
       const messageId = text(data['assistantMessageID'])
-      const errorType = isRecord(data['error']) ? text(data['error']['type']) : undefined
+      const errorType = isRecord(data['error']) ? label(data['error']['type']) : undefined
       return {
         kind: 'tool.failed',
         callId,
@@ -273,7 +268,9 @@ function parseEvent(raw: unknown): BusEvent | undefined {
   const durable = isRecord(raw['durable']) ? raw['durable'] : undefined
   const sessionId = text(data['sessionID']) ?? text(durable?.['aggregateID'])
   const type = text(raw['type'])
-  const created = finite(raw['created'])
+  // A time outside the epoch range is no time at all: the event is dropped, not stamped on a span.
+  const rawCreated = raw['created']
+  const created = epochMs(rawCreated) ? rawCreated : undefined
   if (sessionId === undefined || type === undefined || created === undefined) return undefined
   const top = isRecord(raw['location']) ? raw['location'] : undefined
   const inner = isRecord(data['location']) ? data['location'] : undefined
@@ -588,7 +585,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
       case 'session.renamed':
         // The title is content: kept only while consent allows it.
         if (fact.title !== undefined && fact.title !== '' && consentNow()) {
-          state.label = detachedCopy(capUtf8(fact.title, MAX_LABEL_BYTES))
+          state.label = detachedCopy(capUtf8(fact.title, MAX_FIELD_BYTES))
         }
         return
       case 'execution.started':
@@ -766,9 +763,9 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         if (sessionId === undefined) return
         const state = claim(sessionId)
         const model = isRecord(raw['model']) ? raw['model'] : undefined
-        const agent = text(raw['agent'])
-        const modelId = text(model?.['id'])
-        const modelProvider = text(model?.['providerID'])
+        const agent = label(raw['agent'])
+        const modelId = label(model?.['id'])
+        const modelProvider = label(model?.['providerID'])
         let content: StepContent | undefined
         if (consentNow()) {
           const system = systemTextOf(raw['system'])
@@ -799,9 +796,9 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         const sessionId = text(raw['sessionID'])
         if (sessionId === undefined) return
         const state = claim(sessionId)
-        const kind = text(raw['kind'])
+        const kind = label(raw['kind'])
         if (kind !== undefined) state.pendingKind = kind
-        noteAgent(state, text(raw['agent']))
+        noteAgent(state, label(raw['agent']))
       }),
 
     onToolBefore: (raw) =>
@@ -813,14 +810,14 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         const state = claim(sessionId)
         const tool = toolFor(state, callId)
         if (tool === undefined) return
-        const name = text(raw['tool'])
+        const name = label(raw['tool'])
         const messageId = text(raw['messageID'])
         if (tool.name === undefined && name !== undefined) tool.name = name
         if (tool.messageId === undefined && messageId !== undefined) tool.messageId = messageId
         if (tool.hookStartMs === undefined) tool.hookStartMs = now()
         if (tool.inputBytes === undefined && raw['input'] !== undefined) tool.inputBytes = jsonBytes(raw['input'])
         if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = text(raw['input']['id'])
-        noteAgent(state, text(raw['agent']))
+        noteAgent(state, label(raw['agent']))
       }),
 
     onToolAfter: (raw) =>
@@ -832,16 +829,16 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         const state = claim(sessionId)
         const tool = toolFor(state, callId)
         if (tool === undefined) return
-        const name = text(raw['tool'])
+        const name = label(raw['tool'])
         const messageId = text(raw['messageID'])
         if (tool.name === undefined && name !== undefined) tool.name = name
         if (tool.messageId === undefined && messageId !== undefined) tool.messageId = messageId
         if (tool.inputBytes === undefined && raw['input'] !== undefined) tool.inputBytes = jsonBytes(raw['input'])
         if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = text(raw['input']['id'])
-        noteAgent(state, text(raw['agent']))
+        noteAgent(state, label(raw['agent']))
         const error = isRecord(raw['error']) ? raw['error'] : undefined
         const failed = raw['status'] === 'error' || error !== undefined
-        const errorType = failed ? text(error?.['type']) : undefined
+        const errorType = failed ? label(error?.['type']) : undefined
         const resultBytes = !failed && isRecord(raw['result']) ? textPartsBytes(raw['result']['content']) : undefined
         const done: HookDone = {
           endMs: now(),

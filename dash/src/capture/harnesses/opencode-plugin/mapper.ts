@@ -31,6 +31,16 @@ export const MAX_CONTENT_CHARS = 262_144
 /** Appended to a field that hit the cap, so a reader can tell it was cut. */
 export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
 
+/**
+ * Cap, in UTF-8 bytes, on each host string kept as a short label: the session label, request kind,
+ * agent, model, finish reason, tool name, error type and the like. A longer value is cut, never sent
+ * whole and never retained whole.
+ */
+export const MAX_FIELD_BYTES = 1024
+
+/** Latest event time accepted, in epoch milliseconds: 9999-12-31T23:59:59.999Z. */
+export const MAX_EPOCH_MS = 253_402_300_799_999
+
 // ---------------------------------------------------------------------------------------------
 // Records
 
@@ -124,12 +134,51 @@ function strings(key: string, values: readonly string[]): OtlpWireAttribute {
   return { key, value: { arrayValue: { values: values.map((stringValue) => ({ stringValue })) } } }
 }
 
-function nonEmpty(value: string | undefined): value is string {
-  return value !== undefined && value !== ''
+// One home for the guards on host values: the plugin narrows what the host sends with them and this
+// module re-checks what it writes, so a bound changed here changes both.
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
-function wholeNumber(value: number | undefined): value is number {
+/** A string that is not empty. */
+export function nonEmpty(value: unknown): value is string {
+  return typeof value === 'string' && value !== ''
+}
+
+/** A whole number from 0 up: a count or a byte size. */
+export function wholeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+/** A reported cost: finite and not negative. Zero is a measurement. */
+export function nonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** An event time: epoch milliseconds from 1970 to the year 9999. */
+export function epochMs(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_EPOCH_MS
+}
+
+/** The value when it is a non-empty string; otherwise absent. */
+export function textOf(value: unknown): string | undefined {
+  return nonEmpty(value) ? value : undefined
+}
+
+/** `textOf` cut to `MAX_FIELD_BYTES`: for a host string that is retained or sent as a label. */
+export function labelOf(value: unknown): string | undefined {
+  return nonEmpty(value) ? capUtf8(value, MAX_FIELD_BYTES) : undefined
+}
+
+/** The value when it is a whole number from 0 up; otherwise absent. */
+export function wholeOf(value: unknown): number | undefined {
+  return wholeNumber(value) ? value : undefined
+}
+
+/** The value when it is a valid cost; otherwise absent. */
+export function costOf(value: unknown): number | undefined {
+  return nonNegativeNumber(value) ? value : undefined
 }
 
 function nanos(ms: number): string {
@@ -213,7 +262,7 @@ export function mapStepSpan(record: StepRecord): OtlpWireSpan {
   if (wholeNumber(usage.cacheRead)) attributes.push(count(OPENCODE_KEYS.usageCacheRead, usage.cacheRead))
   if (wholeNumber(usage.cacheWrite)) attributes.push(count(OPENCODE_KEYS.usageCacheWrite, usage.cacheWrite))
   // A reported zero cost is a measurement; an absent cost is not one.
-  if (typeof record.cost === 'number' && Number.isFinite(record.cost)) {
+  if (nonNegativeNumber(record.cost)) {
     attributes.push({ key: OPENCODE_KEYS.cost, value: { doubleValue: record.cost } })
   }
   if (record.skills.length > 0) attributes.push(strings(OPENCODE_KEYS.skillsInvoked, record.skills))
@@ -251,10 +300,6 @@ export function mapToolSpan(record: ToolRecord): OtlpWireSpan {
 
 // ---------------------------------------------------------------------------------------------
 // Content shaping
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
 
 /**
  * Copy a string into independent storage. `slice` on a long string keeps the parent's backing
