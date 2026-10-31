@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
@@ -1105,6 +1106,70 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Assert.Contains("Failed to read response guidance", execution.Output, StringComparison.Ordinal);
         Assert.Contains("response-guidance", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    ///     A corpus that predates the response-preferences block must not crash global doctor, and doctor must
+    ///     report the same no-block warning install and update report. Without the doctor's mirror of that
+    ///     check, the three commands disagree about the same tree and doctor stays silent about nothing being
+    ///     injected.
+    /// </summary>
+    [Fact]
+    public void DoctorGlobalReportsTheNoBlockWarningForAPreBlockCorpusWithoutCrashing()
+    {
+        using Harness h = NewHarness("doctor-pre-block");
+        string anchor = h.MakeDirectory("anchor");
+        WriteCanonicalSourceWithoutResponseBlocks(anchor);
+
+        CommandExecution execution = Capture(() =>
+            new SquadDoctorCommand(
+                    new FakeProcessExecutor(),
+                    h.UserPaths,
+                    anchor,
+                    h.GlobalRoots,
+                    SquadCommandComposition.ResolveRenderer(),
+                    h.Store)
+                .Execute(null!, new SquadDoctorSettings { Path = anchor, Global = true }));
+
+        Assert.Contains(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Copies the canonical corpus beside a solution marker with every response-preferences block removed,
+    ///     so the render carries no block anywhere. The precondition assertion keeps the test from passing
+    ///     vacuously if the canonical blocks ever move.
+    /// </summary>
+    private static void WriteCanonicalSourceWithoutResponseBlocks(string anchor)
+    {
+        File.WriteAllText(Path.Combine(anchor, "KyberWeave.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string destination = Path.Combine(anchor, "products", "kyber-squad");
+        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+
+        Regex block = ResponsePreferencesBlock();
+        int blocksBefore = 0;
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            if (!file.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(file, target, overwrite: true);
+                continue;
+            }
+
+            string text = File.ReadAllText(file, Encoding.UTF8);
+            blocksBefore += block.Count(text);
+            File.WriteAllText(target, block.Replace(text, string.Empty), Encoding.UTF8);
+        }
+
+        Assert.True(blocksBefore > 0, "The canonical corpus must carry response-preferences blocks for this test to mean anything.");
+        foreach (string file in Directory.EnumerateFiles(destination, "*.md", SearchOption.AllDirectories))
+            Assert.Equal(0, block.Count(File.ReadAllText(file, Encoding.UTF8)));
+    }
+
+    private static Regex ResponsePreferencesBlock()
+        => new("<response-preferences>.*?</response-preferences>", RegexOptions.Singleline);
 
     /// <summary>
     ///     Doctor's global collision scan only runs against a canonical source beside the working

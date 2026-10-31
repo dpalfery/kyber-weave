@@ -96,6 +96,43 @@ public sealed class SquadResponsePreferencesInjectorTests
     }
 
     [Fact]
+    public void ReadEffective_WhenTheHomeReadFailsAndTheSeamSuppliesTheDefault_ReturnsThatDefaultAndWarnsExactlyOnce()
+    {
+        string home = NewHomeDirectory();
+        string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
+        File.WriteAllText(path, "operator text", Encoding.UTF8);
+        const string seamDefault = "default supplied through the read seam";
+
+        List<string> warnings = [];
+        string actual;
+        using (SquadHomeHarness.DenyReadOrSkip(path))
+        {
+            actual = SquadResponseGuidanceSource.ReadEffective(home, warnings, () => seamDefault);
+        }
+
+        Assert.Equal(seamDefault, actual);
+        string warning = Assert.Single(warnings);
+        Assert.Contains("response-guidance", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReadEffective_WhenTheShippedDefaultIsMissing_PropagatesTheTypedExceptionAndDoesNotInventAWarning()
+    {
+        // A build without its embedded default is a defect a rerun cannot fix. The source must surface the typed
+        // exception so the deployer can name it, rather than swallow it into a generic warning here.
+        string home = NewHomeDirectory();
+
+        List<string> warnings = [];
+        Assert.Throws<SquadShippedGuidanceUnavailableException>(() =>
+            SquadResponseGuidanceSource.ReadEffective(
+                home,
+                warnings,
+                () => throw new SquadShippedGuidanceUnavailableException("The embedded default is missing.")));
+
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
     public void Inject_ReplacesTheBlockVerbatim_NoCapNoEscapingNoTrimming()
     {
         string largeText = new string('A', 9 * 1024) + "\n- [tool-call] do_work --force\n- verify result\n";
