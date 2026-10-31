@@ -58,8 +58,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
         (string rootA, _) = CreateTwoCorpora();
         DocsTools tools = CreateTools(rootA);
 
-        string miss = tools.Explore(
-            "zzz-no-such-subject-zzz", maxDocs: 5, charBudget: DocumentIndex.DefaultCharBudget);
+        string miss = tools.Explore("zzz-no-such-subject-zzz");
         string symbolMiss = tools.ForSymbol("NoSuchSymbolXyz");
         string glossaryMiss = tools.Glossary("no-such-term-xyz");
         string analysis = tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
@@ -81,10 +80,8 @@ public sealed class McpDocsProvenanceTests : IDisposable
 
         Assert.NotEqual(countA, countB);
 
-        ProvenanceLine lineA = ParseProvenance(
-            CreateTools(rootA).Explore("documentation", maxDocs: 1, charBudget: 1000));
-        ProvenanceLine lineB = ParseProvenance(
-            CreateTools(rootB).Explore("documentation", maxDocs: 1, charBudget: 1000));
+        ProvenanceLine lineA = ParseProvenance(CreateTools(rootA).Explore("documentation"));
+        ProvenanceLine lineB = ParseProvenance(CreateTools(rootB).Explore("documentation"));
 
         Assert.Equal(countA, lineA.Documents);
         Assert.Equal(countB, lineB.Documents);
@@ -94,8 +91,8 @@ public sealed class McpDocsProvenanceTests : IDisposable
     public void NeitherRootsProvenanceAppearsInTheOtherRootsResponses()
     {
         (string rootA, string rootB) = CreateTwoCorpora();
-        string responseA = CreateTools(rootA).Explore("documentation", maxDocs: 1, charBudget: 1000);
-        string responseB = CreateTools(rootB).Explore("documentation", maxDocs: 1, charBudget: 1000);
+        string responseA = CreateTools(rootA).Explore("documentation");
+        string responseB = CreateTools(rootB).Explore("documentation");
 
         Assert.Equal(Path.GetFullPath(rootA), Path.GetFullPath(ParseProvenance(responseA).Root));
         Assert.Equal(Path.GetFullPath(rootB), Path.GetFullPath(ParseProvenance(responseB).Root));
@@ -108,10 +105,8 @@ public sealed class McpDocsProvenanceTests : IDisposable
     {
         (string rootA, string rootB) = CreateTwoCorpora();
 
-        ProvenanceLine lineA = ParseProvenance(
-            CreateTools(rootA).Explore("documentation", maxDocs: 1, charBudget: 1000));
-        ProvenanceLine lineB = ParseProvenance(
-            CreateTools(rootB).Explore("documentation", maxDocs: 1, charBudget: 1000));
+        ProvenanceLine lineA = ParseProvenance(CreateTools(rootA).Explore("documentation"));
+        ProvenanceLine lineB = ParseProvenance(CreateTools(rootB).Explore("documentation"));
 
         Assert.Equal("unavailable", lineA.Revision);
         Assert.Equal("unknown", lineA.Dirty);
@@ -138,8 +133,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
         DocsTools tools = CreateTools(rootA);
         MethodInfo status = FindMcpTool("docs_status");
 
-        string expected = ParseProvenance(
-            tools.Explore("documentation", maxDocs: 1, charBudget: 1000)).Raw;
+        string expected = ParseProvenance(tools.Explore("documentation")).Raw;
         string actual = (string)status.Invoke(tools, null)!;
 
         Assert.Equal(expected, actual.TrimEnd('\n', '\r'));
@@ -171,7 +165,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
 
     private static IEnumerable<string> AllResponses(DocsTools tools)
     {
-        yield return tools.Explore("documentation", maxDocs: 1, charBudget: 1000);
+        yield return tools.Explore("documentation");
         yield return tools.ForSymbol("NoSuchSymbolXyz");
         yield return tools.Glossary("documentation");
         yield return tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);

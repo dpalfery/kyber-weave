@@ -41,18 +41,28 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
 
         foreach (DocumentModel doc in set.Documents)
         {
-            foreach (string symbol in doc.CodeRefs)
+            if (doc.Frontmatter.CodeRefs is not null)
             {
-                if (_resolver.ResolveSymbol(symbol).Count > 0) continue;
+                foreach (string symbol in doc.Frontmatter.CodeRefs)
+                {
+                    ReportUnresolvedCodeRef(doc, symbol, null, report);
+                }
+            }
 
-                string? nearest = DocSpecValidator.Nearest(symbol, _resolver.CandidateNames(symbol));
-                report.Add(new Diagnostic(
-                    UnresolvedCodeRef, Severity.Error,
-                    $"code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index.",
-                    doc.Subject, doc.RelativePath,
-                    nearest is null
-                        ? "The symbol was renamed or removed. Update the reference, or drop it if the documentation no longer covers it."
-                        : $"Nearest surviving symbol: '{nearest}'."));
+            if (doc.Frontmatter.Sections is not null)
+            {
+                foreach (KeyValuePair<string, DocumentSectionVocabulary> entry in doc.Frontmatter.Sections)
+                {
+                    if (entry.Value.CodeRefs is null)
+                    {
+                        continue;
+                    }
+
+                    foreach (string symbol in entry.Value.CodeRefs)
+                    {
+                        ReportUnresolvedCodeRef(doc, symbol, entry.Key, report);
+                    }
+                }
             }
 
             foreach (string endpoint in doc.ApiEndpoints)
@@ -81,5 +91,31 @@ public sealed class DocDriftLinter(ICodeGraphResolver resolver)
         }
 
         return report;
+    }
+
+    private void ReportUnresolvedCodeRef(
+        DocumentModel doc,
+        string symbol,
+        string? sectionSlug,
+        DiagnosticReport report)
+    {
+        if (_resolver.ResolveSymbol(symbol).Count > 0)
+        {
+            return;
+        }
+
+        string? nearest = DocSpecValidator.Nearest(symbol, _resolver.CandidateNames(symbol));
+        string message = sectionSlug is null
+            ? $"code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index."
+            : $"section '{sectionSlug}': code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index.";
+        report.Add(new Diagnostic(
+            UnresolvedCodeRef,
+            Severity.Error,
+            message,
+            doc.Subject,
+            doc.RelativePath,
+            nearest is null
+                ? "The symbol was renamed or removed. Update the reference, or drop it if the documentation no longer covers it."
+                : $"Nearest surviving symbol: '{nearest}'."));
     }
 }

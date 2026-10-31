@@ -16,7 +16,7 @@ public static class DocsServerInstructions
         For a question about how something in this repository works, how to run or configure
         it, what a command, flag, or rule means, or whether something is documented, call
         docs_explore first, before grepping or reading files under docs/ or other markdown. It
-        returns the most relevant sections, ranked, with the code locations they refer to. If it
+        returns one answer with a confidence score and a single source line. If it
         reports a miss, the subject is likely undocumented and searching files directly is
         appropriate.
 
