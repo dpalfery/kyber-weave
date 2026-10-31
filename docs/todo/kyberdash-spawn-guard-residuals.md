@@ -62,6 +62,21 @@ audits are.
 9. **The watchdog's `seen` list grows without bound.** `scripts/proc-guard.sh` appends every
    descendant pid on each 0.5 s poll (about line 333) with no de-duplication, so the list grows for
    the length of the run. Keep it de-duplicated (`sort -u`, or an associative array).
+10. **An unreproduced 1500-second silent hang under the watchdog.** On 2026-10-31,
+    `scripts/proc-guard.sh run --timeout 1500 -- dotnet run --project src/KyberWeave.Cli -- review gates . --all`
+    hung once. The watchdog killed it at the timeout (exit 124). The node count stayed flat at 5 to 6,
+    and the gate `test` never finished. Two later full runs, one plain and one under a pty, finished
+    30 of 30 gates in about 200 seconds, so the hang did not reproduce. Candidates, unverified:
+    - the outer `dotnet run` restores or builds with no timeout of its own (a NuGet or MSBuild lock);
+    - one gate is held to its 900-second default because `ProcessRunner` waits for the output pipes
+      to close;
+    - the agent harness had moved the guarded command to the background, because a foreground
+      command over about 600 seconds is backgrounded. That is why runbook guidance now keeps
+      `--timeout` at or below 540 from an agent tool.
+
+    `review gates` prints only at the end, so a slow run and a stuck run look the same. Progress
+    output is the follow-up. Reproduce with a pty and the same command, and record which phase
+    stops.
 
 This todo is complete when each item is either fixed, with a test, or recorded in ADR 0047 or
 `docs/dash/architecture.md` as an accepted limit with its reason.

@@ -19,6 +19,11 @@ export type RecordedSpawn = { readonly program: string; readonly args: readonly 
 /** A spawner that records each request and starts nothing; its child exits cleanly at once. */
 export type InertSpawner = JobSpawner & { readonly calls: readonly RecordedSpawn[] }
 
+/**
+ * The report filters (`period`, `provider`, `project`, `exclude`) are accepted for the boots'
+ * existing call shape but are not forwarded: `runWebDashboard` no longer takes them, because the
+ * dashboard reads its filters per request.
+ */
 export type BootIsolatedOptions = {
   /** The world's temp root; the state dir is created beneath it. */
   readonly root: string
@@ -83,28 +88,39 @@ export async function bootIsolatedDashboard(options: BootIsolatedOptions): Promi
     return closed
   }
 
+  // The override lives only as long as the boot: a reused test worker must not see a path to a
+  // temp DB that is about to be deleted.
+  const hadCanonDb = Object.hasOwn(process.env, 'KYBER_CANON_DB')
+  const previousCanonDb = process.env['KYBER_CANON_DB']
+  const restoreCanonDb = (): void => {
+    if (hadCanonDb) process.env['KYBER_CANON_DB'] = previousCanonDb
+    else delete process.env['KYBER_CANON_DB']
+  }
   process.env['KYBER_CANON_DB'] = options.canonDbPath
 
-  const server = await runWebDashboard({
-    stateDir,
-    program: INERT_PROGRAM,
-    jobSpawner,
-    receiverSpawner,
-    receiverProber: inertReceiverProber,
-    closeJobHost,
-    ...(options.maintenance === undefined ? {} : { maintenance: options.maintenance }),
-    period: options.period,
-    provider: options.provider,
-    project: [...options.project],
-    exclude: [...options.exclude],
-    port: options.port,
-    open: false,
-    writeStdout: () => {},
-  })
+  let server: Server
+  try {
+    server = await runWebDashboard({
+      stateDir,
+      program: INERT_PROGRAM,
+      jobSpawner,
+      receiverSpawner,
+      receiverProber: inertReceiverProber,
+      closeJobHost,
+      ...(options.maintenance === undefined ? {} : { maintenance: options.maintenance }),
+      port: options.port,
+      open: false,
+      writeStdout: () => {},
+    })
+  } catch (err) {
+    restoreCanonDb()
+    throw err
+  }
 
   const address = server.address()
   if (address === null || typeof address === 'string') {
     await new Promise<void>((resolve) => server.close(() => resolve()))
+    restoreCanonDb()
     throw new Error('dashboard did not bind a TCP port')
   }
 
@@ -123,6 +139,7 @@ export async function bootIsolatedDashboard(options: BootIsolatedOptions): Promi
         server.closeAllConnections()
       })
       await Promise.all(closing)
+      restoreCanonDb()
     },
   }
 }

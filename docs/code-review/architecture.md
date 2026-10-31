@@ -529,14 +529,16 @@ persisting the AST and project caches across local runs and reducing warm inspec
 
 The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
 the KyberDash `ts-test` gate (`npm --prefix dash run test`) and the .NET `test` gate (`dotnet test`). The
-watchdog kills the command's whole tree at an absolute cap (64 descendants, or 128 `node`
-processes for this user), and it fails the gate when a process the run started survives it. A
+watchdog kills the command's whole tree at an absolute cap (64 descendants, or 128 JavaScript runtime
+processes for this user: `node`, `nodejs`, `bun`, `deno`, `tsx`), and it fails the gate when a process the run started survives it. A
 watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
 or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
 
 `ReviewGateProcGuardWiringTests` pins both declarations, so a change to the argv has to change the test with it. The
 exit-code meanings and the local commands are in the
-[KyberDash runbook](../dash/runbook.md#running-tests-safely). Changing a `review.gates` entry in
+[KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`
+and `--timeout`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep
+`--timeout` at or below 540 when a run comes from an agent tool. Changing a `review.gates` entry in
 `.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
 
 No task gate covers a change that touches only workflow YAML, the review config or a shell

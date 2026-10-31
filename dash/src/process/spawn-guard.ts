@@ -11,6 +11,8 @@
 //     These hold even after allowRealSpawns.
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, normalize, resolve } from 'node:path'
 
 export type SpawnKind = 'job' | 'receiver' | 'engine' | 'tool'
 
@@ -51,6 +53,21 @@ export class SpawnedChildMayNotHostError extends Error {
 
 const MAX_DEPTH = 2
 
+/** What each spawned role may spawn. A role absent from this table, and a role mapped to [], spawns nothing. */
+const SPAWNABLE_BY_ROLE: Readonly<Record<string, readonly SpawnKind[]>> = {
+  job: [],
+  receiver: [],
+  tool: [],
+  engine: ['job', 'receiver'],
+}
+
+/** Variables a child must keep even when the caller hands it an env of its own. */
+const INHERITED_ENV_KEYS = [
+  'KYBERDASH_SPAWN_GUARD',
+  'KYBERDASH_SPAWN_LEDGER_FILE',
+  'KYBERDASH_LEDGER_RUN_STARTED_AT',
+] as const
+
 let allowReason: string | null = null
 const hits: string[] = []
 const ledger: LedgerEntry[] = []
@@ -69,16 +86,38 @@ export function spawnLedgerEntries(): readonly LedgerEntry[] {
  */
 function recordSpawn(request: GuardedSpawnRequest, child: unknown): void {
   const pid = (child as { readonly pid?: unknown } | null | undefined)?.pid
-  if (typeof pid !== 'number') return
+  // NaN, 0, a negative or a fractional pid would corrupt the ledger the teardown kills by.
+  if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return
   const entry: LedgerEntry = { pid, command: [request.program, ...request.args].join(' '), startedAt: Date.now() }
   ledger.push(entry)
   const file = process.env.KYBERDASH_SPAWN_LEDGER_FILE
-  if (file === undefined || file === '') return
+  if (file === undefined || file === '' || !isLedgerPath(file)) return
   try {
     appendFileSync(file, `${JSON.stringify(entry)}\n`)
-  } catch {
-    // The ledger is a safety net; a missing file must not break the spawn it observes.
+  } catch (error) {
+    // The ledger is a safety net: a file that is gone (the run ended) must not break the spawn it
+    // observes. Any other failure (EPERM, EACCES, a full disk) means the ledger is blind, so say so.
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return
+    if (!ledgerFailureReported) {
+      ledgerFailureReported = true
+      process.stderr.write(`spawn guard: cannot append to the process ledger ${file}: ${code ?? String(error)}\n`)
+    }
   }
+}
+
+const LEDGER_DIR_PREFIX = 'kyberdash-ledger-'
+let ledgerFailureReported = false
+
+/**
+ * The ledger file is an append path taken from the environment, so it is only honoured when it is
+ * the file the ledger's own setup creates: absolute, free of `..`, and directly inside a
+ * kyberdash-ledger- directory under the OS temp directory.
+ */
+function isLedgerPath(file: string): boolean {
+  if (!isAbsolute(file) || normalize(file) !== file) return false
+  const dir = dirname(file)
+  return basename(dir).startsWith(LEDGER_DIR_PREFIX) && resolve(dirname(dir)) === resolve(tmpdir())
 }
 
 /** Opts the current test in to real spawns. Cleared by the setup file after each test. */
@@ -103,17 +142,26 @@ export function clearSpawnGuardHits(): void {
 function ownDepth(env: NodeJS.ProcessEnv): number | null {
   const raw = env.KYBERDASH_SPAWN_DEPTH
   if (raw === undefined || raw === '') return 0
-  const parsed = Number(raw)
-  // An unreadable depth cannot be shown to be shallow, so it is refused.
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+  const text = raw.trim()
+  // An unreadable depth cannot be shown to be shallow, so it is refused. Number('   ') is 0 and
+  // Number('0x1') is 1, so the text must be plain digits before it is converted.
+  if (!/^\d+$/.test(text)) return null
+  const parsed = Number(text)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 function refusalReason(request: GuardedSpawnRequest, env: NodeJS.ProcessEnv, depth: number | null): string | null {
   const role = env.KYBERDASH_SPAWN_ROLE
   if (depth === null) return `KYBERDASH_SPAWN_DEPTH=${env.KYBERDASH_SPAWN_DEPTH ?? ''} is not a depth`
   if (depth >= MAX_DEPTH) return `calling process is at depth ${depth}, the limit is ${MAX_DEPTH - 1}`
-  if (role === 'job' || role === 'receiver') return `a ${role} process never spawns`
-  if (role === 'engine' && request.kind === 'engine') return 'an engine never spawns an engine'
+  if (role !== undefined && role !== '') {
+    const allowed = SPAWNABLE_BY_ROLE[role]
+    // Allowlist: a role that is not listed (including a mistyped one) may spawn nothing.
+    if (allowed === undefined) return `a process with role ${role} never spawns`
+    if (!allowed.includes(request.kind)) {
+      return allowed.length === 0 ? `a ${role} process never spawns` : `a ${role} process never spawns a ${request.kind}`
+    }
+  }
   if (env.KYBERDASH_SPAWN_GUARD === 'deny' && allowReason === null) {
     return 'spawn guard is in deny mode and the test did not call allowRealSpawns'
   }
@@ -133,8 +181,17 @@ export function guardedSpawn<T>(spawnFn: SpawnFn<T>, request: GuardedSpawnReques
     hits.push(description)
     throw new SpawnRefusedError(`spawn guard refused ${description}: ${reason}`)
   }
+  const callerEnv = request.options?.env
+  const inherited: NodeJS.ProcessEnv = {}
+  // A caller's own env must not turn the guard off in the child by leaving the variable out.
+  if (callerEnv !== undefined) {
+    for (const key of INHERITED_ENV_KEYS) {
+      if (callerEnv[key] === undefined && env[key] !== undefined) inherited[key] = env[key]
+    }
+  }
   const childEnv: NodeJS.ProcessEnv = {
-    ...(request.options?.env ?? env),
+    ...(callerEnv ?? env),
+    ...inherited,
     KYBERDASH_SPAWN_ROLE: request.kind,
     KYBERDASH_SPAWN_DEPTH: String((depth ?? 0) + 1),
   }
@@ -150,7 +207,7 @@ export function guardedSpawn<T>(spawnFn: SpawnFn<T>, request: GuardedSpawnReques
 export function assertMayHost(env: NodeJS.ProcessEnv = process.env): void {
   const role = env.KYBERDASH_SPAWN_ROLE
   const depth = ownDepth(env)
-  if (role === 'job' || role === 'receiver') {
+  if (role === 'job' || role === 'receiver' || role === 'tool') {
     throw new SpawnedChildMayNotHostError(`a ${role} child process may not host the dashboard`)
   }
   if (depth === null || depth >= MAX_DEPTH) {
@@ -160,8 +217,8 @@ export function assertMayHost(env: NodeJS.ProcessEnv = process.env): void {
   }
 }
 
-/** True when this process was spawned as an engine, job or receiver child. */
+/** True when this process was spawned as an engine, job, receiver or tool child. */
 export function isSpawnedChildRole(env: NodeJS.ProcessEnv = process.env): boolean {
   const role = env.KYBERDASH_SPAWN_ROLE
-  return role === 'engine' || role === 'job' || role === 'receiver'
+  return role === 'engine' || role === 'job' || role === 'receiver' || role === 'tool'
 }

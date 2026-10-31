@@ -146,7 +146,10 @@ two static audits (below) keep the list of such sites honest.
 6. **Run it through the watchdog.** `scripts/proc-guard.sh run -- <command>` from the repository
    root, as the [runbook](../../dash/runbook.md#running-tests-safely) describes. The watchdog is
    POSIX-only; on Windows the process ledger still checks the children the run recorded, by pid,
-   but there is no absolute process cap.
+   but there is no absolute process cap. The guard gives the command stdin from `/dev/null` when
+   its own stdin is a terminal, so a command that reads the terminal does not stop; `--tty` keeps
+   the terminal and is risky. From an agent tool keep `--timeout` at or below 540 seconds, because
+   a longer foreground command is moved to the background.
 7. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/boot-dashboard.ts`.
 
 **The allow-list (dash).** `dash/tests/spawn-sites.allowlist.ts` lists every `child_process`

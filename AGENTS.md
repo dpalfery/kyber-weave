@@ -17,7 +17,8 @@ as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` befo
 **Every local test, gate and e2e command runs through the process watchdog.** From the
 repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
 command's process tree at an absolute cap (exit 86) and fails a run that leaves children
-behind (exit 87). `fast-loop.sh` already wraps its test and gate calls. Playwright runs only with
+behind (exit 87). The caps change only by flag (`--max-node`, `--max-tree`), never by environment
+variable. `fast-loop.sh` already wraps its test and gate calls. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely) and
 [ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).

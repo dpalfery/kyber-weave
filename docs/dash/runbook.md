@@ -1354,19 +1354,38 @@ scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests
 ```
 
 The watchdog runs the command in its own process group and polls the process table about every
-half second. It has two caps, both absolute, not measured against a baseline:
+half second. It has two caps, both absolute, not measured against a baseline. The only way to change
+a cap is its flag; there is no environment variable for it, so a stray exported value cannot raise
+the safety limit.
 
-| Option | Default | Environment override | Trips when |
-|---|---|---|---|
-| `--max-node N` | 128 | `KW_MAX_NODE_PROCS` | This user's `node` processes on the machine reach N |
-| `--max-tree M` | 64 | `KW_MAX_TREE_PROCS` | Descendants of the wrapped command reach M |
-| `--timeout S` | none | none | S seconds of wall clock pass |
+| Option | Default | Trips when |
+|---|---|---|
+| `--max-node N` | 128 | This user's JavaScript runtime processes on the machine reach N. Counted by basename: `node`, `nodejs`, `bun`, `deno` and `tsx`. |
+| `--max-tree M` | 64 | Descendants of the wrapped command reach M |
+| `--timeout S` | none | S seconds of wall clock pass |
+| `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
+
+The watchdog refuses to run with an empty root, a root that is not a directory, or `/` (exit 2).
+
+**Standard input.** When the guard's own stdin is a terminal, the wrapped command gets stdin from
+`/dev/null`. The command runs as a background job in its own process group, so a read from the
+terminal would stop it with SIGTTIN, and it would then run until `--timeout` killed it (exit 124).
+`--tty` turns that redirection off. Use it only for a command that must read the terminal; a
+command that does so is stopped by SIGTTIN and ends only at `--timeout`.
+
+**Timeouts from an agent tool.** A foreground command longer than about 600 seconds is moved to the
+background by the agent tool. A guard timeout above 600 seconds therefore must not be used from an
+agent tool. Keep `--timeout` at or below 540 when a run comes from an agent tool.
+
+**Silent runs.** `review gates` prints its result only at the end, so a slow run and a stuck run look
+the same until the timeout fires. Progress output is a follow-up, tracked in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
 
 Exit codes:
 
 | Code | Meaning | What to do |
 |---|---|---|
-| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: raise the matching override and say why. |
+| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test`, and say in the PR why the default was too low. |
 | 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
 | 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
 | any other | The wrapped command's own exit code. | Normal failure. |

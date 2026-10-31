@@ -28,11 +28,16 @@ public sealed class ProcessSpawnSitesTests
         ("src", [".cs"])
     ];
 
+    // Type names may be namespace-qualified (System.Diagnostics.Process), so an optional
+    // "Namespace." prefix is allowed before each one. ProcessRunner.RunInteractive is matched
+    // without a call paren: SquadRunCommand hands it over as a delegate, and the spawn happens
+    // when that delegate is invoked, so the reference itself is the site.
     private static readonly Regex CSharpSpawn = new(
-        @"(?<start>\bProcess\.Start\s*\()" +
+        @"(?<start>\b(?:\w+\.)*Process\.Start\s*\()" +
         @"|(?<run>\bProcessRunner\.Run\s*\()" +
-        @"|(?<proc>\bnew\s+Process\b)" +
-        @"|(?<info>\bnew\s+ProcessStartInfo\s*\(|\bProcessStartInfo\s+\w+\s*=\s*new\s*\()" +
+        @"|(?<interactive>\bProcessRunner\.RunInteractive\b)" +
+        @"|(?<proc>\bnew\s+(?:\w+\.)*Process\b)" +
+        @"|(?<info>\bnew\s+(?:\w+\.)*ProcessStartInfo\s*\(|\bProcessStartInfo\s+\w+\s*=\s*new\s*\()" +
         @"|(?<build>\bBuildStartInfo\s*\()",
         RegexOptions.CultureInvariant);
 
@@ -116,6 +121,12 @@ public sealed class ProcessSpawnSitesTests
     [InlineData("        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(", "BuildStartInfo")]
     [InlineData("        using Process process = new Process { StartInfo = startInfo };", "new Process")]
     [InlineData("        using Process process = new Process();", "new Process")]
+    [InlineData("        using System.Diagnostics.Process process = new System.Diagnostics.Process();", "new Process")]
+    [InlineData("        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo);", "Process.Start")]
+    [InlineData("        ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo(\"git\")", "ProcessStartInfo")]
+    [InlineData("        Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;", "ProcessRunner.RunInteractive")]
+    [InlineData("        return ProcessRunner.RunInteractive(startInfo);", "ProcessRunner.RunInteractive")]
+    [InlineData("        // Func<ProcessStartInfo, int> runner = ProcessRunner.RunInteractive;", null)]
     [InlineData("        // ProcessRunner.Run(startInfo, string.Empty);", null)]
     [InlineData("    /// <c>ProcessRunner.Run</c> copies exactly this environment.", null)]
     [InlineData("        return ProcessRunner.ReadToEnd(process);", null)]
@@ -192,6 +203,9 @@ public sealed class ProcessSpawnSitesTests
 
         if (match.Groups["run"].Success)
             return "ProcessRunner.Run";
+
+        if (match.Groups["interactive"].Success)
+            return "ProcessRunner.RunInteractive";
 
         if (match.Groups["proc"].Success)
             return "new Process";

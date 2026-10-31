@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 
 import { beginLedgerRun } from './tests/setup/process-ledger-global.js'
 
+// Spec workers and any boot they start inherit this; webServer.env below covers the server.
+process.env.KYBERDASH_SPAWN_GUARD = 'deny'
 beginLedgerRun()
 
 const dashRoot = fileURLToPath(new URL('.', import.meta.url))

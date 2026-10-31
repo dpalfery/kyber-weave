@@ -990,6 +990,42 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(120));",
       "count": 1,
       "bound": "ProcessRunner timeout 120 s kills the child tree on expiry; one self-exiting kyber-weave CLI pack invocation in a temp directory."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-node-family-3.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The only child is the guard, whose wrapped command is sleep 5 (self-exiting, killed by the guard at the first poll) or none; the process table is a fixture."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command is sleep 5, which exits by itself; the process table is a fixture."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
+      "text": "Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;",
+      "count": 1,
+      "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardTtyTests.cs",
+      "text": "ProcessStartInfo startInfo = new(scriptPath)",
+      "count": 1,
+      "bound": "Started by the Run below: HarnessTimeout (60 s) kills the tree. The child is script, which runs proc-guard.sh with --timeout 20 around sh -c 'read x; echo done'; the inner command exits by itself on EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardTtyTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, HarnessTimeout);",
+      "count": 1,
+      "bound": "HarnessTimeout (60 s) kills the tree; the guard's own --timeout 20 kills the wrapped read; the inner command exits by itself."
     }
   ]
 }

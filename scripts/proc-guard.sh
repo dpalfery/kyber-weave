@@ -7,18 +7,26 @@
 # anything it started is still alive.
 #
 # Usage:
-#   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] -- <cmd...>
+#   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty] -- <cmd...>
 #   scripts/proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]
 #
 # Exit codes:
 #   86   a cap tripped (stderr names max-tree or max-node); the whole tree was killed
 #   87   processes survived the command (run: only when the command itself succeeded)
 #   124  --timeout elapsed; the whole tree was killed (same code as timeout(1))
+#   2    usage error, or fail-closed: bad root, unreadable clock or process table
 #   else the wrapped command's own exit code
 #
 # Caps are absolute, not relative to a baseline, and reaching the cap trips it:
-#   --max-node  all of this user's node processes on the machine (default 128)
+#   --max-node  all of this user's node, nodejs, bun, deno and tsx processes on the machine, not only
+#               the wrapped command's (default 128); polled every 0.5 s
 #   --max-tree  descendants of the wrapped command (default 64)
+#
+# Terminal input: the wrapped command runs as a background job in its own process group. When
+# the guard's stdin is a terminal, a read from it would stop that job with SIGTTIN until the
+# watchdog fires, so by default stdin is redirected from /dev/null in that case (guarded
+# commands are non-interactive test and gate runs). --tty keeps the terminal as stdin instead;
+# a command that then reads the terminal is stopped by SIGTTIN and ends only by --timeout.
 #
 # Test hook: KW_PROC_GUARD_PS names an executable that prints the process table
 # (rows: "<pid> <ppid> <user> <comm> <args...>") instead of the real ps.
@@ -28,6 +36,10 @@
 # Exported to the wrapped command and to that hook:
 #   KW_PROC_GUARD_ROOT      repository root (run) or the --root value (check-leftovers)
 #   KW_PROC_GUARD_ROOT_PID  pid of the wrapped command
+# Error handling: deliberately no `set -e`. The poll loop, the kill paths and the best-effort
+# cleanup rely on commands that are allowed to fail (kill -0, ps of a dead pid, grep with no
+# match), so -e would abort a run mid-kill. Instead every substitution that a decision depends on
+# (the repo root, the clock, the process table) is checked and the guard fails closed with exit 2.
 set -uo pipefail
 
 readonly EXIT_CAP=86
@@ -59,9 +71,53 @@ table() {
   fi
 }
 
-# Count this user's node processes.
+# Count this user's JavaScript runtime processes (basename of comm: node, nodejs, bun, deno, tsx).
+# The count is machine-wide for this user, not relative to the wrapped command: the cap is an
+# absolute ceiling against fork-bombs, and it also counts unrelated node processes.
 count_node() {
-  table | awk -v u="${me}" '$3 == u { n = split($4, a, "/"); if (a[n] == "node") c++ } END { print c + 0 }'
+  table | awk -v u="${me}" '
+    $3 == u {
+      n = split($4, a, "/")
+      if (a[n] == "node" || a[n] == "nodejs" || a[n] == "bun" || a[n] == "deno" || a[n] == "tsx") c++
+    }
+    END { print c + 0 }'
+}
+
+# Fail closed on a root that is empty, not a directory, or the filesystem root (which would match
+# nearly every command line). Prints the reason on stderr; returns 2 when refused.
+validate_root() {
+  local root="$1"
+  if [[ -z "${root}" || "${root%/}" == "" || ! -d "${root}" ]]; then
+    printf 'proc-guard: refusing root "%s": it must be an existing directory other than /\n' "${root}" >&2
+    return 2
+  fi
+  return 0
+}
+
+# Real wall clock in epoch seconds; non-zero (nothing printed) when date fails.
+real_now() {
+  local value
+  value="$(date +%s 2>/dev/null)"
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    printf 'proc-guard: cannot read the clock (date +%%s failed)\n' >&2
+    return 1
+  fi
+  printf '%s\n' "${value}"
+}
+
+# Epoch seconds, or the KW_PROC_GUARD_NOW fixture; non-zero (nothing printed) when the clock fails.
+epoch_now() {
+  local value
+  if [[ -n "${KW_PROC_GUARD_NOW:-}" ]]; then
+    value="${KW_PROC_GUARD_NOW}"
+    if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+      printf 'proc-guard: KW_PROC_GUARD_NOW must be epoch seconds\n' >&2
+      return 1
+    fi
+    printf '%s\n' "${value}"
+    return 0
+  fi
+  real_now
 }
 
 # Print the pids of every descendant of the given pid, one per line.
@@ -133,6 +189,15 @@ etime_to_seconds() {
   if [[ "${rest}" == *-* ]]; then
     days="${rest%%-*}"
     rest="${rest#*-}"
+    if [[ ! "${days}" =~ ^[0-9]+$ ]]; then
+      printf -- '-1\n'
+      return
+    fi
+  fi
+  # Anything but digits separated by single colons (fractions, trailing colon, empty field) is unknown.
+  if [[ ! "${rest}" =~ ^[0-9]+(:[0-9]+){0,2}$ ]]; then
+    printf -- '-1\n'
+    return
   fi
   local IFS=':'
   for part in ${rest}; do
@@ -259,12 +324,13 @@ check_leftovers() {
     usage
     return 2
   fi
+  validate_root "${root}" || return 2
   export KW_PROC_GUARD_ROOT="${root}"
   local found
   local rows row pid age now
   rows="$(orphans_for_root "${root}")"
   if ((since_given == 1)) && [[ -n "${rows}" ]]; then
-    now="${KW_PROC_GUARD_NOW:-$(date +%s)}"
+    now="$(epoch_now)" || return 2
     local kept=""
     while IFS= read -r row; do
       [[ -z "${row}" ]] && continue
@@ -285,12 +351,13 @@ check_leftovers() {
 }
 
 run_guarded() {
-  local max_node=128 max_tree=64 timeout_s=0
+  local max_node=128 max_tree=64 timeout_s=0 keep_tty=0
   while (($#)); do
     case "$1" in
       --max-node) max_node="${2:-}"; shift 2 ;;
       --max-tree) max_tree="${2:-}"; shift 2 ;;
       --timeout) timeout_s="${2:-}"; shift 2 ;;
+      --tty) keep_tty=1; shift ;;
       --) shift; break ;;
       *) usage; return 2 ;;
     esac
@@ -308,13 +375,23 @@ run_guarded() {
   fi
 
   local root started_at pid
-  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || root=""
+  validate_root "${root}" || return 2
   export KW_PROC_GUARD_ROOT="${root}"
-  started_at="$(date +%s)"
+  started_at="$(real_now)" || return 2
+  # With the real process table, an empty read means ps failed: every cap would silently pass.
+  if [[ -z "${KW_PROC_GUARD_PS:-}" && -z "$(table)" ]]; then
+    printf 'proc-guard: cannot read the process table (ps failed); refusing to run unguarded\n' >&2
+    return 2
+  fi
 
   # Own process group (job control), and the command learns its own pid before it execs.
   set -m
-  bash -c 'export KW_PROC_GUARD_ROOT_PID=$$; exec "$@"' proc-guard-exec "$@" &
+  if [[ -t 0 && "${keep_tty}" -eq 0 ]]; then
+    bash -c 'export KW_PROC_GUARD_ROOT_PID=$$; exec "$@"' proc-guard-exec "$@" </dev/null &
+  else
+    bash -c 'export KW_PROC_GUARD_ROOT_PID=$$; exec "$@"' proc-guard-exec "$@" &
+  fi
   pid=$!
   set +m
   export KW_PROC_GUARD_ROOT_PID="${pid}"
@@ -344,7 +421,12 @@ run_guarded() {
       printf 'proc-guard: --max-node cap tripped (%s node processes, cap %s); killing the process tree\n' "${node}" "${max_node}" >&2
       break
     fi
-    now="$(date +%s)"
+    if ! now="$(real_now)"; then
+      kill_tree "${pid}"
+      { wait "${pid}"; } 2>/dev/null || true
+      trap - INT TERM
+      return 2
+    fi
     if ((timeout_s > 0 && now - started_at >= timeout_s)); then
       tripped="timeout"
       printf 'proc-guard: --timeout %ss elapsed; killing the process tree\n' "${timeout_s}" >&2
@@ -378,7 +460,7 @@ run_guarded() {
   # Leftover check: tracked descendants still alive, members of the command's process group,
   # and re-parented processes that carry the repo root and started after this run began.
   local candidates="" linked="" candidate age run_age row
-  run_age=$(($(date +%s) - started_at))
+  run_age=$(($(real_now || printf '%s' "${started_at}") - started_at))
   for candidate in "${tracked[@]+"${tracked[@]}"}"; do
     if kill -0 "${candidate}" 2>/dev/null; then
       candidates+="${candidate}"$'\n'

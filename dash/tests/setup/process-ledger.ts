@@ -48,7 +48,8 @@ type Survivor = { readonly pid: number; readonly command: string; readonly killa
 function scanTable(options: TeardownOptions, deps: ProcessLedgerDeps): readonly ProcessRow[] {
   if (deps.platform !== 'win32') return deps.listProcesses()
   const isAlive = deps.isAlive
-  if (isAlive === undefined) return []
+  // Silently returning no survivors would pass a run that left children behind.
+  if (isAlive === undefined) throw new Error("process ledger: platform 'win32' requires deps.isAlive")
   return options.entries
     .filter((entry) => isAlive(entry.pid))
     .map((entry) => ({ pid: entry.pid, ppid: 0, startedAt: entry.startedAt, command: entry.command }))
