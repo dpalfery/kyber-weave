@@ -85,6 +85,20 @@ describe('setup never fails the host', () => {
     expect(host.closedSubscriptions).toBe(1)
   })
 
+  for (const timeout of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    it(`falls back to the default wait when hookRegistrationTimeoutMs is ${timeout}`, async () => {
+      const errors: string[] = []
+      const host = createHost({ sessionHookDelayMs: 60 })
+      const cleanup = await start(
+        createSetup({ ...options(), hookRegistrationTimeoutMs: timeout, onError: (where) => errors.push(where) }),
+        host,
+      )
+      expect(errors).toEqual([])
+      expect([...host.sessionHooks].sort()).toEqual(SESSION_HOOKS)
+      await stopPlugin(cleanup)
+    })
+  }
+
   it('ignores hook inputs that name no session and never rejects', async () => {
     const rcv = receiver()
     const host = createHost()

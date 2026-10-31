@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OPENCODE_KEYS } from './contract.js'
 import { createSetup } from './entry.js'
-import { mapStepSpan } from './mapper.js'
+import { labelOf, mapStepSpan } from './mapper.js'
 import {
   OWNED_SESSION_ID,
   attributesOf,
@@ -157,5 +157,19 @@ describe('a prompt over the cap is cut before it is copied', () => {
     const text = stringAttr(spans(rcv, 'request')[0] as OtlpSpan, OPENCODE_KEYS.promptText)
     expect(Buffer.byteLength(text ?? '', 'utf8')).toBe(64 * 1024)
     expect(text?.startsWith(`${'a'.repeat(1000)}\n\nbbb`)).toBe(true)
+  })
+})
+
+describe('a host label is cut before it is encoded', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('never encodes a whole oversized label to keep its first 1 KiB', () => {
+    const encode = vi.spyOn(Buffer, 'from')
+    const label = labelOf('k'.repeat(5_000_000))
+    const widest = Math.max(0, ...encode.mock.calls.map(([value]) => (typeof value === 'string' ? value.length : 0)))
+    expect(Buffer.byteLength(label ?? '', 'utf8')).toBe(FIELD_CAP)
+    expect(widest).toBeLessThan(100_000)
   })
 })

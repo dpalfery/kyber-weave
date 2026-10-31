@@ -202,6 +202,8 @@ export type HostOptions = {
   rejectSessionHook?: boolean
   /** `ctx.session.hook` never settles (a host that accepts the call and never answers). */
   hangSessionHook?: boolean
+  /** `ctx.session.hook` answers only after this many milliseconds (a slow host). */
+  sessionHookDelayMs?: number
   /** `ctx.event.subscribe` throws. */
   throwOnSubscribe?: boolean
   /** No session, tool or event surface at all. */
@@ -331,7 +333,14 @@ export function createHost(options: HostOptions = {}): FakeV2Host {
       ? { hook: () => Promise.reject(new Error('session hook refused (synthetic)')) }
       : options.hangSessionHook === true
         ? { hook: () => new Promise<never>(() => undefined) }
-        : { hook: (name: string, callback: unknown) => register(sessionCallbacks, sessionHooks, name, callback) }
+        : options.sessionHookDelayMs !== undefined
+          ? {
+              hook: (name: string, callback: unknown) =>
+                new Promise<unknown>((resolve) => {
+                  realSetTimeout(() => resolve(register(sessionCallbacks, sessionHooks, name, callback)), options.sessionHookDelayMs)
+                }),
+            }
+          : { hook: (name: string, callback: unknown) => register(sessionCallbacks, sessionHooks, name, callback) }
   const tool = { hook: (name: string, callback: unknown) => register(toolCallbacks, toolHooks, name, callback) }
   const ctx =
     options.bare === true

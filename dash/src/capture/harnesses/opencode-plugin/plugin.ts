@@ -33,10 +33,8 @@
 import { normalize } from 'node:path'
 
 import {
-  MAX_FIELD_BYTES,
   MAX_PROMPT_BYTES,
   capContent,
-  capUtf8,
   costOf,
   detachedCopy,
   epochMs,
@@ -55,7 +53,7 @@ import {
   type StepContent,
   type StepUsage,
 } from './mapper.js'
-import { normalizeSkillId, parseAvailableSkills } from './skills-block.js'
+import { MAX_FIELD_BYTES, capUtf8, normalizeSkillId, parseAvailableSkills } from './skills-block.js'
 import type { OtlpWireSpan } from './transport/otlp-sender.js'
 
 /** The plugin id dash CLI writes into opencode's `plugins` config keys. */
@@ -81,6 +79,8 @@ const MAX_OPEN_TOOLS = 256
 const MAX_DONE_TOOLS = 512
 /** Skill ids waiting for the next step, per session. */
 const MAX_PENDING_SKILLS = 64
+/** Distinct event times remembered per session for the anchors made up for id-less executions. */
+const MAX_MADE_UP_ANCHORS = 64
 /** Skill ids one step keeps; past it the oldest is forgotten. */
 const MAX_STEP_SKILLS = 64
 
@@ -123,12 +123,13 @@ const label = labelOf
 const whole = wholeOf
 
 /**
- * A directory reduced to one spelling: separators collapsed, `.` and `..` resolved and no trailing
- * separator. It is text only: the engine reads no file system, so letter case and symlinks are not
+ * A directory reduced to one spelling: cut to `MAX_FIELD_BYTES`, separators collapsed, `.` and `..`
+ * resolved and no trailing separator. It is text only: the engine reads no file system, so letter case and symlinks are not
  * resolved, and two spellings that differ only there stay different.
  */
 export function normalizeDirectory(directory: string): string {
-  const cleaned = normalize(directory)
+  // Cut first: a host path is a label here, and a megabyte of it is neither retained nor compared.
+  const cleaned = normalize(capUtf8(directory, MAX_FIELD_BYTES))
   const trimmed = cleaned.replace(/[\\/]+$/, '')
   // The root (`/`, `C:\`) is all separator or ends in a drive colon; keep it as normalize left it.
   return trimmed === '' || /^[A-Za-z]:$/.test(trimmed) ? cleaned : trimmed
@@ -357,8 +358,8 @@ type SessionState = {
   version?: string
   label?: string
   execution?: ExecutionState
-  /** The last anchor made up for an execution-started event that carried no id. */
-  madeUpAnchor?: { createdMs: number; repeat: number }
+  /** For each recent event time, how many id-less execution-started events made an anchor from it. */
+  madeUpAnchors?: Map<number, number>
   /** Prompts seen while no execution was open: they belong to the next one. */
   pendingPrompts: Prompts
   pendingSkills: Set<string>
@@ -387,21 +388,22 @@ function noteStepSkill(step: StepState, skillId: string): void {
 
 /**
  * The anchor for an execution-started event the host gave no id: its time, and a repeat number when
- * the previous such event in the session had the same time, so two executions never share a span id.
+ * an earlier such event in the session had the same time, so those executions do not share a span
+ * id. Only the last `MAX_MADE_UP_ANCHORS` distinct times are remembered, so a time repeated after
+ * that many others can still repeat an earlier anchor; the host normally sends an id.
  */
 function madeUpAnchor(state: SessionState, createdMs: number): string {
-  const repeat = state.madeUpAnchor?.createdMs === createdMs ? state.madeUpAnchor.repeat + 1 : 0
-  state.madeUpAnchor = { createdMs, repeat }
+  const seen = (state.madeUpAnchors ??= new Map())
+  const previous = seen.get(createdMs)
+  const repeat = previous === undefined ? 0 : previous + 1
+  // Re-insert so the Map's order is least recently used first.
+  seen.delete(createdMs)
+  seen.set(createdMs, repeat)
+  if (seen.size > MAX_MADE_UP_ANCHORS) {
+    const forgotten = oldest(seen.keys())
+    if (forgotten !== undefined) seen.delete(forgotten)
+  }
   return repeat === 0 ? `created:${createdMs}` : `created:${createdMs}#${repeat}`
-}
-
-/**
- * The head of a prompt that can survive the cap. Every UTF-16 unit takes at least one UTF-8 byte, so
- * the first `MAX_PROMPT_BYTES` units already hold every byte that can be kept; the rest of a huge
- * prompt is never copied or encoded. The copy is independent of the host string.
- */
-function promptHead(promptText: string): string {
-  return promptText.length > MAX_PROMPT_BYTES ? detachedCopy(promptText.slice(0, MAX_PROMPT_BYTES)) : promptText
 }
 
 /** Adds one prompt: always counted; its text kept (capped, blank-line joined) only when content may be kept. */
@@ -409,9 +411,10 @@ function addPrompt(prompts: Prompts, promptText: string | undefined, keepContent
   prompts.count += 1
   if (!keepContent || promptText === undefined || promptText === '') return
   if (prompts.text === undefined) {
-    prompts.text = capUtf8(promptHead(promptText), MAX_PROMPT_BYTES)
+    prompts.text = capUtf8(promptText, MAX_PROMPT_BYTES)
   } else if (Buffer.byteLength(prompts.text, 'utf8') < MAX_PROMPT_BYTES) {
-    prompts.text = capUtf8(`${prompts.text}\n\n${promptHead(promptText)}`, MAX_PROMPT_BYTES)
+    // Cut the new text first so a huge prompt is never joined whole.
+    prompts.text = capUtf8(`${prompts.text}\n\n${capUtf8(promptText, MAX_PROMPT_BYTES)}`, MAX_PROMPT_BYTES)
   }
 }
 

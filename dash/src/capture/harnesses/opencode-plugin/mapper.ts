@@ -16,6 +16,7 @@ import {
   traceIdFor,
   type SpanKind,
 } from './contract.js'
+import { MAX_FIELD_BYTES, capUtf8 } from './skills-block.js'
 import type { OtlpWireAttribute, OtlpWireSpan, OtlpWireStatus } from './transport/otlp-sender.js'
 
 /** Prompt text on the request span is capped at this many UTF-8 bytes. */
@@ -30,13 +31,6 @@ export const MAX_CONTENT_CHARS = 262_144
 
 /** Appended to a field that hit the cap, so a reader can tell it was cut. */
 export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
-
-/**
- * Cap, in UTF-8 bytes, on each host string kept as a short label: the session label, request kind,
- * agent, model, finish reason, tool name, error type and the like. A longer value is cut, never sent
- * whole and never retained whole.
- */
-export const MAX_FIELD_BYTES = 1024
 
 /** Latest event time accepted, in epoch milliseconds: 9999-12-31T23:59:59.999Z. */
 export const MAX_EPOCH_MS = 253_402_300_799_999
@@ -309,19 +303,6 @@ export function mapToolSpan(record: ToolRecord): OtlpWireSpan {
  */
 export function detachedCopy(text: string): string {
   return JSON.parse(JSON.stringify(text)) as string
-}
-
-/**
- * `text` limited to `maxBytes` of UTF-8, cut on a character boundary. Text under the limit is
- * returned unchanged, so its code units (surrogate pairs, CRLF) survive exactly.
- */
-export function capUtf8(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
-  const bytes = Buffer.from(text, 'utf8')
-  let end = Math.min(maxBytes, bytes.length)
-  // A byte of the form 10xxxxxx continues a character; step back to the byte that starts it.
-  while (end > 0 && end < bytes.length && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1
-  return bytes.toString('utf8', 0, end)
 }
 
 /** `text` limited to `MAX_CONTENT_CHARS`, marked when cut. Always an independent copy. */

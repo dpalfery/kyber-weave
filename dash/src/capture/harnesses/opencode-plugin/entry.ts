@@ -133,7 +133,13 @@ async function start(ctx: OpencodeSetupContext | undefined, options: EntryOption
   const env = options.env ?? process.env
   const consentPath = options.consentPath ?? resolveConsentPath()
   const flushTimeoutMs = options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS
-  const hookTimeoutMs = options.hookRegistrationTimeoutMs ?? DEFAULT_HOOK_REGISTRATION_TIMEOUT_MS
+  // A zero, negative, NaN or infinite wait is no wait a caller can mean (a timer would fire at once or
+  // never), so it falls back to the default.
+  const requestedHookWait = options.hookRegistrationTimeoutMs
+  const hookTimeoutMs =
+    requestedHookWait !== undefined && Number.isFinite(requestedHookWait) && requestedHookWait > 0
+      ? requestedHookWait
+      : DEFAULT_HOOK_REGISTRATION_TIMEOUT_MS
 
   const outbox = createOutbox({
     endpoint: options.endpoint ?? DEFAULT_OTLP_ENDPOINT,

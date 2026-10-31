@@ -4,9 +4,9 @@
 // `<description>`; a mid-session change re-emits the block after a
 // "The available skills have changed" message.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { normalizeSkillId, parseAvailableSkills } from './skills-block.js'
+import { capUtf8, headForCap, normalizeSkillId, parseAvailableSkills } from './skills-block.js'
 
 const skill = (id: string): string =>
   `  <skill>\n    <id>${id}</id>\n    <name>${id}</name>\n    <description>does ${id}</description>\n  </skill>`
@@ -76,5 +76,33 @@ describe('normalizeSkillId', () => {
     expect(normalizeSkillId('  skill-a\n')).toBe('skill-a')
     expect(normalizeSkillId('   ')).toBeUndefined()
     expect(normalizeSkillId(7)).toBeUndefined()
+  })
+
+  it('cuts an id to 1024 UTF-8 bytes, in the listing as well as from the host', () => {
+    expect(Buffer.byteLength(normalizeSkillId(` ${'x'.repeat(5_000_000)}`) ?? '', 'utf8')).toBe(1024)
+    const listed = parseAvailableSkills(block('y'.repeat(100_000)))
+    expect(listed.ok && listed.ids[0] !== undefined && Buffer.byteLength(listed.ids[0], 'utf8')).toBe(1024)
+  })
+})
+
+describe('headForCap and capUtf8', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('never leaves half a surrogate pair at the cut', () => {
+    const text = `${'a'.repeat(9)}\u{1F600}${'b'.repeat(20)}`
+    expect(headForCap(text, 10)).toBe('a'.repeat(9))
+    expect(headForCap('short', 10)).toBe('short')
+    expect(capUtf8(text, 10)).toBe('a'.repeat(9))
+    expect(capUtf8(text, 13)).toBe(`${'a'.repeat(9)}\u{1F600}`)
+  })
+
+  it('does not encode the whole of a long string to cut it', () => {
+    const encode = vi.spyOn(Buffer, 'from')
+    const cut = capUtf8('z'.repeat(5_000_000), 1024)
+    const widest = Math.max(0, ...encode.mock.calls.map(([value]) => (typeof value === 'string' ? value.length : 0)))
+    expect(Buffer.byteLength(cut, 'utf8')).toBe(1024)
+    expect(widest).toBeLessThan(100_000)
   })
 })

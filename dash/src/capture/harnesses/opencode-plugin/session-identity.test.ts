@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { OPENCODE_KEYS } from './contract.js'
 import { createSetup } from './entry.js'
+import { normalizeDirectory } from './plugin.js'
 import {
   OWNED_DIRECTORY,
   OWNED_SESSION_ID,
@@ -60,6 +61,27 @@ describe('a request has its own identity even when the host sent no event id', (
     const requests = spans(rcv, 'request')
     expect(requests).toHaveLength(2)
     expect(new Set(requests.map((span) => span['spanId'])).size).toBe(2)
+  })
+})
+
+describe('made-up request anchors stay distinct across interleaved times', () => {
+  it('three id-less executions at times 1000, 2000 and 1000 are three requests', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await host.deliverEvent(bus.sessionCreated(S, 900))
+    for (const created of [1000, 2000, 1000]) await host.deliverEvent(withoutId(bus.executionStarted(S, created)))
+    await host.deliverEvent(bus.executionSucceeded(S, 3000))
+    await stopPlugin(cleanup)
+    const requests = spans(rcv, 'request')
+    expect(requests).toHaveLength(3)
+    expect(new Set(requests.map((span) => span['spanId'])).size).toBe(3)
+  })
+})
+
+describe('a host directory is bounded', () => {
+  it('is cut to the label cap before it is retained or compared', () => {
+    expect(Buffer.byteLength(normalizeDirectory(`/${'d'.repeat(5_000_000)}`), 'utf8')).toBeLessThanOrEqual(1024)
   })
 })
 
