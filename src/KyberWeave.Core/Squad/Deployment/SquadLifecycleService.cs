@@ -496,7 +496,23 @@ public sealed class SquadLifecycleService
     private static IEnumerable<string> DegradedFileWarnings(SquadDeploymentPlan plan)
     {
         return plan.DegradedFiles.Select(degraded =>
-            $"Could not read deployed file '{degraded.RelativePath}' for target {degraded.Target}; it was kept on trust and not verified against the release.");
+            $"Could not read deployed file '{degraded.RelativePath}' for target '{SanitizeTargetTokenForWarning(degraded.Target)}'; it was kept on trust and not verified against the release.");
+    }
+
+    /// <summary>
+    ///     Renders a receipt- or render-sourced target token safe for a one-line warning. The token is
+    ///     attacker-influenced input (a hand-edited receipt), so control characters — including the
+    ///     newline that would split one warning into two log lines — are replaced, and the caller
+    ///     single-quotes the result.
+    /// </summary>
+    internal static string SanitizeTargetTokenForWarning(string token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        StringBuilder sanitized = new(token.Length);
+        foreach (char c in token)
+            sanitized.Append(char.IsControl(c) ? '?' : c);
+        return sanitized.ToString();
     }
 
     /// <summary>

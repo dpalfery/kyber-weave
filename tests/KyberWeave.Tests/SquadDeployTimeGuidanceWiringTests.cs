@@ -492,18 +492,17 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     }
 
     /// <summary>
-    ///     True when the warning names the degraded file and the target outside the quoted path. A
-    ///     target-relative path can carry a target prefix such as <c>.codex/</c>, so the target must be
-    ///     named by the warning text itself.
+    ///     True when the warning names the degraded file and the target in its own quoted target slot.
+    ///     A target-relative path can carry a target prefix such as <c>.codex/</c>, so the target must be
+    ///     named by the warning text itself (<c>for target 'codex'</c>), not merely appear inside the path.
     /// </summary>
     private static bool NamesPathAndTargetOutsideIt(string warning, string fileName, string target)
     {
         if (!warning.StartsWith("Could not read deployed file", StringComparison.Ordinal))
             return false;
 
-        string withoutQuotedPath = System.Text.RegularExpressions.Regex.Replace(warning, "'[^']*'", "''");
         return warning.Contains(fileName, StringComparison.Ordinal)
-            && withoutQuotedPath.Contains(target, StringComparison.OrdinalIgnoreCase);
+            && warning.Contains($"for target '{target}'", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool NamesTargetOutsideQuotedPath(string warning, string target)

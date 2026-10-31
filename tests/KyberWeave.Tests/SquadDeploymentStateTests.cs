@@ -1187,6 +1187,25 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             .ToList();
 
     /// <summary>
+    ///     A degraded-file warning quotes a receipt-sourced token, so a hand-edited receipt cannot
+    ///     inject a second log line: control characters are neutralized while known tokens pass
+    ///     through byte-for-byte.
+    /// </summary>
+    [Theory]
+    [InlineData("codex", "codex")]
+    [InlineData("future-harness", "future-harness")]
+    [InlineData("evil\ninjected", "evil?injected")]
+    [InlineData("carriage\rreturn", "carriage?return")]
+    [InlineData("tab\there", "tab?here")]
+    [InlineData("", "")]
+    public void SanitizeTargetTokenForWarningKeepsKnownTokensAndNeutralizesControlCharacters(
+        string token,
+        string expected)
+    {
+        Assert.Equal(expected, SquadLifecycleService.SanitizeTargetTokenForWarning(token));
+    }
+
+    /// <summary>
     ///     Progressively disclosed references are ordinary deployment files. Their rendered paths
     ///     must therefore receive the same exact-byte ownership and status guarantees as principals.
     /// </summary>
