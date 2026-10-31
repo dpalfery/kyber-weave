@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseAvailableSkills } from './skills-block.js'
+import { normalizeSkillId, parseAvailableSkills } from './skills-block.js'
 
 const skill = (id: string): string =>
   `  <skill>\n    <id>${id}</id>\n    <name>${id}</name>\n    <description>does ${id}</description>\n  </skill>`
@@ -68,5 +68,13 @@ describe('parseAvailableSkills', () => {
       ok: false,
       reason: 'malformed-block',
     })
+  })
+})
+
+describe('normalizeSkillId', () => {
+  it('trims surrounding whitespace and treats nothing left, or a non-string, as absent', () => {
+    expect(normalizeSkillId('  skill-a\n')).toBe('skill-a')
+    expect(normalizeSkillId('   ')).toBeUndefined()
+    expect(normalizeSkillId(7)).toBeUndefined()
   })
 })

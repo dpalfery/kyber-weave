@@ -53,7 +53,7 @@ import {
   type StepContent,
   type StepUsage,
 } from './mapper.js'
-import { parseAvailableSkills } from './skills-block.js'
+import { normalizeSkillId, parseAvailableSkills } from './skills-block.js'
 import type { OtlpWireSpan } from './transport/otlp-sender.js'
 
 /** The plugin id dash CLI writes into opencode's `plugins` config keys. */
@@ -79,6 +79,8 @@ const MAX_OPEN_TOOLS = 256
 const MAX_DONE_TOOLS = 512
 /** Skill ids waiting for the next step, per session. */
 const MAX_PENDING_SKILLS = 64
+/** Skill ids one step keeps; past it the oldest is forgotten. */
+const MAX_STEP_SKILLS = 64
 
 export type CaptureEngineOptions = {
   /** This instance's project directory; absent when the host did not say. */
@@ -219,7 +221,7 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
       if (callId === undefined) return { kind: 'other' }
       const messageId = text(data['assistantMessageID'])
       const inputBytes = data['input'] === undefined ? undefined : jsonBytes(data['input'])
-      const inputId = isRecord(data['input']) ? text(data['input']['id']) : undefined
+      const inputId = isRecord(data['input']) ? normalizeSkillId(data['input']['id']) : undefined
       return {
         kind: 'tool.called',
         callId,
@@ -253,7 +255,7 @@ function factOf(type: string, data: Record<string, unknown>): Fact {
       }
     }
     case 'session.skill.activated': {
-      const skillId = text(data['id']) ?? text(data['name'])
+      const skillId = normalizeSkillId(data['id']) ?? normalizeSkillId(data['name'])
       return skillId === undefined ? { kind: 'other' } : { kind: 'skill.activated', skillId }
     }
     default:
@@ -357,6 +359,15 @@ type SessionState = {
 function oldest<K>(keys: IterableIterator<K>): K | undefined {
   const first = keys.next()
   return first.done === true ? undefined : first.value
+}
+
+/** Notes a skill on a step, forgetting the oldest once the step holds `MAX_STEP_SKILLS`. */
+function noteStepSkill(step: StepState, skillId: string): void {
+  step.skills.add(skillId)
+  if (step.skills.size > MAX_STEP_SKILLS) {
+    const forgotten = oldest(step.skills.values())
+    if (forgotten !== undefined) step.skills.delete(forgotten)
+  }
 }
 
 /**
@@ -512,7 +523,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
 
   const addSkill = (state: SessionState, messageId: string | undefined, skillId: string): void => {
     const step = messageId !== undefined ? state.steps.get(messageId) : lastOpenStep(state)
-    step?.skills.add(skillId)
+    if (step !== undefined) noteStepSkill(step, skillId)
   }
 
   const holdSkill = (state: SessionState, skillId: string): void => {
@@ -710,7 +721,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
       }
       case 'skill.activated': {
         const step = lastOpenStep(state)
-        if (step !== undefined) step.skills.add(fact.skillId)
+        if (step !== undefined) noteStepSkill(step, fact.skillId)
         else holdSkill(state, fact.skillId)
         return
       }
@@ -762,7 +773,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         addPrompt(state.execution?.prompts ?? state.pendingPrompts, promptText, promptText !== undefined && consentNow())
         if (Array.isArray(prompt['skills'])) {
           for (const skill of prompt['skills'] as unknown[]) {
-            const skillId = isRecord(skill) ? text(skill['id']) : undefined
+            const skillId = isRecord(skill) ? normalizeSkillId(skill['id']) : undefined
             if (skillId !== undefined) holdSkill(state, skillId)
           }
         }
@@ -828,7 +839,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         if (tool.messageId === undefined && messageId !== undefined) tool.messageId = messageId
         if (tool.hookStartMs === undefined) tool.hookStartMs = now()
         if (tool.inputBytes === undefined && raw['input'] !== undefined) tool.inputBytes = jsonBytes(raw['input'])
-        if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = text(raw['input']['id'])
+        if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = normalizeSkillId(raw['input']['id'])
         noteAgent(state, label(raw['agent']))
       }),
 
@@ -846,7 +857,7 @@ export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngin
         if (tool.name === undefined && name !== undefined) tool.name = name
         if (tool.messageId === undefined && messageId !== undefined) tool.messageId = messageId
         if (tool.inputBytes === undefined && raw['input'] !== undefined) tool.inputBytes = jsonBytes(raw['input'])
-        if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = text(raw['input']['id'])
+        if (tool.inputId === undefined && isRecord(raw['input'])) tool.inputId = normalizeSkillId(raw['input']['id'])
         noteAgent(state, label(raw['agent']))
         const error = isRecord(raw['error']) ? raw['error'] : undefined
         const failed = raw['status'] === 'error' || error !== undefined

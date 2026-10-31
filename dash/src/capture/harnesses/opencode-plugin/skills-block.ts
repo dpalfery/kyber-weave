@@ -24,6 +24,16 @@ const SKILL_CLOSE = /<\/skill>/g
 const DESCRIPTION_ELEMENT = /<description>[\s\S]*?<\/description>/g
 const ID_ELEMENT = /<id>([\s\S]*?)<\/id>/
 
+/**
+ * One spelling of a skill id for every source (the listing, the prompt, a skill tool call, an
+ * activation event): the string with surrounding whitespace removed, or absent when nothing is left.
+ */
+export function normalizeSkillId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const id = value.trim()
+  return id === '' ? undefined : id
+}
+
 function count(pattern: RegExp, text: string): number {
   return text.match(pattern)?.length ?? 0
 }
@@ -48,8 +58,8 @@ export function parseAvailableSkills(text: string): SkillsBlockResult {
   for (const element of body.matchAll(SKILL_ELEMENT)) {
     // An `<id>` inside a description is prose, not the skill id.
     const withoutDescription = (element[1] ?? '').replace(DESCRIPTION_ELEMENT, '')
-    const id = ID_ELEMENT.exec(withoutDescription)?.[1]?.trim()
-    if (id === undefined || id === '') return { ok: false, reason: 'malformed-block' }
+    const id = normalizeSkillId(ID_ELEMENT.exec(withoutDescription)?.[1])
+    if (id === undefined) return { ok: false, reason: 'malformed-block' }
     ids.push(id)
   }
   if (ids.length !== count(SKILL_OPEN, body)) return { ok: false, reason: 'malformed-block' }
