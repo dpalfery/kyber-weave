@@ -1,151 +1,59 @@
-using System.Text;
+using Markdig;
+using Markdig.Extensions.Tables;
+using Markdig.Syntax;
 
 namespace KyberWeave.Core.Docs.Graph;
 
 /// <summary>Pipe-table parsing for section bodies.</summary>
+/// <remarks>
+/// Cell boundaries follow GitHub-flavored Markdown via Markdig, so link destinations,
+/// code spans, and escaped pipes stay intact without a second splitter.
+/// </remarks>
 internal static class DocumentSectionTable
 {
+    private static readonly MarkdownPipeline TablePipeline = new MarkdownPipelineBuilder()
+        .UsePipeTables()
+        .UsePreciseSourceLocation()
+        .Build();
+
     internal static List<string[]>? ReadDataRows(string sectionBody)
     {
-        List<string> lines = sectionBody
-            .Split('\n')
-            .Select(line => line.Trim())
-            .ToList();
-        List<string> tableLines = new();
-        bool inFence = false;
-        foreach (string line in lines)
-        {
-            if (line.StartsWith("```", StringComparison.Ordinal))
-            {
-                inFence = !inFence;
-                continue;
-            }
-
-            if (!inFence && line.Length > 0 && line[0] == '|')
-            {
-                tableLines.Add(line);
-            }
-        }
-
-        if (tableLines.Count < 2)
-        {
-            return null;
-        }
-
+        MarkdownDocument document = Markdown.Parse(sectionBody, TablePipeline);
         List<string[]> rows = new();
-        for (int index = 0; index < tableLines.Count; index++)
+        foreach (Table table in document.Descendants<Table>())
         {
-            List<string> cells = SplitRowCells(tableLines[index]);
-            if (cells.Count > 0 && cells[0].Length == 0)
+            foreach (TableRow row in table.OfType<TableRow>())
             {
-                cells.RemoveAt(0);
-            }
+                if (row.IsHeader)
+                {
+                    continue;
+                }
 
-            if (cells.Count > 0 && cells[^1].Length == 0)
-            {
-                cells.RemoveAt(cells.Count - 1);
-            }
+                List<string> cells = new();
+                foreach (TableCell cell in row.OfType<TableCell>())
+                {
+                    cells.Add(CellText(sectionBody, cell));
+                }
 
-            if (cells.Count > 0 && cells.All(IsSeparatorCell))
-            {
-                continue;
+                if (cells.Count > 0)
+                {
+                    rows.Add(cells.ToArray());
+                }
             }
-
-            if (index == 0)
-            {
-                continue;
-            }
-
-            rows.Add(cells.ToArray());
         }
 
-        return rows;
+        return rows.Count == 0 ? null : rows;
     }
 
-    private static List<string> SplitRowCells(string line)
+    private static string CellText(string markdown, TableCell cell)
     {
-        List<string> cells = new();
-        StringBuilder current = new();
-        int bracketDepth = 0;
-        int parenDepth = 0;
-        bool inCode = false;
-        int codeTickCount = 0;
-        for (int index = 0; index < line.Length; index++)
+        if (cell.Span.Start < 0 || cell.Span.End < cell.Span.Start || cell.Span.Start >= markdown.Length)
         {
-            char character = line[index];
-            if (!inCode && character == '\\' && index + 1 < line.Length && line[index + 1] == '|')
-            {
-                current.Append('|');
-                index++;
-                continue;
-            }
-
-            if (character == '`')
-            {
-                int run = 1;
-                while (index + run < line.Length && line[index + run] == '`')
-                {
-                    run++;
-                }
-
-                if (!inCode)
-                {
-                    inCode = true;
-                    codeTickCount = run;
-                    current.Append('`', run);
-                    index += run - 1;
-                    continue;
-                }
-
-                if (run == codeTickCount)
-                {
-                    inCode = false;
-                    codeTickCount = 0;
-                    current.Append('`', run);
-                    index += run - 1;
-                    continue;
-                }
-
-                current.Append(character);
-                continue;
-            }
-
-            if (!inCode)
-            {
-                if (character == '[')
-                {
-                    bracketDepth++;
-                }
-                else if (character == ']' && bracketDepth > 0)
-                {
-                    bracketDepth--;
-                }
-                else if (character == '(' && (parenDepth > 0 || (index > 0 && line[index - 1] == ']')))
-                {
-                    parenDepth++;
-                }
-                else if (character == ')' && parenDepth > 0)
-                {
-                    parenDepth--;
-                }
-                else if (character == '|' && bracketDepth == 0 && parenDepth == 0)
-                {
-                    cells.Add(current.ToString().Trim());
-                    current.Clear();
-                    continue;
-                }
-            }
-
-            current.Append(character);
+            return string.Empty;
         }
 
-        cells.Add(current.ToString().Trim());
-        return cells;
-    }
-
-    private static bool IsSeparatorCell(string cell)
-    {
-        string trimmed = cell.Trim(':');
-        return trimmed.Length >= 3 && trimmed.All(character => character == '-');
+        int length = Math.Min(markdown.Length - cell.Span.Start, cell.Span.End - cell.Span.Start + 1);
+        string slice = markdown.Substring(cell.Span.Start, length).Trim();
+        return slice.Replace("\\|", "|", StringComparison.Ordinal);
     }
 }
