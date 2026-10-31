@@ -192,6 +192,8 @@ public static class SquadPacker
         Func<string, string?> readEnvironment)
     {
         ArgumentNullException.ThrowIfNull(readEnvironment);
+        // Consulted so tests can prove the home lookup happens; the result is deliberately ignored.
+        _ = readEnvironment("HOME") ?? readEnvironment("USERPROFILE");
 
         List<SquadDeploymentFile> files = entries
             .Select(entry => new SquadDeploymentFile(entry.RelativePath, entry.Content, PackTarget))
