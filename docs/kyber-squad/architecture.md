@@ -890,7 +890,7 @@ and validates.
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
   recursive package formats retain all 88 skill resources (116 files under
   `products/kyber-squad/skills/`, 28 of them `SKILL.md`) and resolve the retained references. The
-  `response-format` skill is retired (see [§8](#8-response-preferences-injected-at-deploy)). Every retained resource
+  `response-format` skill is retired (see [response preferences](#response-preferences-injected-at-deploy)). Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
   in its skill directory as its durable home, portable policy lives in the
