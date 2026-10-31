@@ -49,8 +49,8 @@ Modifying local developer environments or repository-level agent configurations 
 
 ## Canonical, packaged, and rendered skill surfaces
 
-The canonical product contains 29 `SKILL.md` files. `code-review-loop`, `kilo-review-loop`, and
-`response-format` are authored in Kyber-Squad;
+The canonical product contains 28 `SKILL.md` files. `code-review-loop` and `kilo-review-loop`
+are authored in Kyber-Squad;
 every imported skill except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches
 the designated canonical copy byte for byte. It also retains 87 supplemental references, scripts, provider
