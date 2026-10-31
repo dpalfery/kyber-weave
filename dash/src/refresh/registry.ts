@@ -55,6 +55,8 @@ const ANTIGRAVITY_PARSER_CONTRACT_VERSION = '2'
 // changed declaration requires re-deriving stored records, so checkpoints under
 // v2 re-synthesize. Copilot is kept at 3 for that reason alone.
 const COPILOT_PARSER_CONTRACT_VERSION = '3'
+// OpenCode keeps its place here although it has no provider: its harness row stays, and its
+// parser contract version is the one stored checkpoints were written under.
 const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
   'opencode',
   'cline-cli',
@@ -173,7 +175,6 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   forge: job(['forge']),
   goose: job(['goose']),
   cursor: job(['cursor']),
-  opencode: job(['opencode']),
   'cursor-agent': job(['cursor-agent']),
   crush: job(['crush']),
   warp: job(['warp']),
@@ -364,8 +365,10 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
     label: 'OpenCode',
     providerName: 'opencode',
     classifier: 'provider-identity',
-    sourceRootLabel: '~/.local/share/opencode',
-    nativeFormat: 'sqlite-legacy-files',
+    // No folder source: OpenCode reaches the engine through its capture plugin, so
+    // this row names the OTLP feed instead of an on-disk store.
+    sourceRootLabel: 'opencode-otel',
+    nativeFormat: 'otlp',
   }),
   descriptor({
     harnessId: 'codewhale',
@@ -593,6 +596,14 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
   }),
 ]
 
+/**
+ * Harness ids that have no provider and no import but still resolve a source that names
+ * them. OpenCode is captured by its plugin, so nothing yields its sessions; a source that
+ * still carries the provider name maps to the retained harness id instead of reading as an
+ * unregistered provider.
+ */
+const PROVIDERLESS_HARNESS_IDS: ReadonlyMap<string, HarnessId> = new Map([['opencode', 'opencode']])
+
 const DESCRIPTORS_BY_ID = new Map(HARNESS_DESCRIPTORS.map(entry => [entry.harnessId, entry]))
 
 const PROVIDER_IDENTITY_HARNESS = new Map<string, HarnessId>(
@@ -620,7 +631,6 @@ const READER_HARNESS_IDS = new Set([
   'cursor-agent',
   'commandcode',
   ...KILO_HARNESS_IDS,
-  'opencode',
   'pi',
 ])
 
@@ -715,9 +725,11 @@ export function resolveHarnessScope(ids: readonly string[]): HarnessScopeResolut
 }
 
 export function auditProviderRegistry(providers: readonly { name: string }[]): void {
+  // A provider injected under a providerless harness id (OpenCode) is accounted for by that
+  // identity; production registers none.
   const unaccounted = providers
     .map(provider => provider.name)
-    .filter(name => PROVIDER_DISPOSITIONS[name] === undefined)
+    .filter(name => PROVIDER_DISPOSITIONS[name] === undefined && !PROVIDERLESS_HARNESS_IDS.has(name))
   if (unaccounted.length > 0) {
     throw new Error(
       `Harness-source registry has no job, excluded-with-reason, or alias-of disposition for: ${unaccounted.join(', ')}`,
@@ -745,6 +757,8 @@ export function classifySessionSource(input: ClassificationInput): SessionClassi
   const provider = input.source.provider
   const disposition = PROVIDER_DISPOSITIONS[provider]
   if (disposition === undefined) {
+    const retained = PROVIDERLESS_HARNESS_IDS.get(provider)
+    if (retained !== undefined) return harness(retained)
     return {
       outcome: 'indeterminate',
       provider,

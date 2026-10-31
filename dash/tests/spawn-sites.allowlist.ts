@@ -92,6 +92,17 @@ export const SPAWN_SITE_ALLOWLIST: readonly SpawnSiteAllowance[] = [
     note: 'Release acceptance runner. Runs release tooling steps one at a time. Not a self-spawn.',
   },
   {
+    file: 'scripts/opencode-live-gate/run.mjs',
+    pattern: 'spawn',
+    bound:
+      'runCommand gives every command a timeoutMs from LIMITS and kills the child on it (SIGTERM, then SIGKILL ' +
+      'after 5 s). Every started child is tracked in ctx.children, and SIGINT, SIGTERM and gate abort kill the ' +
+      'whole set before the gate exits. argv only, no shell, stdin ignored.',
+    note:
+      'OpenCode live gate runner. Runs the opencode CLI, the kyberdash verbs and Playwright one command at a ' +
+      'time against a throwaway home. A manual gate, never run by CI or vitest. Not a self-spawn.',
+  },
+  {
     file: 'scripts/sea-mcp-smoke.mjs',
     pattern: 'spawn',
     bound:

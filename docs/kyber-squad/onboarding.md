@@ -578,7 +578,9 @@ The consent file `~/.kyberdash/opencode-plugin.json` is created with content off
 Pass `--no-capture-plugin` to skip the step. Project-scope runs never install the plugin. If `kyberdash`
 is not installed, Squad prints a skip line that names `kyber-weave update`, and Squad's own result is
 unchanged. A failed plugin step prints a warning and does not change Squad's exit code.
-Restart OpenCode after the step reports an installed or upgraded plugin. Squad cannot restart it. See
+The step relays the KyberDash guidance line for the plugin. After an install or upgrade it reads:
+`OpenCode 2.x picks up the capture plugin for new sessions; if KyberDash shows no new OpenCode sessions,
+restart OpenCode.` Squad cannot restart OpenCode. The plugin targets OpenCode 2.x only. See
 [Updating](../install.md#updating) and the [KyberDash runbook](../dash/runbook.md).
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or

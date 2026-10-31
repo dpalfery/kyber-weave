@@ -40,16 +40,56 @@ const run = (action: 'enable' | 'disable', home: string, dryRun = false) =>
 const consent = (home: string): unknown => JSON.parse(readFileSync(consentFile(home), 'utf8'))
 
 describe('capture enable/disable --harness opencode', () => {
-  it('enable writes the JSONC key, installs the plugin and sets content true (creating the file)', async () => {
+  it('enable installs the plugin, sets content true, and writes no opencode.jsonc key', async () => {
     const home = makeHome()
     const result = await run('enable', home)
     expect(result.exitCode).toBe(0)
-    expect(readFileSync(jsonc(home), 'utf8')).toContain('openTelemetry')
+    expect(existsSync(jsonc(home))).toBe(false)
     expect(readFileSync(pluginFile(home), 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
     expect(consent(home)).toEqual({ version: 1, content: true })
     expect(result.events).toEqual(
       expect.arrayContaining([expect.objectContaining({ harness: 'opencode', fileId: 'plugin', kind: 'wrote' })]),
     )
+  })
+
+  it('enable leaves an owner opencode.jsonc byte-identical', async () => {
+    const home = makeHome()
+    const owner = '{\n  // the owner keeps their own settings\n  "model": "example"\n}\n'
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+    writeFileSync(jsonc(home), owner)
+    const result = await run('enable', home)
+    expect(result.exitCode).toBe(0)
+    expect(readFileSync(jsonc(home), 'utf8')).toBe(owner)
+    expect(readFileSync(pluginFile(home), 'utf8')).toBe(OPENCODE_PLUGIN_SOURCE)
+  })
+
+  it('enable restores an openTelemetry key an earlier build wrote, from its receipt, and drops the record', async () => {
+    const home = makeHome()
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+    writeFileSync(jsonc(home), '{\n  "experimental": {\n    "openTelemetry": true\n  }\n}\n')
+    mkdirSync(join(home, '.kyberdash'), { recursive: true })
+    const receiptFile = join(home, '.kyberdash', 'capture-receipt.json')
+    writeFileSync(
+      receiptFile,
+      JSON.stringify({
+        version: 1,
+        files: [
+          {
+            path: jsonc(home),
+            format: 'jsonc',
+            harnessId: 'opencode',
+            keys: { 'experimental.openTelemetry': { written: true, prior: { present: false } } },
+            preSha256: 'pre',
+            postSha256: 'post',
+          },
+        ],
+      }),
+    )
+    const result = await run('enable', home)
+    expect(result.exitCode).toBe(0)
+    expect(readFileSync(jsonc(home), 'utf8')).not.toContain('openTelemetry')
+    const remaining = existsSync(receiptFile) ? JSON.parse(readFileSync(receiptFile, 'utf8')).files : []
+    expect(remaining.some((entry: { path: string }) => entry.path === jsonc(home))).toBe(false)
   })
 
   it('enable with opencodeConfigDir installs the plugin under the custom root (Squad parity)', async () => {
@@ -144,14 +184,17 @@ describe('capture enable/disable --harness opencode', () => {
     )
   })
 
-  it('disable sets content false and removes the plugin and the JSONC key', async () => {
+  it('disable sets content false, removes the plugin, and leaves an owner opencode.jsonc byte-identical', async () => {
     const home = makeHome()
+    const owner = '{\n  // the owner keeps their own settings\n  "model": "example"\n}\n'
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+    writeFileSync(jsonc(home), owner)
     await run('enable', home)
     const result = await run('disable', home)
     expect(result.exitCode).toBe(0)
     expect(existsSync(pluginFile(home))).toBe(false)
     expect(consent(home)).toEqual({ version: 1, content: false })
-    expect(readFileSync(jsonc(home), 'utf8')).not.toContain('"openTelemetry": true')
+    expect(readFileSync(jsonc(home), 'utf8')).toBe(owner)
   })
 
   it('disable still turns consent off when the plugin was edited and is kept (exit 1)', async () => {

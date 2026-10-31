@@ -7,11 +7,11 @@ import { createRequire } from 'node:module'
 
 import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from './doctor.js'
 import { createCodexProvider } from '../providers/codex.js'
-import { createOpenCodeProvider } from '../providers/opencode.js'
+import { createKiloCodeProvider } from '../providers/kilo-code.js'
 import { createDevinProvider } from '../providers/devin.js'
 import { createWarpProvider, drainWarpDbAccessDenials } from '../providers/warp.js'
 import { isSqliteAvailable, openDatabase } from '../ingest/sqlite.js'
-import { emptyCache, type SessionCache } from '../ingest/session-cache.js'
+import { PROVIDER_PARSE_VERSIONS, emptyCache, type SessionCache } from '../ingest/session-cache.js'
 import type { Provider, ProbeRoot, SessionSource } from '../providers/types.js'
 
 const requireForTest = createRequire(import.meta.url)
@@ -169,16 +169,17 @@ describe('collectDoctorReport - env override', () => {
     }
   })
 
-  it('names a deliberate XDG_DATA_HOME override pointing at a missing dir, blaming the override not the install (opencode)', async () => {
+  it('names a deliberate XDG_DATA_HOME override pointing at a missing dir, blaming the override not the install (kilo-code)', async () => {
     const prev = process.env['XDG_DATA_HOME']
     const bogus = join(tmpDir, 'xdg-missing')
     process.env['XDG_DATA_HOME'] = bogus
     try {
       // Construct after setting env so the provider resolves XDG_DATA_HOME
-      // (src/providers/opencode.ts:38 reads it to resolve the data dir).
-      const provider = createOpenCodeProvider()
+      // (src/providers/kilo-code.ts:12 reads it to resolve the data dir). Kilo
+      // stands in for OpenCode, whose provider is gone; the override rule is doctor's.
+      const provider = createKiloCodeProvider()
       const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
-      const r = only(report, 'opencode')
+      const r = only(report, 'kilo-code')
 
       expect(r.envOverrides).toContainEqual({ name: 'XDG_DATA_HOME', value: bogus })
       expect(r.status).toBe('empty')
@@ -191,6 +192,12 @@ describe('collectDoctorReport - env override', () => {
       if (prev === undefined) delete process.env['XDG_DATA_HOME']
       else process.env['XDG_DATA_HOME'] = prev
     }
+  })
+
+  it('drops the OpenCode parser version, so doctor no longer reports session-model-v1 for it', () => {
+    // doctor prints PROVIDER_PARSE_VERSIONS[provider.name] as `parser:`. OpenCode has no
+    // provider now, so no row should carry its retired parser label.
+    expect(PROVIDER_PARSE_VERSIONS).not.toHaveProperty('opencode')
   })
 
   // Windows sets APPDATA and LOCALAPPDATA for every process, so neither

@@ -202,9 +202,10 @@ export type SqliteProviderConfig = {
    * reader pairs turns to calls by id rather than position. The call list
    * and the reader's turn list are different lengths wherever a zero-token
    * assistant message still yields a call, so index pairing would attach
-   * each turn's content to its neighbour. Off by default: providers whose
-   * parser output must stay byte-identical (OpenCode) do not set it, and the
-   * field stays pairing-only — `turnId` remains span identity (D6).
+   * each turn's content to its neighbour. Off by default: a provider whose
+   * parser output must stay byte-identical does not set it (Kilo Code, the
+   * only remaining user of this parser, sets it), and the field stays
+   * pairing-only — `turnId` remains span identity (D6).
    */
   pairingIdFromMessageId?: boolean
 }

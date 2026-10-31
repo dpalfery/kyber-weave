@@ -6,9 +6,11 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 decided-by:
   - adr/0020-kyberdash-one-time-fork
+  - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
+  - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
@@ -66,7 +68,8 @@ code-refs:
   - buildContextReport
   - isOpencodeEnvelopeSpan
   - OPENCODE_CONTRACT_VERSION
-  - createInstalledOpencodePlugin
+  - createSetup
+  - OPENCODE_KEYS
   - ClaudeContentReader
   - ingestProviders
   - CompareRuns
@@ -304,29 +307,49 @@ flowchart TD
 Measured behaviour, residuals, and the counts behind them are in the
 [telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
 
-### OpenCode plugin span/turn envelope (`kyberdash-opencode`)
+### OpenCode V2 capture plugin pipeline (`kyberdash-opencode`)
 
-The dash-CLI-managed plugin (`dash/src/capture/harnesses/opencode-plugin/`, one codebase
-for opencode Desktop and CLI v2 installed by file into opencode's plugin dirs) is a
-**sender**, not a surface: it emits span-anchored OTLP/HTTP spans to the loopback receiver
-(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline spool for at most 500 events, at most 50 events
-per POST halved on 429 down to 1, 250 ms to 5 s backoff with jitter, a 10 s abort
-deadline per POST with a 250 ms response-body disposal bound, one single-flight
-worker, drop-oldest accounting; `close()` aborts the in-flight POST and settles
-every waiter), and every hook is best-effort with
-a 250 ms delivery budget, so a delivery failure never fails the host session. Diagnostics
-are a bounded tail, not an archive: at most 200 delivery-attempt records within
-1 MiB and 100 failure records within 256 KiB, failure messages capped at 2,048
-characters, every retained string detached into independent storage so a capped tail
-cannot pin a large parent allocation, and an ended session's payload bodies released
-at its `session.end`. It writes no
-database directly and serves no API: rows reach `canon.db` only through the receiver →
-`ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
-`/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
-`enable` writes only `experimental.openTelemetry`; the `plugins` registration key and
-`OTEL_EXPORTER_OTLP_ENDPOINT` never enter a receipt. The plugin file itself is owned by
-KyberDash and written through the managed harness writer (see **Installer** below), so
-Squad and `kyber-weave update` never write it.
+KyberDash captures OpenCode through one pipeline, and it supports OpenCode 2.x only
+([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)):
+
+```mermaid
+flowchart LR
+    Host["OpenCode 2.x<br/>hooks and bus events"] --> Plugin["kyberdash-opencode<br/>capture engine"]
+    Plugin -->|"OTLP/HTTP JSON, contract 3"| Receiver["Loopback receiver<br/>127.0.0.1:4318"]
+    Receiver --> Adapter["OpenCode adapter<br/>canon/adapters/opencode.ts"]
+    Adapter --> Store["canon.db records"]
+    Store --> Projection["Shared projection<br/>canon/sessions.ts"]
+    Projection --> API["/api/kyber/*"]
+    API --> Dashboard["Web dashboard"]
+```
+
+The plugin is a sender, not a surface. It is one codebase for OpenCode Desktop and CLI, installed
+as a file into OpenCode's plugin directory (`dash/src/capture/harnesses/opencode-plugin/`). It loads
+through the V2 `{ id, setup }` export and subscribes to the bus (`ctx.event.subscribe()`). It
+registers the `prompt`, `context` and `model.request` session hooks and the `execute.before` and
+`execute.after` tool hooks. It does not register `experimental.idle`, because idle is not a terminal
+signal. Each span is posted as OTLP/HTTP JSON to `http://127.0.0.1:4318/v1/traces` through a bounded
+outbox: 500 spans held at most, 50 per POST, 250 ms to 5 s backoff with jitter, and a 10 s request
+timeout. Delivery never blocks or fails OpenCode. If a V2 surface is absent, the plugin keeps the
+surfaces that exist (hooks only, when there is no bus).
+
+The wire contract was measured on OpenCode CLI 2.2.1 and Desktop 2.2.2. The live gate passed on CLI 2.2.3 on
+2026-10-31. Versions below 2.2.1 are unverified.
+OpenCode 1.x support, native OpenCode OpenTelemetry ingestion and the V1 table import are removed.
+The plugin is the single source of OpenCode data, so nothing else writes OpenCode rows into
+`canon.db`. The plugin writes no database directly and serves no API: rows reach `canon.db` only
+through the receiver and `ingestBatch`, and the dashboard reads them only through `/api/kyber/*`
+(display-layer rule, KD-011). The plugin file is owned by KyberDash and written through the managed
+harness writer (see **Installer** below), so Squad and `kyber-weave update` never write it itself.
+
+**Capture writer.** The OpenCode harness declares no config key (`dash/src/capture/harnesses/opencode.ts`).
+`capture enable --harness opencode`, which the Settings switch "OpenCode Enabled" runs, is a strict
+plugin install plus consent on. `disable` sets consent off and removes the plugin file. Both also run a
+one-time migration: they restore the `experimental.openTelemetry` value that older KyberDash builds
+wrote into `opencode.jsonc` (from the capture receipt) and drop that receipt entry. A value the owner
+has changed since is left in place with a warning (ADR 0031, amended 2026-10-31). `capture status` reports the
+plugin state, consent and receiver liveness, with no OTLP environment snippet. The `plugins`
+registration key and `OTEL_EXPORTER_OTLP_ENDPOINT` are never written.
 
 **Bundle and delivery.** `dash/scripts/bundle-opencode-plugin.mjs` bundles `entry.ts` with esbuild
 into one ESM file that imports only `node:` built-ins and uses the global `fetch`. The text is
@@ -380,119 +403,130 @@ triggers no projection. This is how rows projected by an older build lose their 
 after `kyber-weave update`, with no separate `kyber build`. `dash/src/cli/web-startup-projection.test.ts`
 starts the real `runWebDashboard` and pins both cases.
 
-The envelope contract (`dash/src/canon/adapters/opencode-envelope.ts`):
+The contract-3 envelope. The claim and the mapping live in `dash/src/canon/adapters/opencode-envelope.ts`
+and `dash/src/canon/adapters/opencode.ts`; every wire key, span name and id derivation lives in
+`dash/src/capture/harnesses/opencode-plugin/contract.ts` (`OPENCODE_KEYS`), which both sides import.
 
-- **Version key.** Every envelope span names its emitting contract under
-  `opencode.contract_version` (`OPENCODE_CONTRACT_VERSION`, currently `'2'`); a contract
-  bump invalidates stale checkpoints, following the parser-contract invalidation precedent.
-- **Version guard.** `ingestBatchWithAdapters` (`dash/src/canon/ingest.ts`) quarantines an
-  envelope span with an unknown or missing version under the fixed reason
-  `unknown opencode contract version` before the adapter vote, so no adapter claims it
-  and it is never misattributed to any harness. Spans stamped `'1'` by a pre-upgrade
-  plugin quarantine after the bump — intended; stale checkpoints invalidate and re-emit
-  under `'2'`. The decoded packet stays as the audit
-  evidence, as on every other quarantine path.
-- **Context keys (contract `'2'`).** New marker prefix `opencode.context.` with
-  `opencode.context.system` (string), `opencode.context.tools` (JSON-serialized tool
-  definitions array), and `opencode.context.skills` (JSON array of skill names). A span
-  carrying any `opencode.context.*` key is the envelope. The v2 `session.context` hook
-  payload (system, tools, skills, session/model identity, pinned in
-  `fixtures/context-payload.json` at `@opencode/plugin` 2.1.4) rides these attributes
-  via the mapper; `eventToSpan` includes them on the wire span. Model markers map when
-  the payload names them.
-- **Entry (R1, OpenCode 2.1.4).** The loadable entry (`entry.ts`) has one export, `default`:
-  `{ id: 'kyberdash-opencode', setup }`. The 2.1.4 loader reads only `.default`, and it must be
-  `{ id, effect }` or `{ id, setup }`, so the entry carries no named exports and no dotted-kinds map.
-  `setup(ctx)` registers exactly one hook, `ctx.session.hook("context", cb)`. There is no 1.x hook
-  surface in this plan. OpenCode 1.x is unverified and not supported (D2). The request input is
-  read, never mutated: `sessionID`, `model.id` and the provider id on the model ref, `agent`,
-  `system[n].text` joined, and `tools` serialized. Each request emits one `session.context` event.
-  A callback that throws, or a `setup` whose hook registration rejects, never fails the host.
-  Nothing runs at import.
-- **Context window.** The 2.1.4 `context` input carries only a model reference. The plugin asks
-  OpenCode's model list once per setup (`ctx.model.list()`, row `limit.context`) and sends
-  `opencode.model.context_limit` only when it finds a positive finite value. The lookup is
-  bounded (500 ms), and a failure is sticky, so a broken catalog costs one wait. No value means
-  no attribute, never zero. The adapter reports that attribute as a `reported` window. Without it,
-  the window comes from KyberDash's model-window catalog (`dash/src/canon/model-window-catalog.ts`)
-  as source `catalog`, which the report labels as catalog-derived. Contract stays `'2'`. The
-  attribute is additive, so an rc.7 engine ignores it (D6).
-- **Skills (R1).** When `opencode.context.skills` is absent or empty, the listing is parsed from
-  the `<available_skills>` block in the captured system prompt (`opencode-plugin/skills-block.ts`,
-  shared by the plugin and the adapter). Each `<skill>` contributes its `<id>`. A malformed or
-  missing block yields a named not-measurable reason, never an empty measured list.
-- **Consent.** System prompt, tool definitions, and the skills listing flow only when the
-  consent file `~/.kyberdash/opencode-plugin.json` holds `{ "version": 1, "content": true }`
-  (Q1, §3.4). The file is read on every `context` event, so a change needs no reinstall. The
-  env override `KYBERDASH_OPENCODE_CONTEXT=1` (on) or `0` (off) is read first. With consent off the
-  event still emits identity and markers, with content fields dropped before emit. Install never
-  flips consent on, and the Settings switch is the only path to `content: true` (Q2).
-  Content still follows the 14-day purge.
-- **Claim rule.** The `opencode` adapter claims only the supported envelope (a supported
-  envelope span scores 1; an envelope span under any other version scores 0). A bare
-  `opencode.session.id` with no turn/model/tool/prompt/call/message/hook marker is not
-  the envelope and keeps the legacy non-model path — that is why the envelope is opt-in
-  by marker rather than by namespace.
-- **Mapping.** Session identity rides verbatim and is never synthesized. A tool marker
-  (`opencode.tool.name`) wins over the model markers and maps to `tool.invoke`; model
-  markers map to `llm.invoke`. A context span with context markers but no model identity
-  still maps `llm.invoke` (a context event is pre-LLM-call request assembly), never
-  fabricating counters. Context content buckets after every existing part: system text
-  as `system_prompt`, tools JSON as `tool_definitions` (the `legacyAiParts` pattern).
-  The skills listing reads from raw `opencode.context.skills` (the `skills.ts` listing
-  source, measurable only under consent; a malformed value yields a named
-  `notMeasurable` reason). When that key is absent or empty, it falls back to the
-  `<available_skills>` block of the system prompt, then to `readSystemPromptListing`.
-  Prompt text (`opencode.prompt.text`) buckets as
-  conversation history. Lifecycle boundaries that carry no model or tool marker quarantine
-  as non-model — the correct taxonomy for a boundary, not a rejection — with zero
-  fabricated counters and session anchoring.
-- **Measurability (D7).** `DimensionEvidence` carries observed OpenCode token, cache-read, and
-  cost evidence from the harness's sessions (`canon/measurability.ts`, `evidencedAvailability`).
-  Token usage is `measured` and cost `derived` when the sessions carry counters. Cache is `measured`
-  when cache-read counters exist. Without counters the dimension stays `not_measurable` with the
-  OpenCode reason, never zero. Tool and pressure dimensions keep their existing evidence rules.
+- **Version.** Every envelope span names its contract under `opencode.contract_version`, currently
+  `'3'`. A span with any other or missing version quarantines under the fixed reason
+  `unknown opencode contract version` before the adapter vote, so no adapter claims it. Contract-2
+  rows built before the bump stay in quarantine. The owner's old OpenCode rows are removed only by
+  the command in the [runbook](runbook.md#1b-opencode-capture-enable-and-verify).
+- **Claim rule.** The `opencode` adapter claims only a contract-3 envelope span. Native OpenCode
+  spans (`Session.*`, OpenInference, AI SDK and the legacy `ai.*` names) carry no envelope marker and
+  are not claimed by any harness. They fall to the unclaimed quarantine.
+- **Trace shape.** One trace per OpenCode session. `opencode.request` is parentless and covers one
+  execution, from `session.execution.started` to its terminal event. `opencode.step` is one model
+  call, a child of its request. `opencode.tool` is one tool call, a child of the step whose message id
+  it names. Each span carries `opencode.contract_version`, `opencode.session.id` and
+  `opencode.span.kind`. Span ids are SHA-256 derivations of the session and an anchor (the
+  execution-started event id, the step's message id, or the tool call id), so a re-delivered span is
+  the same row.
+- **Usage.** A step carries OpenCode's own integers: `opencode.usage.input`, `.output`, `.reasoning`,
+  `.cache_read` and `.cache_write`. OpenCode's token classes are disjoint, so the canonical mapping
+  is: fresh input = `input`; cache read = `cache.read`; cache creation = `cache.write`;
+  output = `output + reasoning`; reasoning = `reasoning`.
+- **Cost.** Cost is OpenCode's reported figure, carried verbatim as a harness-basis block, and a
+  reported `0` stays a priced `0`. A step with no reported cost is `unknown` with status `no_rate`.
+  There is no published-rate fallback for OpenCode. The currency is recorded as USD,
+  which is an assumption: OpenCode's cost field names no currency.
+- **Request duration.** Every span uses OpenCode's own `created` timestamps. The session's
+  `duration_ms` sums the request roots when its records nest (see **Projection** below).
+- **Content (consent only).** Content goes to parts and never to `record.raw`. Under consent a request
+  carries the prompt text of each execution (`conversation_history`) and the session title
+  (`kyber.session.label`). A step carries the system prompt (`system_prompt`), the tool catalogue as a
+  JSON array of `{name, description, input}` (`tool_definitions`), and the listed skill ids. Tool
+  inputs and results are not captured.
+- **Metadata (always).** Usage, cost, timings, request and turn structure, model, agent, tool name,
+  call id, status, error type, byte sizes and invoked skill ids flow with or without consent.
+- **Skills invoked.** Three sources feed `kyber.skills.invoked` on the step: the `skill` tool's input
+  id, the skills attached to a prompt, and `session.skill.activated` when it fires. The projection's
+  per-turn maximum stops the same skill being counted twice.
+- **Raw metadata and timeline.** `record.raw` holds metadata keys only. Timeline evidence matching
+  ignores the `kyber.*` namespace, so a session titled "fix subagent title" does not regroup the
+  timeline.
+- **Plugin entry.** The loadable entry (`entry.ts`) exports one value, `default`:
+  `{ id: 'kyberdash-opencode', setup }`. `setup` returns OpenCode's `Cleanup`, which stops the bus
+  subscription and flushes the outbox. Nothing runs at import, and a `setup` that fails resolves to a
+  no-op cleanup rather than failing OpenCode.
+- **Skills listing.** The listed skill ids come from `opencode.context.skills` (the context hook's
+  listing). When that is absent or empty, they are parsed from the `<available_skills>` block of the
+  system prompt (`opencode-plugin/skills-block.ts`, shared by the plugin and the adapter). A malformed
+  or missing block yields a named not-measurable reason, never an empty measured list.
+- **Ownership and duplicates.** One global plugin loads once per directory instance, and again
+  on hot reload. The bus delivers every session to every instance. Three guards stop one event being
+  emitted twice or to the wrong project. An instance emits a session only after one of its own hooks
+  fired for it, or when the event names its directory; events for other sessions wait in a small
+  bounded buffer and are dropped. Span ids are deterministic, so re-delivery is idempotent. A new
+  `setup` for a directory stops the older generation.
+- **Bounds and terminal events.** A request span is emitted only at `session.execution.succeeded`,
+  `failed` or `interrupted`. `experimental.idle` never closes one. An execution with no terminal event
+  is emitted once with outcome `unknown`, ending at its last observed event, after 30 minutes with no
+  events for that session or at `Cleanup`. Per-session state is capped at 64 sessions, with the oldest
+  evicted first. Every hook and event handler swallows its own errors.
+- **Consent.** The consent file `~/.kyberdash/opencode-plugin.json` (`{ "version": 1, "content":
+  <boolean> }`) decides whether content flows, and the env override `KYBERDASH_OPENCODE_CONTEXT=1` (on)
+  or `0` (off) takes precedence over it. The plugin reads consent on every event, so a change needs no
+  reinstall. Install never turns content on; the Settings switch does. Session titles are model
+  summaries of the prompt, so they count as content. Invoked skill ids are identifiers, so they are
+  metadata.
+- **Projection (shared rules, generic to any nested harness).** `summary.duration_ms` sums the
+  request roots when a session's records nest, and sums every record otherwise.
+  `requests[i].turns` counts the turn records under request `i`. `label` is the latest
+  `kyber.session.label`, else the existing fallback. `requests[i].prompt` is a preview of at most
+  200 characters of the request's prompt, taken literally: nothing unquotes or rewrites it. With content withheld it is the not-measurable object
+  `{ availability: 'not_measurable', reason }`, never zero or an empty string. The same object stands for `summary.tools_offered` when tool definitions are withheld.
+- **Measurability.** Token usage, cost and the cache counters come from the step's reported
+  figures. The plugin exports cache read and cache write whenever OpenCode reports them.
+  A step that reports no counter stays `not_measurable` with the OpenCode reason, never zero. Tool and
+  pressure dimensions keep their existing evidence rules.
 - **Absent versus zero (D8, ADR 0033).** In `buildContextReport` (`analysis/report/build.ts`), a
   context bucket whose part was never observed is `unmeasurable` with a named reason. It is not
   `measured(0)`. Only a bucket with an observed part is `measured`. The tray renders that state and
   does not decide it. An OpenCode session with no system prompt observed therefore shows the reason
   text, not "0 tokens".
-- **Assembly.** The installed entry (`plugin.ts`, reached via the `opencode.ts`
-  declare-only re-export) wires hook→mapper→turn→outbox→sender
-  (`createInstalledOpencodePlugin`): every hook boundary maps through the mapper and turn
-  stages onto bounded evidence, then delivers through the outbox (or the sender directly
-  when unspooled). Either way the never-fail-host contract holds, and one codebase serves
-  both Desktop and CLI v2 targets.
+- **Assembly.** `entry.ts` subscribes to the bus and registers the hooks. `plugin.ts` (the capture
+  engine) joins them into request, step and tool records, `mapper.ts` turns each finished record into
+  an OTLP span, and the outbox delivers it (`transport/`). One codebase serves Desktop and CLI.
 
-Counters do not flow on this path today. The plugin observes request assembly, not completion
-usage: `OpencodeHookPayload` has no `tokens` field and `stampMapperPayload` never sets one
-(`dash/src/capture/harnesses/opencode-plugin/plugin.ts`), so the plugin emits no token usage.
-The mapper still converts OpenInference counters when a span carries them, so usage is supplied
-only by a native OpenInference span, which this plugin never emits. Prompt text flows only under
-sender opt-in, and assembled text honors the 14-day content purge. A counter-less, content-less
-plugin turn still projects as a visible session whose content is `not_measurable` and whose
-unchartable turns are counted (`unmeasuredTurns`), each with a reason (see
-[The shared canonical projection](#the-shared-canonical-projection)). Operator steps
-(enable, restart matrix, green-enable≠capture) are in the
-[runbook](runbook.md#harness-opentelemetry-capture); the per-harness outcome row and the
-T0 hook-catalog survey live in the [telemetry inventory](telemetry-inventory.md). E2e proof is
-GREEN 4/4 including the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts`, spec header); the manual live-turn gate is the one-turn procedure in runbook §1b — referenced,
-not run. The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens`
-(`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output
-(`dash/src/server/bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only
-(`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044). Token capture via
-response/generate hooks remains unverified.
+Usage flows on this path. A step's usage and reported cost are metadata and always flow, and the
+session totals are sums of OpenCode's own counters. Prompt text, the system prompt, tool definitions
+and the skills listing flow only under consent, and assembled text honours the 14-day content purge.
+A session with no counters and no content still projects as a visible session. Its unmeasured
+dimensions carry reasons, and its unchartable turns are counted (`unmeasuredTurns`); see
+[the shared canonical projection](#the-shared-canonical-projection). Operator steps are in the
+[runbook](runbook.md#1b-opencode-capture-enable-and-verify).
 
-### OpenCode native-first collection flow and model-id bridging
+The end-to-end check of live capture is the OpenCode live gate: a scripted two-prompt session on the owner's
+machine whose figures must equal OpenCode's own totals. It passed on 2026-10-31 (OpenCode CLI 2.2.3), with the
+session title waived. The `dash/e2e/harness-collection.spec.ts` OpenCode
+scenario replays recorded OpenCode 2.2.1 events through the production plugin, receiver, adapter and
+projection. It proves what the dashboard renders from that replay. It is not proof of live capture.
 
-Collection is native-first per the [harness collection standard](../rules/kyberdash-harness-collection.md):
-native OpenCode spans are the PRIMARY measurement; the plugin and file import are complementary, never
-billed as primary over native. Model identity bridges from `llm.model_name` (preferred) or envelope
-`opencode.model.id` onto `gen_ai.request.model`; the downstream cost basis prices the bridged model;
-absent/empty stays absent with cost unknown/no_rate. Usage counters ride native OTLP only — tool-span
-counters are dropped by the double-count guard. Current-shape `opencode.db`/JSON session files yield
-measured calls through refresh; shifted schemas yield honest `not_measurable` errors, never zeros.
-Per-source outcomes and consent boundaries live in the [telemetry inventory](telemetry-inventory.md).
+**Known limits.**
+
+- Versions below 2.2.1 are unverified.
+- Tool inputs and results are not captured, only the tool's name, status and sizes.
+- Subagent child sessions are not linked to their parent session.
+- The plugin sends no context window. `opencode.model.context_limit` is declared in `contract.ts`,
+  but no code produces it in this build, so the window follows the existing catalog and declared-window
+  rules ([ADR 0030](../adr/0030-kyberdash-declared-context-window-provenance.md)).
+- OpenCode did not reload an edited global plugin file without a restart in the 2026-10-31 live gate: no plugin
+  load line followed the install, and the running service's file watcher had stopped. Restart OpenCode after an
+  install or upgrade. The install guidance says the same when new sessions do not appear.
+- A session whose project instance loads late can miss its title. The plugin then labels it "OpenCode session"
+  (the 2026-10-31 live gate waived this row).
+
+### OpenCode native OpenTelemetry is not collected
+
+On OpenCode 2.2.x, native OpenTelemetry carried no usage in the 2026-10-30 measurement (0 of 55,261
+spans), and OpenCode ignores the `experimental.openTelemetry` key that older KyberDash builds wrote.
+KyberDash therefore maps no native OpenCode span. The AI SDK, OpenInference and legacy `ai.*` mappings
+and their fixtures are removed, and native spans fall to the unclaimed quarantine. The V1 table import
+(`opencode.db` and JSON session files) is removed too, so the plugin is the one source of OpenCode data.
+The decision and the alternatives it rejected are in
+[ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md). The per-source outcome is in the
+[telemetry inventory](telemetry-inventory.md).
 
 ## Local harness-source refresh
 
@@ -555,7 +589,7 @@ exactly one `PROVIDER_PARSE_ERROR` on `harness:<harnessId>:job`, attributed to t
 naming the database, and the run continues for every other harness. This is the R1.2/R1.3 split
 documented in `dash/src/synth/provider.ts` applied to a database rather than a file: an **absent**
 store stays silent, and a store discovered earlier but gone by open time stays silent too, because
-absence is a negative existence check. The shape is the same for the OpenCode databases.
+absence is a negative existence check. The Kilo databases read through the same parser and follow the same rule.
 
 **The job row is not reconciled after a repair.** `reconcileSourceProblems`
 (`dash/src/canon/store.ts`) owns `harness:<harnessId>:<sourceKey>:<code>` rows only (#243), so a
@@ -605,8 +639,7 @@ Pairing is by id, never by index. `createSqliteSessionParser` also emits a call 
 assistant message that still carries text (a router reply), so the call list and the reader's turn
 list are different lengths, and index pairing would attach each turn's content to its neighbour's
 call. The `pairingIdFromMessageId` opt-in on `SqliteProviderConfig` stamps
-`pairingId = message.id`; only `kilo-code` sets it, and OpenCode's parser output stays
-byte-identical. `turnId` remains span identity and `pairingId` is pairing-only, which is the key
+`pairingId = message.id`; only `kilo-code` sets it. `turnId` remains span identity and `pairingId` is pairing-only, which is the key
 `matchingTurns` already honours. The reader declares `positionalPairingUnsafe` for the same reason.
 
 Measurability follows the store rather than the harness's ambition. `kilo`, `kilo-code` and
@@ -735,9 +768,8 @@ session whose absent dimensions are stated rather than fabricated. `analyzeConte
 parts — each content bucket the records cannot supply is `not_measurable` with a reason, and
 `buildSessionRow` counts the turns it could not chart as `unmeasuredTurns`. No recognized
 model call is skipped silently: an unattributed-only group with no evidence still increments
-`skipped`, and a markerless boundary or context span quarantines with no session diagnostic. The dash-managed
-OpenCode plugin is the live case: its turn and `session.context` spans carry a session id and
-model identity but no usage, and such a turn now projects instead of being dropped. A turn
+`skipped`, and a markerless boundary or context span quarantines with no session diagnostic. A turn
+that carries no counters projects instead of being dropped. A turn
 whose harness normalizes to `unattributed` keeps the older evidence test: the legacy collector
 stamped `llm.invoke` on spans no adapter claimed, so a bare unattributed turn with no counters
 and no content is still ambient telemetry, while an unattributed turn that carries counters
@@ -748,9 +780,9 @@ A counter-less turn's captured content is not charted today. `buildSessionRow` p
 turns with a measured input to `analyzeContext`, because a content-bearing turn with no input
 counter would produce a negative residual and a pressure figure computed from the absent
 counter rather than from the model's context. Projecting that content needs an analysis-layer
-contract that separates the buckets from the missing counter; until then a consent-on
-OpenCode-plugin session is visible but still shows no prompt content. This is a known
-limitation recorded with the [OpenCode capture follow-up](../todo/opencode-plugin-token-usage-capture.md).
+contract that separates the buckets from the missing counter; until then such a turn shows no prompt
+content in the composition chart. OpenCode steps carry usage whenever OpenCode reports it, so
+OpenCode sessions are not in this case.
 
 ## Normalization layer
 
@@ -1033,7 +1065,7 @@ invocations", with no deletion or waste claim.
 **Detector version.** `DETECTOR_VERSION` is `5` (`dash/src/canon/store.ts`). Stores stamped with
 an older generation (for example `3` or `4`) report their findings as outdated; the engine re-projects
 them to the current generation on its next maintenance tick (see the engine and projection paragraph
-in the OpenCode plugin section above).
+in the OpenCode V2 capture plugin pipeline section above).
 
 **Web.** The Sessions page section **4 · Skills** has two tiles (skills listed, skills invoked) and
 a headline, "X of Y listed skills had no observed invocation". The headline is rendered from the
@@ -1917,7 +1949,7 @@ Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 
 **The registry is seven harnesses.** `CAPTURE_HARNESS_REGISTRY`
 (`dash/src/capture/harnesses/registry.ts`) declares three managed writers — `copilot`,
-`claude-code` and `opencode` — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
+`claude-code` and `opencode` (OpenCode owns a plugin file and writes no config key) — and four `kind: 'pending'` writers: `codex`, `pi`, `antigravity`,
 and `kilo` appended last. A pending writer is status-only: `buildCaptureStatus`
 (`dash/src/capture/status.ts`) renders its `installEvidence`, `statusLines` and `manualSteps`,
 `enable` and `disable` write nothing and leave no receipt, and `POST /api/kyber/capture` answers

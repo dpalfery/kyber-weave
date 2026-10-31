@@ -270,7 +270,6 @@ export const PROVIDER_CONVENTIONS: ReadonlyMap<string, TokenConvention> = new Ma
       'open-design',
       'openclaude',
       'openclaw',
-      'opencode',
       'pi',
       'quickdesk',
       'qwen',

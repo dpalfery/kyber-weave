@@ -62,12 +62,14 @@ kyberdash report            # terminal report, formatted from the canonical stor
 
 ### OpenCode capture plugin
 
-`install.sh` does not install the OpenCode capture plugin. Squad installs it. Run
-`kyber-weave squad install --global` or `kyber-weave squad update --global` with the OpenCode target,
-and it is written to OpenCode's global plugin directory. Pass `--no-capture-plugin` to skip it. Then
-restart OpenCode. Content capture (system prompt, tool definitions, skills) stays off until you turn
-OpenCode on in the Settings drawer. The [runbook](runbook.md#harness-opentelemetry-capture) describes
-the consent file and the restart steps.
+KyberDash captures OpenCode 2.x only. OpenCode 1.x is not supported. `install.sh` does not install the
+OpenCode capture plugin. Squad installs it. Run `kyber-weave squad install --global` or
+`kyber-weave squad update --global` with the OpenCode target, and it is written to OpenCode's global
+plugin directory. Pass `--no-capture-plugin` to skip it. If new OpenCode sessions do not appear, restart
+OpenCode. Usage, cost and timings flow once the plugin is installed and the KyberDash receiver is running. Content capture
+(system prompt, tool definitions, skills, prompt text) stays off until you turn OpenCode on in the
+Settings drawer. The [runbook](runbook.md#1b-opencode-capture-enable-and-verify) describes the consent
+file and the live gate.
 
 ### Install the tray
 
@@ -95,8 +97,8 @@ One command updates KyberDash. Run `kyber-weave update`, and no other command is
   the previous app is restored if a step fails.
 - It upgrades the OpenCode capture plugin, but only if that plugin is already installed.
 
-When the plugin file changed, the output says to restart OpenCode. KyberDash cannot restart your
-OpenCode process. The engine then re-projects the store on its own start, so you do not run
+When the plugin file changed, the output says to restart OpenCode if new sessions do not appear. KyberDash
+cannot restart your OpenCode process. The engine then re-projects the store on its own start, so you do not run
 `kyber build` after an update.
 
 To update the tray alone, use `kyberdash menubar --update`.

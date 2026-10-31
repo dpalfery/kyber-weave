@@ -260,7 +260,6 @@ export const PROVIDER_ENV_VARS: Record<string, string[]> = {
   'cursor-agent': ['XDG_DATA_HOME'],
   'open-design': ['KYBERDASH_OPEN_DESIGN_DIR', 'APPDATA'],
   openclaude: ['KYBERDASH_OPENCLAUDE_DIR'],
-  opencode: ['XDG_DATA_HOME', 'OPENCODE_DATA_DIR', 'OPENCODE_DB_PREFIX'],
   goose: ['XDG_DATA_HOME', 'GOOSE_PATH_ROOT'],
   grok: ['GROK_HOME'],
   crush: ['XDG_DATA_HOME', 'CRUSH_GLOBAL_DATA', 'LOCALAPPDATA'],
@@ -386,7 +385,6 @@ export const PROVIDER_PARSE_VERSIONS: Record<string, string> = {
   // parent session. reported-cost-v2 persists those measured costs through the
   // cache, including the explicit zero on xai-oauth turns.
   omp: 'nested-agent-v1-reported-cost-v2',
-  opencode: 'session-model-v1',
   quickdesk: 'emf-sqlite-v2-est-cost',
   // session-lineage-capture-v1: SessionLineage (CB-1, slice 1) is now carried
   // on the cached file for every kimicode wire. Child evidence is the
@@ -1425,7 +1423,7 @@ const SQLITE_DB_PATH = /\.(db|sqlite3?|vscdb)$/i
 ///
 /// A database in WAL mode parks committed writes in `<db>-wal`; the main
 /// file's stat only moves on checkpoint, and a long-lived writer connection
-/// (hermes, cursor and opencode keep their state DBs open for the life of
+/// (hermes and cursor keep their state DBs open for the life of
 /// the agent process) can defer checkpoints for hours or days. A fingerprint
 /// built from the main file alone then (a) carries an mtime older than the
 /// newest committed data, so the date-range mtime pre-filter in
@@ -1468,7 +1466,7 @@ export async function fingerprintFile(filePath: string): Promise<FileFingerprint
   } catch {
     // Providers encode extra context into source paths using virtual suffixes:
     // - Cursor: `<dbPath>#cursor-ws=<workspace>` (workspace-aware routing)
-    // - OpenCode: `<dbPath>:<sessionId>` (session scoping)
+    // - Kilo Code: `<dbPath>:<sessionId>` (session scoping)
     // - Hermes: `<dbPath>#hermes-session=<sessionId>` (session scoping)
     // These compound paths don't exist on disk; strip the suffix to stat the
     // underlying database. Try `#` first (rare in real paths), then `:` (must

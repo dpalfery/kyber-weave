@@ -59,22 +59,9 @@ describe('provider registry', () => {
     expect(warp!.toolDisplayName('run_command')).toBe('Bash')
   })
 
-  it('opencode model display names strip provider prefix', async () => {
+  it('registers no OpenCode provider, so no OpenCode display names are produced here', async () => {
     const all = await getAllProviders()
-    const oc = all.find(p => p.name === 'opencode')
-    if (!oc) return
-    expect(oc.modelDisplayName('anthropic/claude-opus-4-6-20260205')).toBe('Opus 4.6')
-    expect(oc.modelDisplayName('google/gemini-2.5-pro')).toBe('Gemini 2.5 Pro')
-  })
-
-  it('opencode tool display names normalize builtins', async () => {
-    const all = await getAllProviders()
-    const oc = all.find(p => p.name === 'opencode')
-    if (!oc) return
-    expect(oc.toolDisplayName('bash')).toBe('Bash')
-    expect(oc.toolDisplayName('edit')).toBe('Edit')
-    expect(oc.toolDisplayName('task')).toBe('Agent')
-    expect(oc.toolDisplayName('unknown_tool')).toBe('unknown_tool')
+    expect(all.find(p => p.name === 'opencode')).toBeUndefined()
   })
 
   it('claude tool display names are identity', () => {
