@@ -8,6 +8,10 @@ owner: dpalfery
 last-reviewed: 2026-09-08
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
+sections:
+  the-relevance-floor:
+    keywords:
+      - retrieval scoring
 code-refs:
   - DocumentIndex
   - DocumentCorpus
@@ -56,7 +60,7 @@ Optional `keywords` (and the internal `aliases` synonym) sit in that same identi
 they are claims, not body mentions, which is why an exact keyword match outranks title and
 prose.
 
-## Authority
+### Authority
 
 Term statistics measure wordiness, not standing. Asked what frontmatter keys a document
 needs, BM25 correctly preferred a plan that says "frontmatter" twenty-five times over the
@@ -77,7 +81,7 @@ The two multiply. A superseded plan lands at 0.22 of its raw relevance — prese
 never the first thing an agent reads. A demoted document still wins when it is named
 outright, because an exact id match scores far above the discount.
 
-## Compound names and prefix coverage
+### Compound names and prefix coverage
 
 Both queries and bodies are vectorised with **adjacent token pairs fused**, at half
 weight. Text writing "Web UI" therefore remains reachable from a query writing "WebUI",
@@ -98,7 +102,7 @@ stems are ignored so `it` cannot match `iteration`.
 These ranking weights and the prefix floor are the contract in
 [ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md).
 
-## The relevance floor
+### The relevance floor
 
 A document scoring below **0.25** is not returned at all, and a query where nothing clears
 the floor returns an explicit miss rather than a best-effort list.

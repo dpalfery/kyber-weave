@@ -19,11 +19,14 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
+sections:
+  "#":
+    keywords:
+      - multi-harness
+      - deployment
+      - agent
+      - skill
 keywords:
-  - multi-harness
-  - deployment
-  - agent
-  - skill
   - circuit-breaker
   - JEV
   - oscillation

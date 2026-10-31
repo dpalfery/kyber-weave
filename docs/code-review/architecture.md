@@ -22,8 +22,15 @@ code-refs:
   - GateCatalogue
   - ProjectRootDetector
   - ReviewBlockWriter
-  - CouncilGateSelection
   - ReviewCatalogueCommand
+sections:
+  "#":
+    keywords:
+      - specialist lenses
+      - parallel lenses
+  council-gates:
+    code-refs:
+      - CouncilGateSelection
 ---
 
 # Review council architecture
@@ -499,7 +506,7 @@ the host OS unconditionally (`changed = null`), bypassing `include:` path filter
 `--all` with contradictory scoping options (`--agent`, `--base`, or `--paths`) is refused before
 any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
 
-#### Repository gate scoping and caching in this repository
+### Repository gate scoping and caching in this repository
 
 This repository configures `include:` globs on all 27 council gates in `.kyber-weave/kyber-weave.yml`,
 partitioned by ecosystem:

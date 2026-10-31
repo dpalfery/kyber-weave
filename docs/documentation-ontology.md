@@ -8,6 +8,11 @@ owner: dpalfery
 last-reviewed: 2026-10-30
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
+lead: frontmatter
+sections:
+  frontmatter:
+    keywords:
+      - frontmatter keys
 ---
 
 # The documentation ontology

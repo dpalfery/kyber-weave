@@ -29,7 +29,6 @@ keywords:
   - codeburn
   - display layer
   - jobhost
-  - tauri
   - desktop
   - menubar
   - projection
@@ -39,6 +38,11 @@ keywords:
   - tool_yield
   - tool_calls
   - skills
+lead: the-kyberdash-tray-dashtray
+sections:
+  the-kyberdash-tray-dashtray:
+    keywords:
+      - tauri
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -2036,6 +2040,8 @@ permission and no analysis logic, and the popover's TypeScript takes no value im
 `dash/src/**` beyond the commented allowlist in the guard test. The macOS status item is the
 KyberDash lightsaber projected as a monochrome template image
 (`icons/tray-template.svg`/`.png`).
+
+### macOS tray placement and launchd
 
 On macOS, tray click positions are converted from backing pixels using the status
 item window's scale before monitor lookup. Cursor fallback uses the primary display's
