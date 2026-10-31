@@ -1091,7 +1091,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         Assert.True(
-            OwningTargetsOf(plan, entry).Contains("Codex"),
+            OwningTargetsOf(plan, entry).Contains(SquadTarget.Codex),
             $"The degraded '{entry}' must record its owning target 'Codex'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
         Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
     }
@@ -1132,36 +1132,24 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         Assert.Single(plan.DegradedFiles);
-        IReadOnlyList<string> owners = OwningTargetsOf(plan, codexEntry);
+        IReadOnlyList<SquadTarget> owners = OwningTargetsOf(plan, codexEntry);
         Assert.True(
             owners.SequenceEqual(ExpectedCodexOwner),
             $"The degraded '{codexEntry}' must record exactly its owning target 'Codex'; it records [{string.Join(", ", owners)}].");
         Assert.Empty(OwningTargetsOf(plan, claudeEntry));
     }
 
-    private static readonly string[] ExpectedCodexOwner = ["Codex"];
+    private static readonly SquadTarget[] ExpectedCodexOwner = [SquadTarget.Codex];
 
     /// <summary>
-    ///     Reads each degraded record's owning target. Until <c>DegradedFiles</c> carries its owner, the entries
-    ///     are bare paths and no owner can be read, so the assertion fails for the stated reason rather than
-    ///     compiling against a shape that does not exist yet.
+    ///     Reads the owning targets recorded for a degraded path from the typed <see cref="SquadDegradedFile"/>
+    ///     contract, so a change to its shape fails at compile time rather than returning empty owners.
     /// </summary>
-    private static IReadOnlyList<string> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath)
-    {
-        List<string> owners = [];
-        foreach (object degraded in plan.DegradedFiles.Cast<object>())
-        {
-            if (degraded is string)
-                continue;
-
-            string? path = degraded.GetType().GetProperty("RelativePath")?.GetValue(degraded) as string;
-            object? target = degraded.GetType().GetProperty("Target")?.GetValue(degraded);
-            if (path == relativePath && target is not null)
-                owners.Add(target.ToString()!);
-        }
-
-        return owners;
-    }
+    private static IReadOnlyList<SquadTarget> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath) =>
+        plan.DegradedFiles
+            .Where(degraded => degraded.RelativePath == relativePath)
+            .Select(degraded => degraded.Target)
+            .ToList();
 
     /// <summary>
     ///     Progressively disclosed references are ordinary deployment files. Their rendered paths

@@ -116,30 +116,17 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
-    /// Guards the isolation rule: the packer takes no home or environment input at all, so the operator's
-    /// home guidance cannot reach an archive and the home file is neither written nor removed. The home
-    /// guidance is planted in a temp directory that is never handed to the packer and no process variable is
-    /// touched, so the packed block must equal the shipped default and the marker must appear nowhere.
+    /// Guards the isolation rule as a output guarantee, not a seam test: the packer takes no home or environment
+    /// input, so the packed <c>&lt;response-preferences&gt;</c> block must equal the shipped default byte-for-byte
+    /// for both carriers. No temp home is built here because the packer cannot be pointed at one; the test
+    /// instead asserts that the operator marker text, which a home-reading packer would have to copy in, appears
+    /// in no archive entry. The marker is a constant, so this check guards the default content, not a real home.
     /// </summary>
     [Fact]
-    public void Pack_OfTheShippedSourceIgnoresTheOperatorHomeGuidanceBecauseItTakesNoHomeInput()
+    public void Pack_OfTheShippedSourceShipsTheDefaultAndNoOperatorMarkerBecauseItTakesNoHomeInput()
     {
-        string home = Path.Combine(_temp.Path, "home");
-        string homePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(homePath)!);
-        File.WriteAllText(homePath, OperatorText, Encoding.UTF8);
-
-        byte[] homeBytesBefore = File.ReadAllBytes(homePath);
-        DateTime homeWriteBefore = File.GetLastWriteTimeUtc(homePath);
-
         string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
         string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
-
-        Assert.True(File.Exists(homePath), "Packing removed the operator home guidance.");
-        Assert.True(
-            homeBytesBefore.AsSpan().SequenceEqual(File.ReadAllBytes(homePath)),
-            $"Packing changed the operator home guidance at '{homePath}'.");
-        Assert.Equal(homeWriteBefore, File.GetLastWriteTimeUtc(homePath));
 
         using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
         {
@@ -158,7 +145,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
             {
                 Assert.False(
                     ReadEntryText(entry).Contains(OperatorText, StringComparison.Ordinal),
-                    $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator home guidance.");
+                    $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the operator marker text.");
             }
         }
     }
@@ -166,13 +153,13 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// <summary>
     /// Guards the isolation proof itself: a packer that accepted an environment or home resolver would make the
     /// no-leak check circular, because a test could only show the seam was consulted, never that it was ignored.
-    /// Removing the parameter from the public surface makes "the packer reads no home input" a structural fact.
+    /// Every public member of <see cref="SquadPacker"/> is scanned, so a new entry point cannot reintroduce a seam.
     /// </summary>
     [Fact]
     public void Packer_PublicSurfaceAcceptsNoEnvironmentOrHomeParameter()
     {
         MethodInfo[] packerMethods = typeof(SquadPacker)
-            .GetMethods(BindingFlags.Public | BindingFlags.Static);
+            .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
         Assert.NotEmpty(packerMethods);
         foreach (MethodInfo method in packerMethods)
@@ -180,10 +167,63 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
             foreach (ParameterInfo parameter in method.GetParameters())
             {
                 Assert.False(
-                    parameter.ParameterType == typeof(Func<string, string?>),
-                    $"SquadPacker.{method.Name} takes an environment resolver parameter '{parameter.Name}'; the packer must take no home or environment input.");
+                    IsHomeOrEnvironmentInput(parameter),
+                    $"SquadPacker.{method.Name} takes a home or environment input '{parameter.Name}' of type '{parameter.ParameterType.Name}'; the packer must take no home or environment input.");
             }
         }
+    }
+
+    /// <summary>
+    /// Proves the surface predicate bites: each rejected shape below must be flagged, and a plain path parameter
+    /// must not be. Without this, a predicate that never matches would pass the surface guard vacuously.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(SeamSamples.ResolverDelegate), "resolve")]
+    [InlineData(nameof(SeamSamples.HomePath), "homeDirectory")]
+    [InlineData(nameof(SeamSamples.EnvironmentParameter), "environment")]
+    [InlineData(nameof(SeamSamples.ResolverNamed), "lookup")]
+    public void HomeOrEnvironmentPredicateRejectsEverySeamShape(string methodName, string parameterName)
+    {
+        ParameterInfo parameter = typeof(SeamSamples)
+            .GetMethod(methodName)!
+            .GetParameters()
+            .Single(p => p.Name == parameterName);
+
+        Assert.True(IsHomeOrEnvironmentInput(parameter));
+    }
+
+    [Fact]
+    public void HomeOrEnvironmentPredicateAcceptsAPlainSourcePath()
+    {
+        ParameterInfo parameter = typeof(SeamSamples)
+            .GetMethod(nameof(SeamSamples.PlainPath))!
+            .GetParameters()
+            .Single();
+
+        Assert.False(IsHomeOrEnvironmentInput(parameter));
+    }
+
+    private static bool IsHomeOrEnvironmentInput(ParameterInfo parameter)
+    {
+        string name = parameter.Name ?? string.Empty;
+        string typeName = parameter.ParameterType.Name;
+        bool namedSeam = Regex.IsMatch(
+            name + " " + typeName,
+            "home|environment|resolver|resolve|lookup|getenv|env(?!elope)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        bool resolverDelegate = parameter.ParameterType.IsGenericType
+            && parameter.ParameterType.GetGenericTypeDefinition().FullName?.StartsWith("System.Func`", StringComparison.Ordinal) == true
+            && parameter.ParameterType.GetGenericArguments().Contains(typeof(string));
+        return namedSeam || resolverDelegate;
+    }
+
+    private static class SeamSamples
+    {
+        public static void ResolverDelegate(Func<string, string?> resolve) { }
+        public static void HomePath(string homeDirectory) { }
+        public static void EnvironmentParameter(object environment) { }
+        public static void ResolverNamed(string lookup) { }
+        public static void PlainPath(string sourcePath) { }
     }
 
 
