@@ -443,11 +443,11 @@ function createEvidence(dir) {
     // The recorded text includes kyberDash and OpenCode responses: that is what the gate is evidence of.
     // It lands only under a plain file name in the gate-owned evidence directory, redacted and bounded.
     writeText(name, text) {
-      // codeql[js/http-to-file-access] recorded responses are the evidence; plain name, redacted, bounded.
+      // CodeQL flags this write as network data to a file: accepted, the responses are the evidence.
       writeFileSync(join(dir, evidenceFileName(name)), boundedEvidence(redact(text)))
     },
     writeJson(name, value) {
-      // codeql[js/http-to-file-access] recorded responses are the evidence; plain name, redacted, bounded.
+      // CodeQL flags this write as network data to a file: accepted, the responses are the evidence.
       writeFileSync(join(dir, evidenceFileName(name)), `${boundedEvidence(redact(JSON.stringify(value, null, 2)))}\n`)
     },
   }
