@@ -303,7 +303,7 @@ public sealed class SquadPerformanceContractTests
             @"(?im)^(?=[^\r\n]*\bworktrees?\b)(?=[^\r\n]*\binherently\s+isolate[^\r\n]*output)[^\r\n]+",
             content);
         Assert.Matches(
-            @"(?im)^(?=[^\r\n]*\b--artifacts-path\b)(?=[^\r\n]*\b(?:not\s+required|optional|omitted)\b)(?=[^\r\n]*\bworktree\b)[^\r\n]+",
+            @"(?im)^(?=[^\r\n]*(?<![\w-])--artifacts-path\b)(?=[^\r\n]*\b(?:not\s+required|optional|omitted)\b)(?=[^\r\n]*\bworktree\b)[^\r\n]+",
             content);
     }
 
