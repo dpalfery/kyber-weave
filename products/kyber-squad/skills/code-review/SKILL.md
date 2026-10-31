@@ -75,7 +75,8 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
+**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes `.agent_scratchpad/<task-id>/review-diff.patch` in every `review-lens` and `review-triage` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the review council completes (including on failure).
+Invoke one seat per applicable lens, all in flight at once, each named with its
 lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
 applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
 owns — auto-skipping is what makes seventeen lenses affordable. Every seat given guidance sections
@@ -156,6 +157,12 @@ This is the adversarial pass the `security-review` skill already applies to vuln
 candidates, generalized to every lens and for the same reason — a confident wrong finding
 costs more trust than a missed finding costs safety. A refuted finding is dropped, not
 downgraded.
+
+**Refutation guardrails.** The refutation pass is an adversarial check on validity, not an excuse to dismiss findings. Refuters are strictly forbidden from dismissing:
+- Contract assertion rigor findings under `R14` (vacuous contract assertions, bare keywords, unguarded boolean `||`, or non-contiguous multi-line loops).
+- Cross-document or prompt-to-prompt schema contradictions under `R16`.
+- Missing operational lifecycle cleanup paths (unpruned worktree, orphaned temp-path, leaked concurrency lock).
+Refuters must adhere to Ground Rule 1: every finding describing a concrete failure scenario must be refuted with concrete evidence proving the failure cannot occur, never an opinion or intuition. Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments: if a concrete failure exists in the lifecycle, prompt schema, or test contract, the finding stands.
 
 ### 4. Adjudicate
 

@@ -60,8 +60,7 @@ a finding.
 nothing enforces it (report the claim here, and leave the missing enforcement to
 `test-infrastructure` or `correctness`).
 
-**Cross-document agreement.** The same fact stated in two documents (a README row and the
-architecture page, a catalogue and a ledger). When one is updated, find the other.
+**Cross-document and prompt-to-prompt contract parity.** Ensure cross-document and prompt-to-prompt contract parity across modified markdown instructions, runbooks, and reference contracts. Invariants, schemas, and rejection rules must agree across modified documents, not only doc-vs-code. When an agent instruction, prompt schema, or runbook updates a rejection rule, digest schema, or state transition, every sibling document and prompt must reflect identical requirements with zero contradiction.
 
 **Links and identifiers.** A relative link, anchor, rule id, or section number that no longer
 resolves after a move, rename, or renumbering.

@@ -40,6 +40,11 @@ it is wrong — not the percentage.
 test itself computed the same way as the code. A comparison of something to itself. An
 exception assertion so broad that any failure satisfies it, including the wrong one.
 
+**Contract assertion rigor.** Enforce strict assertion rigor on contract and specification tests:
+- Flag bare single-word `Assert.Contains` checks that match common keywords, identifiers, or boilerplate instead of testing unique full-phrase semantic contracts.
+- Flag unguarded boolean `||` assertions where one branch matches unrelated text or masks missing invariant assertions.
+- Flag non-contiguous `foreach` field checks over multi-line schemas that loop across lines without verifying contiguous schema structure and ordering; require contiguous multi-line schema assertions.
+
 **Edge cases the change introduces.** New boundary, new branch, new failure mode — is each
 exercised? This is where uncovered-branch analysis and correctness analysis meet, and it is
 the most valuable thing this lens produces.

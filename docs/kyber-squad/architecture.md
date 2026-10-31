@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -776,7 +776,7 @@ and validates.
   registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
-  not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  not declare those servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
   The conductor has no MCP tools by default. Its only exception is the opt-in operator channel
   overlay, described in the next bullet.
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
@@ -898,7 +898,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/<name>.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/<name>.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) are implemented and registered. All thirteen declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. The repository carries no project-level self-deployment: root `.github/agents/`,
@@ -1158,15 +1158,56 @@ invent a reason. `KS-001`–`KS-008` are unchanged; this contract does not add a
 
 ### Escalation (Q5)
 
-When the breaker trips — or a worker returns `STATUS: ESCALATION` — the conductor
+When the breaker trips — or a worker returns a valid escalation (`STATUS: ESCALATION` with
+exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines:
+`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for
+`INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`) — the conductor
 immediately halts rework for that task, does not dispatch further workers for that
 cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
-prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
+prefix as `ESCALATION: end-of-run`). A valid escalation never completes the task or clears its
+exit gate; a `STATUS: ESCALATION` without a valid trigger is not an escalation and is rejected
+like any completion digest. Non-dependent queue tasks may continue. The run
 cannot complete while an unresolved circuit-breaker finding exists in supervised mode. At queue drain,
 `architect` investigates the cluster and authors an intake recommendation or Draft plan.
 In autonomous mode the breaker is not a run stop. Its halt on rework is unchanged, and an
 unresolved finding is listed in the draft pull request as an open finding while delivery
 continues ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)).
+
+### Concurrency and scheduling model (worktree and artifact isolation)
+
+To eliminate git lock contention (`index.lock`) and test output collisions while maximizing
+execution throughput, conductor does not serialize all task execution or test runs:
+
+- **Maximum parallelization of ready tasks**: Independent ready tasks whose declared file and
+  symbol scopes do not overlap execute concurrently up to `review.max-concurrent-workers`.
+- **Worktree and artifact isolation**: Each concurrent worker executes in an isolated git
+  worktree (`git worktree add`, or harness `Workspace: share`/`branch`) or uses dedicated per-task
+  artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports) and direct
+  assembly runner execution (`-class "<namespace>.<Class>"`). Workers author code and run
+  targeted tests simultaneously without mutual interference or file locks.
+- **Serialized branch-head integration**: Only final integration and branch-head mutations are
+  serialized. Merging or cherry-picking a completed worktree back onto the shared feature branch,
+  recording shared index and review gate state, and running `git push` execute sequentially at the
+  integration boundary. All read-only tasks, test runs, and non-overlapping task implementations
+  run in parallel.
+
+### Adversarial RED/GREEN role boundary and same-role task bundling
+
+Quality and verification rigor depend on objective, adversarial test authorship:
+
+- **Strict two-agent adversarial separation**: `test-dev` authors the failing contract test (RED)
+  with a distinct adversarial mindset, and the implementation specialist (`csharp-dev`, etc.)
+  implements production code (GREEN). RED and GREEN are never collapsed into a single worker
+  dispatch; the repository deliberately pays the dispatch and context cost to retain adversarial
+  tension and prevent confirmation bias.
+- **Same-role task bundling**: Conductor avoids unnecessary dispatch latency by bundling small
+  adjacent micro-tasks strictly within the same specialist role (for example, combining all
+  related contract test assertions into one `test-dev` dispatch, or bundling small related
+  implementation edits across 1–3 files within the same specialist role into one dispatch), rather
+  than over-splitting.
+- **Independent verification pass**: Combining small tasks never bypasses verification. The
+  deterministic `task-gate` exit check and final council review execute against the integrated
+  working tree, ensuring all contract tests pass and no false positives or uncommitted changes survive.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
