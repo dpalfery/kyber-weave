@@ -11,7 +11,6 @@ import {
   OWNED_SESSION_ID,
   attributesOf,
   bus,
-  busEvent,
   consentPathIn,
   createHost,
   hook,
