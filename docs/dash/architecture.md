@@ -6,9 +6,10 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-30
 decided-by:
   - adr/0020-kyberdash-one-time-fork
+  - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
   - adr/0010-keywords-prefix-coverage-and-oov-idf
@@ -200,7 +201,7 @@ the table above is the whole layout.
 | `Synthesizer` | `dash/src/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). Implements child `tool.invoke` span extraction, 64KiB result truncation, and structured error status (contracts below). |
 | `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. The session key is read from `session_id`, falling back to `session.id` (the key Claude Code sends), in both the JSON and protobuf decoders. |
 | `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
-| `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
+| `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes behind bounded admission (R2.5): the accepted backlog holds at most four times the high-water mark in spans plus logs and 256 MiB of conservatively measured bytes (decoded JSON ×2 overhead, so the ledger over-estimates retained bytes). A batch that alone exceeds a ceiling is permanently oversize — the receiver answers 413 and queues nothing; a full backlog is shed transiently — the receiver answers 503 + Retry-After (1 s) and the exporter must retry. Batches handed to the sink but not yet settled stay ledgered as in-flight counts and bytes, `enqueue` admits before adding, and a non-finite custom byte measure refuses the batch instead of ledgering it weightless. Request bodies are capped at 64 MiB per request (oversize answers 413); the receiver keeps at most 100 recent error samples. |
 
 ### Collection-mechanism hierarchy and completeness contract
 
@@ -279,7 +280,10 @@ scopes by trace, or by session for a body with no trace id, and never by parent.
 
 No schema changed: state lives in the existing `pending_logs`, `quarantined_logs`, `enriched_logs`,
 `records.raw`, and `metadata` tables. The matcher decides from the trace or session candidates and the log timestamp alone, and it never
-attaches a body to a call that had already ended.
+attaches a body to a call that had already ended. Expiry and replay are metadata-only
+and paged: pending rows are listed without their payloads, and replay pages hold at
+most 4 MiB of payload (16 MiB quarantine pages on the startup relink), so a large
+pending backlog replays page by page within bounded working memory.
 
 ```mermaid
 flowchart TD
@@ -305,9 +309,17 @@ Measured behaviour, residuals, and the counts behind them are in the
 The dash-CLI-managed plugin (`dash/src/capture/harnesses/opencode-plugin/`, one codebase
 for opencode Desktop and CLI v2 installed by file into opencode's plugin dirs) is a
 **sender**, not a surface: it emits span-anchored OTLP/HTTP spans to the loopback receiver
-(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline
-spool with retry, backoff, and drop-oldest accounting), and every hook is best-effort with
-a 250 ms delivery budget, so a delivery failure never fails the host session. It writes no
+(`POST /v1/traces` + `/v1/logs` on `127.0.0.1:4318`) through a bounded outbox (offline spool for at most 500 events, at most 50 events
+per POST halved on 429 down to 1, 250 ms to 5 s backoff with jitter, a 10 s abort
+deadline per POST with a 250 ms response-body disposal bound, one single-flight
+worker, drop-oldest accounting; `close()` aborts the in-flight POST and settles
+every waiter), and every hook is best-effort with
+a 250 ms delivery budget, so a delivery failure never fails the host session. Diagnostics
+are a bounded tail, not an archive: at most 200 delivery-attempt records within
+1 MiB and 100 failure records within 256 KiB, failure messages capped at 2,048
+characters, every retained string detached into independent storage so a capped tail
+cannot pin a large parent allocation, and an ended session's payload bodies released
+at its `session.end`. It writes no
 database directly and serves no API: rows reach `canon.db` only through the receiver →
 `ingestBatch` path addressed by `resolveCanonDbPath`, and read back only through
 `/api/kyber/*` (display-layer rule, KD-011). Capture owns the plugin keys declare-only:
@@ -656,6 +668,33 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   10 minutes, so derived sessions trail the last accepted batch by roughly the idle
   window after the stream quiets, and worst-case by the 10-minute caps.
 
+Automatic projection is coordinated across processes through two metadata keys in the
+store itself (`dash/src/canon/projection-lease.ts`), so the web maintenance tick and the
+receiver scheduler — different processes over separate handles on the same `canon.db` —
+share one cadence and never project at once:
+
+- `projection_last_start_ms` records when the last automatic pass started. Every
+  automatic path delays its next pass until at least the shared 10-minute floor
+  (`SHARED_PROJECTION_MIN_INTERVAL_MS`) after that instant, so maintenance cannot
+  bypass the receiver's floor. Manual paths (`kyber build`, `dash refresh`, the
+  model-catalog rebuild) never consult it: an explicit request always projects.
+- `projection_lease` names which claimant owns the current pass. A pass starts only
+  after winning an atomic compare-and-set on this key. A crashed holder is reclaimed
+  through the recorded pid, else through the 90 s staleness gate
+  (`PROJECTION_LEASE_STALE_MS`); a running pass refreshes its claim every 10 s
+  (`PROJECTION_LEASE_HEARTBEAT_MS`). `drain()`/`close()` bypass the floor but still
+  take the lease, so shutdown rebuilds retained work without racing a live foreign
+  pass. A pass that loses the lease is deferred, not failed: the work stays dirty
+  for the next request, `drain()`, or timer.
+
+Unchanged work writes nothing at either level: the maintenance pass skips the
+projection when the corpus-level change gate reads unchanged (below), and the store's
+`upsertSession`/`upsertRun`/`upsertExecution` skip provably-identical row rewrites,
+so re-projecting a stable corpus settles with no derived writes.
+
+Waiter state is O(1) per cycle: every `request()` made before the next quiescence
+shares one cycle-completion promise, however many requests arrive mid-pass.
+
 The scheduled maintenance pass — the retention purge followed by the shared
 projection — once held the main thread for ~26 s every 30 s: a full corpus
 re-projection blocking every HTTP handler, so a request's latency was `max(handler
@@ -674,7 +713,11 @@ bounded on-disk artifact.
 
 The projection holds one decompressed payload and one decompressed parts set at a
 time; the per-run readers are the exception — they still hold a run's parts while
-serving it.
+serving it. Corpus-wide comparison follows the same discipline: it folds the store
+through `CanonStore.iterateAll()` one record at a time into per-harness streaming
+accumulators — bounded counters plus cost-stream state, never record or parts
+arrays — so the working set is one live record plus figures rather than the whole
+corpus, with figures identical to the batch path.
 
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
 `session` cache — and only the twelve columns the `session_denorm_idx` covering index
@@ -1680,6 +1723,101 @@ Live OpenTelemetry streams frequently capture operational span metrics without c
 - **Lock arbitration**: Before delta processing, `runTranscriptSync` probes the store refresh lock (`STORE_LOCK_FILE`, `dash/src/refresh/lock.ts`). If an active store refresh holds the lock, transcript sync yields immediately with `{ outcome: 'busy' }`, avoiding database contention.
 - **Display layer boundary**: Following [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md), the transcript sync job runs strictly in the engine (`JobHost`), never in the tray or web frontend.
 
+### Spawn chokepoint, child roles and refusals (ADR 0047)
+
+Every child process KyberDash starts from its own code goes through one function,
+`guardedSpawn` in `dash/src/process/spawn-guard.ts`. Each caller names a `kind` (`job`,
+`receiver`, `engine` or `tool`), and the function applies the rules below before the process
+starts. Nothing else in `dash/src` imports `child_process` spawn for a self-spawn; a static test
+(`dash/tests/spawn-sites.test.ts`) fails any other file that does.
+
+```mermaid
+flowchart TB
+    CALLER["User, tray or terminal<br/>depth 0"]
+    ENG["Engine child: kyberdash web<br/>role engine, depth 1<br/>may host; may not start an engine"]
+    JOB["Job child: dash refresh, import, clean<br/>role job, depth 2<br/>never hosts, never spawns"]
+    RCV["Receiver child: otel --serve<br/>role job, depth 2<br/>never hosts, never spawns"]
+    TOOL["Install tools: codesign, spctl, ditto<br/>role tool"]
+    REFUSE["Refused before any process starts<br/>SpawnRefusedError, or a refused spawn target"]
+
+    CALLER -->|"ensureEngine, DetachedLauncher (kind engine)"| ENG
+    ENG -->|"JobHost, kind job"| JOB
+    ENG -->|"ReceiverHost, kind job (shared spawner)"| RCV
+    CALLER -->|"install/node-deps.ts (kind tool)"| TOOL
+    JOB -.->|"any guarded spawn"| REFUSE
+    RCV -.->|"any guarded spawn"| REFUSE
+```
+
+The guard stamps two environment variables on every child it starts: `KYBERDASH_SPAWN_ROLE`
+is the `kind`, and `KYBERDASH_SPAWN_DEPTH` is the caller's depth plus one (absent means 0). A
+child inherits the rest of the parent's environment. A child whose depth cannot be read is refused.
+
+**Rules applied in order, before the spawn:**
+
+| Rule | Refused when | Outcome |
+|---|---|---|
+| Depth limit | The caller is at depth 2 or deeper | `SpawnRefusedError` |
+| Role | The caller's role is `job` or `receiver` | `SpawnRefusedError` |
+| Engine from engine | The caller's role is `engine` and the kind is `engine` | `SpawnRefusedError` |
+| Test mode | `KYBERDASH_SPAWN_GUARD=deny` and the test has not called `allowRealSpawns(reason)` | `SpawnRefusedError`, and a hit is recorded for the test |
+
+The longest legitimate chain is user or tray (depth 0), then the engine (depth 1), then a job or
+receiver (depth 2). Only the engine may host, because the engine's job host is what spawns the
+job children.
+
+**Hosting refusal.** `runWebDashboard` calls `assertMayHost()` before it opens a socket, binds a
+port or builds a host pair. A `job` or `receiver` child, or any process at depth 2 or deeper,
+throws `SpawnedChildMayNotHostError`. The CLI prints `kyberdash web: <reason>` to stderr and exits 1.
+
+**Entry-point refusal.** A self-spawn target is re-run only when the process is the single-file
+binary, or `argv[1]` resolves to the package's `src/launcher.ts` or `dist/cli.js`, or no
+`argv[1]` is present and the `kyberdash` name on `PATH` is used. `resolveJobSpawnTarget`
+(`dash/src/cli/spawn-target.ts`) otherwise returns `{ refused }` with the path it refused. The job
+host then records a failed run whose stderr is that reason; the receiver host reports the reason as
+its last error. Neither spawns anything.
+An injected program is taken as given; the e2e boot injects an inert one.
+
+`kyberdash otel` (attach mode, without `--serve`) resolves the spawn target before it opens the
+store. A refused target exits 1 with the reason and leaves the store untouched, so a refused run
+never persists `receiverHosted = on`.
+
+**Engine refusal.** `ensureEngine` (`dash/src/engine/ensure.ts`) returns `failed` with the reason
+"engine child may not start an engine" whenever the calling process was itself spawned as any child
+role, not only as an engine. A child started for a single job never starts or replaces an engine.
+
+**Bounded external tools are direct calls, not self-spawns.** These stay direct and are recorded in
+the dash spawn-site allow-list with their bound: the port-owner lookups in `otel/receiver.ts`
+(`lsof`, `ss`, `netstat`, 2 s timeout), the process and port discovery in `providers/antigravity.ts`
+(`execFile`, 3 s or 5 s timeout, 1 MiB buffer), the browser opener in `cli/web.ts` (`open`,
+`xdg-open`, `rundll32`, 10 s timeout), and the parse pool in `ingest/parse-workers.ts`, which starts
+worker threads rather than processes.
+
+**Test processes fail closed.** The vitest setup file and the isolated Playwright config set
+`KYBERDASH_SPAWN_GUARD=deny`. Under `deny` every guarded spawn is refused, and the vitest setup
+fails the test that caused it. A test that needs a real child calls `allowRealSpawns(reason)` from
+`dash/tests/setup/spawn-guard.ts`; the opt-in ends after that test. The self-booting e2e boots
+(`dash/e2e/boot-dashboard.ts`) inject inert job and receiver spawners and an inert receiver prober,
+and keep their state under the test's temp root, so no boot starts a child.
+
+**Child record.** Each child a guarded spawn starts is kept in memory and, when a test run names
+`KYBERDASH_SPAWN_LEDGER_FILE`, appended to that file. The process ledger
+(`dash/tests/setup/process-ledger.ts`) reads it at the end of the run; the runbook describes the
+checks.
+
+**Known limits.** The receiver child is stamped `job`, not `receiver`, because `ReceiverHost` uses
+the same spawner as `JobHost`; the `receiver` kind is defined and refused the same way, but no path
+stamps it today. The dash allow-list is per file and spawn-API name, not per line. The static
+scans match a spawn only where its API name appears in the file, so a spawn reached through another
+module's API is found at that module. On Windows the process ledger runs in ledger-entry-only mode
+(recorded children, checked by pid; no descendant or orphan scan), and there is no watchdog, because
+`scripts/proc-guard.sh` is POSIX-only. The residual risks are listed in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+
+**.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`
+and `src/`, and its product process starts carry their own timeouts. The bounds and the one
+deliberate exception (`ProcessRunner.RunInteractive`, unbounded by design) are in the
+[test standard](../standards/test/README.md#tests-that-start-processes).
+
 ### Web Dashboard (dash/web/)
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine.
@@ -1885,6 +2023,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/quarantine/:spanId` | `GET` | `{ spanId, source, name, reason, timestamp, namespaces, harness, rawPayload, evidenceAvailable }` | One quarantined span's audit row plus the packet it kept ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). 200 for a known id; 404 for an unknown one; 405 for a non-GET method; 400 with `{ error: 'Missing span id' }` for an empty id. A row that predates the payload column answers `rawPayload: null, evidenceAvailable: false` — never an invented packet. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[], data: ProblemRow[], total, page, limit }` | Recorded problems; supports `?limit=`, `?offset=`, `?page=`. Rows carry `session_id`, `harness`, `timestamp`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
+| `/api/kyber/version` | `GET` | `{ version, apiVersion }` | The engine's version (`KYBERDASH_VERSION`, read from `dash/package.json`, which a release stamps with the release version) and the report schema version (`apiVersion`). Store-free on purpose: it never reads `canon.db`, so it stays fast while a projection runs, where `/api/kyber/meta` measured 23 s. The web Settings drawer reads it once on open, with no polling. The tray core fetches it on its existing poll and carries it as `ViewState.kyberdashVersion`, passed through unchanged, or `null` when the fetch fails, so the tray shows `unknown`. Non-GET methods answer 405. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 | `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |

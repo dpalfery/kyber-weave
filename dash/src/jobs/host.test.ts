@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanonStore } from '../canon/store.js'
 import { SETTING_KEYS, writeSetting } from '../settings/shared-settings.js'
 import { JobHost } from './host.js'
+import type { JobHostOptions, JobSpawner } from './host.js'
 
 const T0 = 1_700_000_000_000
 const MINUTE = 60_000
@@ -554,5 +555,60 @@ describe('failure artifact pruning keeps the newest', () => {
       store.close()
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+// Storm guard (T3): a host whose spawn target was refused never starts a child. The refusal is
+// the recorded failure, so the operator sees why nothing ran instead of a host that stalls.
+//
+// Seam: JobHostOptions.spawnRefusal (added by T3b). It is the reason resolveJobSpawnTarget gave
+// when it refused this process's entry. Set, the host records a failed refresh with that reason
+// and never calls its spawner. Typed as an intersection here so this file compiles before the
+// option exists.
+describe('JobHost: a refused spawn target starts nothing', () => {
+  const REFUSAL = 'spawn target refused: /repo/dash/e2e/harness-collection-boot.ts is not the CLI entry'
+
+  function refusedHost(spawnerForHost: JobSpawner = spawner): JobHost {
+    const options: JobHostOptions & { readonly spawnRefusal: string } = {
+      store,
+      stateDir,
+      program: 'kyberdash',
+      clock,
+      spawner: spawnerForHost,
+      tickIntervalMs: TICK_MS,
+      maintenance: () => { maintenanceRuns++ },
+      sync: () => {},
+      spawnRefusal: REFUSAL,
+    }
+    const host = new JobHost(options)
+    hosts.push(host)
+    return host
+  }
+
+  it('records a failed scheduled refresh that names the refusal, and never calls the spawner', async () => {
+    const host = refusedHost()
+
+    await host.start()
+
+    expect(spawner.children, 'a refused target must not start any child').toHaveLength(0)
+    expect(host.getStatus().state).toBe('failed')
+    expect(host.getStatus().lastFailure, 'the failure must name the refusal').toContain(REFUSAL)
+  })
+
+  it('answers a manual refresh with the refusal as the failure, and never calls the spawner', async () => {
+    const calls: Array<{ program: string; args: readonly string[] }> = []
+    // Exits at once, so a host that wrongly spawns reports success here and fails fast.
+    const instantSpawner: JobSpawner = {
+      spawn(program, args) {
+        calls.push({ program, args: [...args] })
+        return { exited: Promise.resolve({ code: 0, stderr: '' }), kill: () => {} }
+      },
+    }
+    const host = refusedHost(instantSpawner)
+
+    const outcome = await host.runNow('web')
+
+    expect(calls, 'a refused target must not start any child').toEqual([])
+    expect(outcome).toEqual({ outcome: 'failed', reason: expect.stringContaining(REFUSAL) })
   })
 })

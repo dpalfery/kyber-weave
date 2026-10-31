@@ -40,6 +40,18 @@ public class ReviewVerdictTests
     private static ReviewConfig Config(ReviewPolicy? policy = null) =>
         new() { Policy = policy ?? new ReviewPolicy { AlwaysHuman = ["**/auth/**"] } };
 
+    private static ReviewPolicy PresetWithReservedPaths(ReviewStrictness strictness)
+    {
+        ReviewPolicy preset = ReviewPolicy.ForStrictness(strictness);
+        return new ReviewPolicy
+        {
+            Strictness = strictness,
+            MinConfidence = preset.MinConfidence,
+            MajorCountBlocks = preset.MajorCountBlocks,
+            AlwaysHuman = ["**/auth/**"]
+        };
+    }
+
     private static ReviewOutcome Evaluate(
         IReadOnlyList<ReviewFinding>? findings = null,
         IReadOnlyList<GateResult>? gates = null,
@@ -53,6 +65,29 @@ public class ReviewVerdictTests
             config ?? Config(),
             Today,
             coverage);
+
+    [Fact]
+    public void StrictModeBlocksOnASingleLowerConfidenceMajorThatBalancedModeLetsThrough()
+    {
+        ReviewFinding major = Finding(ReviewSeverity.Major, confidence: 5);
+
+        ReviewOutcome balanced = Evaluate([major], config: Config(PresetWithReservedPaths(ReviewStrictness.Balanced)));
+        ReviewOutcome strict = Evaluate([major], config: Config(PresetWithReservedPaths(ReviewStrictness.Strict)));
+
+        Assert.Equal(ReviewVerdict.Approve, balanced.Verdict);
+        Assert.Equal(ReviewVerdict.RequestChanges, strict.Verdict);
+        Assert.Contains(strict.Diagnostics, d => d.Code == VerdictEngine.MajorFindingThreshold);
+    }
+
+    [Fact]
+    public void StrictModeStillNeverBlocksOnMinorFindings()
+    {
+        ReviewOutcome strict = Evaluate(
+            [Finding(ReviewSeverity.Minor), Finding(ReviewSeverity.Minor, id: "correctness/other")],
+            config: Config(PresetWithReservedPaths(ReviewStrictness.Strict)));
+
+        Assert.Equal(ReviewVerdict.Approve, strict.Verdict);
+    }
 
     [Fact]
     public void ACleanChangeWithNoFindingsIsApprovedAtLowRisk()

@@ -178,7 +178,7 @@ public sealed class SbomTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         return (result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
@@ -642,7 +642,7 @@ public sealed class SbomTests
             startInfo.ArgumentList.Add(dir);
             startInfo.ArgumentList.Add("0.1.0");
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(300));
             Assert.True(
                 result.ExitCode == 0,
                 "generate-artifact-sboms.sh failed: " + result.StandardError);
@@ -747,7 +747,7 @@ public sealed class SbomTests
         tar.ArgumentList.Add(dir);
         tar.ArgumentList.Add(payloadName);
 
-        ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty);
+        ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(tarResult.ExitCode == 0, tarResult.StandardError);
         File.Delete(Path.Combine(dir, payloadName));
     }
@@ -772,7 +772,7 @@ public sealed class SbomTests
         zip.ArgumentList.Add(Path.Combine(dir, archiveName));
         zip.ArgumentList.Add(Path.Combine(dir, payloadName));
 
-        ProcessResult zipResult = ProcessRunner.Run(zip, string.Empty);
+        ProcessResult zipResult = ProcessRunner.Run(zip, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(zipResult.ExitCode == 0, zipResult.StandardError);
         File.Delete(Path.Combine(dir, payloadName));
     }
@@ -898,7 +898,7 @@ public sealed class SbomTests
         startInfo.ArgumentList.Add(Path.GetTempPath());
         startInfo.ArgumentList.Add("9.9.9");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(

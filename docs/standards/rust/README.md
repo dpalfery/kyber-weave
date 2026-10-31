@@ -123,8 +123,10 @@ states, and the bundle targets in `tauri.conf.json` are macOS and Windows instal
 The gate that a Rust change must pass, run from the crate directory:
 
 ```bash
-cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
 ```
+
+The gate runs through the process watchdog, `scripts/proc-guard.sh run --`.
 
 The same three commands are declared in [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml)
 as council gates `cargo-fmt`, `cargo-clippy` and `cargo-test` under `review.gates`, run from the

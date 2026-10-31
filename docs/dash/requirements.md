@@ -4,7 +4,7 @@ title: KyberDash requirements and invariants contract
 doc-type: requirements
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-25
+last-reviewed: 2026-10-29
 status: current
 decided-by:
   - adr/0008-kyberdash-single-canonical-store
@@ -102,7 +102,12 @@ adapter; direct-SQL analytics and engine auto-start rejected):
   `pagination.nextCursor` / `hasMore`, following continuations to reach all retained
   context. `limit` (manifest only; default 25, max 100) and `byteLimit` (content only;
   default and max 16384) bound a page and working memory, never the total retrievable
-  transcript. `coverage.completeness` is `captured_only` — retained evidence only —
+  transcript. At most 100 live multi-page traversals are held, each evicted after two
+  minutes idle; past the cap a new traversal answers `budget_exceeded` rather than
+  evicting a live reader. Content pages fill to 60,000 bytes of chunk text (each chunk
+  capped at 16,384 UTF-8 bytes) so the encoded response stays within 65,536 bytes. No
+  page is retained — every page is re-derived from the store, and a traversal entry is
+  only its binding plus the last touch time. `coverage.completeness` is `captured_only` — retained evidence only —
   and `coverage.gaps` names what is missing (`not_captured`, `unknown_linkage`,
   purge/retention, corrupt). `representation: 'assembled_turn'` (turn targets only)
   is a labelled reconstruction of user/assistant/shared context, never proof of the

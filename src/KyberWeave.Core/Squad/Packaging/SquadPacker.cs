@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Packaging;
 
@@ -10,6 +12,7 @@ namespace KyberWeave.Core.Squad.Packaging;
 /// </summary>
 public static class SquadPacker
 {
+    private const string PackTarget = "pack";
     private static readonly DateTimeOffset FixedTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
@@ -17,7 +20,10 @@ public static class SquadPacker
     /// <summary>
     /// Creates the APM distribution archive containing canonical manifests, profiles, agents, and skills.
     /// </summary>
-    public static string PackApm(string sourcePath, string outDirectory, string version)
+    public static string PackApm(
+        string sourcePath,
+        string outDirectory,
+        string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -31,7 +37,8 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = CollectApmEntries(sourcePath);
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectApmEntries(sourcePath));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -41,7 +48,10 @@ public static class SquadPacker
     /// <summary>
     /// Creates the Agent Plugins v1.0.0 distribution archive containing canonical skills, MCP configuration, and plugin manifest.
     /// </summary>
-    public static string PackPlugins(string sourcePath, string outDirectory, string version)
+    public static string PackPlugins(
+        string sourcePath,
+        string outDirectory,
+        string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -55,7 +65,8 @@ public static class SquadPacker
             File.Delete(archivePath);
         }
 
-        List<(string RelativePath, byte[] Content)> entries = CollectPluginsEntries(sourcePath, version);
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectPluginsEntries(sourcePath, version));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -161,6 +172,30 @@ public static class SquadPacker
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Fills every carrier's response-preferences block with the shipped default text. The packer
+    /// never consults the operator's home guidance: the archive is a function of the canonical
+    /// source alone. A corpus with no block is passed through unchanged (injector no-op).
+    /// </summary>
+    /// <remarks>
+    ///     Packing uses the shipped default text and never reads the operator's home guidance.
+    /// </remarks>
+    private static List<(string RelativePath, byte[] Content)> FillResponsePreferences(
+        List<(string RelativePath, byte[] Content)> entries)
+    {
+        List<SquadDeploymentFile> files = entries
+            .Select(entry => new SquadDeploymentFile(entry.RelativePath, entry.Content, PackTarget))
+            .ToList();
+
+        SquadRenderResult filled = SquadResponsePreferencesInjector.Inject(
+            new SquadRenderResult(true, files, [], [], []),
+            SquadResponseGuidanceSource.DefaultText);
+
+        return filled.Files
+            .Select(file => (file.RelativePath, file.Content.ToArray()))
+            .ToList();
     }
 
     private static byte[] ReadNormalizedFile(string filePath)

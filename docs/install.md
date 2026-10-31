@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-29
 ---
 
 # Installing Kyber-Weave
@@ -414,7 +414,7 @@ kyber-weave --version
 kyber-weave -v
 ```
 
-Output example: `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`.
+Output is exactly `kyber-weave <version>`, with no build metadata. Example: `kyber-weave 0.2.0-rc.1`.
 
 Verify the MCP server binary version:
 
@@ -624,8 +624,11 @@ Requires .NET SDK 10 (pinned in `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ```
+
+Run the test command through `scripts/proc-guard.sh run --`, the process watchdog. See
+[Running tests safely](dash/runbook.md#running-tests-safely).
 
 ## Related
 

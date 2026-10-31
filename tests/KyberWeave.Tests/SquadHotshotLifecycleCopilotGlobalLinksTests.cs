@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
-using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -28,12 +28,15 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         "spec-path.md",
         "intake-path.md",
         "execution-and-review.md",
-        "autonomy.md",
+        "autonomy.md"
     ];
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     /// <summary>
     /// The installed conductor must link each declared reference by an absolute path under the
@@ -60,7 +63,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadOwnedFile owned = Assert.Single(
             receipt.Files,
             file => string.Equals(file.RelativePath, ConductorPath, StringComparison.Ordinal)
-                && string.Equals(file.Target, "copilot", StringComparison.Ordinal));
+                    && string.Equals(file.Target, "copilot", StringComparison.Ordinal));
         string writtenDigest = Convert.ToHexStringLower(
             SHA256.HashData(await File.ReadAllBytesAsync(install.ConductorFile)));
         Assert.Equal(writtenDigest, owned.Sha256);
@@ -89,15 +92,16 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadDoctorCommand command = new(
             executor,
             install.UserPaths,
-            workingDirectory: KyberWeaveTestPaths.ToolRoot,
-            globalRoots: install.GlobalRoots);
+            KyberWeaveTestPaths.ToolRoot,
+            install.GlobalRoots,
+            new SquadRendererRegistry([new CopilotRenderer()]));
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
                 Path = KyberWeaveTestPaths.ToolRoot,
-                Global = true,
+                Global = true
             }));
 
         string normalizedOutput = string.Join(
@@ -125,9 +129,9 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             globalRoots: globalRoots);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: KyberWeaveTestPaths.ToolRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Copilot],
+            KyberWeaveTestPaths.ToolRoot,
+            SquadDeploymentScope.Global,
+            [SquadTarget.Copilot],
             Version: "1.2.3"));
         Assert.True(result.Success);
 

@@ -85,6 +85,8 @@ internal sealed class ReviewPolicyYaml
 
     public int? MinConfidence { get; init; }
 
+    public string? Strictness { get; init; }
+
     public List<ReviewSuppressionYaml>? Suppressions { get; init; }
 }
 

@@ -29,6 +29,12 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 {
     private const char FieldSeparator = '\u001f';
 
+    /// <summary>
+    ///     The bound for the one batched read of the index. The whole node table comes back in one query, so this
+    ///     is generous, and a hung read is stopped rather than leaving the adapter blocked.
+    /// </summary>
+    private static readonly TimeSpan SqliteReadTimeout = TimeSpan.FromSeconds(60);
+
     private static readonly string[] SymbolKinds =
         ["class", "interface", "method", "function", "struct", "enum", "type_alias"];
 
@@ -72,7 +78,9 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
             Load();
             IsAvailable = true;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException
+                                       or System.ComponentModel.Win32Exception
+                                       or TimeoutException)
         {
             UnavailableReason = ex.Message;
         }
@@ -160,6 +168,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
             list = [];
             map[key] = list;
         }
+
         list.Add(node);
     }
 
@@ -167,6 +176,8 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
+            // Input is redirected only so the runner can close it: sqlite3 runs the SQL argument and exits.
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -186,12 +197,10 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
 
-        using Process process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start the 'sqlite3' process.");
-
-        // Both pipes are drained concurrently. This query returns the whole node table, so
-        // stdout is large by design and stderr must not be left to fill behind it.
-        ProcessResult result = ProcessRunner.ReadToEnd(process);
+        // The runner drains both pipes concurrently. This query returns the whole node table, so stdout is
+        // large by design and stderr must not be left to fill behind it. A read that outlasts the bound is
+        // killed and throws TimeoutException, which the constructor reports as the index being unavailable.
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);
 
         if (result.ExitCode != 0)
         {

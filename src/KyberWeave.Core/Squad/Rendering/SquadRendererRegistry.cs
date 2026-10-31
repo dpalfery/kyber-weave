@@ -58,14 +58,15 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             .ToArray();
         if (unsupported.Count > 0)
         {
-            string names = string.Join(", ", unsupported.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
-            string supported = string.Join(", ", SupportedTargets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+            string names = string.Join(", ",
+                unsupported.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+            string supported = string.Join(", ",
+                SupportedTargets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
             return new SquadRenderResult(
-                Success: false,
-                Files: [],
-                Degradations: [],
-                Warnings: [],
-                Errors:
+                false,
+                [],
+                [],
+                [],
                 [
                     $"No renderer is implemented yet for target(s): {names}. " +
                     $"See docs/todo/<target>.md for what is needed to add support. " +
@@ -78,10 +79,12 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         List<SquadRenderWarning> warnings = [];
         List<string> errors = [];
 
+        SquadSource sharedSource = request.PreloadedSource ?? SquadSourceLoader.Load(request.SourceDirectory);
+
         foreach (IGrouping<ISquadRenderer, SquadTarget> group in request.Targets.GroupBy(target => _byTarget[target]))
         {
             SquadRenderResult partial = await group.Key.RenderAsync(
-                request with { Targets = group.ToArray() },
+                request with { Targets = group.ToArray(), PreloadedSource = sharedSource },
                 cancellationToken).ConfigureAwait(false);
 
             files.AddRange(partial.Files);
@@ -95,20 +98,12 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             return new SquadRenderResult(false, files, degradations, warnings, errors);
         }
 
-        // The source is reloaded here, separately from whatever each renderer parsed
-        // internally, because validation needs the canonical model (agent digests, the
-        // full agent/skill roster) regardless of which renderers ran or how they read it.
-        // The corpus is a few dozen small YAML/Markdown files, so the second parse costs
-        // low single-digit milliseconds — trading that for a renderer contract that
-        // doesn't leak a pre-parsed model through every implementation, including the
-        // test fake that never touches disk at all.
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
-        if (SquadOperatorChannel.IsGateOn())
+        if (SquadOperatorChannel.IsGateOn(request.EnvironmentReader))
         {
-            RecordOperatorChannelNotRendered(source, request, degradations);
+            RecordOperatorChannelNotRendered(sharedSource, request, degradations);
         }
 
-        ValidateRenderResult(source, request.Targets, files, degradations);
+        ValidateRenderResult(sharedSource, request.Targets, files, degradations);
 
         return new SquadRenderResult(true, files, degradations, warnings, []);
     }
@@ -201,9 +196,9 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         {
             string token = SquadTargetCatalog.GetToken(target);
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
-                            SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
-                            SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
-                            SquadTarget.Antigravity or SquadTarget.Devin or SquadTarget.CommandCode;
+                SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
+                SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
+                SquadTarget.Antigravity or SquadTarget.Devin or SquadTarget.CommandCode;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -292,7 +287,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             }
 
             if (string.Equals(degradation.Code, "widened", StringComparison.OrdinalIgnoreCase) ||
-                (degradation.Details is not null && degradation.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)))
+                (degradation.Details is not null &&
+                 degradation.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)))
             {
                 throw new SquadRenderValidationException(
                     $"Permission widening detected for agent '{degradation.CanonicalIdentity}'.");
@@ -393,9 +389,11 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     private static SquadRenderValidationException PrincipalCollision(
         string ownerSourcePath,
         string resourcePath,
-        string outputPath) =>
-        new(
+        string outputPath)
+    {
+        return new SquadRenderValidationException(
             $"Resource '{resourcePath}' owned by '{ownerSourcePath}' aliases another principal and causes a portable output collision at '{outputPath}'.");
+    }
 
     /// <remarks>
     /// Takes the whole <see cref="SquadAgent"/> and the loaded fallback profiles, not just a
@@ -420,7 +418,9 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         SquadAgent agent,
         IReadOnlySet<string> skillNames,
         IReadOnlySet<string> sharedIdentities,
-        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles) => target switch
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        return target switch
         {
             SquadTarget.Copilot => $".github/agents/{agent.Name}.agent.md",
             SquadTarget.Cursor => $".cursor/agents/{agent.Name}.md",
@@ -438,6 +438,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.CommandCode => $".commandcode/agents/{agent.Name}.md",
             _ => null
         };
+    }
 
     private static string? ResolvePiAgentOutputPath(
         SquadAgent agent,
@@ -452,9 +453,9 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         // so this claims the lowered skill identity only when the fallback profile actually
         // lowers to a skill. "omit" claims no output path, matching PiRenderer emitting nothing.
         return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
-            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
-                ? $".pi/skills/{agent.Name}/SKILL.md"
-                : null;
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".pi/skills/{agent.Name}/SKILL.md"
+            : null;
     }
 
     /// <remarks>
@@ -478,9 +479,9 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         }
 
         return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
-            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
-                ? $".zcode/commands/{agent.Name}.md"
-                : null;
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".zcode/commands/{agent.Name}.md"
+            : null;
     }
 
     /// <remarks>
@@ -500,15 +501,17 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         }
 
         return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
-            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
-                ? $".devin/skills/{agent.Name}/SKILL.md"
-                : null;
+               string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+            ? $".devin/skills/{agent.Name}/SKILL.md"
+            : null;
     }
 
     private static string? SkillOutputPath(
         SquadTarget target,
         string name,
-        IReadOnlySet<string> suppressedSkillIdentities) => target switch
+        IReadOnlySet<string> suppressedSkillIdentities)
+    {
+        return target switch
         {
             SquadTarget.Copilot when !suppressedSkillIdentities.Contains(name) => $".github/skills/{name}/SKILL.md",
             SquadTarget.Cursor when !suppressedSkillIdentities.Contains(name) => $".cursor/skills/{name}/SKILL.md",
@@ -522,17 +525,21 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Pi when !suppressedSkillIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
             SquadTarget.ZCode when !suppressedSkillIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
             SquadTarget.Devin when !suppressedSkillIdentities.Contains(name) => $".devin/skills/{name}/SKILL.md",
-            SquadTarget.CommandCode when !suppressedSkillIdentities.Contains(name) => $".commandcode/skills/{name}/SKILL.md",
+            SquadTarget.CommandCode when !suppressedSkillIdentities.Contains(name) =>
+                $".commandcode/skills/{name}/SKILL.md",
             _ => null
         };
+    }
 
     private static string ResolveFallbackOutputIdentity(
         string name,
         IReadOnlySet<string> skillNames,
-        IReadOnlySet<string> sharedIdentities) =>
-        skillNames.Contains(name) && !sharedIdentities.Contains(name)
+        IReadOnlySet<string> sharedIdentities)
+    {
+        return skillNames.Contains(name) && !sharedIdentities.Contains(name)
             ? $"role-{name}"
             : name;
+    }
 }
 
 /// <summary>Projects a validated resource closure beside its rendered principal.</summary>
@@ -541,8 +548,10 @@ internal static class SquadResourceProjection
     internal static void Append(
         List<SquadDeploymentFile> files,
         SquadDeploymentFile principal,
-        IReadOnlyList<SquadResource> resources) =>
+        IReadOnlyList<SquadResource> resources)
+    {
         Append(files, principal.RelativePath, resources, principal.Target);
+    }
 
     internal static void Append(
         List<SquadDeploymentFile> files,

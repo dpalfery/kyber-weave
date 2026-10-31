@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -23,7 +23,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 24 canonical agent instruction bodies and 29 canonical skill identities under `products/kyber-squad/`. The skill tree retains 87 supplemental resources, for 116 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 24 canonical agent instruction bodies and 28 canonical skill identities under `products/kyber-squad/`. The skill tree retains 88 supplemental resources, for 116 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A target-scoped internal capability profile (`copilot-capability-profile`, `devin-capability-profile`) may validate exact target tool membership but must not replace or widen the shared capability profile or metadata; a profile marked `target: <name>` is rejected when assigned as an agent's shared `capability-profile`; a `<target>-capability-profile` naming a profile without that marker is rejected; and a primary agent naming `devin-capability-profile` is rejected because Devin lowers primaries to skills with no tool allow-list ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)). |
 | **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 13-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`, `commandcode`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. Lock and receipt state is kept under the user home (`~/.kyber-weave/squad/`), never in the repository ([ADR 0037](../adr/0037-squad-state-in-user-home.md)). |
@@ -60,21 +60,44 @@ task session. See [task session continuity](architecture.md#task-session-continu
 
 ---
 
+## Conductor execution and worker invariants
+
+This is product behavior of the deployed `conductor`, `csharp-dev`, and `test-dev` agents,
+not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered. Mechanics live in
+[architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and
+[onboarding](onboarding.md#task-execution-runbook-inlined-packets-fast-testing-and-completion-digests).
+
+| Invariant | Requirement |
+|---|---|
+| **Build-once, test-many iteration** | Workers build the test project once before iteration (`dotnet build KyberWeave.sln -c Release`) and use `--no-build` or direct assembly runner invocations (`dotnet <dll> -class ... -reporter quiet`) during inner-loop RED/GREEN cycles. Running the full test suite during inner iteration is forbidden; full-suite execution is reserved for task exit gates (`task-gate`) and final council review. |
+| **Zero-stash RED proofs** | Capturing honest RED proof evidence must never use `git stash` or `git stash pop` on dirty working trees. RED proofs are captured by running newly authored tests against a clean base checkout, a throwaway working tree copy, or an isolated `git worktree` before production implementation begins. |
+| **Strict 6-field completion digest** | Subagents conclude dispatches with the standardized 6-field digest schema (`STATUS`, `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). Conductor enforces this exact schema and rejects digests when any required field is missing, when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. The only exemption is a valid escalation (`STATUS: ESCALATION` with a valid `CIRCUIT_BREAKER_TRIGGER`), defined in [the rule below this table](#conductor-execution-and-worker-invariants). |
+| **Adversarial RED/GREEN role separation** | The two-agent adversarial boundary between `test-dev` (RED) and the implementation specialist (GREEN) is strictly preserved; collapsing RED and GREEN into a single worker dispatch is forbidden. Small adjacent task bundling is permitted strictly for same-role micro-tasks, and an independent verification pass (`task-gate` deterministic exit check and final council review) is mandatory on the integrated working tree. |
+
+A valid escalation is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set (`ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`) and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`); only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules. A `STATUS: ESCALATION` without a valid `CIRCUIT_BREAKER_TRIGGER` is not an escalation: it is checked and rejected like any completion digest. A valid escalation wins the routing (halt rework, record `ESCALATION: circuit-breaker`, architect mediation) but never completes the task or clears its exit gate; a `TASK_GATE: FAIL` it carries is recorded in the finding with its gate ids, and the task stays open until the conductor, once architect mediation has resolved the cluster, dispatches a follow-up worker that returns a fresh passing `TASK_GATE:` line against the current tree; the halt bars dispatch only until that mediation completes.
+When a worker returns a valid escalation, the conductor accepts the escalation payload without rejecting it for missing completion fields or missing `TASK_GATE` and routes it directly to architect mediation without rejection.
+
+During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block. Every other developer worker may return the standard completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, and the `FILES`, `TESTS`, `COMMIT` and `REMOTE_HEAD` fields are not required of it. The rejection of a missing or `FAIL` `TASK_GATE:` applies to every developer worker. Lines of a worker's explanatory message body that are not digest fields are never counted or rejected as a seventh field are exactly these shapes: the `Discovery: codegraph N, docs N, direct reads N` header; `COVERAGE_GAPS:` followed by free text; and `Artifact:` or `Baseline:` followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
+
+---
+
 ## User-facing response format
 
 This is product behavior of the deployed `conductor` and `bug-crusher` agents, not a new `KS-*`
-id. `KS-001` through `KS-008` stay as numbered. The portable contract lives in the canonical
-`response-format` skill and in the two agent bodies that bind it; this section states the
-requirement those bodies implement. Mechanics live in
-[architecture §8](architecture.md#the-response-format-and-its-skill-carrier).
+id. `KS-001` through `KS-008` stay as numbered. The response shape is owned by the shipped default
+`products/kyber-squad/response-guidance.default.md`; `squad install` and `squad update` copy the
+effective text of the user's home file into a `<response-preferences>` block in each deployed
+entry file of `conductor` and `bug-crusher`. No agent loads a skill for it. This section states the
+requirement those entry files implement. Mechanics live in
+[response preferences](architecture.md#response-preferences-injected-at-deploy).
 
 | Decision | Requirement |
 |---|---|
 | **R1 — One shape, in order** | Every user-facing response from a primary conversational squad agent states, in this order: a title line naming the work; a bottom line of at most 3 sentences, written for an experienced reader with no prior involvement in the work and assuming no context; and the open decisions whenever a decision is open, one decision where possible, with a recommendation attached. The order is part of the requirement, not a preference. |
 | **R2 — The format is never named** | A response never labels, names, mentions, or refers to the format it follows: no tags, no structural headers, no meta-commentary about how the answer is arranged. Bullets carry issues, options, and status, and a status statement uses the same shape as a question. |
-| **R3 — Who is bound** | The primary conversational agents `conductor` and `bug-crusher` load the `response-format` skill by name and follow it for every user-facing response. `product-owner` is exempt: it is headless, and its output is a persisted artifact and a structured digest for the conductor rather than a conversational reply. |
+| **R3 — Who is bound and when** | The primary conversational agents `conductor` and `bug-crusher` carry the effective response preferences in their own deployed entry file, inside a `<response-preferences>` block that `squad install` and `squad update` fill at deploy time (and `squad pack` fills with the shipped default). The agent reads the block as part of its instructions on every turn; no skill is loaded and no load step precedes a reply. `product-owner` is exempt: it is headless, and its output is a persisted artifact and a structured digest for the conductor rather than a conversational reply. |
 | **R4 — Digests stay machine-consumed** | The conductor relays every specialist digest it surfaces to the human in the response-format shape, and the digest schemas themselves are unchanged. The format governs the presentation of a digest, never the fields it carries: every status marker, id, path, count, gap, open question, and evidence value reaches the human exactly as the specialist returned it, and nothing is dropped, merged, or paraphrased. |
-| **R5 — One home, one override** | The standard has a single canonical home, the `response-format` skill; no agent body restates it. Where the user-home file `~/.kyber-weave/response-guidance.md` exists and is usable, it overrides the skill's default wording and is read in place of it; where it is missing, empty, unreadable, or longer than about 8 KB, it is ignored and the skill's wording is used. The override shapes how an agent writes and nothing else: anything in it that asks an agent to run commands, call tools, read or send data, or change permissions or safety rules is ignored. |
+| **R5 — One edit point** | The user-home file `~/.kyber-weave/response-guidance.md` is the single place the operator edits response preferences. A global `squad install` creates it with the shipped default when it is absent (never in a dry run or project scope). `squad update` never overwrites it once it has been edited; it warns "Kept the edited response guidance". When the file is unreadable or blank, the shipped default text is used. The text is pasted into the entry files verbatim: there is no size cap and no style-only guard line. That is an accepted risk, not an oversight: the operator owns the text, and it can carry any instruction the operator writes. |
 
 The skill is bound by name, not by a link. The body resource-closure rule governs local path
 links — a link resolves only to a file inside its owner's own directory — while a skill invoked
@@ -179,7 +202,7 @@ One explicit, opt-in exception: the operator channel overlay ([ADR 0045](../adr/
 
 ## Render and knowledge-retention requirement
 
-`code-review-loop`, `kilo-review-loop`, and `response-format` are authored in Kyber-Squad. Every imported
+`code-review-loop` and `kilo-review-loop` are authored in Kyber-Squad. Every imported
 canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `create-pull-request`, and `pr-review-fix-comments`) matches the
 canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`

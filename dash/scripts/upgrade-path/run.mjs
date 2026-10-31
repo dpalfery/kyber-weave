@@ -25,6 +25,8 @@ import { tmpdir } from 'node:os'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..')
+// Longest any one synchronous step may run; spawnSync kills it and run() throws.
+const STEP_TIMEOUT_MS = 15 * 60_000
 const OLD_VERSION = process.env['UPGRADE_PATH_OLD'] || '0.9.20'
 // When UPGRADE_PATH_WORK is not set, create an atomically unique work directory
 // with mkdtempSync (0700, random suffix) so the path cannot be predicted by
@@ -53,7 +55,7 @@ const skip = msg => { skipped++; console.log(`  skip  ${msg}`) }
 const check = (cond, msg) => (cond ? ok(msg) : fail(msg))
 
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 1 << 29, shell: false, ...opts })
+  const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 1 << 29, shell: false, timeout: STEP_TIMEOUT_MS, ...opts })
   if (r.error) throw new Error(`${cmd} ${args.join(' ')}: ${r.error.message}`)
   return r
 }

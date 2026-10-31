@@ -5,7 +5,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
+import { currentSpawnRuntime, isSpawnRefusal, resolveJobSpawnTarget } from './spawn-target.js'
 
 export type EngineContext = {
   stateDir: string
@@ -18,6 +18,9 @@ export async function engineContext(): Promise<EngineContext> {
   const { KYBERDASH_VERSION } = await import('./web.js')
   const { runningAsSea } = await import('../sea.js')
   const target = resolveJobSpawnTarget(currentSpawnRuntime(runningAsSea()))
+  // Fail closed: an engine is never started from an entry that is not the CLI. The error
+  // carries the resolver's reason and reaches the operator through the command's own failure path.
+  if (isSpawnRefusal(target)) throw new Error(target.refused)
   return {
     stateDir: join(homedir(), '.kyberdash'),
     version: KYBERDASH_VERSION,

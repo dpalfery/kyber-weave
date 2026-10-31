@@ -134,3 +134,6 @@ KyberWeave.Tests.UpdateCommandTests
 KyberWeave.Tests.SquadRootWrapperAgentTests
 KyberWeave.Tests.SquadStateMigrationTests
 KyberWeave.Tests.KiloRendererContractTests
+KyberWeave.Tests.SquadRenderSeamContractTests
+KyberWeave.Tests.ProcessConsoleCaptureTests
+KyberWeave.Tests.TestFixtureFakesTests

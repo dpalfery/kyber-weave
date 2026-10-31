@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-30
 ---
 
 # Wiring Kyber-Weave into CI
@@ -206,15 +206,87 @@ enforces the per-harness completeness predicate continuously:
   store rather than the operator's own `~/.kyberdash/canon.db`.
 - **Steps:** install dash deps (`npm ci`), `npx playwright install
   --with-deps`, then the conformance spec. The spec runs from the repository
-  root with the pinned `dash` Playwright (`npx --prefix dash playwright test
-  dash/e2e/harness-collection.spec.ts`) so `dash/playwright.config.ts` —
-  whose `webServer` targets the live host — stays unloaded.
+  root with the pinned `dash` Playwright and the isolated config (`npx
+  --prefix dash playwright test --config dash/playwright.isolated.config.ts
+  dash/e2e/harness-collection.spec.ts`). That config is the only Playwright
+  configuration the job loads, so `dash/playwright.config.ts` — whose
+  `webServer` targets the live host — stays unloaded. The isolated config also
+  sets `KYBERDASH_SPAWN_GUARD=deny` and attaches the process-ledger teardown,
+  which fails the job if the run leaves a child behind.
+- **Leftover step:** the job ends with an `if: always()` step that runs
+  `scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since
+  "$JOB_START_EPOCH"`. The first step of the job writes `JOB_START_EPOCH` to
+  `$GITHUB_ENV`. The step fails the job (exit 87) when a process re-parented to
+  PID 1 whose command line contains the workspace path, and that started after
+  the job began, is still running. A job whose tests passed still fails when one
+  survives.
 
-Local equivalent (must stay GREEN 3/3):
+Local equivalent (must stay GREEN; the command runs through the watchdog, see
+[Running tests safely](../dash/runbook.md#running-tests-safely)):
 
 ```bash
-npx --prefix dash playwright test dash/e2e/harness-collection.spec.ts
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
+
+### Leftover-process steps in `ts-gates`, `dash-e2e` and `build-test`
+
+Three jobs in `ci.yml` end with the same leftover step. Each records the job's start
+epoch in its first step and fails when a process it left behind is still running:
+
+| Job | Test steps before the leftover step | Notes |
+|---|---|---|
+| `ts-gates` | `npm test` (dash), the lint and reachability gates, and the tray UI test | Dash and tray TypeScript gates. |
+| `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts …` | The only Playwright invocation in CI. |
+| `build-test` | `dotnet test`, then `dotnet build-server shutdown` | The shutdown stops the MSBuild and `VBCSCompiler` servers, which outlive every build by design, so they are not counted as leftovers. |
+
+The step runs `check-leftovers`, which lists orphaned processes (parent PID 1) whose command
+line contains the workspace path and that started after the job began. The runner's own
+processes do not carry the workspace path, so they are not counted. The check is POSIX-only;
+these three jobs run on `ubuntu-latest`.
+
+The CI test steps call their tools directly and are not wrapped by the watchdog. The leftover
+step is the CI backstop; the watchdog wraps local runs and the review gate commands declared in
+`.kyber-weave/kyber-weave.yml` (see the review council architecture).
+
+`dash-e2e` runs only `harness-collection.spec.ts`. `refresh-filters.spec.ts` is in the isolated
+config but not in CI, and the other Playwright specs have no sanctioned invocation. That gap is
+tracked in [the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
+
+## This repository's own CI: path-targeted jobs and the CodeQL neutral check
+
+`.github/workflows/ci.yml` fans out from a `changes` job ("Detect changed areas") that
+classifies the pull-request diff, then gates the expensive jobs with job-level `if:`
+expressions — never a workflow-level `paths:` filter. Only "CI Summary" is a required
+check, and a skipped job counts as passed, while a workflow that never starts would leave
+the required check pending. The comments on the `changes` job in `ci.yml` state the
+invariant; the `codeql` job's `if: needs.changes.outputs.codeql != '[]'` is one instance
+of it.
+
+Three jobs always run, even on docs-only pull requests: `build-test`, `gitleaks`, and
+`skill-docs-gate` (the skill and docs gate). The .NET tests read files under `docs/`,
+`products/`, `.kyber-weave/`, `.github/`, `scripts/`, and a few under `dash/`, so no path
+set can prove them irrelevant.
+
+Anything that is not a pull request — a push to `main`, the weekly Monday cron, a manual
+dispatch — runs everything. So does any edit to `.github/workflows/ci.yml` itself or to
+anything under `.github/codeql/`: a change to the filters is itself fully exercised.
+
+### The expected neutral "1 configuration not found" check
+
+A pull request that touches no .NET code skips the `csharp` CodeQL matrix leg, and a
+docs-only pull request skips both legs. GitHub then reports a neutral
+"1 configuration not found" check such as `CodeQL Analysis (csharp) /language:csharp`
+(both languages on a docs-only change). This is expected and safe, for three reasons:
+
+1. The neutral check cannot fail CI Summary — only `failure` or `cancelled` fails the
+   gate; `skipped` passes.
+2. Pushes to `main` and the weekly Monday cron always analyze both languages, so full
+   coverage is continuous.
+3. A pull request that cannot change C# cannot introduce C# alerts; there is nothing for
+   the skipped leg to catch.
+
+See the `changes` and `codeql` job comments in `.github/workflows/ci.yml` for the gating
+logic.
 
 ## Related
 

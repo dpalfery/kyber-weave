@@ -13,19 +13,69 @@ import { DERIVED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
 const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
 const scratch = join(dashRoot, '..', '.agent_scratchpad', 'refresh-T8')
-const dashDist = join(dashRoot, 'dash', 'dist', 'index.html')
+const dashDist = join(dashRoot, 'dist', 'dash', 'index.html')
 
 let child: ChildProcess | undefined
+let bootPid: number | undefined
 let app = ''
 let dbPath = ''
 
 test.describe.configure({ mode: 'serial' })
 
+/** True while the process group led by `pid` still has a live member. */
+function bootGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Signals the boot's whole process group. The boot is spawned `detached`, so it leads its own
+ * group and every process it forks shares that group id. Signalling only the leader let a forked
+ * child outlive the run, reparented to PID 1. A group that is already gone (ESRCH) is success.
+ */
+function signalBootGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+/** SIGTERM the group, allow a bounded grace to exit, then SIGKILL whatever is still in it. */
+async function stopBootGroup(pid: number): Promise<void> {
+  signalBootGroup(pid, 'SIGTERM')
+  const deadline = Date.now() + 5_000
+  while (bootGroupAlive(pid) && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+  }
+  if (bootGroupAlive(pid)) signalBootGroup(pid, 'SIGKILL')
+}
+
+/** Process 'exit' fallback: runs when the test process exits without reaching afterAll. */
+const killBootGroupOnExit = (): void => {
+  if (bootPid === undefined || !bootGroupAlive(bootPid)) return
+  try {
+    signalBootGroup(bootPid, 'SIGKILL')
+  } catch {
+    // The process is exiting; there is nothing left that could act on the error.
+  }
+}
+
 test.beforeAll(async () => {
   test.setTimeout(180_000)
   mkdirSync(scratch, { recursive: true })
   if (!existsSync(dashDist)) {
-    const built = spawnSync('npm', ['run', 'build:dash'], { cwd: dashRoot, encoding: 'utf8' })
+    // A synchronous call is not interrupted by test.setTimeout, so the build carries its own bound.
+    const built = spawnSync('npm', ['run', 'build:web'], {
+      cwd: dashRoot,
+      encoding: 'utf8',
+      timeout: 300_000,
+      killSignal: 'SIGKILL',
+    })
     if (built.status !== 0) {
       throw new Error(`build:dash failed: ${built.stdout}\n${built.stderr}`)
     }
@@ -35,10 +85,14 @@ test.beforeAll(async () => {
     env: {
       ...process.env,
       NODE_OPTIONS: '--no-deprecation',
-      CODEBURN_DASH_DIR: join(dashRoot, 'dash', 'dist'),
+      KYBERDASH_DASH_DIR: join(dashRoot, 'dist', 'dash'),
     },
+    // Leads its own process group so teardown can reach every process the boot forks.
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  bootPid = child.pid
+  process.once('exit', killBootGroupOnExit)
 
   app = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('T8 dashboard did not become ready')), 150_000)
@@ -68,7 +122,11 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  child?.kill('SIGTERM')
+  // Stop the whole boot process group, not only the leader, so no forked child outlives the run.
+  if (bootPid !== undefined) {
+    await stopBootGroup(bootPid)
+    process.off('exit', killBootGroupOnExit)
+  }
 })
 
 test('T8 Context Doctor filters split identities from the temp refreshed DB', async ({ page }) => {

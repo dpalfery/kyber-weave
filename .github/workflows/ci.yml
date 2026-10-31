@@ -104,6 +104,9 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -180,6 +183,15 @@ jobs:
           name: nupkg-artifacts
           path: artifacts/nupkg/
           retention-days: 14
+
+      - name: Shut down .NET build servers
+        if: always()
+        run: dotnet build-server shutdown
+
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
 
   sbom:
     # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
@@ -392,6 +404,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.codeql != '[]'
+    # A pull request that touches no .NET files legitimately skips the csharp leg, and a
+    # docs-only pull request skips this job entirely. GitHub code scanning identifies a
+    # configuration by (workflow, category) and diffs the set between main and the PR head,
+    # so the missing leg surfaces as a NEUTRAL "1 configuration not found" check naming
+    # /language:csharp. That check is expected here, informational, and cannot fail CI
+    # Summary — the only required check. Anything that is not a pull request, and any edit
+    # to this workflow or .github/codeql/, takes the changes job's all() fallback and runs
+    # every language, so main's C# analysis never goes stale. Do not restore a static
+    # matrix to silence it; see docs/ci-pipelines/workflows-runbook.md.
     strategy:
       fail-fast: false
       matrix:
@@ -723,6 +744,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -793,6 +817,11 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
+
   # Harness-collection standard: deterministic per-harness completeness
   # enforcement. Runs the Playwright conformance spec against an isolated
   # dashboard booted from a self-seeded temp canon.db — never the live 4747
@@ -811,6 +840,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -833,7 +865,12 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Harness-collection conformance spec
-        run: npx --prefix dash playwright test dash/e2e/harness-collection.spec.ts
+        run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
 
   # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
   # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture

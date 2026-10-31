@@ -6,7 +6,11 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Dispatch ready tasks up to `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); when file scope is uncertain, favor parallelism within the cap and accept the conflict risk. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive, which predated per-task artifacts-path isolation.) Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
-Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope; a plan or spec path in the packet is routing metadata marked not for reading.
+Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope: inlined entry-file table, acceptance criteria, dependencies, selected development mode, required contract, required skills, and pre-computed test commands. Keep plan and spec files out of the worker context: a plan or spec path in the packet is routing metadata marked not for reading; never instruct a worker to open the plan or spec to learn its task.
+
+When dispatching concurrent workers up to `review.max-concurrent-workers`, isolate parallel workers using separate git worktree checkouts or isolated working contexts with dedicated per-task artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports). Serialize final branch-head integration (cherry-pick or fast-forward merge onto the shared feature branch) on the main working tree before git push. If an integration conflict occurs, immediately abort the operation on the main working tree (`git cherry-pick --abort` or `git merge --abort`), record conflict details in the execution record, and dispatch a conflict-reconciliation rework dispatch. Guarantee worktree cleanup across all outcomes (`git worktree remove --force <path>` and `git worktree prune` across all exit paths: successful integration, failure, escalation, or cancellation).
+
+Bundle same-role micro-tasks within a single dispatch where appropriate to minimize dispatch latency, while strictly preserving adversarial separation between RED test authorship and GREEN implementation. Never collapse RED and GREEN into a single worker dispatch: `test-dev` authors the failing test contract and proves it RED; the implementation specialist delivers GREEN and automated verification without weakening that contract, preserving the independent verification pass at task completion.
 
 ## Task session continuity
 
@@ -22,9 +26,13 @@ Discover continuation support from the current harness's exposed tools; do not a
 
 `test-first` is the default. Every implementation task carries a Test contract naming the test surface, runner, and observable behavior.
 
-1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists.
+1. **RED:** `test-dev` authors or identifies the contract test and records a failing run for the intended missing behavior. No implementation begins before valid RED evidence exists. Never use `git stash` to record RED proof runs: zero-stash RED proofs are strictly mandated (forbid git stash). Proofs must run against a clean base checkout, throwaway copy, or isolated worktree.
 2. **GREEN:** the implementation specialist makes that same contract pass without weakening it and records current passing evidence.
 3. **REFACTOR:** cleanup and the developer exit gate preserve GREEN.
+
+Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner:
+`dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClass>" -reporter quiet`
+or `dotnet test --no-build` for fast loops. Reserve full test suite execution for task end or the final review council.
 
 If changing requirements would require weakening or replacing the approved Test contract, return the artifact to its author and reopen approval for that contract.
 
@@ -42,11 +50,22 @@ Changing the verification contract after approval reopens its approval gate.
 
 Every developer worker ends its task by running the deterministic `task-gate` and reports the result in its completion digest. No agent audits a single task, and the conductor does not judge technical correctness.
 
-The digest must carry one line:
+Workers precede the six-field completion digest block with the `Discovery: codegraph N, docs N, direct reads N` header; this header is valid and is not rejected as a 7th digest field, and neither is any other line in the list below. The completion digest itself must follow this exact six-field schema, subject to the phased-rollout scope in the bullets below:
 
-`TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…`
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
+```
 
-- **Missing line or `FAIL`:** reject the digest. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it.
+Worktree workers committing locally report their `<commit-sha>`, while uncommitted/unpushed task runs report `NONE` and `UNPUSHED`.
+
+Lines of the explanatory message body that are not digest fields and are never counted or rejected as a seventh field are exactly these shapes: the `Discovery: codegraph N, docs N, direct reads N` header; `COVERAGE_GAPS:` followed by free text; and `Artifact:` or `Baseline:` followed by one repository-relative or absolute path. A `report=<path>` inside the `TASK_GATE:` line is part of that field, not a separate line.
+
+- **Missing line or `FAIL`:** reject the digest, except a valid escalation under the circuit-breaker section below. Create a self-contained rework item for the original worker session (use the replacement policy above only when needed) naming the failed gate ids and the report path. The rework counts in the per-cluster tally below, keyed `task-gate/<gate-id>` for each failed gate, or `task-gate/missing` when the line is absent. After 2 rework dispatches for a key, the circuit-breaker trips on it. During the phased rollout only `csharp-dev` and `test-dev` must return the full six-field block; every other developer worker may return its standard completion, meaning the completion report its own agent body specifies, plus a `TASK_GATE:` line; the conductor's requirement for that line overrides the agent body, so a standard completion without it is rejected as `task-gate/missing`, and the `FILES`, `TESTS`, `COMMIT` and `REMOTE_HEAD` fields are not required of it. The missing-or-`FAIL` `TASK_GATE` rejection and its `task-gate/<gate-id>` / `task-gate/missing` tally apply to every developer worker.
 - **`PASS`:** the task's gate is complete. It does not authorize merge.
 - **`NONE_DECLARED`:** valid; the repository declares no gates for that agent.
 - **`NONE_APPLICABLE`:** valid; gates are declared for that agent, but every one was skipped for this host or change, so none ran. Accept it as `NONE_DECLARED` is accepted. It is not a pass, and it never reads as `PASS`.
@@ -66,7 +85,7 @@ The per-cluster **dispatch tally** lives on the run's persisted execution artifa
 
 - **Cluster-level retry limit:** Maximum of 2 rework dispatches for the same failing fixture or subsystem failure cluster across the run. If a failure cluster persists across 2 rework attempts, the circuit-breaker trips on that cluster.
 - **Oscillation detection:** If a fix for Failure Cluster A causes regression in Failure Cluster B, and a fix for B regresses A (or rework alternates between failure signatures), the loop detector trips immediately.
-- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the finding in the run's findings collection with the key `ESCALATION: circuit-breaker`. Include `CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>` plus the affected failure cluster, contradictory invariants, blast radius, and the worker's `RECOMMENDED_ACTION`. Reject any other trigger token; do not invent a reason.
+- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns a valid `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. A valid escalation is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set (`ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`) and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`); only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules. A `STATUS: ESCALATION` without a valid `CIRCUIT_BREAKER_TRIGGER` is not an escalation: it is checked and rejected like any completion digest. A valid escalation wins the routing (halt rework, record `ESCALATION: circuit-breaker`, architect mediation) but never completes the task or clears its exit gate; a `TASK_GATE: FAIL` it carries is recorded in the finding with its gate ids, and the task stays open until the conductor, once architect mediation has resolved the cluster, dispatches a follow-up worker that returns a fresh passing `TASK_GATE:` line against the current tree; the halt bars dispatch only until that mediation completes. The conductor accepts a valid escalation's payload without rejection for missing completion fields or `TASK_GATE`. Record the finding in the run's findings collection with the key `ESCALATION: circuit-breaker`. Include `CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>` plus the affected failure cluster, the contradictory invariants and blast radius where the trigger carries them, and the worker's `RECOMMENDED_ACTION`. Reject any other trigger token; do not invent a reason.
 - **Architect mediation:** Tripped circuit-breakers must not be ignored or bypassed. When the queue drains to the findings collection, `architect` investigates the failure cluster, assesses whether coupled test fixtures assert conflicting invariants or legacy details, and authors an intake recommendation or Draft plan to resolve the architectural conflict.
 
 ## Findings and final council

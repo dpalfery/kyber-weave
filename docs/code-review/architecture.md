@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -86,7 +86,7 @@ flowchart TD
 
     subgraph Council["LAYER 2 — The council (parallel, auto-skipping)"]
         direction LR
-        RL["review-lens ×12<br/>model-profile: general"]
+        RL["review-lens ×14<br/>model-profile: general"]
         RT["review-triage ×3<br/>model-profile: fast"]
     end
 
@@ -137,7 +137,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
 | `code-review` | Skill — the procedure, the lens catalogue, the report format | `products/kyber-squad/skills/code-review/SKILL.md` |
-| Lens files | 15 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
+| Lens files | 17 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
 | Host review guidance | `REVIEW.md` at the repository root, bound as `<review-guidance>` in Config Reg. Recurring defect classes, a lens map, and the attestation format (see [Review guidance](#review-guidance)) | `REVIEW.md` |
 | Technology checklists | 11 reference files, loaded as lens *modifiers*; each points at the host's `<technology>-coding-standard` and states no rule of its own | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
@@ -171,7 +171,7 @@ failure. There are two sources, and neither copies the other.
 
 The lens map has two axes:
 
-- **By lens**: each of the 15 catalogue lenses names the sections it takes. The three triage
+- **By lens**: each of the 17 catalogue lenses names the sections it takes. The three triage
   seats (`duplicate-implementation`, `static-analysis-triage`, `dependency-supply-chain`) take
   only the Ground rules and *What not to flag*, because they attribute tool output rather than
   judge code.
@@ -208,13 +208,21 @@ findings. The verdict engine reads no attestation and is unchanged. The attestat
 human reader what the seat claimed to check. It does not prove the seat applied the sections
 correctly, so a claim that does not hold is a review problem, not an engine rule.
 
+### Council hardening and contract verification
+
+The review council enforces explicit contract verification disciplines across its lenses:
+- **Cross-document and prompt-to-prompt contract parity (`documentation-accuracy`):** Verifies parity across modified markdown instructions, runbooks, and reference contracts. Invariants, schemas, and rejection rules must agree across modified documents, not only doc-vs-code.
+- **Contract assertion rigor (`test-adequacy`, `R14`):** Flags bare single-word `Assert.Contains` checks that match common boilerplate, unguarded boolean `||` assertions where one branch matches unrelated text, and non-contiguous `foreach` loops over multi-line schemas; requires contiguous block assertions.
+- **Operational lifecycle state-machine walks (`correctness`, `supportability`):** Walks the complete resource lifecycle from `create` → `execute` → `integrate` → `cleanup`/`remove`/`prune`, and verifies error paths including `conflict` and `rollback` for concurrency primitives, worktrees, locks, and temp-paths.
+- **Literal prompt parsing (`correctness`, `R16`):** Prohibits charitable reading of agent prompt instructions; parses prompt directives literally as executed by language models, flagging any gate deadlock, self-contradiction, or missing recovery step.
+
 ## Why lenses are files, not agents
 
-Fifteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
+Seventeen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Fifteen agents would push the canonical roster from 22 to 37, clutter every harness's agent
-picker, and produce fifteen near-identical descriptions that would collide under
+Seventeen agents would push the canonical roster from 22 to 39, clutter every harness's agent
+picker, and produce seventeen near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.
 
@@ -236,6 +244,8 @@ flowchart LR
         J10["supportability"]
         J11["infra-workflow"]
         J12["prior-art"]
+        J13["test-infrastructure"]
+        J14["documentation-accuracy"]
     end
 
     subgraph T["review-triage — attribution · fast"]
@@ -251,7 +261,7 @@ flowchart LR
 
 A triage seat's input is something a tool already produced. Its job — deciding which of that
 output *this change* is responsible for — is bounded and checkable, which is what makes it
-safe to run on the `fast` model profile. Twelve lenses are not that, and would produce worse
+safe to run on the `fast` model profile. Fourteen lenses are not that, and would produce worse
 findings cheaply, which costs more than it saves.
 
 `prior-art` and `duplicate-implementation` sit on opposite sides of that line while holding one
@@ -260,7 +270,7 @@ verbatim is a fact a gate established, so attributing it is triage. A *type* tha
 another is a judgement about responsibility that needs both types read, so it is not.
 
 **Every lens auto-skips.** Each lens file opens with an applicability predicate and returns
-`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes fifteen lenses
+`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes seventeen lenses
 affordable — and the skip is *recorded*, because a dimension that was deliberately skipped and
 one that was quietly never looked at must not read the same in a report.
 
@@ -304,6 +314,16 @@ Suppressions carry a **mandatory expiry date**. There is no "never" value: a per
 suppression is how a review system quietly stops reviewing, the reason ageing out of memory
 while the exemption stays. On the day after it lapses the finding returns on its own, and
 `KW-REVIEW-004` says why.
+
+### Adversarial confirmation and refutation guardrails
+
+Step 3 spends one more `review-lens` invocation attempting to refute every surviving finding of severity `major` or `critical`. However, to prevent adversarial refuters from invalidating verified standards through specious dismissals, the refutation pass enforces strict **refutation guardrails**:
+- Refuters must adhere to Ground Rule 1: every finding stating a concrete failure scenario must be refuted with concrete proof of why that failure cannot occur, never an opinion or stylistic argument.
+- Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments.
+- Refuters are strictly forbidden from dropping:
+  1. Contract assertion rigor findings under `R14` (e.g., bare keyword substring checks, unguarded boolean `||` assertions matching unrelated text, or non-contiguous multi-line loops).
+  2. Cross-document and prompt-to-prompt schema contradictions under `R16`.
+  3. Missing operational lifecycle cleanup paths (unpruned worktree, orphaned temp-path, unreleased concurrency lock).
 
 ## How the verdict is computed
 
@@ -371,6 +391,10 @@ stays `deny`. **The role that judges a change never ships it.**
 per-role grant, not a property of being a subagent. The lens seats hold `deny`, so a council
 seat cannot re-enter the council.
 
+### Materialized diff contract (Option A)
+
+Read-only council seats (`review-lens` and `review-triage`) have `process.execute: deny` and cannot execute `git diff`. Rather than granting git execution permissions across seventeen seats, `code-reviewer` materializes `git diff <base>...<head>` to task-scoped `.agent_scratchpad/<task-id>/review-diff.patch` before council fan-out, passes this path in each `review-lens` and `review-triage` packet, and removes it after the review council completes (including on failure). Seats read `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands or mutating files. This preserves the strict capability lattice, prevents `index.lock` contention, and avoids redundant diff subprocess invocations across parallel seats.
+
 ## Configuration
 
 Everything host-specific is one section of `.kyber-weave/kyber-weave.yml`:
@@ -385,15 +409,24 @@ review:
   coverage:
     file-line-percent: 85
   policy:
+    strictness: balanced   # lenient | balanced | strict
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.
         expires: 2026-11-18                # required
 ```
+
+**Strictness.** `policy.strictness` selects a preset for the two numbers the verdict engine reads:
+`lenient` (`min-confidence: 8`, `major-count-blocks: 5`), `balanced` (`7`, `3`, the default) or
+`strict` (`5`, `1`, so one surviving major requests changes). An explicit `min-confidence` or
+`major-count-blocks` in the same block overrides the preset. The code-review skill passes the
+strictness to every lens so a strict host receives lower-confidence findings rather than having
+them withheld at the source. Minor findings never block at any level, which keeps the
+autonomous-gate rule that only critical and major findings gate a change.
 
 `run` is **argv, not a command line**, because `ProcessRunner` refuses a shell and refuses a
 concatenated argument string. A host cannot express a pipeline or a redirect here — and neither
@@ -508,18 +541,42 @@ any gate starts (`KW-REVIEW-028`, client-input error exit `2`).
 
 ### Repository gate scoping and caching in this repository
 
-This repository configures `include:` globs on all 27 council gates in `.kyber-weave/kyber-weave.yml`,
+This repository configures `include:` globs on all 30 council gates in `.kyber-weave/kyber-weave.yml`,
 partitioned by ecosystem:
 
 - **Pure C# formatting and static analysis** (`format-whitespace`, `format-style`, `inspectcode`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
 - **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, `.config/dotnet-tools.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
-- **APM skill gates** (`skill-*`, 12 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
+- **APM skill gates** (`skill-*`, 15 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Core/Skills/**`.
 - **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
 
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
+
+#### Test and build gates run under the process watchdog
+
+The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
+the KyberDash `ts-test` gate (`npm --prefix dash run test`) and the .NET `test` gate (`dotnet test`). The
+watchdog kills the command's whole tree at an absolute cap (64 descendants, or 128 JavaScript runtime
+processes for this user: `node`, `nodejs`, `bun`, `deno`, `tsx`), and it fails the gate when a process the run started survives it. A
+watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
+or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
+
+`ReviewGateProcGuardWiringTests` pins both declarations, so a change to the argv has to change the test with it. The
+exit-code meanings and the local commands are in the
+[KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`
+and `--timeout`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep
+`--timeout` at or below 540 when a run comes from an agent tool. Changing a `review.gates` entry in
+`.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
+
+No task gate covers a change that touches only workflow YAML, the review config or a shell
+script; such a task runs no gate. That residual is tracked in
+[the task-gates todo](../todo/task-gates-workflow-and-shell-edits.md).
+
+#### Fast test git repository fixture template
+
+Review gate integration and command tests (`ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, `DocsInitReviewGatesTests`) initialize test repositories using a shared, pre-seeded template (`TestGitRepositoryTemplate`). The template is seeded once per template key (agent, council, and docs-init variants). Individual test fixtures perform a sub-millisecond filesystem copy of the whole pre-seeded working tree including `.git` via `TestGitRepositoryTemplate.CreateRepositoryCopy` rather than spawning repeated `git init`, `git add`, and `git commit` child processes. Untracked test configuration files (`.kyber-weave/`) are excluded via `.git/info/exclude` only for agent and council templates; docs-init templates commit the host config (`.kyber-weave/kyber-weave.yml`) as part of the fixture.
 
 Unknown keys are not silently dropped: any key outside the tables above loads anyway but
 is reported as `KW-CONFIG-002` (Warning), naming the gate and the key. A duplicate gate

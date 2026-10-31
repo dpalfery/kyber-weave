@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -95,7 +96,7 @@ public sealed class CodexRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Codex_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CodexRenderer()]);
@@ -307,7 +308,7 @@ public sealed class CodexRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Codex_GlobalScopePlacesThePrimaryAgentEntryPointSkillUnderSkills()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadRenderRequest request = new(
             ProductRoot,
@@ -403,7 +404,7 @@ public sealed class CodexRendererContractTests : IDisposable
     [Fact]
     public async Task RenderSkill_FrontmatterKeyOrderIsStable()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         string probe = source.Skills
                            .Select(skill => skill.Name)

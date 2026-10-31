@@ -257,10 +257,10 @@ engine under [Kyber-Squad architecture](kyber-squad/architecture.md).
 | [`squad status`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Verify deployed files and report drift against the receipt. |
 | [`squad doctor`](kyber-squad/onboarding.md#command-reference) | `[path]`, `--path`, `-g\|--global` | Diagnose prerequisites, toolchain availability, and deployment health. |
 | [`squad pack`](kyber-squad/onboarding.md#packaging-squad-pack) | `-f\|--format <FORMAT>` (`apm` \| `plugins` \| `all`; default `all`), `-o\|--out <DIR>`, `-v\|--version` | Package agents and skills into distribution archives. |
-| [`squad preset use`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `<name>`, `-t\|--target <TARGETS>`, `-g\|--global`, `--dry-run` | Apply a model preset to target harnesses, recording the selection. |
-| [`squad preset clear`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `-t\|--target <TARGETS>`, `-g\|--global` | Revert target harnesses to bundled model profiles. |
-| [`squad preset list`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | — | List available presets and their active deployments. |
-| [`squad preset show`](kyber-squad/onboarding.md#2-managing-presets-squad-preset) | `<name>`, `--target <TARGET>` | Inspect resolved models for a preset and target harness. |
+| [`squad preset use`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `<name>`, `-t\|--target <TARGETS>`, `-g\|--global`, `--dry-run` | Apply a model preset to target harnesses, recording the selection. |
+| [`squad preset clear`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `-t\|--target <TARGETS>`, `-g\|--global` | Revert target harnesses to bundled model profiles. |
+| [`squad preset list`](kyber-squad/model-profiles.md#apply-switch-and-revert) | — | List available presets and their active deployments. |
+| [`squad preset show`](kyber-squad/model-profiles.md#apply-switch-and-revert) | `<name>`, `--target <TARGET>` | Inspect resolved models for a preset and target harness. |
 
 ### `utilities` — Kyber-owned utility artifacts
 

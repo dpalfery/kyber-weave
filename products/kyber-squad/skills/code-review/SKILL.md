@@ -75,10 +75,11 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
+**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes `.agent_scratchpad/<task-id>/review-diff.patch` in every `review-lens` and `review-triage` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the review council completes (including on failure).
+Invoke one seat per applicable lens, all in flight at once, each named with its
 lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
 applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
-owns — auto-skipping is what makes fifteen lenses affordable. Every seat given guidance sections
+owns — auto-skipping is what makes seventeen lenses affordable. Every seat given guidance sections
 ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
 findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
 findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
@@ -105,6 +106,8 @@ premium for attribution.
 | [duplicate-implementation](references/lenses/duplicate-implementation.md) | **`review-triage`** | Bodies duplicated across the tree, attributed from the duplicates gate |
 | [test-adequacy](references/lenses/test-adequacy.md) | `review-lens` | Would the tests catch this breaking? Behaviour over implementation |
 | [static-analysis-triage](references/lenses/static-analysis-triage.md) | **`review-triage`** | Analyzer output, attributed and reported by rule id |
+| [test-infrastructure](references/lenses/test-infrastructure.md) | `review-lens` | Is the shared test machinery sound: isolation, caches, fixtures, global state? |
+| [documentation-accuracy](references/lenses/documentation-accuracy.md) | `review-lens` | Is every factual claim in the changed docs, plans and doc comments true of the code? |
 | [performance](references/lenses/performance.md) | `review-lens` | Cost at scale, with a named growth dimension |
 | [blast-radius-revertibility](references/lenses/blast-radius-revertibility.md) | `review-lens` | What else it reaches, and whether it can be undone |
 | [supportability](references/lenses/supportability.md) | `review-lens` | Diagnosability, correlation, what leaks to the caller |
@@ -155,6 +158,12 @@ candidates, generalized to every lens and for the same reason — a confident wr
 costs more trust than a missed finding costs safety. A refuted finding is dropped, not
 downgraded.
 
+**Refutation guardrails.** The refutation pass is an adversarial check on validity, not an excuse to dismiss findings. Refuters are strictly forbidden from dismissing:
+- Contract assertion rigor findings under `R14` (vacuous contract assertions, bare keywords, unguarded boolean `||`, or non-contiguous multi-line loops).
+- Cross-document or prompt-to-prompt schema contradictions under `R16`.
+- Missing operational lifecycle cleanup paths (unpruned worktree, orphaned temp-path, leaked concurrency lock).
+Refuters must adhere to Ground Rule 1: every finding describing a concrete failure scenario must be refuted with concrete evidence proving the failure cannot occur, never an opinion or intuition. Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments: if a concrete failure exists in the lifecycle, prompt schema, or test contract, the finding stands.
+
 ### 4. Adjudicate
 
 The reviewer applies the checks no individual lens can, because no lens sees the others:
@@ -190,6 +199,14 @@ Rules, in evaluation order. The first that fires decides:
 Findings whose `confidence` is **below** `review.policy.min-confidence` are excluded before
 the critical and major blocking rules. Equal to the threshold is kept; above it is kept.
 Below it is dropped. The engine compares `Confidence < MinConfidence`.
+
+**Strictness.** `review.policy.strictness` is a named preset over those two numbers, not a
+third mechanism. `balanced` (the default) is `min-confidence: 7`, `major-count-blocks: 3`;
+`lenient` is `8` and `5`; `strict` is `5` and `1`, so one surviving major requests changes. A
+host that also declares `min-confidence` or `major-count-blocks` overrides the preset for that
+number. Minor findings never block at any level. Pass the strictness and the effective
+`min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
+findings instead of having them dropped at the source and a lenient host is not flooded.
 
 The two escalation rules run **before** any finding is weighed, because a reserved path and
 an unreviewable diff both say the same thing: this change is not the engine's to settle,
@@ -290,10 +307,11 @@ review:
   duplicates:
     minimum-lines: 4                       # normalized lines, signature and braces excluded
   policy:
+    strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.

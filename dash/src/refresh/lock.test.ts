@@ -43,7 +43,17 @@ async function exitedPid(): Promise<number> {
   const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
   const pid = child.pid
   if (!pid) throw new Error('no pid')
-  await new Promise<void>(resolve => { child.once('exit', () => resolve()) })
+  // An empty program exits during node startup; the deadline kills it if that ever stops being true.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error('empty node child did not exit within 10 s'))
+    }, 10_000)
+    child.once('exit', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
   return pid
 }
 

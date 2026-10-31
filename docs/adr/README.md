@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-30
 ---
 
 # Architecture decision records
@@ -65,6 +65,7 @@ existing record.
 | [0044](0044-squad-lock-v2-and-instance-deployment-scope.md) | [Squad Lock v2 and Instance Deployment Scope](0044-squad-lock-v2-and-instance-deployment-scope.md) | Accepted | 2026-10-25 | Extend Squad lock to v2 (`kyber-squad.lock/v2`) with model preset overlays, establish `SquadDeploymentScope.Instance` for isolated concurrent harness execution, and synchronize files using non-administrative cross-platform filesystem links tracked in `links.json`. |
 | [0045](0045-conductor-operator-channel-opt-in.md) | [Conductor Operator Channel as an Opt-In Render-Time Overlay, and Non-Blocking Autonomous Delivery](0045-conductor-operator-channel-opt-in.md) | Accepted | 2026-10-27 | The Copilot CLI conductor gets an operator channel only when `KYBER_SQUAD_OPERATOR_CHANNEL` is `true`, `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER` names a valid server declared in global Copilot MCP config, rendered as a tool entry plus overlay text, otherwise byte-identical output; autonomous `NEEDS_HUMAN` and open circuit-breakers are reported in the draft PR, which is marked ready once required CI passes. |
 | [0046](0046-docs-explore-section-answer.md) | [docs_explore Returns One Section Answer, Not a Document List](0046-docs-explore-section-answer.md) | Accepted | 2026-10-30 | `docs_explore` returns one leaf up to 24,000 characters with `{doc-id}#{github-slug}` identity, optional `lead` and `sections` frontmatter, topic confidence via `tanh` of the score gap, and continuation cursors instead of a ranked document list or `charBudget`. |
+| [0047](0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) | [KyberDash Self-Spawns Go Through One Guarded Chokepoint, with Role and Depth Stamped on Every Child](0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md) | Accepted | 2026-10-30 | Every KyberDash self-spawn passes `guardedSpawn` in `dash/src/process/spawn-guard.ts`, which stamps a role and depth on each child, refuses recursion and non-CLI entry targets, fails closed under test (`KYBERDASH_SPAWN_GUARD=deny` with an explicit `allowRealSpawns` opt-in), and requires a bounded allow-list entry for every spawn site. |
 
 ## Writing one
 

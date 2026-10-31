@@ -161,6 +161,8 @@ export const ALIASES = { '@': 'web/src' }
 export const TEST_ENTRIES = [
   'tests/setup/env-isolation.ts', //                  vitest.config.ts setupFiles
   'tests/setup/network-guard-setup.ts', //            vitest.config.ts setupFiles (D10 live-receiver guard)
+  'tests/setup/process-ledger-global.ts', //          vitest.config.ts globalSetup (storm guard T5 ledger)
+  'tests/setup/process-ledger-global-playwright.ts', // playwright configs globalTeardown
   'tests/fixtures/cache-refresh-worker.ts', //        spawned by path from lock-process.test.ts
   'tests/fixtures/cache-refresh-corrupt-owner.ts', // spawned via spawnFixture() in lock-corrupt-body.test.ts
   'tests/fixtures/cache-refresh-slow-owner.ts', //    spawned via spawnFixture() in lock-corrupt-body.test.ts

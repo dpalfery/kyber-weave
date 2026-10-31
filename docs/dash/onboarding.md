@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-26
+last-reviewed: 2026-10-29
 status: current
 ---
 
@@ -177,7 +177,8 @@ only where it looks — an explicit `--server-url http://127.0.0.1:<port>` wins,
 flag: the running engine owns the datastore choice. Only literal loopback origins
 (`127.0.0.1` or `[::1]`, with an explicit port) are contacted; anything else is refused.
 Stopping the client (EOF, SIGTERM, or closing its read end) ends the MCP session within
-a bounded deadline and never stops the shared engine.
+a bounded deadline and never stops the shared engine. A failed `server.connect`
+releases the keep-alive, signal handlers, and stdout guard instead of leaking them.
 
 ### 2. Register the client yourself
 
@@ -218,6 +219,18 @@ boundary — not that every host client renders them.
 > record the product and client versions, one successful question, one
 > unavailable-data answer, and the clean disconnect — and never authorize a real-data
 > analysis merely to satisfy that check.
+
+## Check the KyberDash version
+
+Three places show the version. They agree when the engine and the surfaces come from the same release:
+
+- **Web dashboard:** open **Settings** in the header. The drawer ends with `KyberDash version <version>`. It is read once, when the drawer opens.
+- **Tray:** open the popover and choose **Settings**. The same line sits above **Back**.
+- **Terminal:** run `kyberdash --version`.
+
+The tray shows the engine's version, not the version of the tray app bundle. If a surface shows `KyberDash version unknown`, it could not reach the engine, or the engine predates the version route. Update KyberDash, then reopen the surface.
+
+---
 
 ## Where KyberDash keeps its data
 

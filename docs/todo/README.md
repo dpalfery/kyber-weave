@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-30
 ---
 
 # Todos
@@ -78,6 +78,10 @@ last-reviewed: YYYY-MM-DD
 | [windows-node-gate-probe.md](windows-node-gate-probe.md) | ReviewCouncil | draft | Probe whether `npm`/`npx` start through the shell-free runner on Windows; lift the catalogue's `os: unix` restriction on Node gates if they do. |
 | [review-council-rust-tauri-go-standards.md](review-council-rust-tauri-go-standards.md) | ReviewCouncil | draft | Rust, Tauri and Go review checklists say no standard is declared, so the council cannot cite an authoritative rule for the Kilo findings on those languages; declare `rust`, `tauri` and `go` standards in `.kyber-weave/kyber-weave.yml`, each backed by a `docs/standards/<tech>/` doc. |
 | [kyberdash-macos-funded-live-model-turn.md](kyberdash-macos-funded-live-model-turn.md) | KyberDash | draft | Deferred live-model turn verification on macOS (funded, owner-operated); CI stays deterministic on the specification plus world. |
+| [kyberdash-spawn-guard-residuals.md](kyberdash-spawn-guard-residuals.md) | KyberDash | draft | Known residuals of the spawn guard and process ledger: the receiver child is labelled `job`, the ledger forgives a child that exits within the 3 s settle window, the dash allow-list is per file and pattern, spawns through another module's API are not scanned, and Windows has no watchdog and cannot tell a reused pid apart; the watchdog's orphan link can signal an unrelated same-user process, the ledger's root match lacks a leading boundary, the `KW_PROC_GUARD_KILL` test hook is undocumented, and the `seen` list is not de-duplicated. |
+| [kyberdash-playwright-webserver-specs.md](kyberdash-playwright-webserver-specs.md) | KyberDash | draft | The `spine`, `deep-links` and `numerals` specs run only through `dash/playwright.config.ts`, whose `webServer` uses live state and port 4747 and is no longer a sanctioned invocation; and CI `dash-e2e` does not run `refresh-filters.spec.ts`. |
+| [kyberdash-test-port-3000-econnrefused.md](kyberdash-test-port-3000-econnrefused.md) | KyberDash | draft | Identify the dash test that connects to `127.0.0.1:3000` and logs `ECONNREFUSED`, and confirm it starts nothing and reaches no developer server on that port. |
+| [task-gates-workflow-and-shell-edits.md](task-gates-workflow-and-shell-edits.md) | ReviewCouncil | draft | A task that edits only workflow YAML, `.kyber-weave/kyber-weave.yml` or `scripts/*.sh` runs no task gate (`NONE_APPLICABLE`); decide a workflow linter, a review-config check and task-level `shellcheck`. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-31
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -744,118 +744,16 @@ registered project. A project uninstall also removes that project's registry ent
 
 ---
 
-## Model Presets and Concurrent Harness Instances
+## Concurrent Harness Instances
 
-A **model preset** is a named, user-owned YAML configuration that overrides default agent model
-assignments across harnesses. While canonical agents define semantic model profiles (`fast`,
-`architect`, `general`, `reviewer`, `deep-planning`) mapped to default tokens in the bundled
-`models.yml`, presets allow switching inference providers or models on demand without editing
-managed agent files or waiting for upstream releases.
+Model profiles and presets have their own page: **[Model profiles and model presets](model-profiles.md)**.
+That page covers the six semantic profiles, the per-harness token shapes, creating and
+validating a preset, and switching or reverting one.
 
-### 1. Model Preset Files
+This section covers the other half of the same problem: running a harness against a selected
+preset in an isolated instance, so two projects can use different profiles at the same time.
 
-Presets live in the user home directory under `~/.kyber-weave/squad/presets/<name>.yml`.
-The preset name is the file stem and must match `^[a-z0-9][a-z0-9-]{0,63}$`.
-
-Preset files use the `kyber-squad.model-preset/v1` schema and mirror the profile shape of
-`models.yml`:
-
-```yaml
-schema: kyber-squad.model-preset/v1
-profiles:
-  fast:
-    claude: claude-haiku-5-5
-    opencode: zai-coding-plan/glm-5.3-flash
-  architect:
-    claude: inherit
-```
-
-- **Inheritance and fallbacks**: A preset performs a key-by-key merge per category. Categories or
-  harnesses omitted by the preset fall back to bundled `models.yml` definitions.
-- **Explicit inherit**: Setting a model token to `inherit` omits the `model` frontmatter key on
-  rendered agents, matching bundled behavior.
-- **Default token**: An optional `default` key per profile category specifies a fallback token for
-  any harness not explicitly mapped in that category.
-- **Validation**: `squad preset use` and `squad preset show` strictly validate preset keys
-  against the resolved canonical profiles before any rewrite or print. Referencing an unknown
-  profile category or harness fails validation immediately with **exit code 1**, reporting the
-  exact file path and line number before writing any files. Install and update enforce the
-  same check at render time.
-
-### 2. Managing Presets (`squad preset`)
-
-Model presets are managed using four subcommands:
-
-```bash
-# Apply a preset to target harnesses in project scope
-kyber-weave squad preset use <name> --target claude,copilot
-
-# Apply a preset globally across all deployments of the target
-kyber-weave squad preset use <name> --target claude --global
-
-# Preview model changes without modifying files or state
-kyber-weave squad preset use <name> --target claude --dry-run
-
-# Revert target harnesses to bundled model profiles
-kyber-weave squad preset clear --target claude [--global]
-
-# List all available presets and their active deployments
-kyber-weave squad preset list
-
-# Inspect resolved models for a preset and target harness
-kyber-weave squad preset show <name> --target claude
-```
-
-- **Transactional updates**: `squad preset use` executes through the existing atomic `update`
-  transaction engine. It updates `squad.lock.yml` to schema v2 (`kyber-squad.lock/v2`),
-  recording the applied preset name and lowercase SHA-256 digest under `model-presets`.
-- **Canonical profile resolution**: `use`, `clear`, and `show` resolve canonical model profiles
-  in this order: the `products/kyber-squad` checkout when one is present, then the snapshot
-  stored for the deployment lock's `SquadVersion`, then the newest snapshot, then nothing.
-  `show` has no deployment context, so it resolves checkout first and then the newest snapshot.
-  Resolution from a checkout keeps repo-built behaviour; outside a checkout the snapshot is
-  what reflects the release the deployment was rendered from.
-- **Skills are never rewritten**: model rewrites apply only to deployed agent files. Any
-  receipt `.md` whose final path segment is `SKILL.md` or whose path contains a `skills/`
-  segment passes through byte-identical — canonical skills and primary-agent entry-point
-  skill projections alike — and only agent files whose profile category resolves are touched.
-  Files with an unresolvable identity keep their bytes and produce no diff row.
-- **Unresolvable profiles fail fast**: when no checkout and no snapshot resolve, `use` and
-  `clear` exit with **exit code 1** in both dry-run and apply, and `show` exits with
-  **exit code 1** as well — before any file rewrite, lock change, or printed plan. The error
-  names the remedy: run `kyber-weave squad update` to refresh the profile snapshot; running
-  from a kyber-weave checkout also works.
-- **Snapshot persistence**: committed `squad install` and `squad update` runs (including
-  `squad run` instance provisioning) write one snapshot per Squad release version to
-  `~/.kyber-weave/squad/profiles/<version>.yml` (schema `kyber-squad.canonical-profiles/v1`,
-  carrying the `models.yml` shape plus the agent-name-to-category map). Dry-run writes
-  nothing. A snapshot write that fails after the deployment commits produces a warning
-  naming the remedy (rerun `squad update`); the deployment itself is never failed for it.
-  One file is kept per distinct version and snapshots are never pruned.
-- **Migration for pre-snapshot deployments**: deployments installed before snapshots existed
-  have no snapshot file. After upgrading the CLI, the first `preset use/clear/show` fails
-  with the exit-1 remedy above; one `squad update` (global and/or in the project) re-renders
-  from the release and writes the snapshot, and preset verbs work from then on.
-- **Preserved versioning**: Switching presets never changes the release version of deployed agents.
-- **Dry run preview**: Passing `--dry-run` prints each agent whose resolved model changes in the format
-  `<agent>: <old-model> -> <new-model>` and exits without modifying state or files.
-- **Status reporting**: `squad status` reports the active preset per target. If a preset file has
-  been modified since it was applied, status flags `(changed since applied)`. If a referenced
-  preset file has been deleted, status flags `(missing)` and exits with **exit code 1**, because
-  future updates will fail until repaired.
-
-### 3. Project Preset Selections
-
-When running in project scope without `--global`, `squad preset use` records the project's chosen
-preset under `~/.kyber-weave/squad/selections/<root-key>.yml` (schema `kyber-squad.project-selection/v1`),
-where `<root-key>` is the SHA-256 of the project's canonical physical path.
-
-- **Clean repositories**: Selections are saved exclusively in the user's home state tree. No preset
-  or configuration file is written into the repository, leaving `git status` clean.
-- **Automatic persistence**: Project selections survive releases and updates. Running `squad update`
-  or installing additional targets automatically honors the recorded project selection.
-
-### 4. Running Isolated Harness Instances (`squad run`)
+### 1. Running Isolated Harness Instances (`squad run`)
 
 Different projects frequently require different model presets on the same harness simultaneously.
 Deploying agents directly into project repositories clutters source control, while modifying the
@@ -886,7 +784,7 @@ When `kyber-weave squad run <target> [-- <args>...]` is executed:
    are located via `PATHEXT` and executed under `cmd.exe` with proper argument escaping.
 7. Squad waits for harness process exit and propagates its exact exit code.
 
-### 5. Cleaning Instances (`squad instance remove`)
+### 2. Cleaning Instances (`squad instance remove`)
 
 Harness instances can be inspected via `squad status --global` (under the `Instances` heading)
 and pruned with `instance remove`:
@@ -898,7 +796,7 @@ kyber-weave squad instance remove --target claude --preset fast [--yes]
 Removal reads the instance's `links.json` manifest and safely removes created symbolic links,
 hard links, and directory junctions without following them into the user's main home directory.
 
-### 6. Harness Instance Support Matrix
+### 3. Harness Instance Support Matrix
 
 The `SquadInstanceCatalog` defines the redirection mechanism and support status for each target:
 
@@ -1019,30 +917,91 @@ Kyber-Squad has no separate runbook; this onboarding page is the operator pointe
 
 ---
 
+## Task execution runbook: inlined packets, fast testing, and completion digests
+
+Conductor coordinates task execution with strict context boundaries, pre-computed test commands,
+and standardized completion digests to minimize token consumption and eliminate validation churn:
+
+### Inlined task packets (zero plan context hunting)
+
+Conductor task packets are self-contained. Rather than pointing workers to large plan or
+specification documents under `<plan-index>` or `<specification-index>` (which workers are
+forbidden from reading), the conductor inlines five essential items directly into each dispatch packet:
+
+1. **Objective and strict boundary**: Explicit statement of what to change and what must not be touched.
+2. **Entry-file table**: Exact relative file paths, roles, key symbols, and assigned actions.
+3. **Acceptance criteria checklist**: Complete checklist that the worker must satisfy before handoff.
+4. **Pre-computed test runner command**: The exact direct assembly runner invocation targeting the assigned test class.
+5. **Test/verification contract**: Required RED evidence, test commands, and exit gate expectations.
+
+### Fast assembly runner invocation
+
+Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
+
+```bash
+dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>" -reporter quiet
+```
+
+Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
+against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
+on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
+runs are reserved strictly for task exit gates and final council review.
+
+### Standardized 6-field completion digest
+
+Workers report dispatch completion using an unambiguous 6-field schema:
+
+```text
+STATUS: PASS | FAIL | ESCALATION
+FILES: <comma-separated-paths>
+TESTS: total=N failed=N passed=N
+COMMIT: <commit-sha | NONE>
+REMOTE_HEAD: <remote-head-sha | UNPUSHED>
+TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
+```
+
+Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
+Standardizing this schema eliminates rejection rework caused by formatting variations.
+
+---
+
 ## User-home response guidance
 
 Every user-facing reply from the deployed `conductor` and `bug-crusher` agents follows one shape:
-a title line, a bottom line of at most three sentences, and the open decisions. The standard
-lives in the canonical `response-format` skill, and the operator can replace its wording with a
-file of their own.
+a title line, a bottom line of at most three sentences, and the open decisions. The shape is owned
+by the shipped default. The operator changes the wording by editing one file, and no skill is
+involved any more.
 
-**Where it lands.** `squad update --global` deploys the shipped default guidance to
-`~/.kyber-weave/response-guidance.md`, beside the `squad/` state directory under the user's
-home. The file belongs to no harness: every agent reaches the one path through the
-`response-format` skill, which reads the user's file in place of its own default wording when
-the file exists.
+**Where it lands.** `squad install` creates `~/.kyber-weave/response-guidance.md` with the shipped
+default when the file is absent (a global install, not a dry run and not a project-scope install).
+`squad install` and `squad update` then copy the file's effective text into a `<response-preferences>`
+block in the deployed `conductor` and `bug-crusher` entry files of every target. The file belongs to
+no harness and sits beside the `squad/` state directory under your home. `squad pack` does not read
+it: a packed archive always carries the shipped default.
 
-**How it is installed and refreshed.** `squad update --global` builds and validates the
-deployment plan first, takes the deployment lease, then writes the guidance and commits the receipt
-while it still holds the lease; the digest it records is one it read back from the file on disk.
-So a run that is refused before it can deploy — an unmanaged file in the way, a failed adoption
-check, a legacy layout, or another update already holding the lease — leaves your guidance exactly
-as it was, and `--dry-run` writes nothing. The one window left is a failure after the guidance was
-written and before the receipt committed: the new default stays in place. Run
-`squad update --global` again and it adopts that file without rewriting it and records the
-ownership it was missing. If a newer release has changed the default wording in the meantime,
-Squad cannot tell the file from one you edited, so it keeps it and warns; delete the file to take
-the new default.
+**Edit it, then update.** Edit `~/.kyber-weave/response-guidance.md`, then run `squad update`
+(add `--global` for a global deployment). Update refreshes every entry file you have not edited, and
+the agents read the new text on their next turn. Running `squad update` alone does not change a
+file you have not touched, and it never overwrites an edit to the home file.
+
+**Locally edited entry files stop receiving updates.** If you edit a deployed `conductor` or
+`bug-crusher` entry file by hand, update keeps your bytes and reports it in the warnings. That file
+stops receiving response-preference updates until you delete it or re-deploy.
+
+**Project scope commits your text.** A project-scope install writes your effective text into the
+entry files of every target in that repository. Those files are committed, so the text becomes part
+of the repository. You own it; review it like any other repository instruction.
+
+**How the file is refreshed.** `squad update --global` builds and validates the deployment plan
+first, takes the deployment lease, then writes the guidance and commits the receipt while it still
+holds the lease; the digest it records is one it read back from the file on disk. So a run that is
+refused before it can deploy — an unmanaged file in the way, a failed adoption check, a legacy
+layout, or another update already holding the lease — leaves your guidance exactly as it was, and
+`--dry-run` writes nothing. The one window left is a failure after the guidance was written and
+before the receipt committed: the new default stays in place. Run `squad update --global` again and
+it adopts that file without rewriting it and records the ownership it was missing. If a newer release
+has changed the default wording in the meantime, Squad cannot tell the file from one you edited, so it
+keeps it and warns; delete the file to take the new default.
 
 | State of `~/.kyber-weave/response-guidance.md` | What `squad update --global` does |
 |---|---|
@@ -1061,16 +1020,20 @@ platform cannot represent, or a security policy that refuses the write. If the b
 no readable default, nothing is written or recorded and the warning says to reinstall from a
 release that ships the guidance, because a rerun of the same build cannot fix it.
 
-**What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
-Squad agent answers; you do not edit a deployed skill, which the next update would replace.
-Delete the file to return to the shipped default. The default wording is the canonical
-`products/kyber-squad/skills/response-format/user-guidance.md`.
+**The D8 warning.** A rendered Squad content with no `<response-preferences>` block at all is treated
+as older content: nothing is injected and install or update prints
+`The rendered Squad content has no <response-preferences> block; response preferences were not injected.`
+once. It is not an error.
 
-**What the file may say.** It changes how an agent writes and nothing else. If the file is
-missing, empty, unreadable, or longer than about 8 KB, agents ignore it and use the shipped
-wording, so a stray file cannot leave every answer shapeless. Anything in it that asks an agent to
-run commands, call tools, read or send data, or change permissions or safety rules is ignored: it
-is a style override, not a way to grant an agent more than its canonical body allows.
+**What this changes for you.** Edit `~/.kyber-weave/response-guidance.md` to change how every
+Squad agent answers, then run `squad update`. You do not edit a deployed skill, and no skill is
+loaded. Delete the file to return to the shipped default. The default wording is the canonical
+`products/kyber-squad/response-guidance.default.md`.
+
+**What the file may say.** The text is pasted verbatim into the entry files, with no size cap and no
+style-only guard line. This is an accepted risk: the operator owns the text, and whatever you write
+in it reaches the agent as instruction. Keep it to how answers are shaped, and review it before you
+commit a project-scope install.
 
 ---
 

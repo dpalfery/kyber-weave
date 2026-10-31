@@ -7,6 +7,8 @@ describe('CLI report help', () => {
     const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', 'report', '--help'], {
       cwd: process.cwd(),
       encoding: 'utf8',
+      timeout: 60_000,
+      killSignal: 'SIGKILL',
     })
 
     expect(result.status, result.stderr).toBe(0)

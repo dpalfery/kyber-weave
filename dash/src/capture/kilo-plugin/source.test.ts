@@ -158,4 +158,73 @@ describe('kilo capture plugin source', () => {
     const blob = readdirSync(join(store, 'blobs'))[0]!
     expect(statSync(join(store, 'blobs', blob)).mode & 0o077).toBe(0)
   })
+
+  it('boundsEveryProcessLifetimeMapWithFiniteEviction', () => {
+    // Each of the three process-lifetime maps (tightened paths, session
+    // hashes, tool hashes) must carry a finite cap and an eviction path —
+    // static proof, since the maps are process-private by design.
+    const caps = [...KILO_PLUGIN_SOURCE.matchAll(/MAX_[A-Z_]*\s*=\s*(\d+)/g)].map(
+      (match) => Number(match[1]),
+    )
+    expect(caps.length).toBeGreaterThanOrEqual(3)
+    for (const cap of caps) {
+      expect(Number.isSafeInteger(cap)).toBe(true)
+      expect(cap).toBeGreaterThan(0)
+      expect(cap).toBeLessThanOrEqual(4096)
+    }
+    expect(KILO_PLUGIN_SOURCE).toMatch(/\.delete\(/)
+  })
+
+  it('recapturesEvictedSessionsAndToolsAfterTheBound', async () => {
+    const caps = [...KILO_PLUGIN_SOURCE.matchAll(/MAX_[A-Z_]*\s*=\s*(\d+)/g)].map(
+      (match) => Number(match[1]),
+    )
+    const over = Math.max(...caps) + 10
+    const { hooks } = await loadPlugin()
+    // Drive every map past its cap: one distinct session, prompt, and tool each.
+    for (let i = 0; i < over; i += 1) {
+      await hooks['experimental.chat.system.transform']!(
+        { sessionID: `ses-${i}`, model: { id: 'm1' } },
+        { system: [`prompt ${i}`] },
+      )
+      await hooks['tool.definition']!(
+        { toolID: `tool-${i}` },
+        { description: `tool ${i}`, parameters: { type: 'object' } },
+      )
+      await hooks['chat.params']!(
+        { sessionID: `ses-${i}`, agent: 'code', model: { id: 'm1' }, provider: { id: 'p1' }, message: { id: `msg-${i}` } },
+        {},
+      )
+    }
+    const firstHash = index()[0]!.systemHash as string
+    const firstToolHash = (index()[0]!.toolHashes as Record<string, string>)['tool-0']
+
+    // The earliest session and tool were necessarily evicted; touching them
+    // again must recapture the identical hashes, not corrupt or alias them.
+    await hooks['experimental.chat.system.transform']!(
+      { sessionID: 'ses-0', model: { id: 'm1' } },
+      { system: ['prompt 0'] },
+    )
+    await hooks['tool.definition']!(
+      { toolID: 'tool-0' },
+      { description: 'tool 0', parameters: { type: 'object' } },
+    )
+    await hooks['chat.params']!(
+      { sessionID: 'ses-0', agent: 'code', model: { id: 'm1' }, provider: { id: 'p1' }, message: { id: 'msg-again' } },
+      {},
+    )
+    const lines = index()
+    expect(lines).toHaveLength(over + 1)
+    const recaptured = lines[over]!
+    expect(recaptured.systemHash).toBe(firstHash)
+    expect((recaptured.toolHashes as Record<string, string>)['tool-0']).toBe(firstToolHash)
+    expect(readFileSync(join(store, 'blobs', firstHash as string), 'utf8')).toBe('prompt 0')
+    // Dedup holds across eviction: one blob per distinct prompt and tool, and
+    // the recaptured line reuses the original hashes instead of forking them.
+    const toolCap = Number(KILO_PLUGIN_SOURCE.match(/MAX_TOOL_HASHES\s*=\s*(\d+)/)?.[1] ?? 0)
+    expect(toolCap).toBeGreaterThan(0)
+    expect(Object.keys(recaptured.toolHashes as Record<string, string>).length).toBeLessThanOrEqual(toolCap)
+    expect(new Set(lines.map((line) => line.systemHash)).size).toBe(over)
+    expect(readdirSync(join(store, 'blobs'))).toHaveLength(over * 2)
+  })
 })

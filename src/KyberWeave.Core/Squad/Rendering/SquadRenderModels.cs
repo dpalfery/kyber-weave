@@ -39,6 +39,12 @@ public interface ISquadRenderer
 /// <param name="ModelPresets">
 /// Optional model presets to apply per target during rendering.
 /// </param>
+/// <param name="PreloadedSource">
+/// Optional in-memory canonical source, avoiding disk reads when provided.
+/// </param>
+/// <param name="EnvironmentReader">
+/// Optional environment variable reader delegate, avoiding process-level environment mutation.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -57,7 +63,9 @@ public sealed record SquadRenderRequest(
     string? UserScopeDirectory = null,
     string TranslationMode = "best-effort",
     ISquadGlobalRootResolver? GlobalRoots = null,
-    IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null)
+    IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null,
+    SquadSource? PreloadedSource = null,
+    Func<string, string?>? EnvironmentReader = null)
 {
     /// <summary>
     /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
@@ -74,7 +82,9 @@ public sealed record SquadRenderRequest(
             null,
             "best-effort",
             null,
-            ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets))
+            ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets),
+            null,
+            null)
     {
     }
 }
