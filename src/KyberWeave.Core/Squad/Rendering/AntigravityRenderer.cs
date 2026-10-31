@@ -387,9 +387,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
         List<string> args = [];
         foreach (JsonElement arg in argsElement.EnumerateArray())
         {
-            // GetString() throws on a non-string element, so the value kind decides first: a
-            // malformed args entry takes the fail-closed path this method documents instead of
-            // crashing the render.
+            // Asked exactly the way the command branch above asks it: is this element the kind the
+            // declaration requires? GetString alone would not answer that — it throws for any kind
+            // but String or Null, so a numeric, boolean, or object element would raise during render
+            // instead of withholding the grant, and the caller would see an exception where this
+            // method promises a null. A malformed element is one more reason to reject the whole
+            // declaration, which is the same answer every other branch gives.
             string? value = arg.ValueKind == JsonValueKind.String ? arg.GetString() : null;
             if (value is null)
             {

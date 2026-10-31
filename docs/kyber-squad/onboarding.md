@@ -437,6 +437,13 @@ servers keep the original non-orchestrator rule. The predicate itself lives once
 `CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
 agreeing with the others.
 
+**Two targets cannot express it for the `conductor` at all.** On Devin and Pi the conductor is a
+lowered skill, and a skill on either harness carries no grant vehicle — Devin's skills take no
+rendered `allowed-tools`, Pi's take no `tools` or `extensions`. So the orchestrator's reach there is
+whatever its session already has, and that is a structural boundary rather than a narrower grant.
+The parity guard pins both targets by name, so a change to either shows up as a failing assertion
+instead of a quiet discrepancy.
+
 **Why the orchestrator is included.** One `kyber-weave` tool is `agent_coding_standards`, which
 hands an agent the coding standard it must follow. The conductor writes no code but dispatches,
 reviews digests, and answers owner questions about what a specialist was required to do, and the
@@ -454,7 +461,7 @@ other profile decision are untouched. Do not "fix" it back: change the ADR first
 |---|---|---|
 | Claude | Tool-level wildcards in the agent's `tools` allow-list | `mcp__kyber-weave__*`, and neither `mcp__codegraph__*` nor `mcp__context7__*` |
 | ZCode | Enumerated `mcp__<server>__<tool>` names; no wildcard is expanded | The eight `kyber-weave` names, and neither of the other two servers |
-| Devin | The same enumerated names in `allowed-tools` | The eight `kyber-weave` names, and neither of the other two servers |
+| Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kyber-weave` only through the session it runs in |
 | OpenCode | The server-scoped permission key `kyber-weave_*` | Granted |
 | Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kyber-weave` names |
 | Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kyber-weave]` |

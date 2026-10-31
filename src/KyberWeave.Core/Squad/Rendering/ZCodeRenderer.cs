@@ -196,14 +196,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private const string CommandsDirectory = ".zcode/commands";
 
     /// <summary>
-    /// The declared MCP server every read-entitled principal is granted, the pure orchestrator
-    /// included, because it carries <c>agent_coding_standards</c> (ADR 0049). Named here rather
-    /// than hardcoded at the call sites so the entitlement and the server it applies to are read
-    /// together, matching <see cref="OpenCodeRenderer"/>'s own server-scoped constant.
-    /// </summary>
-    private const string UniversalMcpServer = "kyber-weave";
-
-    /// <summary>
     /// ZCode drops a skill whose description exceeds this length outright rather than
     /// truncating it (<c>skill_description_too_long</c> is an <c>error</c> severity and
     /// <c>parseSkill</c> returns null), so a canonical description over the cap must fail the
@@ -292,13 +284,15 @@ public sealed class ZCodeRenderer : ISquadRenderer
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
         // Read from canonical source rather than a renderer-local list, so a tool renamed
-        // upstream is a source edit, and so the doctor check reads the same roster. Split by
-        // entitlement class, because the two classes are granted on different rules.
+        // upstream is a source edit, and so the doctor check reads the same roster. The split
+        // into entitlement classes, and the order each class is emitted in, live in
+        // CapabilityDegradations: the partition is the one thing two targets must not each decide.
         IReadOnlyList<string> orchestratorExcludedMcpToolNames =
-            QualifiedMcpToolNames(source, server => !IsUniversalMcpServer(server));
+            CapabilityDegradations.OrchestratorExcludedMcpToolNames(source.Toolchain.RequiredMcpTools);
         IReadOnlyList<string> universalMcpToolNames =
-            QualifiedMcpToolNames(source, IsUniversalMcpServer);
-        IReadOnlyList<string> mcpServerNames = DeclaredMcpServerNames(source);
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
+        IReadOnlyList<string> mcpServerNames =
+            CapabilityDegradations.DeclaredMcpServerNames(source.Toolchain.RequiredMcpTools);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -827,11 +821,11 @@ public sealed class ZCodeRenderer : ISquadRenderer
 
         // MCP names append after the built-ins rather than joining ToolOrder: they come from
         // source, so they cannot be part of a fixed renderer-local order, and each group is
-        // already emitted in a stable server-then-tool order by the caller.
+        // already emitted in a stable server-then-tool order by CapabilityDegradations.
         IReadOnlyList<string> resolved =
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ResolveMcpToolNames(
+            .. CapabilityDegradations.ResolveMcpToolNames(
                 agent.CapabilityProfile,
                 capabilityProfiles,
                 orchestratorExcludedMcpToolNames,
@@ -850,33 +844,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         return resolved;
-    }
-
-    /// <summary>
-    /// The MCP tool names a principal's entitlement carries: the orchestrator-excluded servers
-    /// first, then the universal server, each in the server-then-tool order the roster declares.
-    /// </summary>
-    /// <remarks>
-    /// Two named predicates rather than one with a switch, so a reader sees which class of server
-    /// each group is gated on without resolving a condition. Both are the shared rule in
-    /// <see cref="CapabilityDegradations"/>; a renderer-local copy of it is what lets one target
-    /// drift from the others.
-    /// </remarks>
-    private static IReadOnlyList<string> ResolveMcpToolNames(
-        string profileName,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
-        IReadOnlyList<string> universalMcpToolNames)
-    {
-        return
-        [
-            .. CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(profileName, capabilityProfiles)
-                ? orchestratorExcludedMcpToolNames
-                : [],
-            .. CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
-                ? universalMcpToolNames
-                : []
-        ];
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildCapabilityDegradations(
@@ -914,10 +881,11 @@ public sealed class ZCodeRenderer : ISquadRenderer
         List<string> notExpressible = [];
 
         IReadOnlyList<string> withheldServerNames =
-            WithheldMcpServerNames(agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
+            CapabilityDegradations.WithheldMcpServerNames(
+                agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
         if (withheldServerNames.Count > 0)
         {
-            notExpressible.Add(DescribeWithheldMcp(
+            notExpressible.Add(CapabilityDegradations.DescribeWithheldMcp(
                 agent.CapabilityProfile, withheldServerNames, capabilityProfiles));
         }
 
@@ -1010,7 +978,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             : "(none declared)";
 
         IReadOnlyList<string> withheldServerNames =
-            WithheldMcpServerNames(agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
+            CapabilityDegradations.WithheldMcpServerNames(
+                agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
 
         yield return new SquadDegradationRecord(
             TargetToken,
@@ -1025,98 +994,9 @@ public sealed class ZCodeRenderer : ISquadRenderer
             $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
             "instruction-only." +
             (withheldServerNames.Count > 0
-                ? " " + DescribeWithheldMcp(
+                ? " " + CapabilityDegradations.DescribeWithheldMcp(
                     agent.CapabilityProfile, withheldServerNames, capabilityProfiles)
                 : string.Empty));
-    }
-
-    /// <summary>
-    /// The fully qualified MCP tool names declared by <c>toolchain.yml</c> for the servers
-    /// <paramref name="includeServer"/> admits, in a stable order, ready to append to a tool
-    /// allow-list ZCode matches by exact name.
-    /// </summary>
-    private static IReadOnlyList<string> QualifiedMcpToolNames(
-        SquadSource source,
-        Func<string, bool> includeServer)
-    {
-        ArgumentNullException.ThrowIfNull(includeServer);
-
-        return
-        [
-            .. source.Toolchain.RequiredMcpTools
-                .Where(entry => includeServer(entry.Key))
-                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .SelectMany(entry => entry.Value
-                    .OrderBy(tool => tool, StringComparer.Ordinal)
-                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
-        ];
-    }
-
-    /// <summary>Whether a declared server name is the one every read-entitled principal gets.</summary>
-    private static bool IsUniversalMcpServer(string serverName)
-    {
-        return string.Equals(serverName, UniversalMcpServer, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Why a principal did not receive the declared MCP tools. Only a profile outside an
-    /// entitlement reaches this, and the record names exactly the servers it lost and the rule
-    /// that lost them.
-    /// </summary>
-    /// <remarks>
-    /// The reason is selected rather than hedged, so a reader is not left to choose between two
-    /// conditions that are not both true. The withheld-server list never names a granted server
-    /// either, which is why the explanation speaks of "a server every agent needs" rather than
-    /// repeating the server name: the record and the rendered tool list have to agree.
-    /// </remarks>
-    private static string DescribeWithheldMcp(
-        string profileName,
-        IReadOnlyList<string> withheldServerNames,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        string reason = CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
-            ? $"capability profile '{profileName}' is the pure orchestrator profile, which routes " +
-              "work rather than researching it, and the carve-out it keeps reaches only the " +
-              "code-graph and library servers; a server every agent needs is granted on the " +
-              "file-read entitlement alone and is never withheld on the profile's identity"
-            : $"capability profile '{profileName}' does not allow 'filesystem.read', so no " +
-              "declared MCP server is granted";
-
-        return $"Declared MCP server(s) {string.Join(", ", withheldServerNames)} are withheld: " +
-               reason + ".";
-    }
-
-    /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
-    {
-        return [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
-    }
-
-    /// <summary>
-    /// The declared servers a principal is withheld from: every server whose own entitlement it
-    /// does not satisfy.
-    /// </summary>
-    /// <remarks>
-    /// Computed per server rather than as one "granted any MCP" boolean, because the two classes
-    /// answer different questions. A record built from a single answer would name the universal
-    /// server as withheld from the orchestrator after granting it — the one place a review or a
-    /// <c>squad doctor</c> run would read a claim the render contradicts.
-    /// </remarks>
-    private static IReadOnlyList<string> WithheldMcpServerNames(
-        string profileName,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> declaredMcpServerNames)
-    {
-        bool grantsUniversal =
-            CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles);
-        bool grantsOrchestratorExcluded =
-            CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(profileName, capabilityProfiles);
-
-        return
-        [
-            .. declaredMcpServerNames.Where(server =>
-                IsUniversalMcpServer(server) ? !grantsUniversal : !grantsOrchestratorExcluded)
-        ];
     }
 
     private static string CollapseToSingleLine(string value)

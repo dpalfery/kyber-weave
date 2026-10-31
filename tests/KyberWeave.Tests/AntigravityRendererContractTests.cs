@@ -1315,6 +1315,170 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// A squad that declares MCP servers but not <c>kyber-weave</c> grants it to nobody: every
+    /// entitled agent renders no <c>mcpServers</c> key, and no record claims a server was withheld.
+    /// </summary>
+    /// <remarks>
+    /// This is the declaration half of the fail-closed rule, and it is a different question from
+    /// the profile half the read-denied test above covers. The profiles here entitle every agent;
+    /// only the <c>mcp.json</c> is short of the server. Without this case a renderer that resolved
+    /// whichever server the declaration happened to name first — or one that emitted an empty
+    /// <c>mcpServers: []</c> rather than omitting the key — would satisfy every other Antigravity
+    /// assertion in this file, and on this harness an explicit empty list reads as "exclude every
+    /// MCP server" rather than as an absent key.
+    ///
+    /// The withheld-server sentence is asserted absent as well as the grant: nothing was withheld,
+    /// because nothing was there to withhold, and a record saying otherwise would report a
+    /// degradation the render does not have.
+    /// </remarks>
+    [Fact]
+    public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsItToNobodyAndClaimsNoWithholding()
+    {
+        using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("codegraph");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        Assert.Equal(["codegraph"], SquadMcpDeclaration.ServerNames(source));
+
+        // The profiles still entitle agents, so a passing render cannot be explained by an empty
+        // entitlement set.
+        IReadOnlySet<string> entitled = SquadMcpGrantProjection.KyberWeaveEntitledAgents(
+            source,
+            SquadTarget.Antigravity);
+        Assert.NotEmpty(entitled);
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            YamlMappingNode frontmatter = ReadFrontmatter(Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".agents/agents/{agent.Name}/agent.md"));
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+                $"Agent '{agent.Name}' renders an 'mcpServers' key although the squad declares no "
+                + "'kyber-weave' server. An omitted key is the only fail-closed answer: on Antigravity "
+                + "an explicit empty list excludes every server rather than inheriting nothing.");
+        }
+
+        foreach (SquadDegradationRecord record in result.Degradations)
+        {
+            Assert.DoesNotContain("withheld", record.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A declaration that cannot be resolved to a usable launch definition fails closed: no entitled
+    /// agent renders <c>mcpServers</c>, rather than every agent rendering an entry built from a
+    /// partial or guessed definition.
+    /// </summary>
+    /// <remarks>
+    /// Each row is one rejection branch of <c>ResolveUniversalMcpServer</c>, driven through a
+    /// hand-built <see cref="SquadSource"/>: the missing <c>mcpServers</c> key, a non-object
+    /// <c>mcpServers</c>, a non-object entry, a missing, non-string, or blank <c>command</c>, a
+    /// missing or non-array <c>args</c>, and a null element inside <c>args</c>.
+    ///
+    /// The hand-built source is necessary rather than lazy. <see cref="SquadSourceLoader"/> rejects
+    /// every one of these states at load time (<c>ParseMcp</c> and <c>ValidateMcpServer</c> demand an
+    /// object <c>mcpServers</c>, an object <c>kyber-weave</c> entry, a non-empty string
+    /// <c>command</c>, and a string-array <c>args</c>), so no on-disk corpus can reach them. They
+    /// exist to keep a hand-built or future-loaded source from rendering a server the operator never
+    /// declared, and until this theory they were asserted only in prose.
+    ///
+    /// The first row is the positive control: it is the same well-formed declaration the shipped
+    /// corpus carries, so it proves the hand-built path really does reach the renderer and that a
+    /// resolved declaration still grants. Without it, a renderer that had stopped granting anything
+    /// would satisfy every rejection row.
+    ///
+    /// A non-string <c>args</c> element is covered by its null spelling only.
+    /// <see cref="JsonElement.GetString"/> throws for an element that is neither a string nor null,
+    /// so a numeric or object element raises rather than reaching the fail-closed return; the loader
+    /// rejects that state first, so no shipped path can produce it.
+    /// </remarks>
+    [Theory]
+    [InlineData(
+        "well-formed declaration",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "."]}}}""",
+        true)]
+    [InlineData("no mcpServers key", "{}", false)]
+    [InlineData("non-object mcpServers", """{"mcpServers": []}""", false)]
+    [InlineData("non-object entry", """{"mcpServers": {"kyber-weave": "kyber-weave-mcp"}}""", false)]
+    [InlineData("missing command", """{"mcpServers": {"kyber-weave": {"args": []}}}""", false)]
+    [InlineData("non-string command", """{"mcpServers": {"kyber-weave": {"command": 7, "args": []}}}""", false)]
+    [InlineData("blank command", """{"mcpServers": {"kyber-weave": {"command": "   ", "args": []}}}""", false)]
+    [InlineData("missing args", """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp"}}}""", false)]
+    [InlineData(
+        "non-array args",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": "--repo-root"}}}""",
+        false)]
+    [InlineData(
+        "null args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", null]}}}""",
+        false)]
+    public async Task ADeclarationThatCannotBeResolvedGrantsNoMcpServerAndRecordsNoWithholding(
+        string caseName,
+        string mcpConfiguration,
+        bool grants)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        IReadOnlySet<string> entitled = SquadMcpGrantProjection.KyberWeaveEntitledAgents(
+            source,
+            SquadTarget.Antigravity);
+        Assert.NotEmpty(entitled);
+
+        using JsonDocument declaration = JsonDocument.Parse(mcpConfiguration);
+        SquadSource configured = source with { McpConfiguration = declaration.RootElement.Clone() };
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: configured));
+        Assert.True(result.Success, $"[{caseName}] {string.Join("; ", result.Errors)}");
+
+        foreach (string agentName in entitled)
+        {
+            YamlMappingNode frontmatter = ReadFrontmatter(Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".agents/agents/{agentName}/agent.md"));
+            bool carriesEntry = frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers"));
+
+            Assert.True(
+                carriesEntry == grants,
+                $"[{caseName}] Agent '{agentName}' "
+                + (carriesEntry ? "renders" : "omits")
+                + " 'mcpServers', but this declaration must "
+                + (grants ? "grant" : "withhold")
+                + " it. An unresolvable declaration yields no entry at all — never one built from a "
+                + "partial definition, and never an empty '[]', which Antigravity reads as exclude-all.");
+
+            if (!grants)
+            {
+                continue;
+            }
+
+            YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(
+                RequireNode(frontmatter, "mcpServers"));
+            Assert.NotEmpty(entries.Children);
+        }
+
+        if (grants)
+        {
+            return;
+        }
+
+        foreach (SquadDegradationRecord record in result.Degradations)
+        {
+            Assert.DoesNotContain("withheld", record.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
     /// The launch definition the squad's own <c>mcp.json</c> declares for <c>kyber-weave</c>, read
     /// from the loaded source so the rendered entry is compared against the declaration rather
     /// than against a literal the renderer could have drifted from.

@@ -832,6 +832,11 @@ and validates.
   because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
   generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
   server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
+  The orchestrator is granted nothing on this target, structurally rather than narrowly: a Devin
+  primary agent lowers to a skill, a Devin skill carries no rendered `allowed-tools`, and the
+  renderer emits that key on the subagent path alone — so `conductor` reaches `kyber-weave` only
+  through the session it runs in. Devin and Pi are the two such targets, and the parity guard
+  pins both by name.
   `OpenCodeRenderer` expresses the same grant as the server-scoped permission key
   `kyber-weave_*`, and `CommandCodeRenderer` as the enumerated `mcp__kyber-weave__<tool>` names
   in the agent's `tools`; on Command Code the `permission-not-expressible` sentence about parent

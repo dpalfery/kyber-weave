@@ -48,7 +48,11 @@ The change lands on top of the Factory per-droid whitelist delivered in
    stated on 2026-10-31 that every agent, the orchestrator among them, must reach the
    `kyber-weave` MCP server because `agent_coding_standards` is critical to quality for every
    agent. The directive names the `kyber-weave` server only. On the shipped squad, whose every
-   profile allows `filesystem.read`, the rule yields all twenty-four agents.
+   profile allows `filesystem.read`, the rule yields all twenty-four agents — each on the file its
+   target renders. **Two targets have no file to render it on for the orchestrator**: on Devin and
+   Pi the conductor is a lowered skill, so the entitlement there is structurally inexpressible
+   rather than withheld (decision 5 states the per-target outcomes, and the parity guard pins the
+   two absences).
 
 2. **The pure-orchestrator carve-out is reversed for `kyber-weave` and survives for `codegraph`
    and `context7`.** Those two servers keep their existing non-orchestrator-only behaviour. The
@@ -86,14 +90,26 @@ The change lands on top of the Factory per-droid whitelist delivered in
    | Factory | Per-droid server-level `mcpServers` whitelist derived from the squad's `mcp.json` (today exactly `kyber-weave`); the key is never omitted | Whitelisted as `[kyber-weave]` |
    | Claude | Tool-level wildcards in the agent's `tools` allow-list | Receives `mcp__kyber-weave__*` only, and not `mcp__codegraph__*` or `mcp__context7__*` |
    | ZCode | Enumerated `mcp__<server>__<tool>` names from `toolchain.yml`'s `required-mcp-tools`; no wildcard is expanded | Receives the eight `kyber-weave` names, not the `codegraph`/`context7` names |
-   | Devin | The same enumerated `mcp__<server>__<tool>` names in `allowed-tools` | Receives the eight `kyber-weave` names, not the `codegraph`/`context7` names |
+   | Devin | The same enumerated `mcp__<server>__<tool>` names in `allowed-tools`, on the subagent path only | **Structurally inexpressible, not narrow.** A Devin primary agent lowers to a skill, and a Devin skill carries no rendered `allowed-tools` — the renderer emits that key on the subagent path alone, because on a skill it pre-approves rather than restricts — so there is no governed surface on which the orchestrator could be granted anything. Its reach on this target is only what the session it runs in already has |
    | OpenCode | The server-scoped permission key `kyber-weave_*` | Granted |
    | Copilot | The agent's own `copilot-tools` frontmatter entry `kyber-weave/*`; no renderer injects it | Gains that one entry in canonical frontmatter |
    | Command Code | Enumerated `mcp__` names in the agent's `tools` | Receives the eight names |
-   | Pi | Renderer-derived overlay for every entitled agent, replacing the hand-authored `research-agent`-only overlay for this server: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool | Granted in every subagent file. A primary agent lowers to a skill, which carries no `tools` or `extensions`, so the grant is structurally inexpressible on the lowered form and the degradation record says so — the same class of exception as Devin |
+   | Pi | Renderer-derived overlay for every entitled **subagent**, replacing the hand-authored `research-agent`-only overlay for this server: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool | Granted in every subagent file. A primary agent lowers to a skill, which carries no `tools` or `extensions`, so the grant is structurally inexpressible on the lowered form and the degradation record says so — the same class of exception as Devin |
    | Kilo | The agent frontmatter `permission` map entry `kyber-weave_*: allow`; an unentitled agent emits no `permission` key at all | Granted: `permission: {kyber-weave_*: allow}` |
    | Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, read from the squad's own `mcp.json`; no entry when the squad declares no such server | Granted: `mcpServers: [{name: kyber-weave, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
    | Cursor, Codex, Warp | No per-agent key: MCP reach is structurally inherited from the session | Unchanged, and already reaching `kyber-weave` once the operator wires it |
+
+   **Two targets have no conductor grant surface at all, and that is a structural fact rather than
+   a narrower grant.** On **Devin** and **Pi** the conductor is a lowered skill, and a skill on
+   either harness carries no grant vehicle: Devin's skills take no rendered `allowed-tools`, and
+   Pi's take no `tools` or `extensions`. So the orchestrator's reach on those two is whatever the
+   session it runs in already has, and nothing rendered claims otherwise. The absence is asserted
+   rather than described: `SquadUniversalMcpGrantContractTests` pins
+   `targetsWithoutConductorSurface` to exactly `["devin", "pi"]` and cross-checks that list against
+   the primary-to-skill lowering table, so a third target that quietly stopped rendering the
+   orchestrator would fail the guard instead of slipping through an intersection. Each renderer's
+   remarks state the same thing in prose. A reader diagnosing why `conductor` cannot call
+   `agent_coding_standards` on one of those two should start here, not from a withheld grant.
 
    **The ZCode consequence is stated rather than implied.** `validateSubagentMcpRequirements`
    makes every name in `required-mcp-tools` a hard connected-server requirement for every ZCode
@@ -208,11 +224,13 @@ The change lands on top of the Factory per-droid whitelist delivered in
 
 ## Consequences
 
-- `conductor` holds eight read-only documentation tools on every one of the thirteen targets: ten
-  render a per-agent grant, three inherit the server from the session as soon as the operator
-  wires it, and Pi has one structural exception — its lowered primary agent is a skill, which
-  carries no `tools` or `extensions`. Any future agent whose profile allows `filesystem.read` is
-  entitled by the same rule with no per-agent declaration.
+- `conductor` holds eight read-only documentation tools on eight of the thirteen targets. The
+  split is **8 per-agent, 3 session-inherited, 2 structurally inexpressible**: eight targets
+  render it the grant directly, Cursor, Codex, and Warp reach it through a session the operator
+  wires, and **Devin and Pi** cannot express it at all, because a lowered primary agent is a skill
+  there and a skill carries no grant vehicle. The last two are recorded as structural rather than
+  narrow, and the parity guard pins them by name. Any future agent whose profile allows
+  `filesystem.read` is entitled by the same rule with no per-agent declaration.
 - The one shared predicate plus the parity guard means a change to the entitlement rule is one
   edit and one failing test away from being wrong, on every target at once.
 - ZCode installs now require the `kyber-weave` server to be declared, or `squad doctor` fails.
