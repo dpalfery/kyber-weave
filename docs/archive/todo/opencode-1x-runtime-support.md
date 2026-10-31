@@ -6,6 +6,7 @@ component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-31
 status: superseded
+documentation-impact: no-design-change
 ---
 
 # OpenCode 1.x runtime support for the KyberDash capture plugin is unverified
@@ -33,3 +34,22 @@ loads on both 1.x and 2.1.4.
 The decision record for the 2.1.4 shape is in the archived plan
 [2026-10-25-opencode-capture-deploy-kyberdash](../plans/2026-10-25-opencode-capture-deploy-kyberdash.md)
 (decisions D1 and D2).
+
+## Decisions
+
+| ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
+|---|---|---|---|---|
+| OC1X-1 | Does the KyberDash OpenCode capture plugin support OpenCode 1.x? | No. OpenCode capture supports OpenCode 2.x only. Support for 1.x is removed rather than added, so there is no 1.x loader shape to pin. | The plugin is shaped for the 2.x loader (`{ id, setup }`); no 1.x runtime was ever verified, and carrying both shapes risked the 2.x schema rejecting an extra key. Live evidence in the plan: OpenCode 1.19.4 failed to load the V2 plugin. | Plan [2026-10-30-opencode-v2-capture](../plans/2026-10-30-opencode-v2-capture.md) decision D1, approved in AP1 on 2026-10-30. |
+
+## Closeout mapping
+
+Links are written from this archive entry's location (`docs/archive/todo/`).
+
+| ID | Destination |
+|---|---|
+| OC1X-1 | [ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md) records the V2-only decision; [dash/architecture.md](../../dash/architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode) describes the shipped plugin pipeline. |
+
+## Design harvest
+
+Documentation waiver: no new design survives from this todo. The question it raised is closed by
+removing 1.x support, which [ADR 0046](../../adr/0046-opencode-capture-is-a-v2-only-plugin-pipeline.md) and the architecture section above already state.
