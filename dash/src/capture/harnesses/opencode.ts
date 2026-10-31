@@ -92,12 +92,25 @@ export function legacyOpencodeFlagRecord(
   receipt: CaptureReceipt | null,
   configPath: string,
 ): ReceiptFileRecord | undefined {
-  return receipt?.files.find(
-    (entry) =>
-      entry.harnessId === OPENCODE_HARNESS_ID &&
-      entry.path === configPath &&
-      OPENCODE_LEGACY_OTEL_FLAG_KEY in entry.keys,
-  )
+  return receipt?.files.find((entry) => isLegacyFlagEntry(entry, configPath))
+}
+
+/**
+ * `loadCaptureReceipt` checks only the version and that `files` is an array, so an entry is
+ * untrusted here: a null entry, or one without a usable `keys` map or flag record, is not a
+ * legacy record. The migration only warns, so a damaged receipt must not throw.
+ */
+function isLegacyFlagEntry(entry: unknown, configPath: string): entry is ReceiptFileRecord {
+  if (entry === null || typeof entry !== 'object') return false
+  const candidate = entry as Partial<Record<keyof ReceiptFileRecord, unknown>>
+  if (candidate.harnessId !== OPENCODE_HARNESS_ID || candidate.path !== configPath) return false
+  const keys = candidate.keys
+  if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) return false
+  if (!Object.hasOwn(keys, OPENCODE_LEGACY_OTEL_FLAG_KEY)) return false
+  const flag = (keys as Record<string, unknown>)[OPENCODE_LEGACY_OTEL_FLAG_KEY]
+  if (flag === null || typeof flag !== 'object') return false
+  const prior = (flag as { prior?: unknown }).prior
+  return prior !== null && typeof prior === 'object' && typeof (prior as { present?: unknown }).present === 'boolean'
 }
 
 export type LegacyKeyMigration = {
@@ -156,6 +169,7 @@ export function migrateLegacyOpencodeFlag(
     path,
     changes: [{ key, before: legacy.written, ...(legacy.prior.present ? { after: legacy.prior.value } : {}) }],
   })
+  // A dry run mutates nothing, so its output says what it would do, never that it did it.
   const drop = (): void => {
     if (dryRun) return
     dropLegacyKey(receipt, record)
@@ -167,7 +181,9 @@ export function migrateLegacyOpencodeFlag(
     content = readFileSync(path, 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-      result.out.push(`harness opencode: ${path} is gone; dropped the recorded ${key} (nothing to restore)`)
+      result.out.push(
+        `harness opencode: ${path} is gone; ${dryRun ? 'would drop' : 'dropped'} the recorded ${key} (nothing to restore)`,
+      )
       drop()
       return result
     }
@@ -188,7 +204,7 @@ export function migrateLegacyOpencodeFlag(
   if (reverted.drift.length > 0) {
     const [entry] = reverted.drift
     result.err.push(
-      `kyberdash capture: warning: ${path} ${key} is ${describeValue(entry?.current)}, not the ${describeValue(entry?.written)} an earlier KyberDash wrote; leaving it as it is and no longer tracking it`,
+      `kyberdash capture: warning: ${path} ${key} is ${describeValue(entry?.current)}, not the ${describeValue(entry?.written)} an earlier KyberDash wrote; leaving it as it is and ${dryRun ? 'would no longer track' : 'no longer tracking'} it`,
     )
     drop()
     return result

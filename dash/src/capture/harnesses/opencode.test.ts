@@ -22,7 +22,13 @@ import {
   type ReceiptPrior,
 } from '../receipt.js'
 import { readContentConsent, resolveConsentPath } from './opencode-plugin/consent.js'
-import { opencodeHarness, OPENCODE_PLUGIN_CONFIG_KEYS, OPENCODE_PLUGIN_ID } from './opencode.js'
+import {
+  legacyOpencodeFlagRecord,
+  migrateLegacyOpencodeFlag,
+  opencodeHarness,
+  OPENCODE_PLUGIN_CONFIG_KEYS,
+  OPENCODE_PLUGIN_ID,
+} from './opencode.js'
 
 const temporaryHomes: string[] = []
 
@@ -414,6 +420,117 @@ describe('opencode capture writer: plugin-only', () => {
     })
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain(`${home}\\.config\\opencode\\opencode.jsonc`)
+  })
+})
+
+describe('opencode legacy flag migration: hostile receipts and dry runs', () => {
+  const malformedEntries: readonly [string, unknown][] = [
+    ['null entry', null],
+    ['string entry', 'not-an-entry'],
+    ['entry without keys', { harnessId: 'opencode', path: '<path>' }],
+    ['entry with null keys', { harnessId: 'opencode', path: '<path>', keys: null }],
+    ['entry with a non-object keys', { harnessId: 'opencode', path: '<path>', keys: 'x' }],
+    ['entry with an array keys', { harnessId: 'opencode', path: '<path>', keys: [OPENCODE_OTEL_FLAG_KEY] }],
+    ['entry whose flag record is null', { harnessId: 'opencode', path: '<path>', keys: { [OPENCODE_OTEL_FLAG_KEY]: null } }],
+    [
+      'entry whose flag record has no prior',
+      { harnessId: 'opencode', path: '<path>', keys: { [OPENCODE_OTEL_FLAG_KEY]: { written: true } } },
+    ],
+  ]
+
+  it.each(malformedEntries)('ignores a malformed receipt: %s', (_name, entry) => {
+    const home = makeHome()
+    const path = opencodeConfigPath(home)
+    const concrete =
+      entry !== null && typeof entry === 'object' && 'path' in entry ? { ...(entry as object), path } : entry
+    const receipt = { version: 1, files: [concrete] } as unknown as Parameters<typeof legacyOpencodeFlagRecord>[0]
+
+    expect(() => legacyOpencodeFlagRecord(receipt, path)).not.toThrow()
+    expect(legacyOpencodeFlagRecord(receipt, path)).toBeUndefined()
+    const migration = migrateLegacyOpencodeFlag(home, { platform: process.platform }, receipt, false)
+    expect(migration).toEqual({ out: [], err: [], events: [], receiptChanged: false })
+  })
+
+  it('still finds a well-formed entry beside malformed ones', () => {
+    const home = makeHome()
+    const path = opencodeConfigPath(home)
+    const good = {
+      path,
+      format: 'jsonc',
+      harnessId: 'opencode',
+      keys: { [OPENCODE_OTEL_FLAG_KEY]: { written: true, prior: { present: false } } },
+      preSha256: 'a',
+      postSha256: 'b',
+    }
+    const receipt = { version: 1, files: [null, { harnessId: 'opencode', path, keys: null }, good] } as unknown as Parameters<
+      typeof legacyOpencodeFlagRecord
+    >[0]
+    expect(legacyOpencodeFlagRecord(receipt, path)).toBe(good)
+  })
+
+  it('a malformed receipt does not stop enable or status', async () => {
+    const home = makeHome()
+    mkdirSync(dirname(receiptPathForHome(home)), { recursive: true })
+    writeFileSync(receiptPathForHome(home), JSON.stringify({ version: 1, files: [null, { harnessId: 'opencode', keys: null }] }))
+
+    const status = await runCapture('status', { homeDir: home, harnessIds: ['opencode'], fetchHealth: KYBERDASH_LISTENER })
+    expect(status.exitCode).toBe(0)
+  })
+
+  it.skipIf(process.platform === 'win32')('a dry run does not claim a missing file was dropped', () => {
+    const home = makeHome()
+    const path = opencodeConfigPath(home)
+    const receipt = {
+      version: 1 as const,
+      files: [
+        {
+          path,
+          format: 'jsonc',
+          harnessId: 'opencode',
+          keys: { [OPENCODE_OTEL_FLAG_KEY]: { written: true, prior: { present: false } } },
+          preSha256: 'a',
+          postSha256: 'b',
+        },
+      ],
+    }
+
+    const dry = migrateLegacyOpencodeFlag(home, { platform: process.platform }, receipt, true)
+    expect(dry.receiptChanged).toBe(false)
+    expect(receipt.files).toHaveLength(1)
+    expect(dry.out.join('\n')).toContain('would drop')
+    expect(dry.out.join('\n')).not.toMatch(/\bdropped\b/)
+
+    const real = migrateLegacyOpencodeFlag(home, { platform: process.platform }, receipt, false)
+    expect(real.receiptChanged).toBe(true)
+    expect(real.out.join('\n')).toMatch(/\bdropped\b/)
+  })
+
+  it.skipIf(process.platform === 'win32')('a dry run does not claim it stopped tracking a changed flag', () => {
+    const home = makeHome()
+    const path = opencodeConfigPath(home)
+    writeOpencodeJsonc(path, '{\n  "experimental": {\n    "openTelemetry": false\n  }\n}\n')
+    const receipt = {
+      version: 1 as const,
+      files: [
+        {
+          path,
+          format: 'jsonc',
+          harnessId: 'opencode',
+          keys: { [OPENCODE_OTEL_FLAG_KEY]: { written: true, prior: { present: false } } },
+          preSha256: 'a',
+          postSha256: 'b',
+        },
+      ],
+    }
+
+    const dry = migrateLegacyOpencodeFlag(home, { platform: process.platform }, receipt, true)
+    expect(dry.receiptChanged).toBe(false)
+    expect(dry.err.join('\n')).toContain('would no longer track')
+    expect(dry.err.join('\n')).not.toContain('and no longer tracking it')
+
+    const real = migrateLegacyOpencodeFlag(home, { platform: process.platform }, receipt, false)
+    expect(real.receiptChanged).toBe(true)
+    expect(real.err.join('\n')).toContain('no longer tracking it')
   })
 })
 
