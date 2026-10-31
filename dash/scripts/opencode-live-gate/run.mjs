@@ -89,7 +89,7 @@ const STEP_SPAN_NAME = 'opencode.step'
 
 const KYBER_BASE_URL = 'http://127.0.0.1:4747'
 
-const LIMITS = {
+export const LIMITS = {
   helpMs: 30_000,
   runMs: 6 * 60_000,
   apiMs: 30_000,
@@ -104,7 +104,10 @@ const LIMITS = {
   pollMs: 2_000,
   maxMessages: 5_000,
   maxLogStreamChars: 200_000,
-  maxEvidenceFileChars: 5_000_000,
+  maxEvidenceFileBytes: 5_000_000,
+  // What the runner retains of one child stream or one HTTP body; the rest is counted, not kept.
+  maxChildStreamBytes: 20_000_000,
+  maxHttpBodyBytes: 20_000_000,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -148,15 +151,26 @@ export function splitModel(model) {
   return { provider: model.slice(0, at), id: model.slice(at + 1) }
 }
 
+// A key-ish name: up to 64 word characters around a secret word, so `session_token`, `webhook_secret`,
+// `openai_api_key` and `x-goog-api-key` are covered, not just the bare names. The bounds keep matching linear.
+const SECRET_WORD =
+  '(?:authorization|api[_-]?key|apikey|access[_-]?key|private[_-]?key|secret|passw(?:or)?d|credential|signature|(?:access|auth|refresh|id|session|bearer|csrf|xsrf)[_-]?token|token)'
+const SECRET_NAME = `[\\w.-]{0,64}${SECRET_WORD}[\\w.-]{0,64}`
+
 const REDACTIONS = [
   [/\b(authorization|proxy-authorization)(\s*[:=]\s*)(?:bearer\s+|basic\s+)?[^\s,;"']+/gi, '$1$2[redacted]'],
-  [/\b(x-api-key|api-key|apikey|x-auth-token)(\s*[:=]\s*)[^\s,;"']+/gi, '$1$2[redacted]'],
-  [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g, 'Bearer [redacted]'],
+  // Header and env-style assignments: x-goog-api-key: v, OPENAI_API_KEY=v, session_token=v.
   [
-    /"(authorization|proxy-authorization|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|token)"\s*:\s*"[^"]*"/gi,
-    '"$1":"[redacted]"',
+    new RegExp(`\\b(${SECRET_NAME.replace('|token)', ')')})(\\s*[:=]\\s*)(?:bearer\\s+)?[^\\s,;"']+`, 'gi'),
+    '$1$2[redacted]',
   ],
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g, 'Bearer [redacted]'],
+  // A secret-named JSON field with a string value. Numbers (token counters) are not touched.
+  [new RegExp(`"(${SECRET_NAME})"\\s*:\\s*"[^"]*"`, 'gi'), '"$1":"[redacted]"'],
   [/"(reasoningEncryptedContent|encryptedContent|encrypted_content)"\s*:\s*"[^"]*"/g, '"$1":"[redacted]"'],
+  [/-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g, '[redacted]'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted]'],
+  [/\bAIza[0-9A-Za-z_-]{35}/g, '[redacted]'],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, '[redacted]'],
   [/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, '[redacted]'],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[redacted]'],
@@ -442,7 +456,7 @@ export function formatPlan(plan) {
  */
 
 /** @returns {Evidence} */
-function createEvidence(dir) {
+export function createEvidence(dir) {
   mkdirSync(dir, { recursive: true })
   const logPath = join(dir, 'commands.log')
   return {
@@ -464,15 +478,53 @@ function createEvidence(dir) {
   }
 }
 
-/** An evidence file is a plain name inside the evidence directory, never a path. */
-function evidenceFileName(name) {
-  if (name === '' || name !== basename(name)) throw new GateError(`evidence file name is not a plain file name: ${name}`)
+/** An evidence file is a plain name inside the evidence directory, never a path: not `.`, `..`, or a separator. */
+export function evidenceFileName(name) {
+  if (name === '' || name === '.' || name === '..' || name.includes('\0') || name !== basename(name) || /[\\/]/.test(name)) {
+    throw new GateError(`evidence file name is not a plain file name: ${JSON.stringify(name)}`)
+  }
   return name
 }
 
-function boundedEvidence(text) {
-  if (text.length <= LIMITS.maxEvidenceFileChars) return text
-  return `${text.slice(0, LIMITS.maxEvidenceFileChars)}\n... [${text.length - LIMITS.maxEvidenceFileChars} more characters not recorded]`
+/** Caps an evidence file by UTF-8 bytes, which is what lands on disk. */
+export function boundedEvidence(text) {
+  const bytes = Buffer.byteLength(text, 'utf8')
+  if (bytes <= LIMITS.maxEvidenceFileBytes) return text
+  const buffer = Buffer.from(text, 'utf8')
+  // Cut on a character boundary: step back off any continuation byte so no half character becomes U+FFFD.
+  let end = LIMITS.maxEvidenceFileBytes
+  while (end > 0 && (buffer[end] & 0xc0) === 0x80) end -= 1
+  return `${buffer.subarray(0, end).toString('utf8')}\n... [${bytes - end} more bytes not recorded]`
+}
+
+/**
+ * Collects a byte stream up to a cap and counts the rest. Chunks are kept as bytes and decoded once,
+ * so a multi-byte character split across chunks survives. Once the cap is reached nothing more is
+ * retained, but the caller must keep consuming the stream so the producer is never blocked.
+ */
+export function boundedCollector(maxBytes) {
+  const chunks = []
+  let retained = 0
+  let dropped = 0
+  return {
+    push(chunk) {
+      const room = maxBytes - retained
+      if (room <= 0) {
+        dropped += chunk.length
+        return
+      }
+      const kept = chunk.length <= room ? chunk : chunk.subarray(0, room)
+      chunks.push(kept)
+      retained += kept.length
+      dropped += chunk.length - kept.length
+    },
+    text() {
+      const body = Buffer.concat(chunks).toString('utf8')
+      return dropped === 0 ? body : `${body}\n... [${dropped} more bytes not recorded]`
+    },
+    truncated: () => dropped > 0,
+    retainedBytes: () => retained,
+  }
 }
 
 function progress(message) {
@@ -513,8 +565,8 @@ function runCommand(ctx, command, args, { cwd, env, timeoutMs, logOutput = true 
   throwIfAborted(ctx)
   ctx.evidence.log(`$ ${formatCommand(command, args)}   (cwd ${cwd})`)
   return new Promise((done) => {
-    let stdout = ''
-    let stderr = ''
+    const stdoutCollector = boundedCollector(LIMITS.maxChildStreamBytes)
+    const stderrCollector = boundedCollector(LIMITS.maxChildStreamBytes)
     let timedOut = false
     let settled = false
     // OpenCode 2.2.x takes a session's directory from $PWD, not the process cwd. npm leaves $PWD at
@@ -530,20 +582,57 @@ function runCommand(ctx, command, args, { cwd, env, timeoutMs, logOutput = true 
       settled = true
       clearTimeout(timer)
       ctx.children.delete(child)
+      const stdout = stdoutCollector.text()
+      const stderr = stderrCollector.text()
       ctx.evidence.log(`  exit ${code === null ? `signal ${signal}` : code}${timedOut ? ' (timed out and killed)' : ''}${error ? ` error: ${error.message}` : ''}`)
       if (logOutput && stdout !== '') ctx.evidence.log(`  stdout:\n${clip(stdout)}`)
       if (logOutput && stderr !== '') ctx.evidence.log(`  stderr:\n${clip(stderr)}`)
       done({ code, signal, stdout, stderr, timedOut, error })
     }
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf8')
-    })
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8')
-    })
+    // The collectors stop retaining at the cap but the streams are still drained, so a verbose child never blocks.
+    child.stdout.on('data', (chunk) => stdoutCollector.push(chunk))
+    child.stderr.on('data', (chunk) => stderrCollector.push(chunk))
     child.on('error', (error) => finish(null, null, error))
     child.on('close', (code, signal) => finish(code, signal, null))
   })
+}
+
+/**
+ * Reads a response body up to `maxBytes`, then cancels the rest. The time limit bounds how long a body
+ * takes; this bounds how much of it the runner holds. A declared Content-Length over the cap is refused
+ * before any of the body is read. Always resolves with `{ text, bytes, truncated }`.
+ */
+export async function readBodyBounded(response, maxBytes) {
+  const body = response.body
+  if (body === null) return { text: '', bytes: 0, truncated: false }
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await body.cancel().catch(() => undefined)
+    return { text: '', bytes: 0, truncated: true }
+  }
+  const reader = body.getReader()
+  const chunks = []
+  let bytes = 0
+  let truncated = false
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const room = maxBytes - bytes
+      if (value.length > room) {
+        if (room > 0) chunks.push(value.subarray(0, room))
+        bytes += Math.max(room, 0)
+        truncated = true
+        await reader.cancel().catch(() => undefined)
+        break
+      }
+      chunks.push(value)
+      bytes += value.length
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), bytes, truncated }
 }
 
 function timeoutSignal(ms) {
@@ -555,15 +644,20 @@ async function httpGet(ctx, path) {
   const url = `${ctx.config.kyberBaseUrl}${path}`
   ctx.evidence.log(`GET ${url}`)
   try {
-    const response = await fetch(url, { signal: timeoutSignal(LIMITS.httpMs), headers: { accept: 'application/json' } })
-    const text = await response.text()
+    const signal = timeoutSignal(LIMITS.httpMs)
+    const response = await fetch(url, { signal, headers: { accept: 'application/json' } })
+    const { text, bytes, truncated } = await readBodyBounded(response, LIMITS.maxHttpBodyBytes)
     let json
-    try {
-      json = JSON.parse(text)
-    } catch {
-      json = undefined
+    if (!truncated) {
+      try {
+        json = JSON.parse(text)
+      } catch {
+        json = undefined
+      }
     }
-    ctx.evidence.log(`  -> HTTP ${response.status}, ${text.length} bytes${json === undefined ? ', not JSON' : ''}`)
+    ctx.evidence.log(
+      `  -> HTTP ${response.status}, ${bytes} bytes${truncated ? ` (truncated at the ${LIMITS.maxHttpBodyBytes}-byte cap)` : ''}${json === undefined ? ', not JSON' : ''}`,
+    )
     return { status: response.status, ok: response.ok, text, json, error: null }
   } catch (error) {
     ctx.evidence.log(`  -> failed: ${describeError(error)}`)
@@ -993,12 +1087,19 @@ function uniqueNames(toolParts) {
   return names
 }
 
-function skillsListedCount(kyberSession) {
+export function skillsListedCount(kyberSession) {
   const skills = kyberSession && typeof kyberSession === 'object' ? kyberSession.skills : null
   if (!skills || typeof skills !== 'object') return null
   if (isCount(skills.listed_count)) return skills.listed_count
   if (Array.isArray(skills.rows)) return skills.rows.filter((entry) => entry && entry.listed === true).length
   return null
+}
+
+/** The skills-listed count the UI spec must show; a session without one cannot be checked, so it throws. */
+export function requireSkillsListed(kyberSession) {
+  const count = skillsListedCount(kyberSession)
+  if (count === null) throw new GateError('skills missing: the session API reports no skills listing, so the UI spec has no count to look for')
+  return count
 }
 
 /** A Playwright config without a `webServer`, so the spec runs against the live host and starts nothing. */
@@ -1322,9 +1423,19 @@ async function runSteps(ctx) {
   }
 
   progress('8/9 UI spec against the live kyberDash')
+  /** @type {number | undefined} */
+  let skillsListed
+  if (session.json !== undefined) {
+    try {
+      skillsListed = requireSkillsListed(session.json)
+    } catch (error) {
+      // The comparator already fails the skills rows; the spec has nothing true to assert, so it does not run.
+      ctx.failures.push(`the UI spec was skipped: ${describeError(error)}`)
+    }
+  }
   if (session.json === undefined) {
     ctx.notes.push('the UI spec was skipped: kyberDash returned no session to display')
-  } else {
+  } else if (skillsListed !== undefined) {
     // The label row can be waived (see compare.mjs); the page then shows the fallback label, so the UI
     // spec has no title to look for.
     const labelShown = rows.some((row) => row.field === 'label' && row.pass)
@@ -1338,7 +1449,7 @@ async function runSteps(ctx) {
       totalOutput: reading.session.tokens_output + reading.session.tokens_reasoning,
       toolCalls: reading.summary.toolParts.length,
       toolsInvoked: uniqueNames(reading.summary.toolParts),
-      skillsListed: skillsListedCount(session.json),
+      skillsListed,
     }
     ctx.ui = await runUiSpec(ctx, { sessionId: ctx.sessionId, expected })
     if (!ctx.ui.passed) ctx.failures.push(`the UI spec failed (exit ${ctx.ui.code}${ctx.ui.timedOut ? ', timed out' : ''}${ctx.ui.screenshot ? '' : ', no screenshot'}); see playwright-output.txt`)
