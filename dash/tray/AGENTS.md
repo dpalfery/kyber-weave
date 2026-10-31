@@ -42,19 +42,22 @@ Architecture: [`docs/dash/architecture.md`](../../../docs/dash/architecture.md).
 
 ## Gates
 
+Run each command from the repository root through the process watchdog, `scripts/proc-guard.sh run --`
+([`dash/AGENTS.md`](../AGENTS.md#tests-that-start-processes)):
+
 ```bash
-npm --prefix dash run typecheck
-npm --prefix dash run lint          # already covers dash/tray/ui
-npm --prefix dash run test
-npm --prefix dash run check:reachable
+scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash run lint          # already covers dash/tray/ui
+scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
 
 The popover UI has its own gates after `npm --prefix dash/tray/ui ci`:
 
 ```bash
-npm --prefix dash/tray/ui run typecheck
-npm --prefix dash/tray/ui run test
-cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
 ```
 
 `npm --prefix dash run lint` does not cover the Rust crate — `cargo fmt`, `cargo clippy` and

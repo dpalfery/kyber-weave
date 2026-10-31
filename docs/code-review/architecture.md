@@ -525,6 +525,24 @@ partitioned by ecosystem:
 ReSharper InspectCode (`inspectcode`) passes `--caches-home=artifacts/inspectcode-cache` (gitignored),
 persisting the AST and project caches across local runs and reducing warm inspection duration by ~35% wall-clock and ~68% CPU.
 
+#### Test and build gates run under the process watchdog
+
+The two gates that run test suites declare their argv through `scripts/proc-guard.sh run --`:
+the KyberDash `ts-test` gate (`npm --prefix dash run test`) and the .NET `test` gate (`dotnet test`). The
+watchdog kills the command's whole tree at an absolute cap (64 descendants, or 128 `node`
+processes for this user), and it fails the gate when a process the run started survives it. A
+watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
+or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
+
+`ReviewGateProcGuardWiringTests` pins both declarations, so a change to the argv has to change the test with it. The
+exit-code meanings and the local commands are in the
+[KyberDash runbook](../dash/runbook.md#running-tests-safely). Changing a `review.gates` entry in
+`.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
+
+No task gate covers a change that touches only workflow YAML, the review config or a shell
+script; such a task runs no gate. That residual is tracked in
+[the task-gates todo](../todo/task-gates-workflow-and-shell-edits.md).
+
 #### Fast test git repository fixture template
 
 Review gate integration and command tests (`ReviewGatesAgentCommandTests`, `ReviewGatesCouncilCommandTests`, `DocsInitReviewGatesTests`) initialize test repositories using a shared, pre-seeded template (`TestGitRepositoryTemplate`). The template is seeded once per template key (agent, council, and docs-init variants). Individual test fixtures perform a sub-millisecond filesystem copy of the whole pre-seeded working tree including `.git` via `TestGitRepositoryTemplate.CreateRepositoryCopy` rather than spawning repeated `git init`, `git add`, and `git commit` child processes. Untracked test configuration files (`.kyber-weave/`) are excluded via `.git/info/exclude` only for agent and council templates; docs-init templates commit the host config (`.kyber-weave/kyber-weave.yml`) as part of the fixture.

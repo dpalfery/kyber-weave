@@ -6,7 +6,9 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-30
+decided-by:
+  - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -231,11 +233,12 @@ Verify without touching the live store. The e2e conformance proof is GREEN 4/4 i
 the measured-opencode round trip (`dash/e2e/harness-collection.spec.ts`, spec header):
 
 ```bash
-npx playwright test e2e/harness-collection.spec.ts
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
-Run it from `dash/`; it boots an isolated dashboard against a temp `canon.db`, never
-`~/.kyberdash/canon.db` (see `dash/e2e/harness-collection.spec.ts` and
+Always pass `--config dash/playwright.isolated.config.ts` and run through the watchdog; see
+[Running tests safely](#running-tests-safely). The spec boots an isolated dashboard against a temp
+`canon.db`, never `~/.kyberdash/canon.db` (see `dash/e2e/harness-collection.spec.ts` and
 `dash/e2e/harness-collection-world.ts`). The `18.1K` turn-row vs `18.0K` sessions-page figures are the same `fmtTokens` (`dash/web/src/lib/utils.ts:18-25`) on different numerators — the turn row sums input+output (`dash/src/server/bridge.ts:6435`, fixture 18044+71=18115) while the sessions page shows input only (`AgentSessionDashboard.tsx:993-994`, `summary.total_input`=18044).
 
 Manual live-turn gate (manual procedure only — DO NOT run here, DO NOT touch live state,
@@ -839,10 +842,10 @@ the route allowlist.
 **Verifying it.** Focused suites plus the release smoke:
 
 ```bash
-npm --prefix dash exec -- vitest run src/analysis/query      # engine contracts, budgets, cursors
-npm --prefix dash exec -- vitest run src/server/analytics-routes.test.ts src/server/analytics-parity.test.ts
-npm --prefix dash exec -- vitest run src/mcp                 # tools, discovery, stdio, clean exit
-npm --prefix dash exec -- vitest run scripts/sea-mcp-smoke.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/analysis/query      # engine contracts, budgets, cursors
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/analytics-routes.test.ts src/server/analytics-parity.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/mcp                 # tools, discovery, stdio, clean exit
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run scripts/sea-mcp-smoke.test.ts
 ```
 
 `dash/scripts/sea-mcp-smoke.mjs` stages the real single-executable binary outside any
@@ -984,10 +987,13 @@ Build the native shell with `cargo build --locked --manifest-path dash/tray/src-
 
 #### Local gates
 
+Run each of these through the watchdog from the repository root
+([Running tests safely](#running-tests-safely)):
+
 ```bash
-npm --prefix dash/tray/ui run typecheck
-npm --prefix dash/tray/ui run test
-cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
 ```
 
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
@@ -1324,32 +1330,124 @@ curl -s http://127.0.0.1:3000/api/kyber/jobs | jq .
 curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
 ```
 
+### Running tests safely
+
+A test run that starts its own dashboard can start more dashboards, and each one starts more. In
+2026-10 this fork-bombed `node` (536 processes) and crashed three developer Macs. Three independent
+layers now guard against a repeat:
+
+- **The watchdog** (`scripts/proc-guard.sh run`) kills the command's whole process tree at an
+  absolute cap, and refuses to call a run clean while its children are still alive.
+- **Spawn guard** (ADR 0047). Under test, every KyberDash child spawn is refused unless the test opts
+  in with `allowRealSpawns(reason)`. A child stamped with a job or receiver role never hosts a
+  dashboard.
+- **Isolated e2e boots.** The self-booting Playwright specs use `dash/e2e/boot-dashboard.ts`, which
+  injects inert spawners and keeps state under the test's temp root.
+
+**Rule: every local test, gate and e2e command runs through the watchdog, from the repository root.**
+Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
+
+```bash
+scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:locks
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+```
+
+The watchdog runs the command in its own process group and polls the process table about every
+half second. It has two caps, both absolute, not measured against a baseline:
+
+| Option | Default | Environment override | Trips when |
+|---|---|---|---|
+| `--max-node N` | 128 | `KW_MAX_NODE_PROCS` | This user's `node` processes on the machine reach N |
+| `--max-tree M` | 64 | `KW_MAX_TREE_PROCS` | Descendants of the wrapped command reach M |
+| `--timeout S` | none | none | S seconds of wall clock pass |
+
+Exit codes:
+
+| Code | Meaning | What to do |
+|---|---|---|
+| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: raise the matching override and say why. |
+| 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
+| 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
+| any other | The wrapped command's own exit code. | Normal failure. |
+
+The watchdog (`scripts/proc-guard.sh`) is POSIX-only and runs on macOS and Linux. Windows has no
+watchdog cap; the ledger's Windows mode is described under the process ledger below.
+
+**Playwright runs only with the isolated config.** Give `--config dash/playwright.isolated.config.ts`
+on every invocation, from the repository root, through the watchdog:
+
+```bash
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
+```
+
+That config runs the two self-booting specs (`harness-collection.spec.ts` and
+`refresh-filters.spec.ts`), one worker, and adds the process-ledger teardown. The only Playwright
+configs in `dash/` are `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that
+set, and that each sets the spawn guard to deny and wires the ledger. Do not run `dash/playwright.config.ts` by
+hand. Its `webServer` starts a dashboard on port 4747, the port the tray uses, and it is not the
+isolated path. Which specs have no sanctioned invocation is tracked in
+[the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
+
+**Process ledger.** Vitest and Playwright both end with a ledger teardown. It finds three kinds of
+child: every child a guarded spawn started in the run (recorded in `KYBERDASH_SPAWN_LEDGER_FILE`),
+every descendant of the test runner, and every process re-parented to PID 1 whose command line
+contains the `dash/` directory and that started after the run began. It kills each one (TERM, then
+KILL after a short grace period) and fails the run, listing them. Two residuals are known. A
+child that exits within about 3 seconds of the end of the run is not counted, because the ledger
+waits that long for pool workers to finish exiting. The descendant and orphan scans use `ps`, so
+they run on POSIX only. On Windows the ledger runs in ledger-entry-only mode: it checks the
+children it recorded, by pid liveness, then sends TERM and KILL; it does not scan descendants or
+orphans, and it cannot tell a reused pid from its child. The other residuals (the receiver child labelled `job`, the allow-list granularity,
+and spawns through another module's API) are listed in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+
+**Opting in to a real child.** A test that must start a real bounded process calls
+`allowRealSpawns` from `dash/tests/setup/spawn-guard.ts`, with a reason that says what bounds the
+child (for example, "self-exits after 30 s"). The opt-in lasts for that test only. The site is also
+added to the spawn-site allow-list with the same bound; see
+[the test standard](../standards/test/README.md#tests-that-start-processes).
+
+**Leftovers from an earlier run.** `check-leftovers` lists processes that a run left behind. It
+does not kill anything.
+
+```bash
+scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)"
+scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)" --since <epoch-seconds>
+pgrep -x node | wc -l
+```
+
+It exits 0 when none are listed and 87 when some are. Each survivor is printed as pid, then command.
+`--since` limits the list to processes that started at or after that epoch second. Read each
+command, confirm it is a KyberDash test process from this checkout, and stop it yourself. A process
+you do not recognise is not yours to stop; report it.
+
 ### Running Unit & Contract Tests
 
 The dash suites are co-located with the code they cover. The canonical gates are:
 
 ```bash
-npm --prefix dash run typecheck
-npm --prefix dash run lint
-npm --prefix dash run test        # excludes the refresh-lock files; run test:locks for those
-npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
-npm --prefix dash run check:reachable
+scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash run lint
+scripts/proc-guard.sh run -- npm --prefix dash run test        # excludes the refresh-lock files; run test:locks for those
+scripts/proc-guard.sh run -- npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
+scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
 
-Focused runs use the same runner:
+Focused runs use the same runner, also through the watchdog:
 
 ```bash
 # /api/kyber/* backend contract tests
-npm --prefix dash exec -- vitest run src/server/kyber-api.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/kyber-api.test.ts
 
 # SQLite query bridge tests
-npm --prefix dash exec -- vitest run src/server/kyber-bridge.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/kyber-bridge.test.ts
 
 # CLI/REST report parity (Requirement 11.14)
-npm --prefix dash exec -- vitest run src/cli/report-api-parity.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/cli/report-api-parity.test.ts
 
 # Web dashboard component tests
-npm --prefix dash exec -- vitest run web/src
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run web/src
 ```
 
 These suites validate:

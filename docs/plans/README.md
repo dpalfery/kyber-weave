@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are open.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-30-test-process-storm-guard.md](2026-10-30-test-process-storm-guard.md) | Ready — closeout mapping complete (§10); archive blocked until G2 (PR CI) and G3 (local Playwright) pass and the plan is committed; council `NEEDS_HUMAN` under KW-REVIEW-008 only; blocks the OpenCode V2 plan's G1–G3 (D1) | 2026-10-30 | Stop test runs from ever fork-bombing the machine: fix both e2e boot scripts, add a spawn chokepoint with a child role/depth marker, a CLI-entry-only spawn target, fail-closed spawning under vitest and Playwright, leftover-process detection, an absolute process-cap watchdog for local and agent gate runs, a static audit of every spawn site, and a CI leftover step. |
 
 ## Archived Plans
 
