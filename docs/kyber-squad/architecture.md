@@ -1159,7 +1159,9 @@ invent a reason. `KS-001`–`KS-008` are unchanged; this contract does not add a
 ### Escalation (Q5)
 
 When the breaker trips — or a worker returns a valid escalation (`STATUS: ESCALATION` with
-exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set) — the conductor
+exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines:
+`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for
+`INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`) — the conductor
 immediately halts rework for that task, does not dispatch further workers for that
 cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
 prefix as `ESCALATION: end-of-run`). A valid escalation never completes the task or clears its

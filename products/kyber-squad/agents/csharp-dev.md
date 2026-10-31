@@ -71,8 +71,8 @@ Your packet is your whole scope. Do not open files under the directories named b
    - **Worktree output isolation:** Executing inside isolated git worktrees inherently isolates build output directories.
      Which rule applies depends on where you run:
      - In a shared checkout (a), follow the isolation bullet above: pass `--artifacts-path <per-task dir>` on every dotnet invocation.
-     - In your own isolated git worktree (b), `bin/` and `obj/` are already private, so `--artifacts-path` may be omitted, and the direct assembly test runner reads `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll` inside that worktree.
-     - Whenever `--artifacts-path <dir>` is passed (c), the direct assembly test runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` instead of `bin/Release`.
+     - In your own isolated git worktree (b) without that flag, `bin/` and `obj/` are already private, so `--artifacts-path` may be omitted, and the direct assembly test runner reads `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll` inside that worktree.
+     - Whenever `--artifacts-path <dir>` is passed (c), including inside a worktree, (c) overrides (b): for a `-c Release` build the direct assembly test runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase in that path) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`.
    - **Build once, test many with direct assembly runner.** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly with quiet output:
      `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
      Reserve full-suite rebuilds for task exit gates and final council runs.
