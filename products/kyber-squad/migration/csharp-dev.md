@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/csharp-dev.agent.md
 sources:
   .github/agents/csharp-dev.agent.md: 09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-final-body-sha256: 32a891ae195244075e44fe80153719dc657bc8207e1cd55ef62ee810c1fa983b
+final-body-sha256: 56045472d5066c24a4c1bd8dc3d01512d2a304a7c651808b97dc04bf63f317a7
 ---
 # csharp-dev migration
 
@@ -15,6 +15,10 @@ The canonical agent description and instruction body were synchronized from `.gi
 Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
+
+The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
+exit gate, and `path.agent_scratchpad` worktree isolation. `final-body-sha256` covers that
+evolved body.
 
 ## Canonical projection
 

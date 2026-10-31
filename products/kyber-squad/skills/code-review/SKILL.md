@@ -75,7 +75,7 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes this materialized diff path in every `review-lens` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the council completes (including on failure).
+**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes `path.agent_scratchpad/<task-id>/review-diff.patch` in every `review-lens` and `review-triage` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the review council completes (including on failure).
 Invoke one seat per applicable lens, all in flight at once, each named with its
 lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
 applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it

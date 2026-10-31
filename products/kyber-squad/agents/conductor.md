@@ -1,14 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: conductor
-description: |
-  Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request; coordinates the chosen workflow; and defaults delivery to test-first development.
-  STATUS: PASS | FAIL | ESCALATION
-  FILES: <comma-separated-paths>
-  TESTS: total=N failed=N passed=N
-  COMMIT: <commit-sha | NONE>
-  REMOTE_HEAD: <remote-head-sha | UNPUSHED>
-  TASK_GATE: PASS | FAIL
+description: "Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request; coordinates the chosen workflow; and defaults delivery to test-first development."
 invocation: primary
 model-profile: orchestration
 capability-profile: orchestrator
@@ -76,9 +69,9 @@ Defect-first precedence is unchanged in both cases: a concrete failure is diagno
 - Supply pre-computed test commands following the build once, test many pattern with `--no-build` flags or direct assembly execution (`dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`), reserving full suite test execution for task end or the final review council.
 - For test-first mode, enforce zero-stash RED proofs: forbid git stash for recording RED failure evidence; mandate running tests against a clean base checkout, throwaway copy, or isolated worktree.
 - Maintain adversarial separation between RED test authorship (`test-dev`) and GREEN implementation (implementation specialists). Implementers must not author or weaken automated acceptance verification. Never collapse RED and GREEN into a single worker dispatch, preserving independent verification at task completion. Bundle same-role micro-tasks into single dispatches where appropriate to minimize dispatch latency.
-- For concurrent task execution up to the configured limit, isolate parallel workers using git worktree checkouts or isolated work directories with dedicated per-task artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports), and serialize final branch-head integration before git push.
+- For concurrent task execution up to the configured limit, isolate parallel workers using separate git worktree checkouts with dedicated per-task artifact paths (`dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts` for compiler intermediates and `kyber-weave review gates` `--out artifacts/task-gate-<task-id>.json` for gate reports), and serialize final branch-head integration before git push. When an integration conflict occurs, abort the operation on the main working tree (`git cherry-pick --abort` or `git merge --abort`), log conflict details, and dispatch a conflict-reconciliation rework dispatch. Guarantee worktree cleanup across all outcomes (`git worktree remove --force <path>` and `git worktree prune` across successful integration, failure, escalation, or cancellation).
 - Retain the original worker session for that task's rework and verification when the harness supports continuation. Record the worker session handle and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
-- Require the explicit six-field worker completion digest schema from all workers (STATUS:, FILES:, TESTS: total=N failed=N passed=N, COMMIT: <commit-sha | NONE>, REMOTE_HEAD: <remote-head-sha | UNPUSHED>, and the developer exit gate line). Reject a digest whose task-gate line is missing or `FAIL` back to the original worker session, as specified in the **Developer exit gate** of the execution-and-review contract. No agent audits a single task; `code-reviewer` is the single end-of-run council, never a per-task reviewer.
+- Require the explicit six-field worker completion digest schema from all workers, as specified in the execution-and-review contract. Reject a digest whose task-gate line is missing or `FAIL` back to the original worker session, as specified in the **Developer exit gate** of the execution-and-review contract. During phased rollout, scope the strict 6-field completion digest rejection rule to migrated specialist agents (`csharp-dev`, `test-dev`), permitting unmigrated specialists to return standard completions. Circuit-breaker escalation digests (`STATUS: ESCALATION`) are explicitly exempted from the 6-field completion requirements (`FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD`, `TASK_GATE`). When a worker returns `STATUS: ESCALATION`, the conductor accepts the escalation payload without rejecting it for missing completion fields or missing `TASK_GATE` and routes it directly to architect mediation without rejection. No agent audits a single task; `code-reviewer` is the single end-of-run council, never a per-task reviewer.
 - Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, and applies equally to resumed and replacement sessions. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
 - every completed change receives a docs-dev review for documentation impact; plan/spec-backed work additionally completes closeout before the objective is reported complete.
 
