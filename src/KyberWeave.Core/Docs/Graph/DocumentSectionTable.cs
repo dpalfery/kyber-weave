@@ -1,0 +1,70 @@
+namespace KyberWeave.Core.Docs.Graph;
+
+/// <summary>Pipe-table parsing for section bodies.</summary>
+internal static class DocumentSectionTable
+{
+    internal static List<string[]>? ReadDataRows(string sectionBody)
+    {
+        List<string> lines = sectionBody
+            .Split('\n')
+            .Select(line => line.Trim())
+            .ToList();
+        List<string> tableLines = new();
+        bool inFence = false;
+        foreach (string line in lines)
+        {
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
+
+            if (!inFence && line.Length > 0 && line[0] == '|')
+            {
+                tableLines.Add(line);
+            }
+        }
+
+        if (tableLines.Count < 2)
+        {
+            return null;
+        }
+
+        List<string[]> rows = new();
+        for (int index = 0; index < tableLines.Count; index++)
+        {
+            List<string> cells = tableLines[index].Split('|')
+                .Select(cell => cell.Trim())
+                .ToList();
+            if (cells.Count > 0 && cells[0].Length == 0)
+            {
+                cells.RemoveAt(0);
+            }
+
+            if (cells.Count > 0 && cells[^1].Length == 0)
+            {
+                cells.RemoveAt(cells.Count - 1);
+            }
+
+            if (cells.Count > 0 && cells.All(IsSeparatorCell))
+            {
+                continue;
+            }
+
+            if (index == 0)
+            {
+                continue;
+            }
+
+            rows.Add(cells.ToArray());
+        }
+
+        return rows;
+    }
+
+    private static bool IsSeparatorCell(string cell)
+    {
+        string trimmed = cell.Trim(':');
+        return trimmed.Length >= 3 && trimmed.All(character => character == '-');
+    }
+}

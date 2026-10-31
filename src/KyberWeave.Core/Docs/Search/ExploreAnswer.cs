@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Text;
 using Markdig;
@@ -96,6 +97,11 @@ public sealed partial class DocumentIndex
         }
 
         ScoredLeaf winner = rank.Winner;
+        ScoredLeaf? redirected = TryAnswerFromIndexRow(trimmed, queryVector, coverageTerms, titleQuery, winner);
+        if (redirected is not null)
+        {
+            winner = redirected;
+        }
 
         if (cursor is not null)
         {
@@ -265,16 +271,18 @@ public sealed partial class DocumentIndex
             foreach (DocumentLeaf leaf in ExpandScoringLeaves(doc))
             {
                 LeafTopicAssignment assignment = context.Assign(leaf);
-                double claim = ScoreLeafClaim(assignment, doc, leaf, trimmed, queryVector);
+                double claimForTopic = ScoreLeafClaim(assignment, doc, leaf, trimmed, queryVector, false);
+                double claim = ScoreLeafClaim(assignment, doc, leaf, trimmed, queryVector, true);
                 double body = ScoreLeafBody(doc, leaf, queryVector, coverageTerms, corpusAverageLength);
                 string leadLeafId = doc.LeadLeafId;
                 double lead = exactId && string.Equals(leaf.Id, leadLeafId, StringComparison.Ordinal) ? IdWeight : 0;
+                double topicLeafScore = authority * (documentIdentity + claimForTopic + body + lead);
                 double leafScore = authority * (documentIdentity + claim + body + lead);
 
                 string topicKey = assignment.TopicKey;
-                if (!topicScores.TryGetValue(topicKey, out double existingTopic) || leafScore > existingTopic)
+                if (!topicScores.TryGetValue(topicKey, out double existingTopic) || topicLeafScore > existingTopic)
                 {
-                    topicScores[topicKey] = leafScore;
+                    topicScores[topicKey] = topicLeafScore;
                 }
             }
         }
@@ -285,19 +293,21 @@ public sealed partial class DocumentIndex
             .First();
 
         ScoredLeaf? globalWinner = null;
-        (DocumentModel docWinner, double identityWinner, double _) = qualifying.First(
-            entry => entry.Document == winningDocument);
+        (DocumentModel docWinner, double identityWinner, double _) =
+            qualifying.First(entry => entry.Document == winningDocument);
 
         {
             double authority = Authority(docWinner);
             bool exactId = IsExactDocumentIdQuery(docWinner, trimmed);
-            double documentIdentity = ScoreLeafDocumentIdentity(docWinner, queryVector, titleQuery, _corpus, coverageTerms);
+            double documentIdentity =
+                ScoreLeafDocumentIdentity(docWinner, queryVector, titleQuery, _corpus, coverageTerms);
             LeafTopicContext context = new(docWinner);
 
             foreach (DocumentLeaf leaf in ExpandScoringLeaves(docWinner))
             {
                 LeafTopicAssignment assignment = context.Assign(leaf);
-                double claim = ScoreLeafClaim(assignment, docWinner, leaf, trimmed, queryVector);
+                double claimForTopic = ScoreLeafClaim(assignment, docWinner, leaf, trimmed, queryVector, false);
+                double claim = ScoreLeafClaim(assignment, docWinner, leaf, trimmed, queryVector, true);
                 double body = ScoreLeafBody(docWinner, leaf, queryVector, coverageTerms, corpusAverageLength);
                 string leadLeafId = docWinner.LeadLeafId;
                 double lead = exactId && string.Equals(leaf.Id, leadLeafId, StringComparison.Ordinal) ? IdWeight : 0;
@@ -342,6 +352,88 @@ public sealed partial class DocumentIndex
         }
 
         return new RankExploreResult(globalWinner, runnerTopic);
+    }
+
+    private ScoredLeaf? TryAnswerFromIndexRow(
+        string trimmed,
+        IReadOnlyDictionary<string, double> queryVector,
+        IReadOnlyList<string> coverageTerms,
+        IReadOnlyDictionary<string, double> titleQuery,
+        ScoredLeaf indexWinner)
+    {
+        IndexRowEdge? row = _sectionGraph.SelectBestIndexRow(
+            indexWinner.Document,
+            indexWinner.TopicHeading,
+            trimmed,
+            queryVector);
+        if (row is null)
+        {
+            return null;
+        }
+
+        if (!_sectionGraph.DocumentsByPath.TryGetValue(row.TargetRelativePath, out DocumentModel? target))
+        {
+            return null;
+        }
+
+        return RankBestLeafInDocument(target, trimmed, queryVector, coverageTerms, titleQuery, row.TargetFragment);
+    }
+
+    private ScoredLeaf? RankBestLeafInDocument(
+        DocumentModel document,
+        string trimmed,
+        IReadOnlyDictionary<string, double> queryVector,
+        IReadOnlyList<string> coverageTerms,
+        IReadOnlyDictionary<string, double> titleQuery,
+        string? preferredFragment)
+    {
+        double corpusAverageLength = CorpusAverageBodyLength();
+        double authority = Authority(document);
+        bool exactId = IsExactDocumentIdQuery(document, trimmed);
+        double documentIdentity = ScoreLeafDocumentIdentity(document, queryVector, titleQuery, _corpus, coverageTerms);
+        LeafTopicContext context = new(document);
+        ScoredLeaf? best = null;
+
+        foreach (DocumentLeaf leaf in ExpandScoringLeaves(document))
+        {
+            if (!string.IsNullOrEmpty(preferredFragment))
+            {
+                string docId = document.Frontmatter.Id ?? document.RelativePath;
+                string preferredId = string.Create(CultureInfo.InvariantCulture, $"{docId}#{preferredFragment}");
+                if (!string.Equals(leaf.Id, preferredId, StringComparison.Ordinal)
+                    && !leaf.Id.EndsWith(
+                        string.Create(CultureInfo.InvariantCulture, $"#{preferredFragment}"),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+            }
+
+            LeafTopicAssignment assignment = context.Assign(leaf);
+            double claim = ScoreLeafClaim(assignment, document, leaf, trimmed, queryVector, true);
+            double body = ScoreLeafBody(document, leaf, queryVector, coverageTerms, corpusAverageLength);
+            string leadLeafId = document.LeadLeafId;
+            double lead = exactId && string.Equals(leaf.Id, leadLeafId, StringComparison.Ordinal) ? IdWeight : 0;
+            double leafScore = authority * (documentIdentity + claim + body + lead);
+
+            if (best is null
+                || leafScore > best.LeafScore
+                || (leafScore == best.LeafScore && assignment.SectionLineNumber < best.SectionLineNumber))
+            {
+                best = new ScoredLeaf(
+                    document,
+                    leaf,
+                    leafScore,
+                    leafScore,
+                    assignment.IsPreamble,
+                    assignment.TopicHeading,
+                    assignment.SubHeading,
+                    assignment.TopicKey,
+                    assignment.SectionLineNumber);
+            }
+        }
+
+        return best;
     }
 
     private const int IncompleteContinuationSlack = 500;
@@ -443,9 +535,11 @@ public sealed partial class DocumentIndex
         return Math.Max(1, sum / _corpus.Documents.Count);
     }
 
-    private static bool IsExactDocumentIdQuery(DocumentModel doc, string trimmed) =>
-        string.Equals(trimmed, doc.Frontmatter.Id, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(trimmed, doc.RelativePath, StringComparison.OrdinalIgnoreCase);
+    private static bool IsExactDocumentIdQuery(DocumentModel doc, string trimmed)
+    {
+        return string.Equals(trimmed, doc.Frontmatter.Id, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(trimmed, doc.RelativePath, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Document identity inside a leaf score: partial, title, and document body. Exact
@@ -456,17 +550,20 @@ public sealed partial class DocumentIndex
         IReadOnlyDictionary<string, double> queryVector,
         IReadOnlyDictionary<string, double> titleQuery,
         DocumentCorpus corpus,
-        IReadOnlyList<string> coverageTerms) =>
-        ScorePartialIdentity(doc, queryVector)
-        + TitleWeight * ScoreTitle(doc, titleQuery)
-        + BodyWeight * corpus.ScoreBody(doc, queryVector, coverageTerms);
+        IReadOnlyList<string> coverageTerms)
+    {
+        return ScorePartialIdentity(doc, queryVector)
+               + TitleWeight * ScoreTitle(doc, titleQuery)
+               + BodyWeight * corpus.ScoreBody(doc, queryVector, coverageTerms);
+    }
 
-    private static double ScoreLeafClaim(
+    private double ScoreLeafClaim(
         LeafTopicAssignment assignment,
         DocumentModel document,
         DocumentLeaf leaf,
         string trimmed,
-        IReadOnlyDictionary<string, double> queryVector)
+        IReadOnlyDictionary<string, double> queryVector,
+        bool includeInboundLinkLabels)
     {
         List<string> labels = new();
         AppendSectionVocabularyLabels(document, leaf, labels, out List<string> sectionCodeRefs);
@@ -481,6 +578,18 @@ public sealed partial class DocumentIndex
             {
                 int insertAt = string.IsNullOrEmpty(assignment.TopicHeading) ? 0 : 1;
                 labels.Insert(insertAt, assignment.SubHeading);
+            }
+        }
+
+        if (includeInboundLinkLabels
+            && _sectionGraph.InboundLabelsByLeafId.TryGetValue(leaf.Id, out IReadOnlyList<string>? inbound))
+        {
+            foreach (string inboundLabel in inbound)
+            {
+                if (!string.IsNullOrWhiteSpace(inboundLabel))
+                {
+                    labels.Add(inboundLabel);
+                }
             }
         }
 
@@ -605,7 +714,7 @@ public sealed partial class DocumentIndex
                 continue;
             }
 
-            double denominator = frequency + (Bm25K1 * (1 - Bm25B + (Bm25B * length / corpusAverageLength)));
+            double denominator = frequency + Bm25K1 * (1 - Bm25B + Bm25B * length / corpusAverageLength);
             score += _corpus.InverseDocumentFrequency(term) * frequency * (Bm25K1 + 1) / denominator;
         }
 
@@ -619,7 +728,7 @@ public sealed partial class DocumentIndex
                 && slugFrequency > 0)
             {
                 double denominator = slugFrequency
-                                     + (Bm25K1 * (1 - Bm25B + (Bm25B * length / corpusAverageLength)));
+                                     + Bm25K1 * (1 - Bm25B + Bm25B * length / corpusAverageLength);
                 score += _corpus.InverseDocumentFrequency(slug)
                          * slugFrequency
                          * (Bm25K1 + 1)

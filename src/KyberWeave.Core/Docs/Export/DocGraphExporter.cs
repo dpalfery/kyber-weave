@@ -22,7 +22,9 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
     private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     public DocGraphExportResult Export(DocumentSet set, string outputDirectory)
-        => Export(set, outputDirectory, contributors: null);
+    {
+        return Export(set, outputDirectory, null);
+    }
 
     /// <summary>Exports documents plus independently governed graph contributions.</summary>
     public DocGraphExportResult Export(
@@ -49,7 +51,7 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
 
     private static string Node(DocGraphNode node)
     {
-        JsonObject json = new JsonObject
+        JsonObject json = new()
         {
             ["type"] = "node",
             ["id"] = node.Id,
@@ -65,17 +67,35 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
         return Line(json);
     }
 
-    private static string Edge(DocGraphEdge edge) => Line(new JsonObject
+    private static string Edge(DocGraphEdge edge)
     {
-        ["type"] = "edge",
-        ["label"] = edge.Label,
-        ["from"] = edge.From,
-        ["to"] = edge.To
-    });
+        JsonObject json = new()
+        {
+            ["type"] = "edge",
+            ["label"] = edge.Label,
+            ["from"] = edge.From,
+            ["to"] = edge.To
+        };
 
-    private static string Line(JsonNode node) => node.ToJsonString(Compact);
+        if (edge.Properties is not null)
+        {
+            foreach (KeyValuePair<string, string?> property in edge.Properties)
+            {
+                json[property.Key] = property.Value;
+            }
+        }
+
+        return Line(json);
+    }
+
+    private static string Line(JsonNode node)
+    {
+        return node.ToJsonString(Compact);
+    }
 
     /// <summary>Resolves a relative link against the linking document's directory.</summary>
-    internal static string? ResolveLink(string fromRelativePath, string link) =>
-        DocGraphProjection.ResolveLink(fromRelativePath, link);
+    internal static string? ResolveLink(string fromRelativePath, string link)
+    {
+        return DocGraphProjection.ResolveLink(fromRelativePath, link);
+    }
 }

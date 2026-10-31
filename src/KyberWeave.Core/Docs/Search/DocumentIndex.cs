@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Text;
 
@@ -91,19 +92,24 @@ public sealed partial class DocumentIndex
     private readonly Dictionary<string, List<DocumentModel>> _bySymbol;
     private readonly Dictionary<string, List<DocumentModel>> _byKeyword;
     private readonly Dictionary<string, IReadOnlyList<CodeJoin>> _joinsByPath;
+    private readonly DocumentSectionGraph _sectionGraph;
 
     internal IReadOnlyDictionary<string, List<DocumentModel>> ByKeyword => _byKeyword;
+
+    internal DocumentSectionGraph SectionGraph => _sectionGraph;
 
     private DocumentIndex(
         DocumentCorpus corpus,
         Dictionary<string, List<DocumentModel>> bySymbol,
         Dictionary<string, List<DocumentModel>> byKeyword,
-        Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath)
+        Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath,
+        DocumentSectionGraph sectionGraph)
     {
         _corpus = corpus;
         _bySymbol = bySymbol;
         _byKeyword = byKeyword;
         _joinsByPath = joinsByPath;
+        _sectionGraph = sectionGraph;
     }
 
     /// <summary>Documents in scope.</summary>
@@ -167,7 +173,9 @@ public sealed partial class DocumentIndex
             joinsByPath[doc.RelativePath] = joins;
         }
 
-        return new DocumentIndex(corpus, bySymbol, byKeyword, joinsByPath)
+        DocumentSectionGraph sectionGraph = DocumentSectionGraph.Build(corpus.Documents);
+
+        return new DocumentIndex(corpus, bySymbol, byKeyword, joinsByPath, sectionGraph)
         {
             CodeGraphAvailable = resolver.IsAvailable
         };
