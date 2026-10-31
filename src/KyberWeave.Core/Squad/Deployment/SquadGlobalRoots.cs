@@ -38,7 +38,7 @@ public interface ISquadGlobalRootResolver
 /// <remarks>
 ///     Each target's root was verified for 2026-09-14:
 ///     - Claude: `.claude/agents/` and `.claude/skills/` under `$CLAUDE_CONFIG_DIR` (default `~/.claude`)
-///     - Codex: `.codex/agents/` and `.codex/skills/` under `$CODEX_HOME` (default `~/.codex`);
+///     - Codex: `agents/` and `skills/` under `$CODEX_HOME` (default `~/.codex`), so a global agent lands at `agents/&lt;name&gt;.toml`;
 ///     `CODEX_HOME` confirmed live in the owner's `config.toml` on this machine
 ///     - Cursor: `.cursor/agents/` and `.cursor/skills/` under `$CURSOR_CONFIG_DIR` (default `~/.cursor`)
 ///     - Copilot: `.copilot/agents/` and `.copilot/skills/` under `$COPILOT_HOME` (default `~/.copilot`)

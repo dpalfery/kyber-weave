@@ -1064,6 +1064,149 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    ///     An unreadable deployed entry cannot be proven unedited, so the plan keeps its record and leaves the
+    ///     bytes alone. The path must also be named in <c>DegradedFiles</c>; without that the caller has no way
+    ///     to tell a preserved-but-unverified file from one that was checked and found unchanged.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateWithAnUnreadableDeployedEntryRecordsThePathInDegradedFiles()
+    {
+        using TempDirectory fixture = new();
+        const string entry = ".codex/agents/conductor.toml";
+        SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), "codex", false));
+        Write(fixture.Path, entry, "installed body");
+        string fullPath = Path.Combine(fixture.Path, entry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(entry, "updated body")],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.True(
+            OwningTargetsOf(plan, entry).Contains("codex"),
+            $"The degraded '{entry}' must record its owning target 'codex'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
+        Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
+    }
+
+    /// <summary>
+    ///     An unreadable file with an unknown target token is still reported by name: the degraded
+    ///     record keeps the raw token verbatim, so a corrupt or future token never reads as clean.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateWithAnUnreadableDeployedEntryWithAnUnknownTargetStillRecordsTheRawToken()
+    {
+        using TempDirectory fixture = new();
+        const string entry = ".codex/agents/conductor.toml";
+        const string unknownTarget = "future-harness";
+        SquadReceipt oldReceipt = Receipt(new SquadOwnedFile(entry, Digest("installed body"), unknownTarget, false));
+        Write(fixture.Path, entry, "installed body");
+        string fullPath = Path.Combine(fixture.Path, entry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(entry, "updated body", unknownTarget)],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.True(
+            OwningTargetsOf(plan, entry).Contains(unknownTarget),
+            $"The degraded '{entry}' must record its raw owning token '{unknownTarget}'; it records [{string.Join(", ", OwningTargetsOf(plan, entry))}].");
+        Assert.Contains(plan.Receipt.Files, file => file.RelativePath == entry);
+    }
+
+    /// <summary>
+    ///     A plan can span several targets, and a degraded path is only meaningful with its owner: the warning
+    ///     must name the target that owns the unreadable file. Without the owner recorded, a caller naming all
+    ///     targets would blame a healthy harness for another target's unreadable file.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateRecordsTheOwningTargetOfEachDegradedFileWhenThePlanCoversSeveralTargets()
+    {
+        using TempDirectory fixture = new();
+        const string codexEntry = ".codex/agents/conductor.toml";
+        const string claudeEntry = ".claude/agents/conductor.md";
+        SquadReceipt oldReceipt = Receipt(
+            new SquadOwnedFile(codexEntry, Digest("codex body"), "codex", false),
+            new SquadOwnedFile(claudeEntry, Digest("claude body"), "claude", false));
+        Write(fixture.Path, codexEntry, "codex body");
+        Write(fixture.Path, claudeEntry, "claude body");
+        string codexPath = Path.Combine(fixture.Path, codexEntry);
+
+        SquadDeploymentPlan plan;
+        using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(codexPath))
+        {
+            plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [
+                    Rendered(codexEntry, "codex body", "codex"),
+                    Rendered(claudeEntry, "claude body", "claude")
+                ],
+                oldReceipt,
+                [],
+                false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+        }
+
+        Assert.Single(plan.DegradedFiles);
+        IReadOnlyList<string> owners = OwningTargetsOf(plan, codexEntry);
+        Assert.True(
+            owners.SequenceEqual(ExpectedCodexOwner),
+            $"The degraded '{codexEntry}' must record exactly its owning target 'codex'; it records [{string.Join(", ", owners)}].");
+        Assert.Empty(OwningTargetsOf(plan, claudeEntry));
+    }
+
+    private static readonly string[] ExpectedCodexOwner = ["codex"];
+
+    /// <summary>
+    ///     Reads the raw owning target tokens recorded for a degraded path from the
+    ///     <see cref="SquadDegradedFile"/> contract, so a change to its shape fails at compile
+    ///     time rather than returning empty owners.
+    /// </summary>
+    private static IReadOnlyList<string> OwningTargetsOf(SquadDeploymentPlan plan, string relativePath) =>
+        plan.DegradedFiles
+            .Where(degraded => degraded.RelativePath == relativePath)
+            .Select(degraded => degraded.Target)
+            .ToList();
+
+    /// <summary>
+    ///     A degraded-file warning quotes a receipt-sourced token, so a hand-edited receipt cannot
+    ///     inject a second log line: control characters are neutralized while known tokens pass
+    ///     through byte-for-byte.
+    /// </summary>
+    [Theory]
+    [InlineData("codex", "codex")]
+    [InlineData("future-harness", "future-harness")]
+    [InlineData("evil\ninjected", "evil?injected")]
+    [InlineData("carriage\rreturn", "carriage?return")]
+    [InlineData("tab\there", "tab?here")]
+    [InlineData("", "")]
+    public void SanitizeTargetTokenForWarningKeepsKnownTokensAndNeutralizesControlCharacters(
+        string token,
+        string expected)
+    {
+        Assert.Equal(expected, SquadLifecycleService.SanitizeTargetTokenForWarning(token));
+    }
+
+    /// <summary>
     ///     Progressively disclosed references are ordinary deployment files. Their rendered paths
     ///     must therefore receive the same exact-byte ownership and status guarantees as principals.
     /// </summary>

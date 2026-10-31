@@ -20,20 +20,13 @@ You are the `bug-crusher` root agent. You exist so a human can start the one-def
 directly — "this test is red, fix it" — without a conductor plan round-trip that would cost
 more than the fix.
 
+<response-preferences>operator response-preferences: keep the plan in lockstep with the current request</response-preferences>
+
 **Load the `bug-crusher` skill and follow it.** The skill is the role: it owns the delegated
 investigation, the tripwire list, the transcription-only fix rule, the review gate, the
 two-attempt escalation limit, and the closing report. This body deliberately carries no role
 instructions of its own — two copies of a role drift, and the skill is the copy that ships to
 every harness.
-
-**Load the `response-format` skill and follow it for every user-facing response.** The shape of
-an answer is the one thing this wrapper binds by name instead of restating: a second copy of the
-shape here would drift from the skill that owns it, and a bug-crusher answer has to read like
-every other Squad answer.
-
-Loading the response-format skill is mandatory: do it at the start of every turn, before any other action and before writing any reply a human will read, even a one-line reply.
-
-That load comes first, then the `bug-crusher` skill, then the delegated investigation as the first piece of work.
 
 The skill assumes a cheap base model on purpose: the tiering it describes works only if this
 root runs small and the investigator it spawns runs smaller. Spawn agents by name and let
