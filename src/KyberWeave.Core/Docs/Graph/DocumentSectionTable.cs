@@ -67,22 +67,49 @@ internal static class DocumentSectionTable
         List<string> cells = new();
         StringBuilder current = new();
         int bracketDepth = 0;
+        int parenDepth = 0;
+        bool inCode = false;
         for (int index = 0; index < line.Length; index++)
         {
             char character = line[index];
-            if (character == '[')
+            if (!inCode && character == '\\' && index + 1 < line.Length && line[index + 1] == '|')
             {
-                bracketDepth++;
-            }
-            else if (character == ']' && bracketDepth > 0)
-            {
-                bracketDepth--;
-            }
-            else if (character == '|' && bracketDepth == 0)
-            {
-                cells.Add(current.ToString().Trim());
-                current.Clear();
+                current.Append('|');
+                index++;
                 continue;
+            }
+
+            if (character == '`')
+            {
+                inCode = !inCode;
+                current.Append(character);
+                continue;
+            }
+
+            if (!inCode)
+            {
+                if (character == '[')
+                {
+                    bracketDepth++;
+                }
+                else if (character == ']' && bracketDepth > 0)
+                {
+                    bracketDepth--;
+                }
+                else if (character == '(')
+                {
+                    parenDepth++;
+                }
+                else if (character == ')' && parenDepth > 0)
+                {
+                    parenDepth--;
+                }
+                else if (character == '|' && bracketDepth == 0 && parenDepth == 0)
+                {
+                    cells.Add(current.ToString().Trim());
+                    current.Clear();
+                    continue;
+                }
             }
 
             current.Append(character);

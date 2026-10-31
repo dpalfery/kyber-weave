@@ -22,4 +22,53 @@ public sealed class DocumentSectionTableTests
         Assert.Equal("ok", row[1]);
         Assert.Equal("done", row[2]);
     }
+
+    [Fact]
+    public void PipeCharactersInsideLinkDestinationsStayInOneCell()
+    {
+        const string body = """
+            | Plan | Status |
+            |---|---|
+            | [a](x|y.md) | ok |
+            """;
+
+        List<string[]>? rows = DocumentSectionTable.ReadDataRows(body);
+        Assert.NotNull(rows);
+        string[] row = Assert.Single(rows);
+        Assert.Equal(2, row.Length);
+        Assert.Equal("[a](x|y.md)", row[0]);
+        Assert.Equal("ok", row[1]);
+    }
+
+    [Fact]
+    public void PipeCharactersInsideCodeSpansStayInOneCell()
+    {
+        const string body = """
+            | Plan | Status |
+            |---|---|
+            | `a|b` | ok |
+            """;
+
+        List<string[]>? rows = DocumentSectionTable.ReadDataRows(body);
+        Assert.NotNull(rows);
+        string[] row = Assert.Single(rows);
+        Assert.Equal("`a|b`", row[0]);
+        Assert.Equal("ok", row[1]);
+    }
+
+    [Fact]
+    public void EscapedPipeCharactersStayInOneCell()
+    {
+        const string body = """
+            | Plan | Status |
+            |---|---|
+            | a\|b | ok |
+            """;
+
+        List<string[]>? rows = DocumentSectionTable.ReadDataRows(body);
+        Assert.NotNull(rows);
+        string[] row = Assert.Single(rows);
+        Assert.Equal("a|b", row[0]);
+        Assert.Equal("ok", row[1]);
+    }
 }
