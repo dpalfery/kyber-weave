@@ -209,14 +209,12 @@ public sealed class DocumentSectionGraph
         string combined = link.Path;
         if (string.IsNullOrEmpty(combined))
         {
-            combined = string.IsNullOrEmpty(link.Fragment) ? string.Empty : $"#{link.Fragment}";
-        }
-        else if (!string.IsNullOrEmpty(link.Fragment))
-        {
-            combined = string.Create(CultureInfo.InvariantCulture, $"{link.Path}#{link.Fragment}");
+            combined = string.Empty;
         }
 
-        string? resolved = DocGraphProjection.ResolveLink(source.RelativePath, combined);
+        string? resolved = string.IsNullOrEmpty(combined)
+            ? source.RelativePath
+            : DocGraphProjection.ResolveLink(source.RelativePath, combined);
         if (resolved is null)
         {
             return;

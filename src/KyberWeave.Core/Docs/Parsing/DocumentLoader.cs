@@ -217,6 +217,8 @@ public sealed partial class DocumentLoader
 
         DocumentFrontmatter? frontmatter = null;
         string? parseError = null;
+        DocumentFrontmatter sectionOverlay = new();
+        string? sectionFrontmatterError = SectionFrontmatterParser.Apply(read.Yaml, sectionOverlay);
         try
         {
             frontmatter = MarkdownFrontmatterReader.Deserializer
@@ -228,9 +230,17 @@ public sealed partial class DocumentLoader
         }
 
         frontmatter ??= new DocumentFrontmatter();
-        if (parseError is null)
+        if (parseError is null && sectionFrontmatterError is null)
         {
-            SectionFrontmatterParser.Apply(read.Yaml, frontmatter);
+            if (!string.IsNullOrWhiteSpace(sectionOverlay.Lead))
+            {
+                frontmatter.Lead = sectionOverlay.Lead;
+            }
+
+            if (sectionOverlay.Sections is not null)
+            {
+                frontmatter.Sections = sectionOverlay.Sections;
+            }
         }
 
         return new DocumentModel
@@ -239,6 +249,7 @@ public sealed partial class DocumentLoader
             FilePath = absolutePath,
             HasFrontmatter = true,
             ParseError = parseError,
+            SectionFrontmatterError = sectionFrontmatterError,
             Frontmatter = frontmatter,
             DocType = ParseDocType(frontmatter.DocType),
             Status = ParseStatus(frontmatter.Status),
@@ -343,8 +354,8 @@ public sealed partial class DocumentLoader
     /// </summary>
     internal static IReadOnlyList<DocumentLeaf> SplitLeaves(string body, string docId)
     {
-        MarkdownDocument document = Markdown.Parse(body, LeafPipeline);
         string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
+        MarkdownDocument document = Markdown.Parse(normalized, LeafPipeline);
         Dictionary<HeadingBlock, string> headingIds = BuildHeadingIds(document, docId);
 
         List<DocumentLeaf> leaves = new();

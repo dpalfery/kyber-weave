@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Text;
@@ -35,7 +34,10 @@ public sealed class ExploreAnswerTests : IDisposable
 
     private readonly DocFixture _fixture = new();
 
-    public void Dispose() => _fixture.Dispose();
+    public void Dispose()
+    {
+        _fixture.Dispose();
+    }
 
     [Fact]
     public void AMatchPastCharacter2000IsReturnedAndTheIntroIsNot()
@@ -46,8 +48,10 @@ public sealed class ExploreAnswerTests : IDisposable
         string sectionBody = beforeMatch + answerPhrase;
         DocsTools tools = BuildTools(
             ("window/fixture", "Window fixture", "6-Docs/window/fixture.md", ["windowtarget"],
-                [("Introduction", RepeatToLength("neutral ", 400) + introMarker),
-                    ("Answer", sectionBody)]));
+            [
+                ("Introduction", RepeatToLength("neutral ", 400) + introMarker),
+                ("Answer", sectionBody)
+            ]));
 
         string response = Explore(tools, "windowtarget");
         string prose = AnswerProse(response);
@@ -138,7 +142,8 @@ public sealed class ExploreAnswerTests : IDisposable
 
         Assert.Contains(mainPhrase, prose, StringComparison.Ordinal);
         Assert.DoesNotContain(unrelated, prose, StringComparison.Ordinal);
-        Assert.DoesNotContain("[also in this document, not matching this query: Unrelated]", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("[also in this document, not matching this query: Unrelated]", response,
+            StringComparison.Ordinal);
         AssertLegacyPileAbsent(response);
     }
 
@@ -147,9 +152,11 @@ public sealed class ExploreAnswerTests : IDisposable
     {
         DocsTools tools = BuildTools(
             ("api/routing", "Routing", "6-Docs/webui/architecture.md", ["routing"],
-                [("Alpha", "routing alpha section routing"),
-                    ("Beta", "routing beta section routing"),
-                    ("Gamma", "routing gamma section routing")]));
+            [
+                ("Alpha", "routing alpha section routing"),
+                ("Beta", "routing beta section routing"),
+                ("Gamma", "routing gamma section routing")
+            ]));
 
         string response = Explore(tools, "routing");
         string prose = AnswerProse(response);
@@ -171,7 +178,7 @@ public sealed class ExploreAnswerTests : IDisposable
 
         const string query = "closetopic";
         string response = Explore(tools, query);
-        AssertTopicConfidence(host, query, response, expectRunnerTopicAboveZero: true, expectBelow060: true);
+        AssertTopicConfidence(host, query, response, true, true);
     }
 
     [Fact]
@@ -201,7 +208,7 @@ public sealed class ExploreAnswerTests : IDisposable
 
         Assert.Contains(phrase, prose, StringComparison.Ordinal);
         Assert.Equal(phrase, prose);
-        Assert.Equal(1.00, ParseConfidence(response), precision: 2);
+        Assert.Equal(1.00, ParseConfidence(response), 2);
         Assert.DoesNotContain(IncompletePrefix, response, StringComparison.Ordinal);
     }
 
@@ -234,17 +241,83 @@ public sealed class ExploreAnswerTests : IDisposable
         AssertLegacyPileAbsent(response);
     }
 
-    private DocsTools BuildTools(params (string Id, string Title, string Path, string[] Keywords, (string Heading, string Body)[] Sections)[] documents)
+    [Fact]
+    public void ANegativeCursorOffsetIsInvalidWithoutThrowing()
+    {
+        DocsTools tools = BuildTools(
+            ("cursor/fixture", "Cursor fixture", "6-Docs/cursor/fixture.md", ["cursorneg"],
+                [("Detail", "cursorneg definitive answer phrase")]));
+
+        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        ExploreAnswer answer = index.Explore("cursorneg", "docs/a.md|id#sec|-1");
+
+        Assert.True(answer.IsInvalidCursor);
+        Assert.False(string.IsNullOrEmpty(answer.InvalidCursorMessage));
+    }
+
+    [Fact]
+    public void DuplicateTopicHeadingsDoNotBreakExploreScoring()
+    {
+        DocsTools tools = BuildTools(
+            ("dup/headings", "Dup headings", "6-Docs/dup/headings.md", ["dupheading"],
+            [
+                ("Topic", "dupheading first section wins"),
+                ("Topic", "dupheading second section ignored")
+            ]));
+
+        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        Exception? failure = Record.Exception(() => index.Explore("dupheading"));
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void ContinuationCursorsCoverEveryCharacterWhenParagraphBreakFallsInSlack()
+    {
+        const string unit = "slackpara ";
+        int cap = ExploreAnswer.AnswerCharCap;
+        int slack = 500;
+        string prefix = RepeatToLength(unit, cap - 20);
+        string gap = RepeatToLength(unit, slack / 2);
+        string suffix = "SLACK-PARA-TAIL-MARKER-slackpara";
+        string body = prefix + "\n\n" + gap + suffix;
+        Assert.True(body.Length > cap + 50, "fixture must exceed one answer span.");
+
+        DocsTools tools = BuildTools(
+            ("slack/para", "Slack para", "6-Docs/slack/para.md", ["slackpara"],
+                [("Detail", body)]));
+
+        DocumentIndex index = CreateHost(_fixture.Root).Current();
+        ExploreAnswer first = index.Explore("slackpara");
+        Assert.NotNull(first.CursorToken);
+
+        StringBuilder assembled = new(first.Prose);
+        string? cursor = first.CursorToken;
+        int guard = 0;
+        while (cursor is not null && guard++ < 20)
+        {
+            ExploreAnswer next = index.Explore("slackpara", cursor);
+            assembled.Append(next.Prose);
+            cursor = next.CursorToken;
+        }
+
+        Assert.Equal(body, assembled.ToString());
+    }
+
+    private DocsTools BuildTools(
+        params (string Id, string Title, string Path, string[] Keywords, (string Heading, string Body)[] Sections)[]
+            documents)
     {
         (DocsTools tools, _) = BuildToolsWithHost(documents);
         return tools;
     }
 
     private (DocsTools Tools, DocumentIndexHost Host) BuildToolsWithHost(
-        params (string Id, string Title, string Path, string[] Keywords, (string Heading, string Body)[] Sections)[] documents)
+        params (string Id, string Title, string Path, string[] Keywords, (string Heading, string Body)[] Sections)[]
+            documents)
     {
         _fixture.WithCatalog().WithSourceRoot("1-Presentation/Api");
-        foreach ((string id, string title, string path, string[] keywords, (string Heading, string Body)[] sections) in documents)
+        foreach ((string id, string title, string path, string[] keywords,
+                     (string Heading, string Body)[] sections) in documents)
         {
             WriteDocument(id, title, path, keywords, sections);
         }
@@ -349,8 +422,8 @@ public sealed class ExploreAnswerTests : IDisposable
         }
 
         double expected = ContractConfidence(winnerTopic, runnerTopic, answer.Incomplete);
-        Assert.Equal(expected, answer.Confidence, precision: 2);
-        Assert.Equal(expected, ParseConfidence(formattedResponse), precision: 2);
+        Assert.Equal(expected, answer.Confidence, 2);
+        Assert.Equal(expected, ParseConfidence(formattedResponse), 2);
 
         if (expectBelow060)
         {
@@ -430,8 +503,10 @@ public sealed class ExploreAnswerTests : IDisposable
         return tail.TrimEnd();
     }
 
-    private static IEnumerable<string> SourceLines(string response) =>
-        response.Split('\n').Where(line => line.StartsWith("source:", StringComparison.Ordinal));
+    private static IEnumerable<string> SourceLines(string response)
+    {
+        return response.Split('\n').Where(line => line.StartsWith("source:", StringComparison.Ordinal));
+    }
 
     private static void AssertLegacyPileAbsent(string response)
     {

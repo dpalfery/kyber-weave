@@ -192,8 +192,7 @@ public sealed partial class DocumentIndex
             return (remainder, false, null);
         }
 
-        int proseEnd = Math.Min(cap, remainder.Length);
-        int cursorEnd = proseEnd;
+        int cursorEnd = Math.Min(cap, remainder.Length);
         if (remainder.Length > cap)
         {
             int slackEnd = Math.Min(remainder.Length, cap + IncompleteContinuationSlack);
@@ -205,14 +204,14 @@ public sealed partial class DocumentIndex
             }
         }
 
-        string slice = remainder[..proseEnd];
+        string slice = remainder[..cursorEnd];
         string? cursor = cursorEnd < remainder.Length
             ? ExploreCursor.Format(
                 winner.Document.RelativePath,
                 winner.Leaf.Id,
                 characterOffset + cursorEnd)
             : null;
-        bool incomplete = cursorEnd < remainder.Length || remainder.Length > cap;
+        bool incomplete = cursor is not null;
         return (slice, incomplete, cursor);
     }
 
@@ -449,9 +448,7 @@ public sealed partial class DocumentIndex
 
         string docId = document.Frontmatter.Id ?? document.RelativePath;
         MarkdownDocument markdown = Markdown.Parse(document.Body, ExploreHeadingPipeline);
-        Dictionary<string, DocumentSection> sectionByHeading = document.Sections.ToDictionary(
-            section => section.Heading,
-            StringComparer.Ordinal);
+        Dictionary<string, DocumentSection> sectionByHeading = SectionByHeading(document.Sections);
 
         foreach (HeadingBlock heading in markdown.Descendants<HeadingBlock>())
         {
@@ -496,6 +493,18 @@ public sealed partial class DocumentIndex
         }
 
         return builder.ToString();
+    }
+
+    private static Dictionary<string, DocumentSection> SectionByHeading(
+        IReadOnlyList<DocumentSection> sections)
+    {
+        Dictionary<string, DocumentSection> map = new(StringComparer.Ordinal);
+        foreach (DocumentSection section in sections)
+        {
+            map.TryAdd(section.Heading, section);
+        }
+
+        return map;
     }
 
     private static string SlugifySectionHeading(string heading)
@@ -811,9 +820,7 @@ public sealed partial class DocumentIndex
             _sectionByLeafId = new Dictionary<string, DocumentSection>(StringComparer.Ordinal);
 
             MarkdownDocument markdown = Markdown.Parse(document.Body, ExploreHeadingPipeline);
-            Dictionary<string, DocumentSection> sectionByHeading = document.Sections.ToDictionary(
-                section => section.Heading,
-                StringComparer.Ordinal);
+            Dictionary<string, DocumentSection> sectionByHeading = SectionByHeading(document.Sections);
 
             foreach (HeadingBlock heading in markdown.Descendants<HeadingBlock>())
             {
@@ -923,7 +930,8 @@ internal sealed record ExploreCursor(string RelativePath, string LeafId, int Cha
             return false;
         }
 
-        if (!int.TryParse(token[(lastPipe + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int offset))
+        if (!int.TryParse(token[(lastPipe + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int offset)
+            || offset < 0)
         {
             return false;
         }

@@ -81,6 +81,7 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
         {
             foreach (KeyValuePair<string, string?> property in edge.Properties)
             {
+                if (property.Key is "type" or "label" or "from" or "to") continue;
                 json[property.Key] = property.Value;
             }
         }

@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using Markdig;
@@ -49,6 +50,57 @@ public sealed class LinkFragmentTests
         Assert.Equal("the overview", link.Text, StringComparer.Ordinal);
         Assert.Equal(1, link.Line);
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void AFragmentedLinkResolvesTheTargetDocumentWithoutPassingFragmentToResolveLink()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/linker.md", """
+                                       ---
+                                       id: docs/source
+                                       title: Source
+                                       doc-type: reference
+                                       status: current
+                                       owner: Maintainers
+                                       last-reviewed: 2026-10-31
+                                       ---
+
+                                       # Source
+
+                                       ## Topic
+
+                                       ### Detail
+
+                                       See [other doc](other/target.md#install-section) for steps.
+                                       """)
+            .Write("6-Docs/other/target.md", """
+                                             ---
+                                             id: docs/target
+                                             title: Target
+                                             doc-type: reference
+                                             status: current
+                                             owner: Maintainers
+                                             last-reviewed: 2026-10-31
+                                             ---
+
+                                             # Target
+
+                                             ## Topic
+
+                                             ### Install section
+
+                                             Target body.
+                                             """);
+
+        DocumentSet set = fixture.Load();
+        DocumentSectionGraph graph = DocumentSectionGraph.Build(set.Documents);
+        DocumentModel target = set.Documents.Single(doc => doc.RelativePath == "6-Docs/other/target.md");
+        DocumentLeaf fragmentLeaf = Assert.Single(
+            target.Leaves,
+            leaf => leaf.Id.Contains("install", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(graph.InboundLabelsByLeafId.ContainsKey(fragmentLeaf.Id));
     }
 
     /// <summary>

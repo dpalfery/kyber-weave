@@ -139,12 +139,12 @@ public sealed class SectionFrontmatterValidationTests
             .Write(SubjectPath, ReferenceBody(
                 "lead: huge-leaf",
                 $"""
-                ## Topic
+                 ## Topic
 
-                ### Huge leaf
+                 ### Huge leaf
 
-                {huge}
-                """));
+                 {huge}
+                 """));
 
         DiagnosticReport report = fixture.Validate();
 
@@ -263,19 +263,66 @@ public sealed class SectionFrontmatterValidationTests
         Assert.Contains("detail", item.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SectionsDeclaredAsScalarSurfacesInvalidVocabulary()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(SubjectPath, ReferenceBody(
+                """
+                sections:
+                  detail:
+                    keywords: not-a-list
+                """,
+                """
+                ## Topic
+
+                ### Detail
+
+                Body.
+                """));
+
+        DiagnosticReport report = fixture.Validate();
+
+        Diagnostic item = Assert.Single(
+            report.Items,
+            i => i.Code == DocSpecValidator.InvalidVocabulary && i.Severity == Severity.Error);
+        Assert.Contains("keywords", item.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NullSectionEntryDoesNotThrowOnLoad()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(SubjectPath, ReferenceBody(
+                """
+                sections:
+                  install:
+                """,
+                """
+                ## Topic
+
+                ### Detail
+
+                Body.
+                """));
+
+        DocumentModel doc = Assert.Single(fixture.LoadSubjects());
+        Assert.NotNull(doc.Keywords);
+    }
+
     private static DocFixture BuildLeadFixture(string? leadYaml)
     {
         DocFixture fixture = new DocFixture().WithCatalog();
         string extra = leadYaml is null ? string.Empty : leadYaml + Environment.NewLine;
         fixture.Write(SubjectPath, ReferenceBody(extra, $"""
-            {PreambleMarker}
+                                                         {PreambleMarker}
 
-            ## Topic
+                                                         ## Topic
 
-            ### Detail
+                                                         ### Detail
 
-            {DetailMarker}
-            """));
+                                                         {DetailMarker}
+                                                         """));
         return fixture;
     }
 

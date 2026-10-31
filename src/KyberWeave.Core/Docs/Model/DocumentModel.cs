@@ -132,6 +132,9 @@ public sealed class DocumentModel
     /// <summary>Set when the frontmatter block was present but could not be deserialized.</summary>
     public string? ParseError { get; init; }
 
+    /// <summary>Set when optional <c>lead</c> or <c>sections</c> frontmatter could not be parsed.</summary>
+    public string? SectionFrontmatterError { get; init; }
+
     public DocumentFrontmatter Frontmatter { get; init; } = new();
 
     public DocType DocType { get; init; }
@@ -249,6 +252,11 @@ public sealed class DocumentModel
 
         foreach (DocumentSectionVocabulary section in Frontmatter.Sections.Values)
         {
+            if (section is null)
+            {
+                continue;
+            }
+
             if (section.Keywords is not null)
             {
                 items.AddRange(section.Keywords);
@@ -265,6 +273,11 @@ public sealed class DocumentModel
 
         foreach (DocumentSectionVocabulary section in Frontmatter.Sections.Values)
         {
+            if (section is null)
+            {
+                continue;
+            }
+
             if (section.CodeRefs is not null)
             {
                 items.AddRange(section.CodeRefs);

@@ -1,5 +1,8 @@
+using System.Globalization;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Parsing;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Parsing;
 
@@ -10,15 +13,21 @@ internal static class SectionFrontmatterParser
 {
     private const string PreamblePlaceholder = "__kyber_preamble_slug__";
 
-    internal static void Apply(string yaml, DocumentFrontmatter frontmatter)
+    internal static string? Apply(string yaml, DocumentFrontmatter frontmatter)
     {
         ArgumentNullException.ThrowIfNull(frontmatter);
         if (string.IsNullOrWhiteSpace(yaml))
         {
-            return;
+            return null;
         }
 
         string normalized = yaml.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string? shapeError = ValidateSectionsShape(normalized);
+        if (shapeError is not null)
+        {
+            return shapeError;
+        }
+
         string patched = normalized
             .Replace("\"#\":", PreamblePlaceholder + ":", StringComparison.Ordinal)
             .Replace("'#':", PreamblePlaceholder + ":", StringComparison.Ordinal);
@@ -28,9 +37,9 @@ internal static class SectionFrontmatterParser
         {
             overlay = MarkdownFrontmatterReader.Deserializer.Deserialize<SectionFrontmatterOverlay>(patched);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return;
+            return ex.Message;
         }
 
         if (!string.IsNullOrWhiteSpace(overlay.Lead))
@@ -40,7 +49,7 @@ internal static class SectionFrontmatterParser
 
         if (overlay.Sections is not { Count: > 0 })
         {
-            return;
+            return null;
         }
 
         Dictionary<string, DocumentSectionVocabulary> sections = new(StringComparer.Ordinal);
@@ -51,6 +60,83 @@ internal static class SectionFrontmatterParser
         }
 
         frontmatter.Sections = sections;
+        return null;
+    }
+
+    private static string? ValidateSectionsShape(string yaml)
+    {
+        try
+        {
+            YamlStream stream = new();
+            using StringReader reader = new(yaml);
+            stream.Load(reader);
+            if (stream.Documents.Count == 0 || stream.Documents[0].RootNode is not YamlMappingNode root)
+            {
+                return null;
+            }
+
+            if (!root.Children.TryGetValue(new YamlScalarNode("sections"), out YamlNode? sectionsNode))
+            {
+                return null;
+            }
+
+            if (sectionsNode is YamlScalarNode)
+            {
+                return "sections must be a mapping keyed by section slug, not a scalar.";
+            }
+
+            if (sectionsNode is not YamlMappingNode sectionsMap)
+            {
+                return "sections must be a mapping keyed by section slug.";
+            }
+
+            foreach (KeyValuePair<YamlNode, YamlNode> entry in sectionsMap.Children)
+            {
+                if (entry.Value is YamlScalarNode)
+                {
+                    return "Each sections entry must be a mapping with optional keywords and code-refs.";
+                }
+
+                if (entry.Value is not YamlMappingNode sectionMap)
+                {
+                    continue;
+                }
+
+                foreach (KeyValuePair<YamlNode, YamlNode> property in sectionMap.Children)
+                {
+                    if (property.Key is not YamlScalarNode { Value: { } key })
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(key, "keywords", StringComparison.Ordinal)
+                        && !string.Equals(key, "code-refs", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (property.Value is YamlSequenceNode)
+                    {
+                        continue;
+                    }
+
+                    return string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"sections.{PlainScalar(entry.Key)}.{key} must be a list.");
+                }
+            }
+        }
+        catch (YamlException ex)
+        {
+            return ex.Message;
+        }
+
+        return null;
+    }
+
+    private static string PlainScalar(YamlNode node)
+    {
+        return node is YamlScalarNode scalar ? scalar.Value ?? string.Empty : string.Empty;
     }
 
     private sealed class SectionFrontmatterOverlay

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace KyberWeave.Core.Docs.Graph;
 
 /// <summary>
@@ -27,7 +29,7 @@ internal static class IndexSectionCatalog
         string normalized = NormalizeRelativePath(relativePath);
         foreach (Entry entry in Entries)
         {
-            if (normalized.EndsWith(entry.PathSuffix, StringComparison.OrdinalIgnoreCase)
+            if (PathMatches(normalized, entry.PathSuffix)
                 && string.Equals(sectionHeading, entry.Heading, StringComparison.Ordinal))
             {
                 return true;
@@ -40,5 +42,13 @@ internal static class IndexSectionCatalog
     internal static string NormalizeRelativePath(string relativePath)
     {
         return relativePath.Replace('\\', '/').Trim();
+    }
+
+    private static bool PathMatches(string normalizedPath, string pathSuffix)
+    {
+        return string.Equals(normalizedPath, pathSuffix, StringComparison.OrdinalIgnoreCase)
+               || normalizedPath.EndsWith(
+                   string.Create(CultureInfo.InvariantCulture, $"/{pathSuffix}"),
+                   StringComparison.OrdinalIgnoreCase);
     }
 }

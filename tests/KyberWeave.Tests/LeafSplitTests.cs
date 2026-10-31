@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -28,14 +27,14 @@ public sealed class LeafSplitTests
     public void ATripleHashHeadingIsItsOwnLeaf()
     {
         string body = """
-            ## Topic
+                      ## Topic
 
-            Lead before the triple.
+                      Lead before the triple.
 
-            ### Child
+                      ### Child
 
-            Triple body.
-            """;
+                      Triple body.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
@@ -49,18 +48,18 @@ public sealed class LeafSplitTests
     public void AFourHashHeadingStaysInsideItsParentTripleHashLeaf()
     {
         string body = """
-            ## Topic
+                      ## Topic
 
-            ### Parent
+                      ### Parent
 
-            Before quad.
+                      Before quad.
 
-            #### Detail
+                      #### Detail
 
-            Quad body.
+                      Quad body.
 
-            After quad.
-            """;
+                      After quad.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
@@ -76,14 +75,14 @@ public sealed class LeafSplitTests
     public void APreambleWithProseGetsTheDocIdHashIdentity()
     {
         string body = """
-            # Title
+                      # Title
 
-            Preamble prose before any section.
+                      Preamble prose before any section.
 
-            ## Overview
+                      ## Overview
 
-            Section body.
-            """;
+                      Section body.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
@@ -97,16 +96,16 @@ public sealed class LeafSplitTests
     public void ADuplicateHeadingSlugGetsTheGitHubMinusOneSuffix()
     {
         string body = """
-            ## Topic
+                      ## Topic
 
-            ### Overview
+                      ### Overview
 
-            First.
+                      First.
 
-            ### Overview
+                      ### Overview
 
-            Second.
-            """;
+                      Second.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
@@ -120,17 +119,17 @@ public sealed class LeafSplitTests
     public void AHashInsideAFencedBlockDoesNotSplitLeaves()
     {
         string body = """
-            ## Commands
+                      ## Commands
 
-            ```bash
-            ## not a heading
-            echo hi
-            ```
+                      ```bash
+                      ## not a heading
+                      echo hi
+                      ```
 
-            ### Real
+                      ### Real
 
-            End.
-            """;
+                      End.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
@@ -143,23 +142,41 @@ public sealed class LeafSplitTests
     public void AHashInsideATildeFenceDoesNotSplitLeaves()
     {
         string body = """
-            ## Commands
+                      ## Commands
 
-            ~~~bash
-            ## not a heading
-            echo hi
-            ~~~
+                      ~~~bash
+                      ## not a heading
+                      echo hi
+                      ~~~
 
-            ### Real
+                      ### Real
 
-            End.
-            """;
+                      End.
+                      """;
 
         IReadOnlyList<LeafExpectation> contract = ContractLeaves(body, DocId);
         IReadOnlyList<LeafExpectation> actual = ProductionSplitLeaves(body, DocId);
 
         Assert.DoesNotContain(contract, leaf => leaf.Id.Contains("not-a-heading", StringComparison.Ordinal));
         Assert.Equal(contract, actual);
+    }
+
+    [Fact]
+    public void CrlfLineEndingsMatchLfLeafBodies()
+    {
+        const string lfBody = """
+                              ## Topic
+
+                              ### Detail
+
+                              alpha beta gamma.
+                              """;
+
+        string crlfBody = lfBody.Replace("\n", "\r\n", StringComparison.Ordinal);
+        IReadOnlyList<LeafExpectation> lfLeaves = ProductionSplitLeaves(lfBody, DocId);
+        IReadOnlyList<LeafExpectation> crlfLeaves = ProductionSplitLeaves(crlfBody, DocId);
+
+        Assert.Equal(lfLeaves, crlfLeaves);
     }
 
     /// <summary>

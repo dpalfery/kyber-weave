@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace KyberWeave.Core.Docs.Graph;
 
 /// <summary>Pipe-table parsing for section bodies.</summary>
@@ -33,9 +35,7 @@ internal static class DocumentSectionTable
         List<string[]> rows = new();
         for (int index = 0; index < tableLines.Count; index++)
         {
-            List<string> cells = tableLines[index].Split('|')
-                .Select(cell => cell.Trim())
-                .ToList();
+            List<string> cells = SplitRowCells(tableLines[index]);
             if (cells.Count > 0 && cells[0].Length == 0)
             {
                 cells.RemoveAt(0);
@@ -60,6 +60,36 @@ internal static class DocumentSectionTable
         }
 
         return rows;
+    }
+
+    private static List<string> SplitRowCells(string line)
+    {
+        List<string> cells = new();
+        StringBuilder current = new();
+        int bracketDepth = 0;
+        for (int index = 0; index < line.Length; index++)
+        {
+            char character = line[index];
+            if (character == '[')
+            {
+                bracketDepth++;
+            }
+            else if (character == ']' && bracketDepth > 0)
+            {
+                bracketDepth--;
+            }
+            else if (character == '|' && bracketDepth == 0)
+            {
+                cells.Add(current.ToString().Trim());
+                current.Clear();
+                continue;
+            }
+
+            current.Append(character);
+        }
+
+        cells.Add(current.ToString().Trim());
+        return cells;
     }
 
     private static bool IsSeparatorCell(string cell)

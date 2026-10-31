@@ -79,9 +79,9 @@ public sealed class DocSpecValidator
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
 
-        Dictionary<string, List<string>> idOwners = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        Dictionary<string, List<string>> idOwners = new(StringComparer.Ordinal);
         foreach (DocumentModel doc in set.Documents)
         {
             string? id = doc.Frontmatter.Id;
@@ -91,10 +91,11 @@ public sealed class DocSpecValidator
                 paths = [];
                 idOwners[id] = paths;
             }
+
             paths.Add(doc.RelativePath);
         }
 
-        HashSet<string> knownIds = new HashSet<string>(idOwners.Keys, StringComparer.Ordinal);
+        HashSet<string> knownIds = new(idOwners.Keys, StringComparer.Ordinal);
 
         Dictionary<string, DocumentModel> byPath = set.Documents.ToDictionary(
             doc => doc.RelativePath,
@@ -145,7 +146,25 @@ public sealed class DocSpecValidator
                 $"Frontmatter block could not be parsed: {doc.ParseError}",
                 doc.Subject, doc.RelativePath,
                 "Check YAML indentation and that list values use '- ' items."));
+            if (doc.SectionFrontmatterError is not null)
+            {
+                report.Add(new Diagnostic(
+                    InvalidVocabulary, Severity.Error,
+                    $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
+                    doc.Subject, doc.RelativePath,
+                    "Use a mapping for sections and list values for keywords and code-refs."));
+            }
+
             return;
+        }
+
+        if (doc.SectionFrontmatterError is not null)
+        {
+            report.Add(new Diagnostic(
+                InvalidVocabulary, Severity.Error,
+                $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
+                doc.Subject, doc.RelativePath,
+                "Use a mapping for sections and list values for keywords and code-refs."));
         }
 
         DocumentFrontmatter fm = doc.Frontmatter;
@@ -338,6 +357,7 @@ public sealed class DocSpecValidator
                 {
                     RequireValue(fm.SourceRoot, "source-root", doc, report);
                 }
+
                 break;
 
             case DocType.Runbook:
@@ -346,6 +366,7 @@ public sealed class DocSpecValidator
                     RequireList(doc.CodeRefs, "code-refs", doc, report,
                         "A runbook with a source-root must name the symbols it operates, or drop source-root if it is process-only.");
                 }
+
                 break;
         }
     }
@@ -416,14 +437,19 @@ public sealed class DocSpecValidator
         return relativePath[(start + 1)..end];
     }
 
-    private bool IsKnownDocType(string value) =>
-        _config.DocTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    private bool IsKnownDocType(string value)
+    {
+        return _config.DocTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
 
-    private bool IsKnownStatus(string value) =>
-        _config.Statuses.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    private bool IsKnownStatus(string value)
+    {
+        return _config.Statuses.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
 
-    private static string? GetFrontmatterValue(DocumentFrontmatter fm, string key) =>
-        key switch
+    private static string? GetFrontmatterValue(DocumentFrontmatter fm, string key)
+    {
+        return key switch
         {
             "id" => fm.Id,
             "title" => fm.Title,
@@ -436,6 +462,7 @@ public sealed class DocSpecValidator
             "technology" => fm.Technology,
             _ => null
         };
+    }
 
     private static void RequireValue(string? value, string key, DocumentModel doc, DiagnosticReport report)
     {
@@ -498,7 +525,18 @@ public sealed class DocSpecValidator
         foreach (KeyValuePair<string, DocumentSectionVocabulary> entry in doc.Frontmatter.Sections)
         {
             string slug = entry.Key;
-            DocumentSectionVocabulary section = entry.Value;
+            DocumentSectionVocabulary? section = entry.Value;
+            if (section is null)
+            {
+                report.Add(new Diagnostic(
+                    InvalidVocabulary,
+                    Severity.Error,
+                    $"sections entry '{slug}' is empty; declare keywords or code-refs.",
+                    doc.Subject,
+                    doc.RelativePath,
+                    "Remove the slug or add a mapping with keywords and/or code-refs."));
+                continue;
+            }
 
             if (!slugs.Contains(slug))
             {
@@ -562,7 +600,8 @@ public sealed class DocSpecValidator
 
     private static HashSet<string> CollectSectionSlugs(DocumentModel doc, string docId)
     {
-        HashSet<string> slugs = new(DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId), StringComparer.Ordinal);
+        HashSet<string> slugs = new(DocumentLoader.CollectHeadingFragmentSlugs(doc.Body, docId),
+            StringComparer.Ordinal);
         slugs.Add("#");
         return slugs;
     }
@@ -702,7 +741,10 @@ public sealed class DocSpecValidator
         return builder.ToString().Trim('-');
     }
 
-    private static string SlugToHeadingWords(string slug) => slug.Replace('-', ' ');
+    private static string SlugToHeadingWords(string slug)
+    {
+        return slug.Replace('-', ' ');
+    }
 
     private static Dictionary<string, IReadOnlySet<string>> BuildHeadingSlugIndex(DocumentSet set)
     {
@@ -758,8 +800,8 @@ public sealed class DocSpecValidator
                     Nearest(link.Fragment, slugs) is { } near
                         ? $"Closest heading anchor: '#{near}'."
                         : null,
-                    StartLine: doc.BodyStartLine + link.Line - 1,
-                    EndLine: doc.BodyStartLine + link.Line - 1));
+                    doc.BodyStartLine + link.Line - 1,
+                    doc.BodyStartLine + link.Line - 1));
             }
         }
     }
@@ -772,7 +814,7 @@ public sealed class DocSpecValidator
 
         foreach (string candidate in candidates)
         {
-            int distance = StringDistance.Levenshtein(value, candidate, ignoreCase: true);
+            int distance = StringDistance.Levenshtein(value, candidate, true);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -816,7 +858,7 @@ public sealed class DocSpecValidator
                 continue;
             }
 
-            int distance = StringDistance.Levenshtein(value, candidate, ignoreCase: true);
+            int distance = StringDistance.Levenshtein(value, candidate, true);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
