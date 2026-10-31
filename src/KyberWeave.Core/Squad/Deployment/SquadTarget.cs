@@ -83,6 +83,19 @@ public static class SquadTargetCatalog
     };
 
     /// <summary>
+    /// Resolves one exact canonical token without throwing. Returns <see langword="false"/> for an
+    /// unknown or null token, so recovery paths can degrade instead of aborting.
+    /// </summary>
+    public static bool TryResolve(string? token, out SquadTarget target)
+    {
+        if (token is not null && TargetsByToken.TryGetValue(token, out target))
+            return true;
+
+        target = default;
+        return false;
+    }
+
+    /// <summary>
     /// Parses repeated or comma-separated target arguments into a first-seen ordered set.
     /// </summary>
     public static IReadOnlyList<SquadTarget> Parse(IEnumerable<string> values)

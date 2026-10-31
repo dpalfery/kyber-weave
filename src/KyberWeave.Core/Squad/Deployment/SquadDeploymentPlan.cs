@@ -493,9 +493,7 @@ public sealed class SquadDeploymentPlan
                 // Bytes that cannot be read cannot be proven unedited, so the record is kept and the file is
                 // left alone; the caller reports it by name.
                 nextOwnedFiles.Add(previous);
-                degradedFiles.Add(new SquadDegradedFile(
-                    relativePath,
-                    SquadTargetCatalog.Parse([rendered.File.Target]).Single()));
+                AddDegradedFile(degradedFiles, relativePath, rendered.File.Target);
                 continue;
             }
 
@@ -557,9 +555,7 @@ public sealed class SquadDeploymentPlan
             {
                 // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
                 nextOwnedFiles.Add(previous);
-                degradedFiles.Add(new SquadDegradedFile(
-                    previous.RelativePath,
-                    SquadTargetCatalog.Parse([previous.Target]).Single()));
+                AddDegradedFile(degradedFiles, previous.RelativePath, previous.Target);
                 continue;
             }
 
@@ -745,9 +741,9 @@ public sealed class SquadDeploymentPlan
 
         if (siblingGlobalReceipts is not null)
             foreach (SquadReceipt sibling in siblingGlobalReceipts)
-                foreach (SquadOwnedFile file in sibling.Files)
-                    managedIdentities.Add(DeployedFileIdentity(file.Target,
-                        SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+            foreach (SquadOwnedFile file in sibling.Files)
+                managedIdentities.Add(DeployedFileIdentity(file.Target,
+                    SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
 
         List<SquadUnmanagedPathCollision> collisions = [];
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -925,6 +921,16 @@ public sealed class SquadDeploymentPlan
         return target + '\0' + relativePath;
     }
 
+    /// <summary>
+    /// Records a degraded file only when its target token resolves. An unknown token keeps the owned
+    /// record (already added by the caller), so recovery never throws from inside a catch.
+    /// </summary>
+    private static void AddDegradedFile(List<SquadDegradedFile> degradedFiles, string relativePath, string target)
+    {
+        if (SquadTargetCatalog.TryResolve(target, out SquadTarget resolved))
+            degradedFiles.Add(new SquadDegradedFile(relativePath, resolved));
+    }
+
     private static bool IsOwnedBySiblingReceipt(
         IReadOnlyList<SquadReceipt>? siblingReceipts,
         string target,
@@ -934,10 +940,10 @@ public sealed class SquadDeploymentPlan
             return false;
 
         foreach (SquadReceipt sibling in siblingReceipts)
-            foreach (SquadOwnedFile owned in sibling.Files)
-                if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
-                    string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
-                    return true;
+        foreach (SquadOwnedFile owned in sibling.Files)
+            if (string.Equals(owned.Target, target, StringComparison.Ordinal) &&
+                string.Equals(owned.RelativePath, relativePath, StringComparison.Ordinal))
+                return true;
 
         return false;
     }
@@ -988,14 +994,14 @@ public enum SquadFileMutationKind
     Delete
 }
 
+/// <summary>A deployed file a plan kept on trust, with the target that produced it.</summary>
+public sealed record SquadDegradedFile(string RelativePath, SquadTarget Target);
+
 /// <summary>
 ///     One planned file change without its payload, for command hosts that report what a plan
 ///     will do. An uninstall plan's receipt holds only the files it retains, so the removals it
 ///     plans are readable from these changes alone.
 /// </summary>
-/// <summary>A deployed file a plan kept on trust, with the target that produced it.</summary>
-public sealed record SquadDegradedFile(string RelativePath, SquadTarget Target);
-
 public sealed record SquadPlannedFileChange(
     string RelativePath,
     string Target,
