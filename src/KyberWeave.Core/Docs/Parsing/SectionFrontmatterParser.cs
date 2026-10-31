@@ -92,14 +92,9 @@ internal static class SectionFrontmatterParser
 
             foreach (KeyValuePair<YamlNode, YamlNode> entry in sectionsMap.Children)
             {
-                if (entry.Value is YamlScalarNode)
-                {
-                    return "Each sections entry must be a mapping with optional keywords and code-refs.";
-                }
-
                 if (entry.Value is not YamlMappingNode sectionMap)
                 {
-                    continue;
+                    return "Each sections entry must be a mapping with optional keywords and code-refs.";
                 }
 
                 foreach (KeyValuePair<YamlNode, YamlNode> property in sectionMap.Children)

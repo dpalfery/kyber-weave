@@ -310,6 +310,55 @@ public sealed class SectionFrontmatterValidationTests
         Assert.NotNull(doc.Keywords);
     }
 
+    [Fact]
+    public void SectionValueThatIsASequenceNamesTheMappingRequirement()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(SubjectPath, ReferenceBody(
+                """
+                sections:
+                  install:
+                    - a
+                    - b
+                """,
+                """
+                ## Topic
+
+                ### Detail
+
+                Body.
+                """));
+
+        DiagnosticReport report = fixture.Validate();
+
+        Diagnostic item = Assert.Single(
+            report.Items,
+            i => i.Code == DocSpecValidator.InvalidVocabulary && i.Severity == Severity.Error);
+        Assert.Contains("must be a mapping", item.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OneBrokenYamlBlockReportsASingleParseError()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write(SubjectPath, ReferenceBody(
+                "sections: [",
+                """
+                ## Topic
+
+                ### Detail
+
+                Body.
+                """));
+
+        DiagnosticReport report = fixture.Validate();
+
+        Assert.Single(report.Items, i => i.Code == DocSpecValidator.MissingFrontmatter);
+        Assert.DoesNotContain(
+            report.Items,
+            i => i.Message.Contains("Section frontmatter could not be parsed", StringComparison.Ordinal));
+    }
+
     private static DocFixture BuildLeadFixture(string? leadYaml)
     {
         DocFixture fixture = new DocFixture().WithCatalog();

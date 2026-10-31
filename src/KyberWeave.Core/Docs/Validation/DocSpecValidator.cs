@@ -141,20 +141,25 @@ public sealed class DocSpecValidator
 
         if (doc.ParseError is not null)
         {
-            report.Add(new Diagnostic(
-                MissingFrontmatter, Severity.Error,
-                $"Frontmatter block could not be parsed: {doc.ParseError}",
-                doc.Subject, doc.RelativePath,
-                "Check YAML indentation and that list values use '- ' items."));
-            if (doc.SectionFrontmatterError is not null)
+            // A sections shape error is valid YAML that the document deserializer also
+            // rejects. Report that shape once. A syntax error is the same failure in both
+            // parsers, so the frontmatter parse is the one finding.
+            if (doc.SectionFrontmatterError is not null
+                && doc.SectionFrontmatterError.Contains("must be", StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(
                     InvalidVocabulary, Severity.Error,
                     $"Section frontmatter could not be parsed: {doc.SectionFrontmatterError}",
                     doc.Subject, doc.RelativePath,
                     "Use a mapping for sections and list values for keywords and code-refs."));
+                return;
             }
 
+            report.Add(new Diagnostic(
+                MissingFrontmatter, Severity.Error,
+                $"Frontmatter block could not be parsed: {doc.ParseError}",
+                doc.Subject, doc.RelativePath,
+                "Check YAML indentation and that list values use '- ' items."));
             return;
         }
 
