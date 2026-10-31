@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -14,6 +15,7 @@ namespace KyberWeave.Tests.Squad;
 /// packed archive is self-contained and deterministic. Without this, an archive ships the canonical
 /// placeholder line and the operator's home file leaks into a distributable artifact.
 /// </summary>
+[Collection(PackIsolationCollection.Name)]
 public sealed class SquadPackResponsePreferencesTests : IDisposable
 {
     private const string ConductorAgent = "agents/conductor.md";
@@ -116,11 +118,12 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
-    /// Guards the isolation rule as a output guarantee, not a seam test: the packer takes no home or environment
+    /// Guards the isolation rule as an output guarantee, not a seam test: the packer takes no home or environment
     /// input, so the packed <c>&lt;response-preferences&gt;</c> block must equal the shipped default byte-for-byte
     /// for both carriers. No temp home is built here because the packer cannot be pointed at one; the test
     /// instead asserts that the operator marker text, which a home-reading packer would have to copy in, appears
-    /// in no archive entry. The marker is a constant, so this check guards the default content, not a real home.
+    /// in no archive entry. The marker is a constant, so this check guards the default content, not a real home:
+    /// <see cref="Pack_IgnoresARealHomeGuidanceFilePointedAtByTheProcessEnvironment"/> covers a real home.
     /// </summary>
     [Fact]
     public void Pack_OfTheShippedSourceShipsTheDefaultAndNoOperatorMarkerBecauseItTakesNoHomeInput()
@@ -151,9 +154,68 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
+    /// Guards the isolation rule against a real home: with the process home pointed at a temp
+    /// directory holding a sentinel guidance file, packing must still ship the default and the
+    /// sentinel must appear in no archive entry. A packer that read the ambient home would copy
+    /// the sentinel in. Runs in a non-parallel collection because it mutates process environment.
+    /// </summary>
+    [Fact]
+    public void Pack_IgnoresARealHomeGuidanceFilePointedAtByTheProcessEnvironment()
+    {
+        const string sentinel = "operator pack-isolation real-home sentinel: must never reach an archive";
+        string fakeHome = Path.Combine(_temp.Path, "fake-home");
+        string guidanceDir = Path.Combine(fakeHome, ".kyber-weave");
+        Directory.CreateDirectory(guidanceDir);
+        File.WriteAllText(
+            Path.Combine(guidanceDir, "response-guidance.md"),
+            "<response-preferences>" + sentinel + "</response-preferences>\n",
+            Encoding.UTF8);
+
+        string? savedHome = Environment.GetEnvironmentVariable("HOME");
+        string? savedUserProfile = Environment.GetEnvironmentVariable("USERPROFILE");
+        try
+        {
+            Environment.SetEnvironmentVariable("HOME", fakeHome);
+            Environment.SetEnvironmentVariable("USERPROFILE", fakeHome);
+
+            string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-realhome");
+            string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-realhome");
+
+            using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
+            {
+                AssertCarrierShipsDefault(apmArchive, ConductorAgent);
+            }
+
+            using (ZipArchive pluginsArchive = ZipFile.OpenRead(pluginsPath))
+            {
+                AssertCarrierShipsDefault(pluginsArchive, BugCrusherSkill);
+            }
+
+            foreach (string archivePath in new[] { apmPath, pluginsPath })
+            {
+                using ZipArchive archive = ZipFile.OpenRead(archivePath);
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    Assert.False(
+                        ReadEntryText(entry).Contains(sentinel, StringComparison.Ordinal),
+                        $"{Path.GetFileName(archivePath)} entry '{entry.FullName}' contains the real-home sentinel text.");
+                }
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HOME", savedHome);
+            Environment.SetEnvironmentVariable("USERPROFILE", savedUserProfile);
+        }
+    }
+
+    /// <summary>
     /// Guards the isolation proof itself: a packer that accepted an environment or home resolver would make the
     /// no-leak check circular, because a test could only show the seam was consulted, never that it was ignored.
     /// Every public member of <see cref="SquadPacker"/> is scanned, so a new entry point cannot reintroduce a seam.
+    /// The parameter scan alone cannot catch ambient reads or neutrally named seams, so
+    /// <see cref="Packer_SourceContainsNoAmbientHomeOrEnvironmentReads"/> and
+    /// <see cref="Pack_IgnoresARealHomeGuidanceFilePointedAtByTheProcessEnvironment"/> cover those paths.
     /// </summary>
     [Fact]
     public void Packer_PublicSurfaceAcceptsNoEnvironmentOrHomeParameter()
@@ -174,6 +236,47 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     }
 
     /// <summary>
+    /// Proves the packer performs no ambient home or environment reads: its source must not
+    /// reference the home-resolution APIs a neutrally named seam would use. Parameter-name
+    /// scanning cannot catch a <c>root</c> string that is handed a home directory at runtime,
+    /// so this source scan plus the real-home output test close that gap.
+    /// </summary>
+    [Fact]
+    public void Packer_SourceContainsNoAmbientHomeOrEnvironmentReads()
+    {
+        string sourcePath = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core", "Squad", "Packaging", "SquadPacker.cs");
+        Assert.True(File.Exists(sourcePath), $"Expected packer source at '{sourcePath}'.");
+
+        string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+
+        // The one allowed guidance seam is the shipped default text: the packer fills carriers
+        // from the canonical source alone. The home-reading entry point must never appear here.
+        Assert.True(
+            source.Contains("SquadResponseGuidanceSource.DefaultText", StringComparison.Ordinal),
+            "SquadPacker.cs must fill carriers from SquadResponseGuidanceSource.DefaultText.");
+        string[] forbidden =
+        [
+            "GetFolderPath",
+            "SpecialFolder",
+            "UserProfile",
+            "USERPROFILE",
+            "\"HOME\"",
+            "GetEnvironmentVariable",
+            "ReadEffective",
+            "IConfiguration",
+            "environmentReader"
+        ];
+
+        foreach (string token in forbidden)
+        {
+            Assert.False(
+                source.Contains(token, StringComparison.Ordinal),
+                $"SquadPacker.cs references ambient home/environment API '{token}'; the packer must be a function of the canonical source alone.");
+        }
+    }
+
+    /// <summary>
     /// Proves the surface predicate bites: each rejected shape below must be flagged, and a plain path parameter
     /// must not be. Without this, a predicate that never matches would pass the surface guard vacuously.
     /// </summary>
@@ -182,6 +285,10 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [InlineData(nameof(SeamSamples.HomePath), "homeDirectory")]
     [InlineData(nameof(SeamSamples.EnvironmentParameter), "environment")]
     [InlineData(nameof(SeamSamples.ResolverNamed), "lookup")]
+    [InlineData(nameof(SeamSamples.UserProfilePath), "userProfile")]
+    [InlineData(nameof(SeamSamples.ProfilePath), "profileDir")]
+    [InlineData(nameof(SeamSamples.ConfigParameter), "config")]
+    [InlineData(nameof(SeamSamples.ConfigurationType), "value")]
     public void HomeOrEnvironmentPredicateRejectsEverySeamShape(string methodName, string parameterName)
     {
         ParameterInfo parameter = typeof(SeamSamples)
@@ -209,12 +316,16 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         string typeName = parameter.ParameterType.Name;
         bool namedSeam = Regex.IsMatch(
             name + " " + typeName,
-            "home|environment|resolver|resolve|lookup|getenv|env(?!elope)",
+            "home|environment|resolver|resolve|lookup|getenv|userprofile|profile|config|setting|option|env(?!elope)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        bool configLikeType = Regex.IsMatch(
+            typeName,
+            "configuration|environment|settings|options|profile",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         bool resolverDelegate = parameter.ParameterType.IsGenericType
             && parameter.ParameterType.GetGenericTypeDefinition().FullName?.StartsWith("System.Func`", StringComparison.Ordinal) == true
             && parameter.ParameterType.GetGenericArguments().Contains(typeof(string));
-        return namedSeam || resolverDelegate;
+        return namedSeam || configLikeType || resolverDelegate;
     }
 
     private static class SeamSamples
@@ -223,7 +334,19 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         public static void HomePath(string homeDirectory) { }
         public static void EnvironmentParameter(object environment) { }
         public static void ResolverNamed(string lookup) { }
+        public static void UserProfilePath(string userProfile) { }
+        public static void ProfilePath(string profileDir) { }
+        public static void ConfigParameter(string config) { }
+        public static void ConfigurationType(FakeConfiguration value) { }
         public static void PlainPath(string sourcePath) { }
+
+        [SuppressMessage(
+            "Performance",
+            "CA1812:Avoid uninstantiated internal classes",
+            Justification = "The type exists only as a parameter-type probe for the surface-guard predicate; it is referenced via reflection, never constructed.")]
+        public sealed class FakeConfiguration
+        {
+        }
     }
 
 
@@ -272,4 +395,15 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         using StreamReader reader = new(entry.Open(), Encoding.UTF8);
         return reader.ReadToEnd();
     }
+}
+
+[CollectionDefinition(PackIsolationCollection.Name, DisableParallelization = true)]
+[SuppressMessage(
+    "Naming",
+    "CA1711:Identifiers should not have incorrect suffix",
+    Justification = "xUnit collection definitions are named <Name>Collection by convention; "
+        + "the suffix is the framework idiom, not a claim to be a collection type.")]
+public sealed class PackIsolationCollection
+{
+    public const string Name = "Squad pack home isolation";
 }
