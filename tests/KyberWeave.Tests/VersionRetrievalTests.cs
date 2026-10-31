@@ -165,6 +165,7 @@ public class VersionRetrievalTests
     {
         ProcessStartInfo startInfo = new("dotnet")
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -175,10 +176,7 @@ public class VersionRetrievalTests
             startInfo.ArgumentList.Add(arg);
         }
 
-        using Process process = Process.Start(startInfo)
-                                ?? throw new InvalidOperationException(
-                                    $"Could not start dotnet process for '{assembly.Location}'.");
-
-        return ProcessRunner.ReadToEnd(process);
+        // Bounded: the product CLI answers --version and exits; the timeout kills it if it does not.
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 }

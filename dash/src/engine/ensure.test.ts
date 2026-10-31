@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { allowRealSpawns } from '../../tests/setup/spawn-guard.js'
 import { ensureEngine } from './ensure.js'
 import type { EngineRecord } from './instance.js'
 
@@ -115,6 +116,8 @@ describe('ensureEngine', () => {
   })
 
   it('reports a program that cannot be started at once, with the cause', async () => {
+    // The program path does not exist, so the OS refuses with ENOENT and no process ever starts.
+    allowRealSpawns('ENOENT path: spawn of a nonexistent program starts no process')
     const result = await ensureEngine({
       stateDir: '/s', version: '1.0.0', program: '/nonexistent/kyberdash',
       // The spawn error is an event-loop turn away; a real sleep yields, the test's no-op one does not.

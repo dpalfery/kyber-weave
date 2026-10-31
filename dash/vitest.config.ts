@@ -9,6 +9,10 @@ export default defineConfig({
     ],
   },
   test: {
+    // Forks, pinned: the ledger treats every descendant of the vitest process as a test child.
+    pool: 'forks',
+    // Leftover-process ledger: fails the run, and kills the children, if any outlive it.
+    globalSetup: [resolve(__dirname, './tests/setup/process-ledger-global.ts')],
     // Include backend tests, operator-tool tests, and UI component tests
     include: [
       'src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
@@ -30,6 +34,8 @@ export default defineConfig({
       resolve(__dirname, './tests/setup/env-isolation.ts'),
       // Fails closed on any fetch to the live KyberDash receiver (D10).
       resolve(__dirname, './tests/setup/network-guard-setup.ts'),
+      // Fails closed on any child process a test starts without opting in.
+      resolve(__dirname, './tests/setup/spawn-guard-setup.ts'),
       resolve(__dirname, './web/vitest.setup.ts'),
     ],
     // Real-I/O tests (session parses, sqlite fixtures, worker pools) exceed the

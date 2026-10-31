@@ -199,6 +199,10 @@ public sealed class FastLoopScriptTests
             File.Copy(fastLoopSource, fastLoopDest, true);
             MakeExecutable(fastLoopDest);
 
+            string procGuardDest = Path.Combine(Root, "scripts", "proc-guard.sh");
+            File.Copy(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "proc-guard.sh"), procGuardDest, true);
+            MakeExecutable(procGuardDest);
+
             string classListDest = Path.Combine(Root, "scripts", "fast-loop-classes.txt");
             File.WriteAllText(classListDest, "KyberWeave.Tests.FastLoopScriptTests\n");
 

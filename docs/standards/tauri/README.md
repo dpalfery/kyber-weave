@@ -123,12 +123,15 @@ A change to the Tauri layer passes the Rust gates of the Rust standard, and the 
 that the root `AGENTS.md` lists. Run them from the repository root:
 
 ```bash
-cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
-cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
-cargo test --manifest-path dash/tray/src-tauri/Cargo.toml
-npm --prefix dash/tray/ui run typecheck
-npm --prefix dash/tray/ui run test
+scripts/proc-guard.sh run -- cargo fmt --manifest-path dash/tray/src-tauri/Cargo.toml --check
+scripts/proc-guard.sh run -- cargo clippy --manifest-path dash/tray/src-tauri/Cargo.toml -- -D warnings
+scripts/proc-guard.sh run -- cargo test --manifest-path dash/tray/src-tauri/Cargo.toml
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
 ```
+
+Each command runs through the process watchdog, `scripts/proc-guard.sh run --`
+([runbook](../../../dash/runbook.md#running-tests-safely)).
 
 The same three Rust commands run from `dash/tray/src-tauri`, as the Rust standard gives them.
 The council declares them as `review.gates` entries `cargo-fmt`, `cargo-clippy` and `cargo-test`,

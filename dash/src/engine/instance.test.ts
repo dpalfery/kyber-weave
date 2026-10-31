@@ -82,9 +82,24 @@ describe('engine instance lock', () => {
     const path = enginePipePath(stateDir)
     // A real engine killed outright leaves its socket file behind; reproduce exactly that.
     const child = spawn(process.execPath, ['-e', `require('net').createServer().listen(${JSON.stringify(path)}, () => console.log('up'))`], { stdio: ['ignore', 'pipe', 'ignore'] })
-    await new Promise<void>((resolve) => { child.stdout.once('data', () => resolve()) })
-    child.kill('SIGKILL')
-    await new Promise<void>((resolve) => { child.once('exit', () => resolve()) })
+    // Attached at spawn so an exit that lands before the readiness wait is still observed.
+    // A spawn failure emits 'error' without 'exit', so both settle the wait.
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => resolve())
+      child.once('error', () => resolve())
+    })
+    try {
+      // The deadline and the early-exit rejection keep a child that dies before printing from hanging the test.
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { reject(new Error('engine child did not print "up" within 10 s')) }, 10_000)
+        child.once('error', (error) => { clearTimeout(timer); reject(error) })
+        child.once('exit', () => { clearTimeout(timer); reject(new Error('engine child exited before printing "up"')) })
+        child.stdout.once('data', () => { clearTimeout(timer); resolve() })
+      })
+    } finally {
+      child.kill('SIGKILL')
+      await exited
+    }
     expect(existsSync(path)).toBe(true)
 
     const taken = await acquireEngine({ stateDir, version: '1.0.0' })

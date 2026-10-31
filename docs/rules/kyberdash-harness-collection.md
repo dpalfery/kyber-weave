@@ -4,7 +4,7 @@ title: KyberDash harness collection standard
 doc-type: rule
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-30
 ---
 
 # KyberDash harness collection standard
@@ -83,6 +83,21 @@ Per-session "no published rate" is honest-empty cost state, per
 `unpriced` / stated-reason rendering, never `$0.00`, and it must not be a
 "complete" criterion. Cost is derived and secondary; completeness is decided on
 collection dimensions alone.
+
+## Running the conformance spec
+
+The conformance spec (`dash/e2e/harness-collection.spec.ts`) is run only with the isolated
+Playwright config, through the process watchdog, from the repository root:
+
+```bash
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+```
+
+The isolated config starts no web server, sets the spawn guard to deny, and fails the run if
+the spec leaves a process behind. The spec boots its own dashboard on an ephemeral port from a
+temp `canon.db`, so a run never reaches the live dashboard port or `~/.kyberdash/canon.db`. A
+run that skips the isolated config is not a conformance result. See the
+[runbook](../dash/runbook.md#running-tests-safely).
 
 ## Related
 

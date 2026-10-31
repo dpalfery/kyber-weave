@@ -280,9 +280,15 @@ async function attachOtelToEngine(opts: { port?: number; host?: string; db?: str
   const { join } = await import('path')
   const { ensureEngine } = await import('../engine/ensure.js')
   const { KYBERDASH_VERSION } = await import('./web.js')
-  const { resolveJobSpawnTarget, currentSpawnRuntime } = await import('./spawn-target.js')
+  const { resolveJobSpawnTarget, currentSpawnRuntime, isSpawnRefusal } = await import('./spawn-target.js')
   const { runningAsSea } = await import('../sea.js')
 
+  const target = resolveJobSpawnTarget(currentSpawnRuntime(runningAsSea()))
+  if (isSpawnRefusal(target)) {
+    // Fail closed before any write: a refused run must leave the store untouched.
+    process.stderr.write(`kyberdash otel: ${target.refused}\n`)
+    process.exit(1)
+  }
   // The store is migrated before it is opened: the v21 -> v22 backfill is one
   // blocking pass over every session payload, and this command holds the
   // store's write lock for the duration of it.
@@ -292,7 +298,6 @@ async function attachOtelToEngine(opts: { port?: number; host?: string; db?: str
   } finally {
     store.close()
   }
-  const target = resolveJobSpawnTarget(currentSpawnRuntime(runningAsSea()))
   const result = await ensureEngine({
     stateDir: join(homedir(), '.kyberdash'),
     version: KYBERDASH_VERSION,

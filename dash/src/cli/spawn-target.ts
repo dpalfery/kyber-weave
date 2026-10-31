@@ -25,6 +25,9 @@
 // `kyberdash` name on PATH: a missing PATH lookup surfaces as ENOENT in the job footer,
 // which is honest, whereas re-running the wrong entry is not.
 
+import { realpathSync } from 'node:fs'
+import { basename, dirname } from 'node:path'
+
 /** The program name a spawn falls back to when this process has no entry script to re-run. */
 export const PATH_FALLBACK_PROGRAM = 'kyberdash'
 
@@ -123,7 +126,41 @@ export function currentSpawnRuntime(isSea: boolean): SpawnRuntime {
   }
 }
 
-export function resolveJobSpawnTarget(runtime: SpawnRuntime): SpawnTarget {
+/** The answer for an entry that is not the CLI: nothing is spawned and `refused` says why. */
+export type SpawnRefusal = { readonly refused: string }
+
+/** Resolves symlinks; a path that does not exist is judged by its literal shape. */
+function realPathOrLiteral(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * True when `path` has the shape of this package's entry: `src/launcher.ts` (a checkout under
+ * tsx) or `dist/cli.js` (the published bin). The shape is the parent directory plus the
+ * basename, so an e2e boot script or a vitest worker never passes.
+ */
+function isCliEntryShape(path: string): boolean {
+  const file = basename(path)
+  const parent = basename(dirname(path))
+  return (parent === 'src' && file === 'launcher.ts') || (parent === 'dist' && file === 'cli.js')
+}
+
+const REFUSAL_PATH_MAX = 120
+
+function clip(path: string): string {
+  return path.length <= REFUSAL_PATH_MAX ? path : `...${path.slice(-(REFUSAL_PATH_MAX - 3))}`
+}
+
+/**
+ * Where a job child is spawned from, or a refusal. Fail closed: only the SEA, the real CLI
+ * entry, or the PATH fallback is ever re-run. Re-running whatever script happens to be
+ * running (an e2e boot script, a vitest worker) is how a test fork-bombed node.
+ */
+export function resolveJobSpawnTarget(runtime: SpawnRuntime): SpawnTarget | SpawnRefusal {
   if (runtime.isSea) {
     // The binary is the CLI; it needs no entry script and must not be given the
     // unexpanded argv0 as if it were one.
@@ -133,6 +170,13 @@ export function resolveJobSpawnTarget(runtime: SpawnRuntime): SpawnTarget {
   if (entry === undefined || entry === '') {
     return { program: PATH_FALLBACK_PROGRAM, programArgs: [] }
   }
+  const real = realPathOrLiteral(entry)
+  if (!isCliEntryShape(real)) {
+    const resolved = real === entry ? '' : ` (resolves to ${clip(real)})`
+    return {
+      refused: `spawn target refused: ${clip(entry)}${resolved} is not the kyberdash CLI entry (src/launcher.ts or dist/cli.js)`,
+    }
+  }
   // execArgv first: a --import/--require/--loader flag only means anything ahead of the
   // entry, and dropping one loses the TypeScript loader this process itself ran under.
   // The inspector family is the exception - see filterInspectorFlags.
@@ -140,4 +184,9 @@ export function resolveJobSpawnTarget(runtime: SpawnRuntime): SpawnTarget {
     program: runtime.execPath,
     programArgs: [...filterInspectorFlags(runtime.execArgv), entry],
   }
+}
+
+/** Narrowing helper for callers: true when the resolver refused. */
+export function isSpawnRefusal(target: SpawnTarget | SpawnRefusal): target is SpawnRefusal {
+  return 'refused' in target
 }

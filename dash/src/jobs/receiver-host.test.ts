@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CanonStore } from '../canon/store.js'
 import { SETTING_KEYS, writeSetting } from '../settings/shared-settings.js'
 import { ReceiverHost } from './receiver-host.js'
-import type { ReceiverProbe } from './receiver-host.js'
+import type { ReceiverHostOptions, ReceiverProbe } from './receiver-host.js'
 
 class FakeChild {
   killed = false
@@ -282,6 +282,35 @@ describe('ReceiverHost: undecided probes', () => {
 
     expect(host.getStatus()).toBe('unknown')
     expect(spawner.spawnAttempts).toBe(0)
+    expect(delay).toBeNull()
+  })
+})
+
+// Storm guard (T3): a receiver whose spawn target was refused never starts `otel`. The refusal is
+// reported as the receiver's last error, so the coverage indicator says why no receiver runs.
+//
+// Seam: ReceiverHostOptions.spawnRefusal (added by T3b), the same reason string the JobHost takes.
+// Typed as an intersection here so this file compiles before the option exists. A refusal is not
+// fixed by retrying, so no delay is owed: poll() answers null.
+describe('ReceiverHost: a refused spawn target starts nothing', () => {
+  const REFUSAL = 'spawn target refused: /repo/dash/e2e/harness-collection-boot.ts is not the CLI entry'
+
+  it('never spawns the receiver while hosting is on, and reports the refusal as its last error', async () => {
+    writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
+    const options: ReceiverHostOptions & { readonly spawnRefusal: string } = {
+      store,
+      program: 'kyberdash',
+      prober,
+      spawner,
+      spawnRefusal: REFUSAL,
+    }
+    const host = new ReceiverHost(options)
+    hosts.push(host)
+
+    const delay = await host.poll()
+
+    expect(spawner.spawnAttempts, 'a refused target must not start a receiver').toBe(0)
+    expect(host.getReceiverState().lastError, 'the refusal must be reported as the last error').toContain(REFUSAL)
     expect(delay).toBeNull()
   })
 })

@@ -14,6 +14,15 @@ governed docs. Use `--scoped` for declared gates limited to changed files, or `-
 all gates unscoped (`review gates . --all`). It is **not** evidence and must never be cited
 as such ([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
 
+**Every local test, gate and e2e command runs through the process watchdog.** From the
+repository root, wrap it as `scripts/proc-guard.sh run -- <command>`. The watchdog kills the
+command's process tree at an absolute cap (exit 86) and fails a run that leaves children
+behind (exit 87). The caps change only by flag (`--max-node`, `--max-tree`), never by environment
+variable. `fast-loop.sh` already wraps its test and gate calls. Playwright runs only with
+`--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
+[Running tests safely](docs/dash/runbook.md#running-tests-safely) and
+[ADR 0047](docs/adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md).
+
 ### Before opening a PR
 
 Run the same declared gate suite a review cites — scoped by default, full before push:
@@ -25,7 +34,9 @@ dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
 
-Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
+Run any test or build command you start yourself through `scripts/proc-guard.sh run --`. The
+`dotnet test` and dash `ts-test` gates in [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
+already run through it. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
 [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate

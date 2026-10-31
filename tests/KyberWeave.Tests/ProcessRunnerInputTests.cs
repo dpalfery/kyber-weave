@@ -47,7 +47,7 @@ public sealed class ProcessRunnerInputTests
             "count=$(wc -c | tr -d '[:space:]'); printf '\\nstdin:%s\\n' \"$count\"; exit 11");
 
         ProcessResult result = await Task
-            .Run(() => ProcessRunner.Run(startInfo, input))
+            .Run(() => ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(TimeoutSeconds)))
             .WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds));
 
         Assert.Equal(new string('o', BytesPerStream) + $"\nstdin:{BytesPerStream}\n", result.StandardOutput);
@@ -66,7 +66,7 @@ public sealed class ProcessRunnerInputTests
         ProcessStartInfo startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
         startInfo.Environment["KYBER_WEAVE_PROCESS_MARKER"] = "from-caller";
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds));
 
         Assert.Equal("from-caller", result.StandardOutput);
         Assert.Equal(0, result.ExitCode);

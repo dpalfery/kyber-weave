@@ -13,6 +13,7 @@ import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
 import { BRAND } from '../brand-overlay.js'
 import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+import { inertDashboardSeams } from '../../tests/support/inert-spawners.js'
 
 useAbsentLiveReceiver()
 
@@ -73,6 +74,7 @@ describe('embedded web dashboard (SEA asset)', () => {
     })
 
     server = await runWebDashboard({
+      ...inertDashboardSeams(),
       port: 0,
       open: false,
       kyberBridge: testBridge,
@@ -152,6 +154,7 @@ describe('embedded dashboard: SEA without web.json', () => {
     })
 
     const server = await runWebDashboard({
+      ...inertDashboardSeams(),
       port: 0,
       open: false,
       kyberBridge: testBridge,
@@ -204,6 +207,7 @@ describe('embedded dashboard: KYBERDASH_DASH_DIR override', () => {
         })
 
         const server = await runWebDashboard({
+          ...inertDashboardSeams(),
           port: 0,
           open: false,
           kyberBridge: testBridge,
@@ -249,6 +253,7 @@ describe('embedded dashboard: KYBERDASH_DASH_DIR override', () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
         const server = await runWebDashboard({
+          ...inertDashboardSeams(),
           port: 0,
           open: false,
           kyberBridge: testBridge,

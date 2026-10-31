@@ -112,11 +112,14 @@ single-quoted strings, and generally no semicolons.
 For changes under `dash/`, run the applicable gates from the repository instructions:
 
 ```bash
-npm --prefix dash run typecheck
-npm --prefix dash run lint
-npm --prefix dash run test
-npm --prefix dash run check:reachable
+scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash run lint
+scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
+
+Run each command through `scripts/proc-guard.sh run --` (the process watchdog); see
+[Running tests safely](../../dash/runbook.md#running-tests-safely).
 
 Changes to the engine's built output or update path also require `npm --prefix dash run build:cli`; changes to the build/update path require `./scripts/update-loop.sh`. Changes to
 `dash/tray/` additionally use the tray UI and Rust gates in the root `AGENTS.md`. Test
