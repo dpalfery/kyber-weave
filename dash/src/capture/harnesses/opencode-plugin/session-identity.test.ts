@@ -110,3 +110,38 @@ describe('the skills one step keeps are bounded', () => {
     expect(skills?.at(-1)).toBe('skill-199')
   })
 })
+
+describe('a directory is the same instance however it is spelled', () => {
+  for (const spelling of [`${OWNED_DIRECTORY}/`, `${OWNED_DIRECTORY}//`, '/HOME/scratch/./oc-probe', '/HOME/scratch/other/../oc-probe']) {
+    it(`owns a session whose events name the directory as ${spelling}`, async () => {
+      const rcv = receiver()
+      const host = createHost({ directory: OWNED_DIRECTORY })
+      const cleanup = await start(createSetup(options(rcv)), host)
+      await host.deliverEvent(bus.sessionCreated('ses_spelled', 1000, spelling))
+      await host.deliverEvent(bus.executionStarted('ses_spelled', 1010))
+      await host.deliverEvent(bus.executionSucceeded('ses_spelled', 1020))
+      await stopPlugin(cleanup)
+      expect(spans(rcv, 'request')).toHaveLength(1)
+    })
+  }
+
+  it('still drops a session of a different directory', async () => {
+    const rcv = receiver()
+    const host = createHost({ directory: `${OWNED_DIRECTORY}/` })
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await host.deliverEvent(bus.sessionCreated('ses_other', 1000, `${OWNED_DIRECTORY}-two`))
+    await host.deliverEvent(bus.executionStarted('ses_other', 1010))
+    await host.deliverEvent(bus.executionSucceeded('ses_other', 1020))
+    await stopPlugin(cleanup)
+    expect(rcv.attempts).toEqual([])
+  })
+
+  it('a setup for the same directory spelled with a trailing slash supersedes the earlier one', async () => {
+    const first = createHost({ directory: OWNED_DIRECTORY })
+    const second = createHost({ directory: `${OWNED_DIRECTORY}/` })
+    await start(createSetup(options(receiver())), first)
+    const cleanup = await start(createSetup(options(receiver())), second)
+    expect(first.closedSubscriptions).toBe(1)
+    await stopPlugin(cleanup)
+  })
+})

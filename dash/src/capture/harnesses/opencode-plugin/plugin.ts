@@ -30,6 +30,8 @@
 // The engine owns no timers, files, sockets or globals: the caller hands it a span sink, a consent
 // check and a clock (`entry.ts`). It never throws; a failure goes to `onError`.
 
+import { normalize } from 'node:path'
+
 import {
   MAX_FIELD_BYTES,
   MAX_PROMPT_BYTES,
@@ -119,6 +121,18 @@ export type CaptureEngine = {
 const text = textOf
 const label = labelOf
 const whole = wholeOf
+
+/**
+ * A directory reduced to one spelling: separators collapsed, `.` and `..` resolved and no trailing
+ * separator. It is text only: the engine reads no file system, so letter case and symlinks are not
+ * resolved, and two spellings that differ only there stay different.
+ */
+export function normalizeDirectory(directory: string): string {
+  const cleaned = normalize(directory)
+  const trimmed = cleaned.replace(/[\\/]+$/, '')
+  // The root (`/`, `C:\`) is all separator or ends in a drive colon; keep it as normalize left it.
+  return trimmed === '' || /^[A-Za-z]:$/.test(trimmed) ? cleaned : trimmed
+}
 
 /** What one bus event means to this plugin, reduced to the small values it needs. */
 type Fact =
@@ -276,7 +290,8 @@ function parseEvent(raw: unknown): BusEvent | undefined {
   if (sessionId === undefined || type === undefined || created === undefined) return undefined
   const top = isRecord(raw['location']) ? raw['location'] : undefined
   const inner = isRecord(data['location']) ? data['location'] : undefined
-  const directory = text(top?.['directory']) ?? text(inner?.['directory'])
+  const rawDirectory = text(top?.['directory']) ?? text(inner?.['directory'])
+  const directory = rawDirectory === undefined ? undefined : normalizeDirectory(rawDirectory)
   const id = text(raw['id'])
   return {
     sessionId,
@@ -396,7 +411,8 @@ function addPrompt(prompts: Prompts, promptText: string | undefined, keepContent
 
 /** Build the capture engine. Construction touches no I/O and starts no timer. */
 export function createCaptureEngine(options: CaptureEngineOptions): CaptureEngine {
-  const { directory, emit } = options
+  const { emit } = options
+  const directory = options.directory === undefined ? undefined : normalizeDirectory(options.directory)
   const now = options.now ?? ((): number => Date.now())
   const sessions = new Map<string, SessionState>()
   const held: BusEvent[] = []

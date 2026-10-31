@@ -28,7 +28,7 @@
 // `onError` when given). Nothing runs at import; the outbox and timers are created inside `setup`.
 
 import { resolveContentConsent, resolveConsentPath } from './consent.js'
-import { OPENCODE_PLUGIN_ID, createCaptureEngine, type CaptureEngine } from './plugin.js'
+import { OPENCODE_PLUGIN_ID, createCaptureEngine, normalizeDirectory, type CaptureEngine } from './plugin.js'
 import { createOutbox, type Outbox } from './transport/outbox.js'
 import { DEFAULT_OTLP_ENDPOINT, type OtlpFetch } from './transport/otlp-sender.js'
 
@@ -125,7 +125,7 @@ async function start(ctx: OpencodeSetupContext | undefined, options: EntryOption
   }
 
   const rawDirectory = ctx?.location?.directory
-  const directory = typeof rawDirectory === 'string' && rawDirectory !== '' ? rawDirectory : undefined
+  const directory = typeof rawDirectory === 'string' && rawDirectory !== '' ? normalizeDirectory(rawDirectory) : undefined
   const env = options.env ?? process.env
   const consentPath = options.consentPath ?? resolveConsentPath()
   const flushTimeoutMs = options.flushTimeoutMs ?? DEFAULT_FLUSH_TIMEOUT_MS
