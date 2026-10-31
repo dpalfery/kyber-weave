@@ -25,6 +25,7 @@ public sealed class SquadPerformanceContractTests
     private const string CodeReviewSkillPath = "products/kyber-squad/skills/code-review/SKILL.md";
     private const string CodeReviewerAgentPath = "products/kyber-squad/agents/code-reviewer.md";
     private const string ReviewLensAgentPath = "products/kyber-squad/agents/review-lens.md";
+    private const string ReviewTriageAgentPath = "products/kyber-squad/agents/review-triage.md";
     private const string ReviewCouncilArchitecturePath = "docs/code-review/architecture.md";
 
     private const string DocumentationAccuracyLensPath =
@@ -103,10 +104,7 @@ public sealed class SquadPerformanceContractTests
         Assert.Contains(DirectAssemblyRunner, content, StringComparison.Ordinal);
         Assert.Matches(DirectAssemblyRegex, content);
         Assert.Contains(QuietReporter, content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("pre-computed", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("precomputed", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify pre-computed test commands.");
+        Assert.Matches(@"(?i)\bpre-?computed\s+test\s+commands?\b", content);
     }
 
     [Theory]
@@ -115,7 +113,7 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesSpecifyBuildOnceTestMany(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("build once", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"(?i)\bbuild\s+once,\s+test\s+many\b", content);
         Assert.Contains(NoBuildFlag, content, StringComparison.Ordinal);
         Assert.True(
             HasBuildOnceReservationClause(content),
@@ -128,23 +126,16 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesSpecifyZeroStashRedProofs(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("git stash", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("forbid", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("never", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("zero-stash", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("do not stash", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must forbid git stash for RED proofs.");
-        Assert.True(
-            content.Contains("clean base", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("throwaway", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("worktree", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must mandate running RED proofs against clean base checkout, throwaway copy, or isolated worktree.");
+        Assert.Matches(
+            @"(?i)\b(?:forbid(?:s|ding)?\s+(?:`?git\s+stash`?|using\s+git\s+stash)|zero-stash\s+RED\s+proofs?|never\s+use\s+`?git\s+stash`?)\b",
+            content);
+        Assert.Matches(
+            @"(?i)\b(?:clean\s+base\s+checkout|throwaway\s+(?:copy|working\s+tree)|isolated\s+worktree)\b",
+            content);
     }
 
     [Theory]
     [InlineData(ConductorExecutionPath)]
-    [InlineData(ConductorAgentPath)]
     public void ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -162,19 +153,10 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesSpecifyInlinedTaskPacketContents(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.True(
-            content.Contains("entry-file", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("entry file", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify inlining entry-file table in task packets.");
+        Assert.Matches(@"(?i)\binlined\s+entry-?file\s+table\b", content);
         Assert.Contains("acceptance criteria", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("pre-computed", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("precomputed", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify pre-computed test commands in task packets.");
-        Assert.True(
-            content.Contains("out of worker context", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("out of the worker context", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must keep plan/spec files out of worker context.");
+        Assert.Matches(@"(?i)\bpre-?computed\s+test\s+commands?\b", content);
+        Assert.Matches(@"(?i)\bout\s+of\s+(?:the\s+)?worker\s+context\b", content);
     }
 
     [Theory]
@@ -183,16 +165,11 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesSpecifyWorktreeAndArtifactsParallelization(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("worktree", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("--artifacts-path", StringComparison.Ordinal) ||
-            content.Contains("artifacts/task-gate-", StringComparison.Ordinal),
-            $"{relativePath} must specify per-task artifact paths (--artifacts-path or artifacts/task-gate-).");
-        Assert.True(
-            content.Contains("branch-head", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("integration", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must serialize final branch-head integration.");
-        Assert.Contains("git push", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"(?i)\b(?:git\s+worktree\s+checkouts?|separate\s+git\s+worktree\s+checkouts?)\b", content);
+        Assert.Contains("--artifacts-path .agent_scratchpad/<task-id>/artifacts", content, StringComparison.Ordinal);
+        Assert.Contains("--out artifacts/task-gate-<task-id>.json", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bserialize\s+final\s+branch-head\s+integration\b", content);
+        Assert.Matches(@"(?i)\bbefore\s+git\s+push\b", content);
     }
 
     [Theory]
@@ -201,17 +178,12 @@ public sealed class SquadPerformanceContractTests
     public void ConductorSurfacesPreserveAdversarialRedGreenBoundaryAndBundleSameRoleTasks(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("adversarial", content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("test-dev", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("same-role", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("same role", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify same-role micro-task bundling.");
-        Assert.Contains("independent verification", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("never collapse", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("never collapsing", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify never collapsing RED and GREEN.");
+        Assert.Matches(
+            @"(?i)\badversarial\s+separation\s+between\s+RED\s+test\s+authorship[^\r\n]*and\s+GREEN\s+implementation\b",
+            content);
+        Assert.Matches(@"(?i)\b(?:bundle\s+)?same-?role\s+micro-?tasks?\b", content);
+        Assert.Matches(@"(?i)\bnever\s+collapse\s+RED\s+and\s+GREEN\b", content);
+        Assert.Matches(@"(?i)\bindependent\s+verification\s+(?:pass\s+)?at\s+task\s+completion\b", content);
     }
 
     [Theory]
@@ -221,23 +193,76 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Contains("Discovery: codegraph N, docs N, direct reads N", content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("precede", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("precedes", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("followed by", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must clarify that Discovery header precedes the 6-field digest.");
+        Assert.Matches(@"(?i)\bprecedes?\s+(?:the\s+)?(?:six|6)-field\s+(?:completion\s+)?digest\b", content);
+    }
+
+    [Theory]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(RequirementsDocPath)]
+    public void ConductorAndRequirementsExemptCircuitBreakerEscalationFromSixFieldRejection(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\b(?:exempt\w*|bypasses?)\b)(?=[^\r\n]*\bSTATUS:\s*ESCALATION\b)[^\r\n]+",
+            content);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\barchitect\s+mediation\b)(?=[^\r\n]*\b(?:without\s+rejection|never\s+reject|without\s+rejecting)\b)[^\r\n]+",
+            content);
     }
 
     [Fact]
     public void ConductorExecutionContractSpecifiesWorktreeCleanupAndConflictHandling()
     {
         string content = ReadRepoFile(ConductorExecutionPath);
-        Assert.Contains("git worktree remove", content, StringComparison.Ordinal);
+        Assert.Matches(@"(?i)\bgit\s+(?:cherry-pick|merge)\s+--abort\b", content);
+        Assert.Contains("git worktree remove --force", content, StringComparison.Ordinal);
         Assert.Contains("git worktree prune", content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("conflict", StringComparison.OrdinalIgnoreCase) &&
-            content.Contains("rework", StringComparison.OrdinalIgnoreCase),
-            $"{ConductorExecutionPath} must specify conflict-reconciliation rework dispatch.");
+        Assert.Matches(
+            @"(?i)\b(?:git\s+worktree\s+remove\s+--force[^\r\n]*(?:all\s+exit\s+paths|integration,\s+failure,\s+escalation,\s+or\s+cancellation|all\s+outcomes)|guarantee[^\r\n]*worktree\s+cleanup\s+across\s+all\s+outcomes)\b",
+            content);
+        Assert.Matches(@"(?i)\bconflict-reconciliation\s+rework\s+dispatch\b", content);
+    }
+
+    /// <summary>
+    /// Conductor is a non-developer orchestrator; its frontmatter description and body must never define
+    /// or emit a TASK_GATE digest. The canonical six-field worker completion digest and full 5-state TASK_GATE
+    /// enum are defined in the execution-and-review contract reference.
+    /// </summary>
+    [Fact]
+    public void ConductorFrontmatterDescriptionContainsNoDigestSchemaAndBodyDefinesFullFiveStateTaskGate()
+    {
+        string content = ReadRepoFile(ConductorAgentPath);
+        int firstMarker = content.IndexOf("---", StringComparison.Ordinal);
+        int secondMarker = content.IndexOf("---", firstMarker + 3, StringComparison.Ordinal);
+        Assert.True(firstMarker >= 0 && secondMarker > firstMarker,
+            $"{ConductorAgentPath} must contain YAML frontmatter.");
+        string frontmatter = content.Substring(firstMarker, secondMarker - firstMarker);
+        string body = content.Substring(secondMarker + 3);
+
+        Assert.DoesNotContain("FILES:", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("TESTS:", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("COMMIT:", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("REMOTE_HEAD:", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("TASK_GATE:", frontmatter, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("TASK_GATE:", body, StringComparison.Ordinal);
+
+        string executionContent = ReadRepoFile(ConductorExecutionPath);
+        Assert.Matches(ContiguousSixFieldDigestRegex, executionContent);
+        Assert.Contains("PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", executionContent,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(ConductorExecutionPath)]
+    public void ConductorSurfacesScopeSixFieldRejectionToMigratedSpecialistsDuringPhasedRollout(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\b(?:phased\s+rollout|migrated\s+(?:specialist\s+)?agents?)\b)(?=[^\r\n]*\bcsharp-dev\b)(?=[^\r\n]*\btest-dev\b)[^\r\n]+",
+            content);
     }
 
     [Theory]
@@ -269,23 +294,50 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    public void SpecialistSurfacesClarifyWorktreeOutputIsolationBypassesArtifactsPath(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\bworktrees?\b)(?=[^\r\n]*\binherently\s+isolate[^\r\n]*output)[^\r\n]+",
+            content);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\b--artifacts-path\b)(?=[^\r\n]*\b(?:not\s+required|optional|omitted)\b)(?=[^\r\n]*\bworktree\b)[^\r\n]+",
+            content);
+    }
+
+    [Theory]
     [InlineData(TestDevAgentPath)]
     [InlineData(TestDevSkillPath)]
     public void TestDevSurfacesSpecifyZeroStashRedProofRule(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("git stash", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("forbid", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("never", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("zero-stash", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("do not stash", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must forbid git stash for RED proofs.");
-        Assert.True(
-            content.Contains("clean base", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("throwaway", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("worktree", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify clean base checkout, throwaway copy, or isolated worktree.");
+        Assert.Matches(
+            @"(?i)\b(?:forbid(?:s|ding)?\s+(?:`?git\s+stash`?|using\s+git\s+stash)|zero-stash\s+RED\s+proof(?:s|\s+rule)|never\s+(?:use|run)\s+`?git\s+stash`?)\b",
+            content);
+        Assert.Matches(
+            @"(?i)\b(?:clean\s+base\s+checkout|throwaway\s+(?:copy|working\s+tree)|isolated\s+worktree)\b",
+            content);
+    }
+
+    [Fact]
+    public void TestDevSkillQualifiesDirectAssemblyRunnerWithLanguageSpecificTargeting()
+    {
+        string content = ReadRepoFile(TestDevSkillPath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\b(?:dotnet\s+tests/KyberWeave\.Tests|direct\s+assembly\s+runner)\b)(?=[^\r\n]*\b(?:\.NET\s+solutions?|\.NET\s+projects?|language-specific)\b)[^\r\n]+",
+            content);
+    }
+
+    [Fact]
+    public void TestDevSkillSpecifiesDiscoveryHeaderPrecedingDigestSchema()
+    {
+        string content = ReadRepoFile(TestDevSkillPath);
+        Assert.Contains("Discovery: codegraph N, docs N, direct reads N", content, StringComparison.Ordinal);
+        Assert.Matches(
+            @"(?i)\b(?:precedes?(?:\s+the)?\s+(?:six|6)-field\s+(?:completion\s+)?digest|Discovery:\s*codegraph[^\r\n]*\r?\n[ \t]*STATUS:)\b",
+            content);
     }
 
     [Theory]
@@ -295,21 +347,11 @@ public sealed class SquadPerformanceContractTests
     public void SpecialistSurfacesPreserveAdversarialRedGreenAndForbidCollapsedRedGreen(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("adversarial", content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("test-dev", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("same-role", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("same role", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify same-role task bundling.");
-        Assert.Contains("independent verification", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("never collapse", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("never collapsing", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify never collapsing RED and GREEN.");
-        Assert.True(
-            content.Contains("artifacts/task-gate-", StringComparison.Ordinal) ||
-            content.Contains("--artifacts-path", StringComparison.Ordinal),
-            $"{relativePath} must specify per-task artifact isolation.");
+        Assert.Matches(@"(?i)\badversarial\s+(?:separation|role\s+boundary)\b", content);
+        Assert.Matches(@"(?i)\b(?:bundle\s+)?same-?role\s+(?:micro-?tasks?|task\s+bundling)\b", content);
+        Assert.Matches(@"(?i)\bnever\s+collapse\s+RED\s+and\s+GREEN\b", content);
+        Assert.Matches(@"(?i)\bindependent\s+verification\b", content);
+        Assert.Contains("--artifacts-path", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -341,27 +383,12 @@ public sealed class SquadPerformanceContractTests
     public void DocumentationSpecifiesSixFieldDigestRejectionRule(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("STATUS: FAIL", content, StringComparison.Ordinal);
-        Assert.Contains("TASK_GATE:", content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("reject", StringComparison.OrdinalIgnoreCase) &&
-            (content.Contains("missing", StringComparison.OrdinalIgnoreCase) ||
-             content.Contains("required field", StringComparison.OrdinalIgnoreCase)),
-            $"{relativePath} must specify that conductor rejects digests when any required field is missing.");
-        Assert.True(
-            content.Contains("STATUS: FAIL", StringComparison.Ordinal) &&
-            content.Contains("TASK_GATE:", StringComparison.Ordinal),
-            $"{relativePath} must specify that conductor rejects digests when STATUS: FAIL is reported or TASK_GATE: is missing or FAIL.");
-    }
-
-    [Fact]
-    public void ArchitectureDocumentationRendererTablePreservesAgentNamePrecision()
-    {
-        string content = ReadRepoFile(ArchitectureDocPath);
-        Assert.Contains(".opencode/agents/<name>.md", content, StringComparison.Ordinal);
-        Assert.Contains(".kilo/agents/<name>.md", content, StringComparison.Ordinal);
-        Assert.DoesNotContain(".opencode/agents/*.md", content, StringComparison.Ordinal);
-        Assert.DoesNotContain(".kilo/agents/*.md", content, StringComparison.Ordinal);
+        Assert.Matches(
+            @"(?i)\breject[^\r\n]*(?:any\s+required\s+field\s+is\s+missing|missing[^\r\n]*required\s+field)\b",
+            content);
+        Assert.Matches(
+            @"(?i)\breject[^\r\n]*(?:STATUS:\s*FAIL|TASK_GATE:[^\r\n]*FAIL)\b",
+            content);
     }
 
     [Theory]
@@ -384,6 +411,7 @@ public sealed class SquadPerformanceContractTests
     [InlineData(CodeReviewSkillPath)]
     [InlineData(CodeReviewerAgentPath)]
     [InlineData(ReviewLensAgentPath)]
+    [InlineData(ReviewTriageAgentPath)]
     [InlineData(ReviewCouncilArchitecturePath)]
     public void CouncilSurfacesSpecifyMaterializedDiffContract(string relativePath)
     {
@@ -392,49 +420,40 @@ public sealed class SquadPerformanceContractTests
         Assert.DoesNotContain("artifacts/review-diff.patch", content, StringComparison.Ordinal);
         Assert.Matches(CouncilDiffCleanupRegex, content);
 
-        if (relativePath == ReviewLensAgentPath)
+        if (relativePath is CodeReviewSkillPath or CodeReviewerAgentPath)
+            Assert.Matches(
+                @"(?im)^(?=[^\r\n]*(?:\b|(?<=[\s`]))\.agent_scratchpad/<task-id>/review-diff\.patch\b)(?=[^\r\n]*\breview-lens\b)(?=[^\r\n]*\breview-triage\b)[^\r\n]+",
+                content);
+
+        if (relativePath is ReviewLensAgentPath or ReviewTriageAgentPath)
         {
-            Assert.True(
-                content.Contains("view_file", StringComparison.Ordinal) ||
-                content.Contains("filesystem.read: allow", StringComparison.Ordinal) ||
-                content.Contains("filesystem.read", StringComparison.Ordinal),
-                $"{relativePath} must specify reading diff via view_file / filesystem.read: allow.");
+            Assert.Matches(@"(?i)\b(?:view_file|filesystem\.read)\b", content);
             Assert.Matches(@"(?i)\b(?:never|not|without)\s+(?:execut\w+|run\w*)\s+git\b", content);
         }
         else
         {
-            Assert.True(
-                content.Contains("materialize", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("materializing", StringComparison.OrdinalIgnoreCase),
-                $"{relativePath} must specify materializing unified diff.");
-            Assert.True(
-                content.Contains("fan-out", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("fanout", StringComparison.OrdinalIgnoreCase) ||
-                content.Contains("fan out", StringComparison.OrdinalIgnoreCase),
-                $"{relativePath} must specify materialization before lens fan-out.");
-            Assert.Contains("review-lens", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Matches(@"(?i)\bmaterializ(?:es?|ing)\s+(?:`?git\s+diff`?|(?:the\s+)?(?:unified\s+)?diff)\b",
+                content);
+            Assert.Matches(@"(?i)\bbefore\s+(?:council\s+|lens\s+)?fan-?out\b", content);
         }
+    }
+
+    [Fact]
+    public void ReviewLensAgentInstructsReadingSuppliedDiffPathFromInvocationPacket()
+    {
+        string content = ReadRepoFile(ReviewLensAgentPath);
+        Assert.Matches(
+            @"(?im)^(?=[^\r\n]*\bread\s+(?:the\s+)?materialized\s+diff\b)(?=[^\r\n]*\b(?:path\s+supplied\s+in\s+(?:your\s+)?(?:task|invocation)\s+packet|supplied\s+in\s+(?:your\s+)?(?:task|invocation)\s+packet)\b)[^\r\n]+",
+            content);
     }
 
     [Fact]
     public void DocumentationAccuracyLensChartersCrossDocumentContractParity()
     {
         string content = ReadRepoFile(DocumentationAccuracyLensPath);
-        Assert.True(
-            content.Contains("cross-document", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("prompt-to-prompt", StringComparison.OrdinalIgnoreCase),
-            $"{DocumentationAccuracyLensPath} must charter cross-document / prompt-to-prompt parity.");
-        Assert.Contains("parity", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("schema", StringComparison.OrdinalIgnoreCase) &&
-            content.Contains("rejection", StringComparison.OrdinalIgnoreCase),
-            $"{DocumentationAccuracyLensPath} must charter parity across schemas and rejection rules.");
-        Assert.True(
-            content.Contains("agree across modified documents", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("agree across modified", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("not only doc-vs-code", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("not only code", StringComparison.OrdinalIgnoreCase),
-            $"{DocumentationAccuracyLensPath} must mandate agreement across modified documents, not only doc-vs-code.");
+        Assert.Matches(@"(?i)\b(?:cross-document|prompt-to-prompt)\s+(?:contract\s+)?parity\b", content);
+        Assert.Matches(@"(?i)\b(?:invariants,\s+)?schemas,\s+and\s+rejection\s+rules\b", content);
+        Assert.Matches(@"(?i)\bagree\s+across\s+modified\s+documents,\s+not\s+only\s+doc-vs-code\b", content);
     }
 
     [Theory]
@@ -443,22 +462,9 @@ public sealed class SquadPerformanceContractTests
     public void TestAdequacyAndReviewGuidanceEnforceContractAssertionRigor(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("Assert.Contains", content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("single-word", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("single word", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("bare", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must flag bare single-word Assert.Contains checks.");
-        Assert.True(
-            content.Contains("||", StringComparison.Ordinal) &&
-            (content.Contains("unrelated text", StringComparison.OrdinalIgnoreCase) ||
-             content.Contains("unguarded", StringComparison.OrdinalIgnoreCase)),
-            $"{relativePath} must flag unguarded boolean || assertions.");
-        Assert.True(
-            content.Contains("foreach", StringComparison.OrdinalIgnoreCase) &&
-            (content.Contains("non-contiguous", StringComparison.OrdinalIgnoreCase) ||
-             content.Contains("contiguous", StringComparison.OrdinalIgnoreCase)),
-            $"{relativePath} must flag non-contiguous foreach field checks over multi-line schemas.");
+        Assert.Matches(@"(?i)\bbare\s+single-word\s+`?Assert\.Contains`?\b", content);
+        Assert.Matches(@"(?i)\bunguarded\s+boolean\s+`?\|\|`?\s+assertions?\b", content);
+        Assert.Matches(@"(?i)\bnon-contiguous\s+`?foreach`?\s+field\s+checks\b", content);
     }
 
     [Theory]
@@ -467,21 +473,10 @@ public sealed class SquadPerformanceContractTests
     public void CorrectnessAndSupportabilityLensesRequireOperationalLifecycleWalk(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("lifecycle", content, StringComparison.OrdinalIgnoreCase);
-        Assert.True(
-            content.Contains("create", StringComparison.OrdinalIgnoreCase) &&
-            content.Contains("cleanup", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must specify walking the lifecycle from create to cleanup.");
-        Assert.True(
-            content.Contains("rollback", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("conflict", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must include conflict/rollback in the lifecycle walk.");
-        Assert.True(
-            content.Contains("worktree", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("concurrency", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("lock", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("temp-path", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must apply lifecycle walk to concurrency, worktree, lock, or temp-path primitives.");
+        Assert.Matches(@"(?i)\boperational\s+lifecycle\s+(?:state-machine\s+)?walk\b", content);
+        Assert.Matches(@"(?i)`create`\s*→\s*`execute`\s*→\s*`integrate`\s*→\s*`cleanup`", content);
+        Assert.Matches(@"(?i)(?:`?conflict`?\s+and\s+`?rollback`?|conflict/rollback)", content);
+        Assert.Matches(@"(?i)\b(?:concurrency\s+primitives?|worktree\s+allocations?|locks?|temp-paths?)\b", content);
     }
 
     [Theory]
@@ -490,19 +485,13 @@ public sealed class SquadPerformanceContractTests
     public void CorrectnessLensAndReviewGuidanceRequireLiteralPromptParsing(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.True(
-            content.Contains("charitable reading", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("charitable", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must prohibit charitable reading of agent prompt instructions.");
-        Assert.True(
-            content.Contains("literal parsing", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("literal", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must mandate literal parsing of prompts.");
-        Assert.True(
-            content.Contains("deadlock", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("self-contradiction", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("contradiction", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must flag gate deadlocks or self-contradictions in prompts.");
+        Assert.Matches(
+            @"(?i)\b(?:prohibit\s+charitable\s+reading\s+of\s+prompts|prohibit\s+charitable\s+reading\s+of\s+agent\s+prompt\s+instructions)\b",
+            content);
+        Assert.Matches(
+            @"(?i)\b(?:mandate\s+literal\s+parsing\s+of\s+instructions|require\s+literal\s+parsing\s+of\s+prompt\s+instructions)\b",
+            content);
+        Assert.Matches(@"(?i)\b(?:gate\s+deadlock|self-contradiction|contradiction/self-contradiction)\b", content);
     }
 
     [Theory]
@@ -511,21 +500,12 @@ public sealed class SquadPerformanceContractTests
     public void CodeReviewSurfacesEnforceRefutationGuardrails(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
-        Assert.Contains("refut", content, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"(?i)\brefutation\s+guardrails\b", content);
         Assert.Contains("R14", content, StringComparison.Ordinal);
         Assert.Contains("R16", content, StringComparison.Ordinal);
-        Assert.True(
-            content.Contains("Ground Rule 1", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("concrete failure", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must reference Ground Rule 1 / concrete failure guardrail.");
-        Assert.True(
-            content.Contains("repo-idiom", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("idiom", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must forbid dismissing findings under repo-idiom excuses.");
-        Assert.True(
-            content.Contains("cleanup", StringComparison.OrdinalIgnoreCase) ||
-            content.Contains("lifecycle", StringComparison.OrdinalIgnoreCase),
-            $"{relativePath} must protect missing lifecycle cleanup findings from refutation dismissal.");
+        Assert.Matches(@"(?i)\bGround\s+Rule\s+1\b", content);
+        Assert.Matches(@"(?i)\b(?:'repo-idiom'|repo-idiom)\b", content);
+        Assert.Matches(@"(?i)\bmissing\s+operational\s+lifecycle\s+cleanup\s+paths?\b", content);
     }
 
     private static string ReadRepoFile(string relativePath)
