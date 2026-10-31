@@ -84,13 +84,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     ];
 
     /// <summary>
-    /// The capability profile whose holder routes work rather than researching it, which
-    /// <c>ClaudeRenderer</c> also excludes from the standard MCP grant. Declared here rather
-    /// than read from the renderer so the expectation cannot drift with the implementation.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
-
-    /// <summary>
     /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
     /// Keeping the empty case word-for-word is what makes the withholding visible and
     /// distinguishable from a deliberate whitelist.
@@ -518,12 +511,21 @@ public sealed class FactoryRendererContractTests : IDisposable
                     + "mcp.json does not declare. Squad does not invent Factory MCP server names."));
         }
 
-        // The shipped claims: the read-entitled specialists carry the documentation server,
-        // and the pure orchestrator carries none.
+        // The shipped claims: the read-entitled specialists carry the documentation server, and
+        // so does the orchestrator — kyber-weave hands an agent the coding standards it is held
+        // to, which a role that delegates work needs as much as the roles it delegates to.
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "architect"));
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "code-reviewer"));
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "review-lens"));
-        Assert.Empty(RenderedMcpServers(result, "conductor"));
+        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "conductor"));
+
+        // The orchestrator's grant is the rule, not the exception: assert it against the
+        // source-computed entitlement so a re-added carve-out fails here as well as above.
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Factory),
+            "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
+            + "cannot state the conductor is entitled to kyber-weave.");
     }
 
     /// <summary>
@@ -622,9 +624,14 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// <summary>
     /// A primary agent's entry-point caveat names the droid's actual <c>mcpServers</c> value.
     /// The entry-point skill runs in the main session under the session's permissions, so the
-    /// caveat has to describe what the droid beside it really withholds. <c>conductor</c>'s
-    /// wording stays verbatim because its whitelist is empty.
+    /// caveat has to describe what the droid beside it really withholds — a caveat that names an
+    /// empty whitelist for a droid that carries one tells the reader the opposite of the truth.
     /// </summary>
+    /// <remarks>
+    /// Every primary agent in the shipped squad is read-entitled, the conductor included, so the
+    /// non-empty form is the one the shipped corpus exercises. The empty form is pinned by
+    /// <see cref="RenderAsync_Factory_EmptyMcpDeclarationFailsClosedForEveryDroid"/>.
+    /// </remarks>
     [Fact]
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
@@ -636,7 +643,7 @@ public sealed class FactoryRendererContractTests : IDisposable
             Scope: SquadDeploymentScope.Project));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int whitelistedPrimaries = 0;
+        List<string> whitelistedPrimaries = [];
         foreach (SquadAgent agent in source.Agents.Where(
                      candidate => candidate.Invocation == SquadInvocation.Primary))
         {
@@ -647,7 +654,7 @@ public sealed class FactoryRendererContractTests : IDisposable
                 continue;
             }
 
-            whitelistedPrimaries++;
+            whitelistedPrimaries.Add(agent.Name);
             SquadDegradationRecord record = Assert.Single(
                 result.Degradations,
                 d => string.Equals(d.CanonicalIdentity, agent.Name, StringComparison.Ordinal) &&
@@ -661,21 +668,13 @@ public sealed class FactoryRendererContractTests : IDisposable
         }
 
         Assert.True(
-            whitelistedPrimaries > 0,
+            whitelistedPrimaries.Count > 0,
             "The shipped squad renders no whitelisted primary agent, so the entry-point caveat is "
             + "never exercised with a non-empty mcpServers value.");
 
-        SquadDegradationRecord conductorRecord = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, "conductor", StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(conductorRecord.Details);
-        Assert.Contains(
-            "The same-name entry point at .factory/skills/conductor/SKILL.md runs under the "
-            + "session's permissions; the droid's explicit tools allow-list and mcpServers: [] do "
-            + "not apply to it.",
-            conductorRecord.Details,
-            StringComparison.Ordinal);
+        // The orchestrator is one of them: its caveat must name the server it carries, not the
+        // empty list it used to.
+        Assert.Contains("conductor", whitelistedPrimaries, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -708,6 +707,18 @@ public sealed class FactoryRendererContractTests : IDisposable
                      string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
             Assert.NotNull(withheld.Details);
             Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+
+            // A primary agent's entry-point caveat names the empty value too: with no server
+            // declared there is nothing for the caveat to point at, and the caveat still has to
+            // describe the droid beside it.
+            if (agent.Invocation == SquadInvocation.Primary &&
+                string.Equals(
+                    source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
+                    "skill",
+                    StringComparison.Ordinal))
+            {
+                Assert.Contains("mcpServers: []", withheld.Details, StringComparison.Ordinal);
+            }
         }
     }
 
@@ -761,12 +772,11 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// restatement of the shipped corpus.
     /// </summary>
     /// <remarks>
-    /// Every non-orchestrator profile in the shipped squad allows <c>filesystem.read</c>, which
-    /// leaves the clause indistinguishable from "every non-orchestrator profile is entitled":
-    /// dropping it from the renderer, or narrowing a profile to deny reads, would keep the rest
-    /// of this suite green while a role whose own profile withholds file reads was handed a
-    /// documentation server it has no grant to use. This case is what makes the clause fail a
-    /// build instead.
+    /// Every profile in the shipped squad allows <c>filesystem.read</c>, which leaves the clause
+    /// indistinguishable from "every profile is entitled": dropping it from the renderer, or
+    /// narrowing a profile to deny reads, would keep the rest of this suite green while a role
+    /// whose own profile withholds file reads was handed a documentation server it has no grant
+    /// to use. This case is what makes the clause fail a build instead.
     /// </remarks>
     [Fact]
     public async Task RenderAsync_Factory_WithholdsTheWhitelistWhenTheProfileDeniesFileRead()
@@ -1317,38 +1327,23 @@ public sealed class FactoryRendererContractTests : IDisposable
 
     /// <summary>
     /// The <c>mcpServers</c> value a droid must render: every declared server when the agent's
-    /// capability profile allows <c>filesystem.read</c> and the profile is not the pure
-    /// orchestrator, otherwise the empty list.
+    /// capability profile allows <c>filesystem.read</c>, otherwise the empty list.
     /// </summary>
     /// <remarks>
-    /// This is the entitlement condition the other MCP-granting renderers already implement.
-    /// It is restated here rather than called from the renderer so the test states the contract
-    /// instead of echoing the implementation.
+    /// The entitlement is read from <see cref="SquadMcpGrantProjection"/> rather than from the
+    /// renderer, so the test states the contract instead of echoing the implementation. The
+    /// orchestrator is not carved out of it: <c>kyber-weave</c> carries
+    /// <c>agent_coding_standards</c>, and the conductor has to hand its delegates the standards
+    /// they are held to.
     /// </remarks>
     private static IReadOnlyList<string> ExpectedFactoryMcpServers(
         SquadSource source,
         SquadAgent agent,
         IReadOnlyList<string> declaredServers)
     {
-        if (string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal))
-        {
-            return [];
-        }
-
-        if (!source.CapabilityProfiles.Profiles.TryGetValue(
-                agent.CapabilityProfile,
-                out SquadCapabilityProfile? profile))
-        {
-            return [];
-        }
-
-        bool grantsDocumentRead =
-            profile.Permissions.TryGetValue(
-                "filesystem.read",
-                out SquadPermissionDecision decision) &&
-            decision == SquadPermissionDecision.Allow;
-
-        return grantsDocumentRead ? declaredServers : [];
+        return SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Factory)
+            ? declaredServers
+            : [];
     }
 
     /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>

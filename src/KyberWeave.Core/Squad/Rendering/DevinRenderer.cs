@@ -89,15 +89,21 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// and the tool is withheld and recorded as <c>safety-narrowed</c>, as on Claude, Pi, and ZCode.
 /// </para>
 /// <para>
-/// <b>MCP is granted by concrete tool name.</b> Devin names an MCP tool
+/// <b>MCP is granted by concrete tool name, on two entitlements.</b> Devin names an MCP tool
 /// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> in its permission rules, so the tools declared in
 /// <c>toolchain.yml</c>'s <c>required-mcp-tools</c> are appended to <c>allowed-tools</c> in that
-/// form, for every role allowed to read the filesystem except the pure orchestrator — the
-/// same rule <see cref="ClaudeRenderer"/> and <see cref="ZCodeRenderer"/> apply. Devin's
-/// generic MCP tools (<c>mcp_list_tools</c>, <c>mcp_call_tool</c>, and the rest) are never
-/// granted: they reach every configured server's tools, not the declared ones. The servers
-/// themselves are the operator's to configure in Devin's <c>mcp_config.json</c>; this renderer
-/// never writes it.
+/// form. <c>kyber-weave</c> is granted on the file-read grant alone, the pure orchestrator
+/// included, because it carries <c>agent_coding_standards</c> (ADR 0048); <c>codegraph</c> and
+/// <c>context7</c> keep the carve-out a role that only routes work has no use for. The
+/// orchestrator never exercises the widened half of that rule on Devin: <c>conductor</c> is a
+/// primary agent, Devin lowers a primary agent to a <em>skill</em>, and a Devin skill carries no
+/// <c>allowed-tools</c> — this renderer emits that key only on the subagent path. So there is no
+/// surface on which the orchestrator could be granted anything, and none is fabricated: emitting
+/// an <c>allowed-tools</c> list on a skill would auto-approve tools, which is the opposite of the
+/// restriction the key means elsewhere. Devin's generic MCP tools
+/// (<c>mcp_list_tools</c>, <c>mcp_call_tool</c>, and the rest) are never granted: they reach
+/// every configured server's tools, not the declared ones. The servers themselves are the
+/// operator's to configure in Devin's <c>mcp_config.json</c>; this renderer never writes it.
 /// </para>
 /// <para>
 /// <b>Delegation is withheld from subagents.</b> The parent agent dispatches a named profile
@@ -146,11 +152,12 @@ public sealed class DevinRenderer : ISquadRenderer
     private const string SkillsDirectory = ".devin/skills";
 
     /// <summary>
-    /// The capability profile whose holder routes work rather than researching it, and which
-    /// <see cref="ClaudeRenderer"/> and <see cref="ZCodeRenderer"/> also exclude from the
-    /// standard MCP grant.
+    /// The declared MCP server every read-entitled subagent is granted, the pure orchestrator
+    /// included, because it carries <c>agent_coding_standards</c> (ADR 0048). Devin reads the
+    /// entitlement from the envelope profile the harness sees
+    /// (<see cref="SquadAgent.DevinCapabilityProfile"/>), not the shared one.
     /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
+    private const string UniversalMcpServer = "kyber-weave";
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Devin's core tool names, every tool that
@@ -240,7 +247,13 @@ public sealed class DevinRenderer : ISquadRenderer
         // permission-not-expressible details without a renderer change.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
-        IReadOnlyList<string> qualifiedMcpToolNames = QualifiedMcpToolNames(source);
+        // Read from canonical source rather than a renderer-local list, so a tool renamed
+        // upstream is a source edit, and so the doctor check reads the same roster. Split by
+        // entitlement class, because the two classes are granted on different rules.
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames =
+            QualifiedMcpToolNames(source, server => !IsUniversalMcpServer(server));
+        IReadOnlyList<string> universalMcpToolNames =
+            QualifiedMcpToolNames(source, IsUniversalMcpServer);
         IReadOnlyList<string> mcpServerNames = DeclaredMcpServerNames(source);
 
         List<SquadDeploymentFile> files = [];
@@ -254,7 +267,8 @@ public sealed class DevinRenderer : ISquadRenderer
                     agent,
                     source.ModelProfiles.Profiles,
                     source.CapabilityProfiles.Profiles,
-                    qualifiedMcpToolNames,
+                    orchestratorExcludedMcpToolNames,
+                    universalMcpToolNames,
                     request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -354,7 +368,8 @@ public sealed class DevinRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> qualifiedMcpToolNames,
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -369,7 +384,11 @@ public sealed class DevinRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        frontmatter["allowed-tools"] = ResolveTools(agent, capabilityProfiles, qualifiedMcpToolNames);
+        frontmatter["allowed-tools"] = ResolveTools(
+            agent,
+            capabilityProfiles,
+            orchestratorExcludedMcpToolNames,
+            universalMcpToolNames);
 
         string content;
         lock (SerializerLock)
@@ -453,7 +472,8 @@ public sealed class DevinRenderer : ISquadRenderer
     private static string[] ResolveTools(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> qualifiedMcpToolNames)
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames)
     {
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
         string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
@@ -471,11 +491,15 @@ public sealed class DevinRenderer : ISquadRenderer
         }
 
         // MCP names append after the built-ins: they come from source, so they cannot join the
-        // fixed renderer-local order, and the caller already supplies them server-then-tool.
+        // fixed renderer-local order, and each group is already server-then-tool from the caller.
         string[] resolved =
         [
             .. ToolOrder.Where(granted.Contains),
-            .. GrantsMcp(agent, capabilityProfiles) ? qualifiedMcpToolNames : []
+            .. ResolveMcpToolNames(
+                profileName,
+                capabilityProfiles,
+                orchestratorExcludedMcpToolNames,
+                universalMcpToolNames)
         ];
         if (resolved.Length == 0)
         {
@@ -488,6 +512,33 @@ public sealed class DevinRenderer : ISquadRenderer
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// The MCP tool names a subagent's entitlement carries: the orchestrator-excluded servers
+    /// first, then the universal server, each in the roster's server-then-tool order.
+    /// </summary>
+    /// <remarks>
+    /// Read from the envelope profile (<see cref="SquadAgent.DevinCapabilityProfile"/>) because
+    /// that is the profile Devin's harness sees; the shared profile's decision is not what the
+    /// lowered subagent runs under. The rule itself is the shared predicate in
+    /// <see cref="CapabilityDegradations"/>, so this target cannot drift from the others.
+    /// </remarks>
+    private static IReadOnlyList<string> ResolveMcpToolNames(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames)
+    {
+        return
+        [
+            .. CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(profileName, capabilityProfiles)
+                ? orchestratorExcludedMcpToolNames
+                : [],
+            .. CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
+                ? universalMcpToolNames
+                : []
+        ];
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildSubagentDegradations(
@@ -526,9 +577,11 @@ public sealed class DevinRenderer : ISquadRenderer
 
         List<string> notExpressible = [];
 
-        if (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles))
+        IReadOnlyList<string> withheldServerNames =
+            WithheldMcpServerNames(profileName, capabilityProfiles, mcpServerNames);
+        if (withheldServerNames.Count > 0)
         {
-            notExpressible.Add(DescribeWithheldMcp(agent, mcpServerNames));
+            notExpressible.Add(DescribeWithheldMcp(profileName, withheldServerNames, capabilityProfiles));
         }
 
         if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publish) &&
@@ -630,15 +683,20 @@ public sealed class DevinRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// The fully qualified MCP tool names declared by <c>toolchain.yml</c>, in a stable
-    /// server-then-tool order, in the <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> form Devin's
-    /// permission rules use.
+    /// The fully qualified MCP tool names declared by <c>toolchain.yml</c> for the servers
+    /// <paramref name="includeServer"/> admits, in a stable server-then-tool order, in the
+    /// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> form Devin's permission rules use.
     /// </summary>
-    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source)
+    private static IReadOnlyList<string> QualifiedMcpToolNames(
+        SquadSource source,
+        Func<string, bool> includeServer)
     {
+        ArgumentNullException.ThrowIfNull(includeServer);
+
         return
         [
             .. source.Toolchain.RequiredMcpTools
+                .Where(entry => includeServer(entry.Key))
                 .OrderBy(entry => entry.Key, StringComparer.Ordinal)
                 .SelectMany(entry => entry.Value
                     .OrderBy(tool => tool, StringComparer.Ordinal)
@@ -652,29 +710,64 @@ public sealed class DevinRenderer : ISquadRenderer
         return [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
     }
 
-    private static string DescribeWithheldMcp(
-        SquadAgent agent,
-        IReadOnlyList<string> mcpServerNames)
+    /// <summary>Whether a declared server name is the one every read-entitled subagent gets.</summary>
+    private static bool IsUniversalMcpServer(string serverName)
     {
-        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
-        return $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
-               $"profile '{profileName}' does not allow 'filesystem.read', or is the pure " +
-               "orchestrator profile that routes work rather than researching it.";
+        return string.Equals(serverName, UniversalMcpServer, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Whether a subagent is entitled to the declared MCP tools: any role allowed to read the
-    /// filesystem, except a pure orchestrator.
+    /// Why a subagent did not receive the declared MCP tools, naming exactly the servers it lost
+    /// and the rule that lost them.
     /// </summary>
-    private static bool GrantsMcp(
-        SquadAgent agent,
+    /// <remarks>
+    /// The reason is selected rather than hedged: the two withheld classes are withheld for
+    /// different causes, and a sentence offering both would be read as both. The explanation
+    /// never names a granted server, so the record and the rendered <c>allowed-tools</c> list
+    /// cannot contradict one another.
+    /// </remarks>
+    private static string DescribeWithheldMcp(
+        string profileName,
+        IReadOnlyList<string> withheldServerNames,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
-        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
-        return !string.Equals(profileName, PureOrchestratorProfile, StringComparison.Ordinal) &&
-               capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile) &&
-               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-               decision == SquadPermissionDecision.Allow;
+        string reason = CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
+            ? $"capability profile '{profileName}' is the pure orchestrator profile, which routes " +
+              "work rather than researching it, and the carve-out it keeps reaches only the " +
+              "code-graph and library servers; a server every agent needs is granted on the " +
+              "file-read entitlement alone and is never withheld on the profile's identity"
+            : $"capability profile '{profileName}' does not allow 'filesystem.read', so no " +
+              "declared MCP server is granted";
+
+        return $"Declared MCP server(s) {string.Join(", ", withheldServerNames)} are withheld: " +
+               reason + ".";
+    }
+
+    /// <summary>
+    /// The declared servers a subagent is withheld from: every server whose own entitlement its
+    /// envelope profile does not satisfy.
+    /// </summary>
+    /// <remarks>
+    /// Computed per server rather than as one "granted any MCP" boolean, because the two classes
+    /// answer different questions. A record built from a single answer would name the universal
+    /// server as withheld from the orchestrator after granting it — the one place a review would
+    /// read a claim the render contradicts.
+    /// </remarks>
+    private static IReadOnlyList<string> WithheldMcpServerNames(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> declaredMcpServerNames)
+    {
+        bool grantsUniversal =
+            CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles);
+        bool grantsOrchestratorExcluded =
+            CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(profileName, capabilityProfiles);
+
+        return
+        [
+            .. declaredMcpServerNames.Where(server =>
+                IsUniversalMcpServer(server) ? !grantsUniversal : !grantsOrchestratorExcluded)
+        ];
     }
 
     private static string CollapseToSingleLine(string value)

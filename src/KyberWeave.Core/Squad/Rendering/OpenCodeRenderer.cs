@@ -40,8 +40,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// onto OpenCode's permission taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
 /// <c>grep</c>, <c>glob</c>, <c>list</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
 /// <c>network.read</c> -&gt; <c>webfetch</c>, <c>websearch</c>, and <c>delegate</c> -&gt; pattern-based <c>task</c> rules.
-/// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to agents
-/// with <c>filesystem.read: allow</c>, excluding pure orchestrators and shared identities.
+/// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to every agent
+/// with <c>filesystem.read: allow</c>, pure orchestrators included, excluding shared identities whose
+/// canonical skill is the only projection emitted. The orchestrator keeps the grant because that server
+/// carries <c>agent_coding_standards</c> (ADR 0048).
 /// <c>network.publish</c> has no native tool and is withheld, emitting <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
@@ -346,15 +348,12 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 }
             }
 
-            bool isPureOrchestrator = string.Equals(
-                agent.CapabilityProfile,
-                "orchestrator",
-                StringComparison.Ordinal);
-
-            if (!isPureOrchestrator &&
-                !suppressedSkillIdentities.Contains(agent.Name) &&
-                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow)
+            // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
+            // carries agent_coding_standards, which the role that assigns work needs to point its
+            // delegates at the standards they are held to (ADR 0048). A suppressed shared identity
+            // keeps no grant, because its canonical skill is the only projection emitted.
+            if (!suppressedSkillIdentities.Contains(agent.Name) &&
+                CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))
             {
                 granted.Add(KyberWeaveMcpPermission);
             }

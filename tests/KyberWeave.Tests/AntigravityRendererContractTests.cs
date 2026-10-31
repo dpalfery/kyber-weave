@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -1188,5 +1190,176 @@ public sealed class AntigravityRendererContractTests : IDisposable
             string identity = SquadDeploymentPlan.IdentityFromRelativePath(agentFile.RelativePath);
             Assert.Equal(agent.Name, identity);
         }
+    }
+
+    /// <summary>
+    /// Every agent the source entitles to <c>kyber-weave</c> renders it in its own frontmatter, in
+    /// the one entry shape live-probed against <c>agy</c> 1.4.12, and every agent the source does
+    /// not entitle renders no <c>mcpServers</c> key at all.
+    /// </summary>
+    /// <remarks>
+    /// The roster is computed from the loaded capability profiles by
+    /// <see cref="SquadMcpGrantProjection"/>, never from the renderer, so a renderer that re-added
+    /// the pure-orchestrator carve-out fails here rather than agreeing with its own copy of the
+    /// rule. <c>conductor</c>'s presence is asserted explicitly as well, because that one agent is
+    /// the whole point of ADR 0048: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
+    /// the role that assigns work is the role that needs it.
+    ///
+    /// The shape is asserted structurally rather than by string match because it is the contract.
+    /// The probe called <c>{name, command, args}</c> entries successfully; the alternative
+    /// single-key map spelling (<c>- kyber-weave: {command, args}</c>) listed and ran but was never
+    /// called, so it is not the shape this suite accepts.
+    /// </remarks>
+    [Fact]
+    public async Task EveryReadEntitledAgentRendersTheKyberWeaveMcpServerInTheCallVerifiedShape()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        IReadOnlySet<string> entitled = SquadMcpGrantProjection.KyberWeaveEntitledAgents(
+            source,
+            SquadTarget.Antigravity);
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Contains(conductor.Name, entitled, StringComparer.Ordinal);
+
+        (string Command, string[] Args) declaration = DeclaredKyberWeaveServer(source);
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile agentFile = Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".agents/agents/{agent.Name}/agent.md");
+            YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
+
+            if (!entitled.Contains(agent.Name))
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+                    $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') renders an "
+                    + "'mcpServers' key, but the source withholds kyber-weave from it.");
+                continue;
+            }
+
+            YamlNode servers = RequireNode(frontmatter, "mcpServers");
+            YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(servers);
+            YamlMappingNode entry = Assert.IsType<YamlMappingNode>(Assert.Single(entries.Children));
+
+            // The verified entry shape, and only that shape: an entry that also carried the server
+            // name as its own key would be the spelling the probe never called.
+            string[] keys = [.. entry.Children.Keys
+                .Select(key => (key as YamlScalarNode)?.Value ?? string.Empty)];
+            Assert.Equal(["name", "command", "args"], keys);
+            Assert.Equal("kyber-weave", RequireScalar(entry, "name"));
+            Assert.Equal(declaration.Command, RequireScalar(entry, "command"));
+            Assert.Equal(declaration.Args, RequireSequenceValues(entry, "args"));
+        }
+    }
+
+    /// <summary>
+    /// An agent whose profile denies <c>filesystem.read</c> renders no MCP server and carries a
+    /// <c>permission-not-expressible</c> record naming the server it lost and the rule that lost it,
+    /// while a granted agent beside it carries no withholding claim.
+    /// </summary>
+    /// <remarks>
+    /// Two outcomes, two records. A blanket "MCP is not expressible here" sentence would have made
+    /// a deliberately granted agent indistinguishable from a withheld one in the only place a
+    /// review or a <c>squad doctor</c> run reads either, which is how the pre-ADR-0048 renderer
+    /// reported every agent as degraded while granting nobody.
+    /// </remarks>
+    [Fact]
+    public async Task AnAgentWhoseProfileDeniesFileReadRendersNoMcpServerAndRecordsTheWithholding()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
+            "The read-denied fixture still entitles its agent, so the fail-closed branch is not "
+            + "exercised by this test.");
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        YamlMappingNode withheldFrontmatter = ReadFrontmatter(Assert.Single(
+            result.Files,
+            file => file.RelativePath == $".agents/agents/{denied.Name}/agent.md"));
+        Assert.False(
+            withheldFrontmatter.Children.ContainsKey(new YamlScalarNode("mcpServers")),
+            $"Agent '{denied.Name}' denies 'filesystem.read' and must render no 'mcpServers' entry.");
+
+        SquadDegradationRecord withholding = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                      string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(withholding.Details);
+        Assert.Contains("kyber-weave", withholding.Details, StringComparison.Ordinal);
+        Assert.Contains("withheld", withholding.Details, StringComparison.Ordinal);
+        Assert.Contains("filesystem.read", withholding.Details, StringComparison.Ordinal);
+
+        SquadAgent granted = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, granted, SquadTarget.Antigravity),
+            "The read-denied fixture must leave every other agent entitled, or the granted half of "
+            + "this test proves nothing.");
+        foreach (SquadDegradationRecord record in result.Degradations.Where(record =>
+                     string.Equals(record.CanonicalIdentity, granted.Name, StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The launch definition the squad's own <c>mcp.json</c> declares for <c>kyber-weave</c>, read
+    /// from the loaded source so the rendered entry is compared against the declaration rather
+    /// than against a literal the renderer could have drifted from.
+    /// </summary>
+    private static (string Command, string[] Args) DeclaredKyberWeaveServer(SquadSource source)
+    {
+        Assert.True(
+            source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers),
+            "The canonical squad declares no 'mcpServers', so there is no server to grant.");
+        Assert.True(
+            servers.TryGetProperty(SquadMcpGrantProjection.KyberWeaveServer, out JsonElement server),
+            "The canonical squad declares no 'kyber-weave' server, so there is no grant to assert.");
+        Assert.True(
+            server.TryGetProperty("command", out JsonElement command),
+            "The declared 'kyber-weave' server carries no 'command'.");
+        Assert.True(
+            server.TryGetProperty("args", out JsonElement args),
+            "The declared 'kyber-weave' server carries no 'args'.");
+
+        return (
+            command.GetString() ?? string.Empty,
+            [.. args.EnumerateArray().Select(arg => arg.GetString() ?? string.Empty)]);
+    }
+
+    private static YamlNode RequireNode(YamlMappingNode node, string key)
+    {
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"Frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
+        }
+
+        return value;
+    }
+
+    private static string[] RequireSequenceValues(YamlMappingNode node, string key)
+    {
+        YamlSequenceNode sequence = Assert.IsType<YamlSequenceNode>(RequireNode(node, key));
+        return
+        [
+            .. sequence.Children.Select(child => Assert.IsType<YamlScalarNode>(child).Value
+                ?? throw new InvalidOperationException($"Key '{key}' has a null sequence entry."))
+        ];
     }
 }

@@ -22,10 +22,48 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// skill projections.
 /// </para>
 /// <para>
-/// Permission degradation: Kilo agent configuration has no frontmatter tool allow-list or
-/// capability permission lattice. Configured profile decisions (including allow, ask, and deny)
-/// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
-/// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
+/// <b>Kilo does have a permission lattice, and it is an approval lattice rather than a visibility
+/// allow-list.</b> Agent frontmatter carries a first-class <c>permission</c> map whose values are
+/// <c>ask</c>, <c>allow</c>, <c>deny</c>, or null; the deprecated <c>tools: {name: boolean}</c> form
+/// is folded into it during the loader's normalization, and an unrecognised frontmatter key is
+/// tolerated rather than rejected (verified against the published <c>@kilocode/cli</c> 7.8.18,
+/// <c>Kilo-Org/kilocode</c> tag <c>v7.8.18</c> — the loader at <c>packages/opencode/src/config/agent.ts</c>
+/// globs <c>{agent,agents}/**/*.md</c>, merges every frontmatter key into the agent config, and
+/// validates the result against the agent schema). <c>allow</c> means the call runs without an ask
+/// prompt; it does not hide another tool, and only a <c>deny</c> rule whose pattern is <c>*</c>
+/// removes one from the model's view. The entry this renderer emits is therefore a pre-approval,
+/// not isolation: it removes a prompt — and, because a headless subagent's ask fails closed, a
+/// likely failure — from tools a Squad subagent is entitled to call. It restricts nothing.
+/// </para>
+/// <para>
+/// <b>MCP tools are gated by that same map, under a namespaced key.</b> The key is
+/// <c>{server}_{tool}</c>, with the server name sanitized only for characters outside
+/// <c>[a-zA-Z0-9_-]</c> — so the hyphen in <c>kyber-weave</c> survives, and <c>kyber-weave_*</c> is
+/// the server wildcard (a <c>kyber_weave_*</c> spelling would parse cleanly and match nothing). An
+/// agent the universal MCP predicate entitles to this server emits that wildcard with
+/// <c>allow</c>, the pure orchestrator included, because the server carries
+/// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
+/// (ADR 0048). An agent the predicate does not entitle emits no entry at all: for a headless
+/// subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a server the operator
+/// may never have configured would assert more than canonical source does — the capability lattice
+/// declares no MCP capability to derive one from.
+/// </para>
+/// <para>
+/// <b>The server half of the wiring stays the operator's.</b> An agent file cannot add an MCP
+/// server: the server itself is session-level configuration (the <c>mcp</c> key in
+/// <c>kilo.jsonc</c>), and Squad writes no harness settings file. A grant with no configured server
+/// reaches nothing, which is why this renderer emits the permission entry and stops there rather
+/// than pretending the entry supplies the connection.
+/// </para>
+/// <para>
+/// <b>Capability permissions remain unexpressed, and that gap is recorded.</b> The
+/// <c>permission</c> map is keyed by tool name — built-in tools by their own names, MCP tools as
+/// <c>{server}_{tool}</c> — so the canonical capability vocabulary (<c>filesystem.read</c>,
+/// <c>process.execute</c>, ...) is not a key Kilo reads. Translating the lattice onto Kilo's tool
+/// keys is a separate decision this renderer does not take, so every capability a profile
+/// constrains is recorded as a structured degradation under code
+/// <c>permission-not-expressible</c>, deny decisions included, rather than being silently dropped
+/// (preventing capability widening).
 /// </para>
 /// <para>
 /// <b>Agent resources are projected beside their principal with a discovery-guard
@@ -50,6 +88,15 @@ public sealed class KiloRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".kilo/agents";
     private const string SkillsDirectory = ".kilo/skills";
+
+    /// <summary>
+    /// The <c>permission</c> entry naming the whole <c>kyber-weave</c> MCP surface: Kilo gates MCP
+    /// tools under the same permission map as built-in ones, keyed <c>{server}_{tool}</c> with the
+    /// server name sanitized only for characters outside <c>[a-zA-Z0-9_-]</c>. The hyphen is
+    /// load-bearing — an underscore spelling would parse and match nothing — so the key is a
+    /// constant rather than assembled at the call site, and a test pins the emitted bytes.
+    /// </summary>
+    private const string KyberWeaveMcpPermission = "kyber-weave_*";
 
     private static readonly ThreadLocal<ISerializer> YamlSerializer = new(() => new SerializerBuilder().Build());
 
@@ -114,9 +161,18 @@ public sealed class KiloRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
+            // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
+            // carries agent_coding_standards, and the role that assigns work is the role telling
+            // its delegates which standards they are held to (ADR 0048). The predicate is shared so
+            // this target cannot drift from the others' answer.
+            bool grantsKyberWeaveMcp = CapabilityDegradations.GrantsUniversalMcpServers(
+                agent.CapabilityProfile,
+                source.CapabilityProfiles.Profiles);
+
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
+                grantsKyberWeaveMcp,
                 request.Scope);
             files.Add(principal);
             SquadAgentResourceDiscoveryGuard.Append(
@@ -160,6 +216,7 @@ public sealed class KiloRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
+        bool grantsKyberWeaveMcp,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -173,6 +230,19 @@ public sealed class KiloRenderer : ISquadRenderer
         if (model is not null)
         {
             frontmatter["model"] = model;
+        }
+
+        // The key is a constant rather than assembled here: Kilo sanitizes the server name only
+        // for characters outside [a-zA-Z0-9_-], so "kyber-weave" keeps its hyphen and this is the
+        // wildcard Kilo's matcher resolves for kyber-weave_docs_status. An unentitled agent emits
+        // no entry: absence of "allow" withholds for a headless subagent (its ask fails closed),
+        // and a "deny" here would out-assert a canonical source that declares no MCP reach.
+        if (grantsKyberWeaveMcp)
+        {
+            frontmatter["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [KyberWeaveMcpPermission] = "allow"
+            };
         }
 
         // The composed agent file carries discovery-guarded links: an in-closure .md link
@@ -248,9 +318,14 @@ public sealed class KiloRenderer : ISquadRenderer
             return null;
         }
 
-        // Kilo has no capability permission lattice. All configured permissions (allow, ask,
-        // deny) are unexpressed at the harness boundary; recording deny constraints ensures
-        // canonical restrictions are not silently dropped (preventing capability widening).
+        // Kilo's permission map is keyed by tool name (built-in tools by their own names, MCP tools
+        // as {server}_{tool}), so the capability vocabulary is not a key it reads and this renderer
+        // translates no capability onto one. Every configured decision — allow, ask, deny — is
+        // therefore unexpressed at the harness boundary; recording the deny constraints in
+        // particular ensures canonical restrictions are not silently dropped (preventing capability
+        // widening). No record names MCP servers the agent was denied: the entitlement decides only
+        // whether an approval is emitted, and an agent that is not entitled gets no entry rather
+        // than a deny, so there is no withheld-server sentence to record.
         List<string> unexpressed = capabilityVocabulary
             .Where(cap => profile.Permissions.ContainsKey(cap))
             .ToList();
@@ -261,7 +336,7 @@ public sealed class KiloRenderer : ISquadRenderer
         }
 
         string details =
-            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
+            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo's permission map is keyed by tool name, not by capability, so those decisions are unexpressed; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
 
         return new SquadDegradationRecord(
             "kilo",

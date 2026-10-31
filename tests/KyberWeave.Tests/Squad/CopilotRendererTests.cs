@@ -165,6 +165,52 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain("context7/*", architectToolsLine, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The pure orchestrator's rendered tools name the <c>kyber-weave</c> server, and no other
+    /// agent's rendered tools change.
+    /// </summary>
+    /// <remarks>
+    /// Copilot derives no MCP membership of its own: an agent reaches exactly the tools its own
+    /// <c>copilot-tools</c> frontmatter names, validated against the effective profile's
+    /// <c>filesystem.read</c>. So the widening lands in the canonical source, and this test pins
+    /// both halves — the renderer echoes the declaration in catalog order, and that declaration
+    /// follows the source-computed entitlement, which grants <c>kyber-weave</c> to the orchestrator
+    /// while leaving <c>codegraph</c> and <c>context7</c> withheld from it.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_ConductorIsGrantedKyberWeaveAndEveryOtherAgentKeepsItsTools()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
+
+            // The renderer adds nothing the agent did not declare: the rendered list is the
+            // agent's own membership in the catalog's approved order.
+            Assert.Equal(CopilotToolCatalog.Normalize(agent.CopilotTools), tools);
+
+            if (SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Copilot))
+            {
+                Assert.True(
+                    tools.Contains("kyber-weave/*", StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') is "
+                    + "entitled to kyber-weave by the source rule but declares no 'kyber-weave/*' "
+                    + "tool: " + string.Join(", ", tools));
+            }
+        }
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.Contains("kyber-weave/*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("codegraph/*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain(
+            conductorTools,
+            tool => tool.StartsWith("context7/", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task RenderAsync_AlwaysIncludesVscodeAndTodo_AcrossAllAgents()
     {
@@ -186,6 +232,22 @@ public sealed class CopilotRendererTests
         }
     }
 
+    /// <summary>
+    /// Each canonical agent's rendered <c>tools</c> line is byte-exact: the catalog's approved
+    /// order, carrying exactly the membership its own <c>copilot-tools</c> frontmatter declares.
+    /// </summary>
+    /// <remarks>
+    /// The expected lines are literal on purpose. This test pins the emission order and the
+    /// rendering of declared membership — not the entitlement rule, which
+    /// <see cref="SquadUniversalMcpGrantContractTests"/> derives from the source — so a literal
+    /// row is what makes a reordered catalog or a lost entry fail rather than re-derive itself.
+    ///
+    /// Every <c>*</c>-bearing entry is single-quoted here and double-quoted in the canonical
+    /// <c>products/kyber-squad/agents/*.md</c> frontmatter. That asymmetry is real and must not be
+    /// reconciled: the source is YAML the loader reads, while this line is what
+    /// <c>CopilotRenderer</c> emits, and its converter writes every wildcard with
+    /// <c>ScalarStyle.SingleQuoted</c> so Copilot does not read <c>*</c> as an alias marker.
+    /// </remarks>
     [Theory]
     [InlineData("architect",
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
@@ -198,7 +260,7 @@ public sealed class CopilotRendererTests
     [InlineData("code-reviewer",
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
     [InlineData("conductor",
-        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]")]
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, 'kyber-weave/*', agent]")]
     [InlineData("csharp-dev",
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kyber-weave/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("dal-dev",
@@ -1034,5 +1096,34 @@ public sealed class CopilotRendererTests
         string? toolsLine = lines.FirstOrDefault(l => l.StartsWith("tools:", StringComparison.Ordinal));
         Assert.NotNull(toolsLine);
         return toolsLine.Trim();
+    }
+
+    /// <summary>
+    /// The entries of a rendered agent's <c>tools</c> flow sequence, unquoted. Copilot's
+    /// single-quoted wildcards are the only quoting the converter emits, so stripping the quotes
+    /// recovers the tool identifier the harness matches on.
+    /// </summary>
+    private static IReadOnlyList<string> RenderedTools(SquadRenderResult result, string agentName)
+    {
+        string content = ConductorAgentContent(result, $".github/agents/{agentName}.agent.md");
+        string toolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
+
+        Match match = ToolsFlowSequenceRegex.Match(toolsLine);
+        Assert.True(
+            match.Success,
+            $"Agent '{agentName}' frontmatter carries no flow-style 'tools: [...]' line: {toolsLine}");
+
+        string items = match.Groups["items"].Value.Trim();
+        if (items.Length == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. items
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(item => item.Trim('\'', '"'))
+        ];
     }
 }

@@ -34,8 +34,21 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// A subagent is never given the <c>agent</c> or <c>agent_output</c> tools, so
-/// <c>delegate</c> is not expressible. MCP tools reach a subagent only when named in its
-/// <c>tools</c> list; Squad names none, so parent MCP is not inherited.
+/// <c>delegate</c> is not expressible.
+/// </para>
+/// <para>
+/// <b>MCP is granted by fully qualified tool name, on the file-read entitlement.</b> Command Code
+/// gives a subagent no MCP tool it does not name in its own <c>tools</c> list, so an unnamed
+/// server is a server the agent cannot call. This renderer therefore names the
+/// <c>kyber-weave</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
+/// whose capability profile resolves and allows <c>filesystem.read</c> — the pure orchestrator
+/// included, because that server carries <c>agent_coding_standards</c> (ADR 0048). It names that
+/// one server and no other: <c>codegraph</c> and <c>context7</c> keep the orchestrator carve-out,
+/// and this target never named them before the widening either, so it is not the surface on
+/// which that carve-out is expressed. Where the grant is empty — a profile that denies the read,
+/// or an unresolvable one — the agent names no MCP tool and its
+/// <c>permission-not-expressible</c> record states that reason rather than claiming in general
+/// terms that Squad names nothing.
 /// </para>
 /// <para>
 /// Profile-declared shared identities suppress their skill projections per the native
@@ -55,6 +68,12 @@ public sealed class CommandCodeRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".commandcode/agents";
     private const string SkillsDirectory = ".commandcode/skills";
+
+    /// <summary>
+    /// The declared MCP server this target names: the one whose tools every agent needs, granted
+    /// on the file-read entitlement alone, the pure orchestrator included (ADR 0048).
+    /// </summary>
+    private const string UniversalMcpServer = "kyber-weave";
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Command Code's built-in tool names,
@@ -160,12 +179,17 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        // Read from canonical source rather than a renderer-local list, so a tool renamed
+        // upstream is a source edit, and so the doctor check reads the same roster.
+        IReadOnlyList<string> universalMcpToolNames = UniversalMcpToolNames(source);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
+                universalMcpToolNames,
                 request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -187,6 +211,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                                 agent,
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
+                                universalMcpToolNames,
                                 $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
                                 true));
                         }
@@ -213,13 +238,15 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                             agent,
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
+                            universalMcpToolNames,
                             skillPrincipal.RelativePath));
                     }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
                     // Omit mode: the agent renders exactly as before, with no entry-point skill.
-                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                    degradations.AddRange(BuildDegradationRecords(
+                        agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
                 }
                 else
                 {
@@ -230,7 +257,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             }
             else
             {
-                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                degradations.AddRange(BuildDegradationRecords(
+                    agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
             }
         }
 
@@ -257,6 +285,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -278,7 +307,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
 
         // Always emit tools. Omitting it already grants nothing, but an explicit list keeps
         // the grant reviewable in the file, and an empty grant is the visible tools: [].
-        frontmatter["tools"] = new CommandCodeYamlFlowSequence(ResolveTools(agent, capabilityProfiles));
+        frontmatter["tools"] = new CommandCodeYamlFlowSequence(
+            ResolveTools(agent, capabilityProfiles, universalMcpToolNames));
 
         string content;
         lock (SerializerLock)
@@ -422,7 +452,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     /// </summary>
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames)
     {
         HashSet<string> granted = new(StringComparer.Ordinal);
 
@@ -443,7 +474,49 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             }
         }
 
-        return ToolOrder.Where(granted.Contains).ToArray();
+        // MCP names append after the built-ins: they come from source, so they cannot join the
+        // fixed renderer-local order, and the caller already supplies them server-then-tool.
+        return
+        [
+            .. ToolOrder.Where(granted.Contains),
+            .. ResolveMcpToolNames(agent.CapabilityProfile, capabilityProfiles, universalMcpToolNames)
+        ];
+    }
+
+    /// <summary>
+    /// The MCP tool names an agent's entitlement carries, in the roster's server-then-tool order.
+    /// </summary>
+    /// <remarks>
+    /// Command Code has no per-server permission key, only the agent's own <c>tools</c> list, so
+    /// the entitlement is written out name by name. It is the shared
+    /// <see cref="CapabilityDegradations.GrantsUniversalMcpServers"/> rule, not a renderer-local
+    /// copy, so this target cannot drift from the others.
+    /// </remarks>
+    private static IReadOnlyList<string> ResolveMcpToolNames(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames)
+    {
+        return CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
+            ? universalMcpToolNames
+            : [];
+    }
+
+    /// <summary>
+    /// The fully qualified <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> names of the declared server
+    /// every read-entitled agent gets, in a stable server-then-tool order.
+    /// </summary>
+    private static IReadOnlyList<string> UniversalMcpToolNames(SquadSource source)
+    {
+        return
+        [
+            .. source.Toolchain.RequiredMcpTools
+                .Where(entry => string.Equals(entry.Key, UniversalMcpServer, StringComparison.Ordinal))
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .SelectMany(entry => entry.Value
+                    .OrderBy(tool => tool, StringComparer.Ordinal)
+                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
+        ];
     }
 
     /// <summary>
@@ -458,6 +531,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         string entryPointSkillPath,
         bool reusedCanonicalSkill = false)
     {
@@ -484,6 +558,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
                      agent,
                      capabilityProfiles,
+                     universalMcpToolNames,
                      $"The same-name entry point at {entryPointSkillPath} runs under the " +
                      "session's permissions; the agent's explicit tools allow-list does not " +
                      "apply to it."))
@@ -495,6 +570,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
@@ -538,8 +614,21 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                 "Capability 'delegate' cannot spawn subagents; Command Code never gives a subagent the agent tool.");
         }
 
-        notExpressibleDetails.Add(
-            "MCP tools reach a Command Code subagent only when named in tools; Squad names none, so parent MCP was not inherited.");
+        // The parent-MCP sentence states the actual condition, and only when the condition
+        // holds: an agent whose tools list names the roster's MCP tools must not carry a record
+        // claiming Squad names none. The cause is selected rather than assumed, so a roster that
+        // declares nothing is not reported as a profile that denied the read.
+        if (!CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles) ||
+            universalMcpToolNames.Count == 0)
+        {
+            string cause = universalMcpToolNames.Count == 0
+                ? "the toolchain roster declares no tool for the server every agent needs"
+                : $"capability profile '{agent.CapabilityProfile}' does not allow 'filesystem.read'";
+            notExpressibleDetails.Add(
+                "MCP tools reach a Command Code subagent only when named in its tools list; " +
+                $"because {cause}, no MCP tool is named for this agent and parent MCP is not " +
+                "inherited.");
+        }
 
         if (entryPointSkillNote is not null)
         {

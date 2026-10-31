@@ -28,6 +28,19 @@ whitelist. This remains the record for the entry-point decision; the whitelist c
 stated in [Kyber-Squad architecture §4](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
 and the [capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix).
 
+Amended again 2026-10-31, in place ([ADR 0048](0048-universal-kyber-weave-mcp-grant.md)): **the
+whitelist is no longer withheld from the pure orchestrator.** By owner directive the `kyber-weave`
+server is granted to every droid whose capability profile resolves and allows `filesystem.read`,
+`conductor` included, because `agent_coding_standards` is critical to quality for every agent. The
+withholding the amendment above recorded therefore survives only for the `codegraph` and `context7`
+servers, which the squad's `mcp.json` does not declare at all — so on the shipped squad every droid
+carries `mcpServers: [kyber-weave]`, and `[]` remains the fail-closed outcome for a profile that
+grants no read entitlement and for a squad that declares no servers. This record changes because
+its own amendment had made the orchestrator the one droid the derivation excluded, and that
+exclusion was the part the owner overturned. Nothing else in this record moves: the entry-point
+skill still runs under the session's permissions and is still not governed by the value the key
+carries.
+
 ## Context
 
 Factory custom droids are dispatched as subagents: the main-session agent invokes them
@@ -94,6 +107,7 @@ native droid primitive works for delegation, and only the user-facing selection 
 ## Related
 
 - [ADR 0019: Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering](0019-pi-native-subagents-and-primary-lowering.md)
+- [ADR 0048: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0048-universal-kyber-weave-mcp-grant.md)
 - [ADR 0025: Native Devin Agents, Pinned Models, and In-Process Delegation](0025-devin-native-agents-and-skill-lowering.md)
 - [Kyber-Squad requirements: degradation matrix](../kyber-squad/requirements.md)
 - [Kyber-Squad onboarding: Factory notes](../kyber-squad/onboarding.md)
