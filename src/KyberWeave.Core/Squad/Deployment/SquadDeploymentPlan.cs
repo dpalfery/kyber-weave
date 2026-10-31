@@ -46,7 +46,7 @@ public sealed class SquadDeploymentPlan
         SquadStateMutation receiptMutation,
         ISquadGlobalRootResolver? globalRoots = null,
         bool isSingleRootLayout = false,
-        IReadOnlyList<string>? degradedFiles = null)
+        IReadOnlyList<SquadDegradedFile>? degradedFiles = null)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -101,10 +101,10 @@ public sealed class SquadDeploymentPlan
     public IReadOnlyList<SquadPlannedFileChange> PlannedFileChanges { get; }
 
     /// <summary>
-    ///     Relative paths of deployed files this plan could not read and therefore kept on trust rather than
-    ///     verifying. Empty for a plan whose every file was read and checked.
+    ///     Deployed files this plan could not read and therefore kept on trust rather than verifying, each
+    ///     with the target that produced it. Empty for a plan whose every file was read and checked.
     /// </summary>
-    public IReadOnlyList<string> DegradedFiles { get; }
+    public IReadOnlyList<SquadDegradedFile> DegradedFiles { get; }
 
     internal IReadOnlyList<SquadFilePrecondition> FilePreconditions { get; }
 
@@ -439,7 +439,7 @@ public sealed class SquadDeploymentPlan
         List<SquadFileMutation> mutations = new();
         List<SquadFilePrecondition> preconditions = new();
         List<SquadOwnedFile> nextOwnedFiles = new();
-        List<string> degradedFiles = new();
+        List<SquadDegradedFile> degradedFiles = new();
         HashSet<string> renderedIdentities = new(StringComparer.Ordinal);
 
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
@@ -493,7 +493,9 @@ public sealed class SquadDeploymentPlan
                 // Bytes that cannot be read cannot be proven unedited, so the record is kept and the file is
                 // left alone; the caller reports it by name.
                 nextOwnedFiles.Add(previous);
-                degradedFiles.Add(relativePath);
+                degradedFiles.Add(new SquadDegradedFile(
+                    relativePath,
+                    SquadTargetCatalog.Parse([rendered.File.Target]).Single()));
                 continue;
             }
 
@@ -555,7 +557,9 @@ public sealed class SquadDeploymentPlan
             {
                 // Unreadable means unprovable: keep the record rather than delete bytes we cannot verify.
                 nextOwnedFiles.Add(previous);
-                degradedFiles.Add(previous.RelativePath);
+                degradedFiles.Add(new SquadDegradedFile(
+                    previous.RelativePath,
+                    SquadTargetCatalog.Parse([previous.Target]).Single()));
                 continue;
             }
 
@@ -989,6 +993,9 @@ public enum SquadFileMutationKind
 ///     will do. An uninstall plan's receipt holds only the files it retains, so the removals it
 ///     plans are readable from these changes alone.
 /// </summary>
+/// <summary>A deployed file a plan kept on trust, with the target that produced it.</summary>
+public sealed record SquadDegradedFile(string RelativePath, SquadTarget Target);
+
 public sealed record SquadPlannedFileChange(
     string RelativePath,
     string Target,

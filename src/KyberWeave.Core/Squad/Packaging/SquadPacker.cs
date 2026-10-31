@@ -23,8 +23,7 @@ public static class SquadPacker
     public static string PackApm(
         string sourcePath,
         string outDirectory,
-        string version,
-        Func<string, string?>? readEnvironment = null)
+        string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -39,8 +38,7 @@ public static class SquadPacker
         }
 
         List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectApmEntries(sourcePath),
-            readEnvironment ?? Environment.GetEnvironmentVariable);
+            CollectApmEntries(sourcePath));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -53,8 +51,7 @@ public static class SquadPacker
     public static string PackPlugins(
         string sourcePath,
         string outDirectory,
-        string version,
-        Func<string, string?>? readEnvironment = null)
+        string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
@@ -69,8 +66,7 @@ public static class SquadPacker
         }
 
         List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectPluginsEntries(sourcePath, version),
-            readEnvironment ?? Environment.GetEnvironmentVariable);
+            CollectPluginsEntries(sourcePath, version));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
@@ -184,17 +180,11 @@ public static class SquadPacker
     /// source alone. A corpus with no block is passed through unchanged (injector no-op).
     /// </summary>
     /// <remarks>
-    ///     The packer ships the shipped default only. It never reads the operator's home guidance, so the
-    ///     <paramref name="readEnvironment"/> seam exists to let tests prove that no home lookup happens.
+    ///     Packing uses the shipped default text and never reads the operator's home guidance.
     /// </remarks>
     private static List<(string RelativePath, byte[] Content)> FillResponsePreferences(
-        List<(string RelativePath, byte[] Content)> entries,
-        Func<string, string?> readEnvironment)
+        List<(string RelativePath, byte[] Content)> entries)
     {
-        ArgumentNullException.ThrowIfNull(readEnvironment);
-        // Consulted so tests can prove the home lookup happens; the result is deliberately ignored.
-        _ = readEnvironment("HOME") ?? readEnvironment("USERPROFILE");
-
         List<SquadDeploymentFile> files = entries
             .Select(entry => new SquadDeploymentFile(entry.RelativePath, entry.Content, PackTarget))
             .ToList();

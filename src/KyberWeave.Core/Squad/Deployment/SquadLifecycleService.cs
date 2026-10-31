@@ -226,7 +226,7 @@ public sealed class SquadLifecycleService
                     planGlobalRoots,
                     []);
 
-            warnings.AddRange(DegradedFileWarnings(plan, request.Targets));
+            warnings.AddRange(DegradedFileWarnings(plan));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -443,7 +443,7 @@ public sealed class SquadLifecycleService
 
             ReportPreservedEdits(plan, previousReceipt, request.ReplaceManaged, warnings);
 
-            warnings.AddRange(DegradedFileWarnings(plan, targets));
+            warnings.AddRange(DegradedFileWarnings(plan));
 
             if (request.DryRun)
                 return new SquadLifecycleResult(
@@ -493,13 +493,10 @@ public sealed class SquadLifecycleService
         }
     }
 
-    private static IEnumerable<string> DegradedFileWarnings(
-        SquadDeploymentPlan plan,
-        IReadOnlyList<SquadTarget> targets)
+    private static IEnumerable<string> DegradedFileWarnings(SquadDeploymentPlan plan)
     {
-        string targetNames = string.Join(", ", targets.Select(SquadTargetCatalog.GetToken));
-        return plan.DegradedFiles.Select(path =>
-            $"Could not read deployed file '{path}' for target {targetNames}; it was kept on trust and not verified against the release.");
+        return plan.DegradedFiles.Select(degraded =>
+            $"Could not read deployed file '{degraded.RelativePath}' for target {SquadTargetCatalog.GetToken(degraded.Target)}; it was kept on trust and not verified against the release.");
     }
 
     /// <summary>
