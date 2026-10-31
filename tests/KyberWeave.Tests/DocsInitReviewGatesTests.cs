@@ -502,16 +502,17 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     {
         try
         {
-            ProcessStartInfo startInfo = new("cargo", "--version")
+            ProcessStartInfo startInfo = new("cargo")
             {
                 UseShellExecute = false,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            using Process? process = Process.Start(startInfo);
-            if (process is null) return false;
+            startInfo.ArgumentList.Add("--version");
 
-            return ProcessRunner.ReadToEnd(process).ExitCode == 0;
+            // Bounded: a rustup proxy can stall on a toolchain download, and that stall must not hang the suite.
+            return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30)).ExitCode == 0;
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {

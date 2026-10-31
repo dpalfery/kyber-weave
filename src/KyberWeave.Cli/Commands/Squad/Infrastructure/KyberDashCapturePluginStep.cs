@@ -34,6 +34,12 @@ internal sealed class KyberDashCapturePluginStep
     private const string UnknownCommandMarker = "unknown command";
     private const string VerdictPrefix = "opencode plugin: ";
 
+    /// <summary>
+    ///     The bound for the plugin verb. It starts KyberDash and reads or writes the OpenCode config, so it gets
+    ///     more room than a probe. Two minutes is well past a healthy run and still ends a hang.
+    /// </summary>
+    private static readonly TimeSpan PluginVerbTimeout = TimeSpan.FromSeconds(120);
+
     private readonly IProcessExecutor _executor;
     private readonly Func<string?> _locateKyberDash;
 
@@ -51,7 +57,7 @@ internal sealed class KyberDashCapturePluginStep
     /// <summary>The production step: the shared process executor and the real KyberDash locator.</summary>
     public static KyberDashCapturePluginStep CreateDefault()
     {
-        return new KyberDashCapturePluginStep(ProcessExecutor.Instance, LocateKyberDash);
+        return new KyberDashCapturePluginStep(ProcessExecutor.WithTimeout(PluginVerbTimeout), LocateKyberDash);
     }
 
     /// <summary>Runs the verb against one OpenCode global root and prints one or two lines about it.</summary>
@@ -84,7 +90,7 @@ internal sealed class KyberDashCapturePluginStep
             result = _executor.Run(start, string.Empty);
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or Win32Exception
-                                       or UnauthorizedAccessException)
+                                       or UnauthorizedAccessException or TimeoutException)
         {
             AnsiConsole.MarkupLine(
                 $"[yellow]warning:[/] OpenCode capture plugin step could not run KyberDash: {Markup.Escape(ex.Message)}. " +

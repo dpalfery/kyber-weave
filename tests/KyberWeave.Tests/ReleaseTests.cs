@@ -87,7 +87,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unameOs + "' '" + unameArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedRid, result.StandardOutput.Trim());
@@ -112,7 +112,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_kyberdash_rid '" + kyberWeaveRid + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expectedKyberDashRid, result.StandardOutput.Trim());
@@ -154,7 +154,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_semver_compare '" + left + "' '" + right + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -177,7 +177,7 @@ public sealed class ReleaseTests
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, listed);
+        ProcessResult result = ProcessRunner.Run(startInfo, listed, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
@@ -217,7 +217,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.2.0-rc.1", result.StandardOutput.Trim());
@@ -252,7 +252,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -267,7 +267,7 @@ public sealed class ReleaseTests
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.StandardOutput.Trim());
@@ -293,7 +293,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_release_has_kyberdash '" + version + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expected ? 0 : 1, result.ExitCode);
     }
@@ -309,7 +309,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "printf '%s' \"$KYBERDASH_MIN_VERSION\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("0.1.7-rc.9", result.StandardOutput.Trim());
@@ -327,7 +327,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid '" + unsupportedOs + "' x86_64");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -346,7 +346,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_resolve_rid 'Linux' '" + unsupportedArch + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
         Assert.True(string.IsNullOrEmpty(result.StandardOutput.Trim()),
@@ -375,7 +375,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -398,7 +398,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(1, result.ExitCode);
         // The helper writes the diff to stderr so a user running the
@@ -423,7 +423,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
@@ -446,7 +446,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(2, result.ExitCode);
     }
@@ -477,7 +477,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_verify_checksum '" + sandbox.SumsPath + "' '" + archive + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
     }
@@ -1238,7 +1238,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1290,7 +1290,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1369,7 +1369,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1509,7 +1509,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("--list");
         startInfo.ArgumentList.Add(sandbox.Root);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("usage:", result.StandardError, StringComparison.Ordinal);
@@ -1526,7 +1526,7 @@ public sealed class ReleaseTests
         startInfo2.ArgumentList.Add(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
 
-        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty);
+        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result2.ExitCode);
         Assert.Contains("usage:", result2.StandardError, StringComparison.Ordinal);
@@ -1616,7 +1616,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
@@ -1667,7 +1667,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1717,7 +1717,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
@@ -1759,7 +1759,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("unexpected release asset", result.StandardError, StringComparison.Ordinal);
@@ -1804,7 +1804,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -1855,7 +1855,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains(".hidden-file", result.StandardError, StringComparison.Ordinal);
@@ -1889,7 +1889,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         // Script must exit non-zero when all assets are missing.
         Assert.NotEqual(0, result.ExitCode);
@@ -1952,7 +1952,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(releaseDirPath, "SHA256SUMS.txt")));
@@ -1993,7 +1993,7 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add(sandbox.Root);
         startInfo.ArgumentList.Add(version);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
 
@@ -2058,7 +2058,7 @@ public sealed class ReleaseTests
             startInfo.ArgumentList.Add(sandbox.Root);
             startInfo.ArgumentList.Add(version);
 
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Script must exit non-zero when the hash command fails.
             Assert.NotEqual(0, result.ExitCode);
@@ -2115,7 +2115,7 @@ public sealed class ReleaseTests
             };
             resolveInfo.ArgumentList.Add("-c");
             resolveInfo.ArgumentList.Add("command -v " + tool);
-            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty);
+            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             if (resolveResult.ExitCode != 0)
             {
@@ -2147,7 +2147,7 @@ public sealed class ReleaseTests
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
         normalInfo.ArgumentList.Add(sandbox.Root);
         normalInfo.ArgumentList.Add(version);
-        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty);
+        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.Equal(0, normalResult.ExitCode);
 
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
@@ -2195,7 +2195,7 @@ public sealed class ReleaseTests
                 Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
             fallbackInfo.ArgumentList.Add(sandbox.Root);
             fallbackInfo.ArgumentList.Add(version);
-            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));
 
             // Verify sha256sum is not available in the hermetic PATH.
             ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
@@ -2208,7 +2208,7 @@ public sealed class ReleaseTests
             verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
             verifySha256sumAbsent.ArgumentList.Add("-c");
             verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
-            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.NotEqual(0, verifySha256Result.ExitCode);
 
             // Verify shasum IS available in the hermetic PATH.
@@ -2222,7 +2222,7 @@ public sealed class ReleaseTests
             verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
             verifyShasumPresent.ArgumentList.Add("-c");
             verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
-            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty);
+            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty, TimeSpan.FromSeconds(60));
             Assert.Equal(0, verifyShasumResult.ExitCode);
 
             Assert.Equal(0, fallbackResult.ExitCode);
@@ -2271,7 +2271,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar '" + Path.GetDirectoryName(recorder) + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         string[] argv = File.ReadAllLines(
@@ -2297,7 +2297,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_run_menubar \"" + Path.GetDirectoryName(recorder) + "\"");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(
@@ -2326,7 +2326,7 @@ public sealed class ReleaseTests
             ". \"" + InstallShPath + "\"; " +
             "kyber_weave_menubar_conflict '" + withMenubar + "' '" + noKyberdash + "'");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.Equal(expectedExitCode, result.ExitCode);
         if (expectedExitCode != 0)

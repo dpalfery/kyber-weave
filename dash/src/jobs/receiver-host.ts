@@ -96,6 +96,11 @@ export type ReceiverHostOptions = {
   readonly programArgs?: readonly string[]
   readonly prober?: ReceiverProber
   readonly spawner?: JobSpawner
+  /**
+   * Why `resolveJobSpawnTarget` refused this process's entry. When set, hosting never spawns;
+   * the reason is reported as the receiver's last error and `poll()` owes no retry.
+   */
+  readonly spawnRefusal?: string
 }
 
 export function healthzUrl(): string {
@@ -182,7 +187,10 @@ export class ReceiverHost {
    */
   private readonly owned = new Set<JobChild>()
 
+  private readonly spawnRefusal: string | undefined
+
   constructor(options: ReceiverHostOptions) {
+    this.spawnRefusal = options.spawnRefusal
     this.store = options.store
     this.program = options.program
     this.programArgs = options.programArgs ?? []
@@ -218,7 +226,7 @@ export class ReceiverHost {
       checkedAt: this.lastCheckedAt,
       lastAcceptedAt: textOrNull(health?.lastAcceptedAt),
       failures5m: countOrNull(health?.failures5m),
-      lastError: textOrNull(health?.lastError),
+      lastError: this.spawnRefusal ?? textOrNull(health?.lastError),
       lastCode: textOrNull(health?.lastCode),
       lastErrorAt: textOrNull(health?.lastErrorAt),
     }
@@ -295,6 +303,9 @@ export class ReceiverHost {
     // probe that resolves after close creates nothing. Startup slower than
     // the poll interval therefore keeps one child, never a pile of them.
     if (this.closed || this.owned.size > 0) return null
+
+    // A refused target is not fixed by retrying: no spawn, no delay.
+    if (this.spawnRefusal !== undefined) return null
 
     try {
       const child = this.spawner.spawn(this.program, [...this.programArgs, 'otel', '--serve'])

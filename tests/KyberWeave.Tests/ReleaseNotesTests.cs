@@ -416,7 +416,7 @@ public sealed class ReleaseNotesTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
 
         Assert.True(
             result.ExitCode == 0,
@@ -441,7 +441,7 @@ public sealed class ReleaseNotesTests
             startInfo.ArgumentList.Add(argument);
         }
 
-        return ProcessRunner.Run(startInfo, string.Empty);
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { allProviderNames } from '../providers/index.js'
+import { SpawnedChildMayNotHostError } from '../process/spawn-guard.js'
 import { DashboardPortRefusedError, EngineAlreadyRunningError, joinViewUrl, openBrowser, runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { registerKyberCommands } from './register.js'
@@ -140,6 +141,10 @@ export function buildProgram(): Command {
           process.stdout.write(`\n  ${err.message}\n`)
           if (opts.open && err.record.url !== undefined) openBrowser(joinViewUrl(err.record.url, opts.view))
           process.exit(0)
+        }
+        if (err instanceof SpawnedChildMayNotHostError) {
+          process.stderr.write(`kyberdash web: ${err.message}\n`)
+          process.exit(1)
         }
         if (err instanceof DashboardPortRefusedError) {
           // A configured port that is taken, or that this process may not bind, is a

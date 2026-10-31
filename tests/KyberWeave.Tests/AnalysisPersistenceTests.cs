@@ -538,7 +538,7 @@ public sealed class AnalysisPersistenceTests
         startInfo.ArgumentList.Add("--version");
         try
         {
-            if (ProcessRunner.Run(startInfo, string.Empty).ExitCode != 0)
+            if (ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60)).ExitCode != 0)
                 throw SkipException.ForSkip("git is unavailable; tracked-file safety was not run.");
         }
         catch (Win32Exception)
@@ -552,7 +552,7 @@ public sealed class AnalysisPersistenceTests
         ProcessStartInfo startInfo = ProcessStartInfo("git");
         startInfo.WorkingDirectory = workingDirectory;
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         if (result.ExitCode != 0) throw new InvalidOperationException(result.StandardError);
     }
 
@@ -606,7 +606,7 @@ public sealed class AnalysisPersistenceTests
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
-        return ProcessRunner.Run(startInfo, input);
+        return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(60));
     }
 
     private static ProcessStartInfo SqliteStartInfo() => ProcessStartInfo("sqlite3");

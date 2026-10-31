@@ -1,6 +1,10 @@
 import { defineConfig } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
+import { beginLedgerRun } from './tests/setup/process-ledger-global.js'
+
+beginLedgerRun()
+
 const dashRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
@@ -8,6 +12,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   workers: 1,
+  globalTeardown: './tests/setup/process-ledger-global-playwright.ts',
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4747' },
   webServer: {
@@ -19,5 +24,7 @@ export default defineConfig({
     url: 'http://127.0.0.1:4747',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // None of spine, deep-links or numerals needs a real scheduled refresh through this server.
+    env: { KYBERDASH_SPAWN_GUARD: 'deny' },
   },
 })

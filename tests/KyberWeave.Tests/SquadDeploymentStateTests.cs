@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -5424,6 +5425,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             ProcessStartInfo startInfo = new("fsutil.exe")
             {
                 CreateNoWindow = true,
+                RedirectStandardInput = true,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false
@@ -5432,22 +5434,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             startInfo.ArgumentList.Add("setCaseSensitiveInfo");
             startInfo.ArgumentList.Add(directory);
             startInfo.ArgumentList.Add("enable");
-            using Process? process = Process.Start(startInfo);
-            if (process is null)
-            {
-                diagnostic = "fsutil did not start";
-                return false;
-            }
 
-            string standardOutput = process.StandardOutput.ReadToEnd();
-            string standardError = process.StandardError.ReadToEnd();
-            process.WaitForExit();
+            // Bounded: ProcessRunner kills the tree if fsutil has not exited in 60 s. A start failure throws
+            // InvalidOperationException, which the catch below turns into the diagnostic.
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
             diagnostic = string.Join(
                 " ",
-                new[] { standardOutput, standardError }
+                new[] { result.StandardOutput, result.StandardError }
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .Select(value => value.Trim()));
-            return process.ExitCode == 0;
+            return result.ExitCode == 0;
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or Win32Exception)

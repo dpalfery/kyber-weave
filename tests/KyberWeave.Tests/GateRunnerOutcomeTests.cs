@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Xunit;
 
@@ -176,6 +177,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
@@ -183,11 +185,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        using Process process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("git could not be started for the test repository.");
-        process.StandardOutput.ReadToEnd();
-        process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        Assert.Equal(0, process.ExitCode);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        Assert.Equal(0, result.ExitCode);
     }
 }

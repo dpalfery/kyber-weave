@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
@@ -43,11 +44,16 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
 
     private static void MakeFifo(string path)
     {
-        ProcessStartInfo info = new("mkfifo");
+        ProcessStartInfo info = new("mkfifo")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
         info.ArgumentList.Add(path);
-        using Process process = Process.Start(info) ?? throw new InvalidOperationException("mkfifo did not start.");
-        process.WaitForExit();
-        Assert.Equal(0, process.ExitCode);
+        ProcessResult result = ProcessRunner.Run(info, string.Empty, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, result.ExitCode);
     }
 
     [Fact]

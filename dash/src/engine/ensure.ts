@@ -5,8 +5,9 @@
 // stop and replaced, because an engine that outlives an upgrade keeps running old parsing
 // and old receiver code. If none holds it, the caller's own executable starts one.
 
-import { spawn } from 'child_process'
+import type { ChildProcess } from 'child_process'
 
+import { defaultSpawn, guardedSpawn, isSpawnedChildRole, type SpawnFn } from '../process/spawn-guard.js'
 import { queryEngine, requestEngineShutdown, type EngineRecord } from './instance.js'
 
 const POLL_MS = 100
@@ -39,17 +40,24 @@ export type EngineEnsureOptions = {
  * execve. The program is the caller's own executable (process.execPath or the tray's resolved binary),
  * never user input.
  */
-class DetachedLauncher {
+export class DetachedLauncher {
   constructor(
     private readonly program: string,
     private readonly programArgs: readonly string[],
+    private readonly spawnFn: SpawnFn<ChildProcess | undefined> = defaultSpawn,
   ) {}
 
   /** Set when the OS refuses to start the program (ENOENT, EACCES): reported at once, not as a timeout. */
   spawnError: Error | null = null
 
   start(args: readonly string[]): void {
-    const child = spawn(this.program, [...this.programArgs, ...args], { detached: true, stdio: 'ignore' })
+    const child = guardedSpawn(this.spawnFn, {
+      kind: 'engine',
+      program: this.program,
+      args: [...this.programArgs, ...args],
+      options: { detached: true, stdio: 'ignore' },
+    })
+    if (child === undefined) throw new Error(`spawning ${this.program} returned no child process`)
     child.on('error', (err) => { this.spawnError = err })
     child.unref()
   }
@@ -74,6 +82,10 @@ async function waitFor<T>(
 }
 
 export async function ensureEngine(options: EngineEnsureOptions): Promise<EngineEnsureResult> {
+  // A child started to do one piece of work never starts an engine: that is the storm.
+  if (isSpawnedChildRole()) {
+    return { outcome: 'failed', reason: 'engine child may not start an engine: this process was spawned as a child (KYBERDASH_SPAWN_ROLE)' }
+  }
   const query = options.query ?? queryEngine
   const shutdown = options.shutdown ?? requestEngineShutdown
   const sleep = options.sleep ?? delay
