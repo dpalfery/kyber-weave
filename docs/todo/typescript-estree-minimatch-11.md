@@ -46,9 +46,15 @@ and 11 still export, and `ts-lint` over the whole dash tree is the behaviour che
 
 ## Removing it
 
-1. Delete the `overrides` entry from `dash/package.json`.
+1. Choose the shape from the trigger that fired:
+   - **Full trigger — both parents admit `>= 11.0.1`.** Delete the `overrides` entry from
+     `dash/package.json`.
+   - **Partial trigger — only one parent has moved.** Keep the entry and narrow it to the
+     parent that has not, for example `"overrides": { "eslint": { "minimatch": "^11.0.1" } }`.
+     Deleting it outright lets the lagging parent's own range resolve, restoring 3.1.5 or
+     10.2.6 and reopening the finding.
 2. `npm install --prefix dash`.
-3. Confirm one deduped `minimatch` at 11.0.1 or later: `npm ls --prefix dash minimatch`.
+3. Confirm one deduped `minimatch` at 11.0.1 or later under every consumer: `npm ls --prefix dash minimatch`.
 4. Confirm `npm audit --prefix dash --json` still reports zero vulnerabilities.
 5. Run the dash gates: `ts-typecheck`, `ts-lint`, `ts-test`, `ts-reachable` via
    `dotnet run --project src/KyberWeave.Cli -- review gates . --paths dash/package.json`.
