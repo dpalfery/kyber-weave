@@ -1,8 +1,8 @@
 using System.Reflection;
-using System.Text.Json;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Mcp;
+using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
 
@@ -73,7 +73,7 @@ public sealed class SquadToolchainRosterGuardTests
     public void ShippedToolchainRosterCoversEveryMcpServerTheSquadDeclares()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declaredServers = SquadMcpDeclaration.ServerNames(source);
 
         Assert.True(
             declaredServers.Count > 0,
@@ -94,26 +94,6 @@ public sealed class SquadToolchainRosterGuardTests
             + "Add each server as a key under required-mcp-tools; the Factory renderer whitelists "
             + "the declared servers per droid and `squad doctor` checks an install against that "
             + "roster, so an unrostered server is granted to a droid with no tools behind it.");
-    }
-
-    /// <summary>
-    /// The server names the squad's own <c>mcp.json</c> declares, read from the loaded source so
-    /// the guard tracks the declaration rather than a transcription of it.
-    /// </summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
-    {
-        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
-            servers.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        return
-        [
-            .. servers.EnumerateObject()
-                .Select(server => server.Name)
-                .OrderBy(name => name, StringComparer.Ordinal)
-        ];
     }
 
     /// <summary>

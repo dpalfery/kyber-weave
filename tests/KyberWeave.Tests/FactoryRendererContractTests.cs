@@ -176,7 +176,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new FactoryRenderer()]);
@@ -485,7 +485,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_WhitelistsDeclaredMcpServersForEntitledDroids()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
         Assert.NotEmpty(declaredMcpServers);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -540,7 +540,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_RecordsMcpWithholdingOnlyWhenTheWhitelistIsEmpty()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Factory],
@@ -629,7 +629,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declaredMcpServers = SquadMcpDeclaration.ServerNames(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Factory],
@@ -688,7 +688,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers();
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        Assert.Empty(DeclaredMcpServerNames(source));
+        Assert.Empty(SquadMcpDeclaration.ServerNames(source));
         Assert.NotEmpty(source.Agents);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -722,7 +722,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("zeta-reader", "alpha-reader");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
         Assert.Equal(["alpha-reader", "zeta-reader"], declared);
 
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
@@ -774,7 +774,7 @@ public sealed class FactoryRendererContractTests : IDisposable
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
-        IReadOnlyList<string> declared = DeclaredMcpServerNames(source);
+        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
         Assert.NotEmpty(declared);
 
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
@@ -1016,7 +1016,7 @@ public sealed class FactoryRendererContractTests : IDisposable
 
         // All relative Markdown links in the skill body resolve to emitted files.
         const string linkPattern = @"\[([^\]]+)\]\(([^)]+)\)";
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(skillBody, linkPattern))
+        foreach (Match match in Regex.Matches(skillBody, linkPattern))
         {
             string link = match.Groups[2].Value;
             if (!link.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !link.StartsWith('#'))
@@ -1313,27 +1313,6 @@ public sealed class FactoryRendererContractTests : IDisposable
         }
 
         return granted;
-    }
-
-    /// <summary>
-    /// The server names the squad's own <c>mcp.json</c> declares, in ordinal order. Read from
-    /// the loaded source model, so a renderer that invents a name cannot satisfy a test that
-    /// compares against this list.
-    /// </summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
-    {
-        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
-            servers.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        return
-        [
-            .. servers.EnumerateObject()
-                .Select(server => server.Name)
-                .OrderBy(name => name, StringComparer.Ordinal)
-        ];
     }
 
     /// <summary>

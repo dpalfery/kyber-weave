@@ -809,6 +809,13 @@ and validates.
   omission is the inherited-and-therefore-widened case. A non-empty whitelist is a distinguished,
   non-degraded outcome: the `permission-not-expressible` detail that parent MCP was excluded is
   recorded only for the empty list, so the frontmatter value and the receipt agree.
+  Widening that whitelist is a declared edit rather than a renderer change: naming a server in
+  `mcp.json` is what puts it in the list, and `SquadToolchainRosterGuardTests` fails until the
+  same name is a `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun
+  the squad's own roster contract. `codegraph` and `context7` are absent on Factory because the
+  squad's `mcp.json` does not declare them, although Claude grants their tools: a Claude
+  allow-list entry that matches no configured server is inert, whereas a Factory entry names a
+  server the operator must already have configured.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
 - **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:

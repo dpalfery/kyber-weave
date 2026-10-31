@@ -2,7 +2,7 @@
 id: plans/2026-10-31-factory-mcp-server-visibility
 title: "Factory droids see the kyber-weave MCP server through a declared per-droid whitelist"
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-31
@@ -14,7 +14,7 @@ impact-components: [KyberSquad, DocGraph]
 
 # Factory droids see the kyber-weave MCP server through a declared per-droid whitelist
 
-**Status: Ready — approved for execution 2026-10-31 (AP1, `AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`).** Every decision row below is answered. D2's answer was amended after execution (2026-10-31, PR #486 review council finding R16); the correction, its reason, and its provenance are recorded in D2's status column. Both documentation checks passed against this checkout in the conductor's run (2026-10-31): `docs validate .` (no `--merge-ready`, plan still active) — `result: pass`, 0 errors, 0 warnings — and `docs drift .` — `result: pass`, 0 errors, 0 warnings — each reporting `provenance: root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=140`, a root identical to this checkout; G2 and G3 are closed with that evidence below. G1 and G4 remain open and are not gate conditions. Frontmatter `status` stays `current` because the frontmatter vocabulary has no `ready` value; the lifecycle Ready is this body status line and the plan index. **Development mode:** `test-first` (packet value; no user opt-out). **Autonomy:** `autonomous` (packet value and repository Config Reg `<autonomy>`).
+**Status: Archived — complete 2026-10-31.** Approved for execution 2026-10-31 (AP1, `AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`), delivered and archived the same day. Closeout mapping, harvest verification, and the documentation-impact review are in `## Closeout mapping`; G1 and G4 remain owner live checks and are not closure conditions. Frontmatter `status: archived` follows the closed status vocabulary (`KW-DOC-SPEC-002`). Every decision row below is answered, and the table is preserved intact by the archive move as the repository's closeout policy requires; D2's answer was amended after execution (2026-10-31, PR #486 review council finding R16) and the correction, its reason, and its provenance are recorded in D2's status column. **Development mode:** `test-first` (packet value; no user opt-out). **Autonomy:** `autonomous` (packet value and repository Config Reg `<autonomy>`).
 
 **Scale:** `extends-component`, components `KyberSquad` and `DocGraph`.
 
@@ -201,7 +201,68 @@ The conductor runs `code-reviewer` over the whole change after T2 and T3, before
 
 ## Closeout mapping
 
-_To be completed at T4: every decision id (D1–D10, AP1) and harvest item (H1–H5) mapped to its destination, with the ADR disposition ("no ADR — ADR waiver", per the Design harvest) and the two merge-ready documentation checks recorded._
+**Closeout mapping, completed 2026-10-31.** Every durable decision in Decisions and every harvest item in Design harvest has a named destination in live canonical documentation. The Decisions section is preserved intact through the archive move.
+
+**ADR disposition:** no ADR — ADR waiver: the whitelist refines the already-documented per-target MCP grant pattern (`ClaudeRenderer` and `ZCodeRenderer`'s `filesystem.read`-minus-pure-orchestrator condition) under the existing KS-002 non-broadening guarantee, and changes no capability-lattice entry, boundary, dependency, or schema. The superseded blanket policy lived in an archived plan (D-mcp, 2026-09-16), never in an ADR; ADR 0034 is amended in place (H5), not replaced, and its row in the ADR index carries the amendment pointer.
+
+**Documentation waiver:** none for any decision or harvest item. The single waiver below is AP1, whose content is execution-approval provenance with no surviving architectural, operational, or behavioural invariant; it is stated as a Documentation waiver row rather than as a link.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory) — `[]` excludes every server even a globally configured one, omission inherits the session parent's servers, and server names must match the config file (two independent recordings of Factory's documentation) | extends-component | DocGraph | 2026-10-31 | archived |
+| D2 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — the entitlement rule as a rule, not a roster: `filesystem.read` allowed **and** profile id not `orchestrator`, the condition `ClaudeRenderer` and `ZCodeRenderer` already apply; also stated in [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory) | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D3 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — the whitelist is derived once per render from the server names the squad's own `mcp.json` declares, never from the toolchain roster keys and never a literal, so a declared server flows through with no renderer edit | extends-component | KyberSquad | 2026-10-31 | archived |
+| D4 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md#degradation-taxonomy) — the withholding sentence appears only for an empty whitelist, a whitelisted droid is a non-degraded outcome making no withholding claim, and a whitelisted primary's entry-point caveat still names the rendered value; also the Factory row of the [capability matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D5 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — the key is always emitted as a flow sequence, `[]` or the whitelist, never omitted and never a scalar, because omission is the inherited-and-therefore-widened case | extends-component | KyberSquad | 2026-10-31 | archived |
+| D6 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — Squad owns the droid whitelist and no Factory settings file, and the operator owns `.factory/mcp.json` / `~/.factory/mcp.json`; the operator's half is told in [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#factory-notes) | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D7 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — the roster containment guard: every server the squad's `mcp.json` declares must be a `required-mcp-tools` key, so a whitelist entry cannot outrun the squad's roster contract | extends-component | KyberSquad | 2026-10-31 | archived |
+| D8 | The five governed documents this decision names, all reached by the rows above and by H1–H5: [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory), [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology), [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#factory-notes), [kyber-squad/requirements.md](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix), [adr/0034-factory-droid-entry-point-skill.md](../../adr/0034-factory-droid-entry-point-skill.md) | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D9 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md#non-broadening-guarantee) — the whitelist grants no lattice capability and escalates nothing: no `products/kyber-squad/**` file, no `capabilities.yml`, `toolchain.yml`, or `mcp.json` edit, the architect's `process.execute: deny` untouched, no new `KW-*` id, dependency, or ontology value | extends-component | KyberSquad | 2026-10-31 | archived |
+| D10 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory) — CodeGraph is wired in the same file yet `codegraph_explore` is session-level on Factory because the squad declares only `kyber-weave`; the declared widening path is stated in [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) as naming the server in `mcp.json` plus its roster entry, not an emitted MCP tool id in `tools` | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
+| AP1 | Documentation waiver — execution-approval provenance only: the AP1 row in Decisions and the plan-index row record the gate, and no architectural, operational, or behavioural invariant survives that a future engineer or agent would consult | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| H1 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) — the whitelist contract, the `[]` fallback, and the never-omitted key; §4's Factory MCP wiring split (D2, D3, D5, D6) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H2 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md#degradation-taxonomy) — `permission-not-expressible` semantics for the withholding sentence, and the Factory Droids row of the capability matrix (D4) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H3 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory) — the Factory wiring recipe: the file and key, the stdio entry, the provenance `root=` check, the two-owner droid-whitelist boundary, the CodeGraph entry with its honest session-level limit, the `.codegraph/` requirement, and the troubleshooting row (D1, D3, D6, D10) | extends-component | DocGraph | 2026-10-31 | archived |
+| H4 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#factory-notes) — what Squad owns (the droid whitelist) and does not own (any Factory settings file), with the operator's half of the wiring and the runbook pointer (D2, D6) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H5 | [adr/0034-factory-droid-entry-point-skill.md](../../adr/0034-factory-droid-entry-point-skill.md) — amended in place: the entry-point skill is not governed by the droid's `mcpServers` value either way, and the excluded-parent-MCP detail now appears only for an empty whitelist (D4) | extends-component | KyberSquad | 2026-10-31 | archived |
+
+### Harvest verification (H1–H5)
+
+Each harvest target was read after the implementation landed, not trusted from the plan. All five carry their durable item; none drifted.
+
+| ID | Target document | Verified claim | Result |
+|---|---|---|---|
+| H1 | [kyber-squad/architecture.md](../../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology) | The per-target MCP bullet states the derivation from the squad's `mcp.json` (today `kyber-weave`), the `filesystem.read`-minus-`orchestrator` condition, `mcpServers: []` for everyone else, the never-omitted key, and the non-degraded whitelist outcome; §4 states the Squad/operator ownership split | present |
+| H2 | [kyber-squad/requirements.md](../../kyber-squad/requirements.md#degradation-taxonomy) | The `permission-not-expressible` row states the withholding sentence is emitted only for an empty whitelist and that the record still appears for its other conditions; the Factory Droids row states the server-whitelist contract and the operator-owned config file | present, corrected this pass — the two rows previously claimed a whitelisted droid's record "carries no MCP sentence", which is wrong for the whitelisted primary agents whose entry-point caveat names the value (PR #486 review council finding) |
+| H3 | [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md#factory) | The wiring table carries the Factory row (`.factory/mcp.json` / `~/.factory/mcp.json`, key `mcpServers`); the Factory section gives the stdio entry, the provenance `root=` check, the droid-whitelist-versus-app-config boundary, the CodeGraph entry with the session-level limit, the `.codegraph/` requirement with the pre-authorized `codegraph init .`, and the troubleshooting row for a droid that lists no MCP tools | present |
+| H4 | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#factory-notes) | The Factory notes state that the entry-point skill is not bound by the droid's tools allow-list or `mcpServers` whitelist, and that Squad writes no Factory settings file and verifies neither half | present |
+| H5 | [adr/0034-factory-droid-entry-point-skill.md](../../adr/0034-factory-droid-entry-point-skill.md) | The status section records the in-place amendment, decision 2 is restated value-dependently, and the ADR index row carries the amendment pointer | present |
+
+### Documentation-impact review (DOCS_REVIEW)
+
+Run record for T4 closeout. The verdict is `update`: the change alters a documented rendering contract, and the documents that stated the old blanket `[]` behaviour were stale rather than merely incomplete. A `mcpServers: []` / "parent MCP" sweep across `docs/` with `docs/archive/` excluded (archived plans are historical record) found no document in the live corpus stating the blanket exclusion as current behaviour.
+
+| Document | Verdict | Why |
+|---|---|---|
+| [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md) | update (landed) | Gained the Factory wiring row and section, the two-owner boundary, the CodeGraph entry with its honest session-level limit, and a troubleshooting row; the runbook is where an operator is told what to add |
+| [kyber-squad/architecture.md](../../kyber-squad/architecture.md) | update (landed) | Carried the per-target MCP bullet's Factory sentence; extended this pass with the roster containment guard and the declared widening path, which the change introduced and no canonical document stated |
+| [kyber-squad/requirements.md](../../kyber-squad/requirements.md) | update (landed, corrected this pass) | Both the degradation row and the Factory Droids row taught the blanket `[]`; the "records no MCP sentence" claim was corrected to match the renderer's entry-point caveat |
+| [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) | update (landed) | Carried the entry-point sentence as though the droid's value were always `[]`; now carries the whitelist contract and the wiring ownership paragraph |
+| [adr/0034-factory-droid-entry-point-skill.md](../../adr/0034-factory-droid-entry-point-skill.md) | update (landed) | Decision 2 asserted the entry-point skill "does not apply" the droid's `mcpServers: []`; amended in place, value-dependently |
+| [adr/README.md](../../adr/README.md) | update (landed) | The ADR 0034 row names the amendment so the index does not describe a superseded value |
+| [documentation-ontology.md](../../documentation-ontology.md) | no doc change | No new `doc-type`, `status`, or component; the change adds no ontology vocabulary |
+| [catalog.md](../../catalog.md) | no doc change | No public surface, source root, or owner changed; `KyberSquad` and `DocGraph` both already exist |
+| [ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md) | no doc change | No `KW-*` id was added, changed, or renumbered |
+| [kyber-squad/README.md](../../kyber-squad/README.md) | no doc change | Target roster, install flow, and scope statement are unchanged; it names no MCP grant detail |
+| [docgraph/governance.md](../../docgraph/governance.md) | no doc change | The gate surface (`docs_validate`, `docs_drift`) is unchanged; only whether a Factory droid can reach it changed, which the runbook and architecture now state |
+
+### Closeout evidence
+
+- **Whole-change review:** APPROVE on the complete diff, risk MEDIUM. The declared gate suite ran for real — format-whitespace, format-style, build, test, docs-validate, docs-drift, inspectcode, duplicates: 8 executed, 0 failed. The council independently re-ran the new test's mutation proof in a throwaway worktree and confirmed exactly one test fails when the read clause is removed.
+- **Contract tests:** C1 `FactoryRendererContractTests`, C2 `SquadToolchainRosterGuardTests`, and C3 `McpPackagingTests` pass. Expectations are computed from the loaded `SquadSource`, and the new read-entitlement case clones the corpus's own `read-only` profile with only `filesystem.read` flipped to `deny`, asserting that agent renders `[]` while its read-allowed sibling keeps the declared servers.
+- **Documentation gates:** `docs validate . --merge-ready` and `docs drift .` both run after the archive move; findings recorded in this change's completion report, not in the archived artifact.
+- **Not live-verified:** G1 (behaviour of a whitelisted name the operator has not configured) and G4 (a real Factory session with an `architect` droid calling `docs_status`/`docs_validate`/`docs_drift`) remain owner checks and are not closure conditions for this plan.
+
 
 ## GAPS
 
