@@ -69,6 +69,7 @@ internal static class DocumentSectionTable
         int bracketDepth = 0;
         int parenDepth = 0;
         bool inCode = false;
+        int codeTickCount = 0;
         for (int index = 0; index < line.Length; index++)
         {
             char character = line[index];
@@ -81,7 +82,30 @@ internal static class DocumentSectionTable
 
             if (character == '`')
             {
-                inCode = !inCode;
+                int run = 1;
+                while (index + run < line.Length && line[index + run] == '`')
+                {
+                    run++;
+                }
+
+                if (!inCode)
+                {
+                    inCode = true;
+                    codeTickCount = run;
+                    current.Append('`', run);
+                    index += run - 1;
+                    continue;
+                }
+
+                if (run == codeTickCount)
+                {
+                    inCode = false;
+                    codeTickCount = 0;
+                    current.Append('`', run);
+                    index += run - 1;
+                    continue;
+                }
+
                 current.Append(character);
                 continue;
             }
@@ -96,7 +120,7 @@ internal static class DocumentSectionTable
                 {
                     bracketDepth--;
                 }
-                else if (character == '(')
+                else if (character == '(' && (parenDepth > 0 || (index > 0 && line[index - 1] == ']')))
                 {
                     parenDepth++;
                 }

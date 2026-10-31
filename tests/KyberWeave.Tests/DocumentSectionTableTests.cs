@@ -71,4 +71,38 @@ public sealed class DocumentSectionTableTests
         Assert.Equal("a|b", row[0]);
         Assert.Equal("ok", row[1]);
     }
+
+    [Fact]
+    public void PipeCharactersInsidePlainParenthesesStillSplitCells()
+    {
+        const string body = """
+            | Plan | Status |
+            |---|---|
+            | (a|b) | ok |
+            """;
+
+        List<string[]>? rows = DocumentSectionTable.ReadDataRows(body);
+        Assert.NotNull(rows);
+        string[] row = Assert.Single(rows);
+        Assert.Equal(3, row.Length);
+        Assert.Equal("(a", row[0]);
+        Assert.Equal("b)", row[1]);
+        Assert.Equal("ok", row[2]);
+    }
+
+    [Fact]
+    public void PipeCharactersInsideDoubleBacktickSpansStayInOneCell()
+    {
+        const string body = """
+            | Plan | Status |
+            |---|---|
+            | ``a|b`` | ok |
+            """;
+
+        List<string[]>? rows = DocumentSectionTable.ReadDataRows(body);
+        Assert.NotNull(rows);
+        string[] row = Assert.Single(rows);
+        Assert.Equal("``a|b``", row[0]);
+        Assert.Equal("ok", row[1]);
+    }
 }
