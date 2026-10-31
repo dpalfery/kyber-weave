@@ -342,7 +342,7 @@ export function buildPlan(config, stamp) {
       {
         name: '4. Idle wait (max 5 minutes)',
         lines: [
-          `poll ${config.opencodeDb} read-only every ${LIMITS.pollMs / 1000}s: session_v2.time_busy is NULL, both prompts recorded, last session_message is idle`,
+          `poll ${config.opencodeDb} read-only every ${LIMITS.pollMs / 1000}s: session_v2 idle (time_idle at or after time_busy), both prompts recorded, last session_message is idle`,
           `on timeout: ${placeholderRoute(interruptRequest({ sessionId: SESSION_PLACEHOLDER }))}  then record it and fail`,
         ],
       },
@@ -602,6 +602,7 @@ const SESSION_V2_COLUMNS = [
   'tokens_cache_read',
   'tokens_cache_write',
   'time_busy',
+  'time_idle',
   'idle_outcome',
 ]
 const SESSION_MESSAGE_COLUMNS = ['id', 'session_id', 'type', 'seq', 'time_created', 'data']
@@ -618,8 +619,18 @@ function confirmSchemas(ctx, opencodeDb, canonDb) {
 // Reading OpenCode's database
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * OpenCode 2.2.x stamps `time_busy` when an execution starts and leaves it set afterwards; the
+ * execution ended when `time_idle` is at or after it. A session is busy only while `time_busy` is the
+ * newer stamp (or `time_idle` was never written).
+ */
+function isBusy(session) {
+  if (session.time_busy === null) return false
+  return session.time_idle === null || Number(session.time_idle) < Number(session.time_busy)
+}
+
 function readIdleState(ctx, db, sessionId) {
-  const sessionSql = 'SELECT time_busy, idle_outcome FROM session_v2 WHERE id = ?'
+  const sessionSql = 'SELECT time_busy, time_idle, idle_outcome FROM session_v2 WHERE id = ?'
   const lastSql = 'SELECT type FROM session_message WHERE session_id = ? ORDER BY seq DESC LIMIT 1'
   const usersSql = "SELECT COUNT(*) AS n FROM session_message WHERE session_id = ? AND type = 'user'"
   logSql(ctx, 'opencode.db', sessionSql)
@@ -630,7 +641,7 @@ function readIdleState(ctx, db, sessionId) {
   const users = db.prepare(usersSql).get(sessionId)
   return {
     exists: session !== undefined,
-    busy: session !== undefined && session.time_busy !== null,
+    busy: session !== undefined && isBusy(session),
     idleOutcome: session?.idle_outcome ?? null,
     lastType: last?.type ?? null,
     userMessages: users ? Number(users.n) : 0,
@@ -1126,7 +1137,7 @@ async function cleanup(ctx) {
   return result
 }
 
-/** After an interrupt, waits briefly for session_v2.time_busy to clear. Returns the last idle state. */
+/** After an interrupt, waits briefly for the session to stop being busy. Returns the last idle state. */
 async function waitForIdleOrNotBusy(ctx, db, sessionId) {
   const deadline = Date.now() + LIMITS.interruptSettleMs
   let state = readIdleState(ctx, db, sessionId)
