@@ -12,7 +12,7 @@
 // `canon/sessions.ts` must stay importable-free of `analysis/findings.ts`
 // (cycle via `canon/findings.ts`).
 
-import { OPENCODE_MODEL_CONTEXT_LIMIT_KEY } from '../capture/harnesses/opencode-plugin/mapper.js'
+import { OPENCODE_KEYS } from '../capture/harnesses/opencode-plugin/contract.js'
 import type { CanonicalRecord } from './types.js'
 
 /**
@@ -27,8 +27,8 @@ export const MODEL_IDENTITY_KEYS = [
   'gen_ai.response.model',
   'gen_ai.request.model',
   'model',
-  // The OpenCode plugin envelope (contract '2') names its model here.
-  'opencode.model.id',
+  // The OpenCode plugin envelope (contract '3') names its model here.
+  OPENCODE_KEYS.modelId,
 ] as const
 
 /**
@@ -57,8 +57,8 @@ export const CONTEXT_LIMIT_KEYS = [
   'gen_ai.request.max_context_tokens',
   'gen_ai.request.context_window',
   'model_context_window',
-  // The OpenCode plugin's reported window (D6): additive inside contract '2'.
-  OPENCODE_MODEL_CONTEXT_LIMIT_KEY,
+  // The OpenCode plugin's reported window (D6): additive inside contract '3'.
+  OPENCODE_KEYS.contextLimit,
 ] as const
 
 /**

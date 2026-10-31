@@ -301,3 +301,69 @@ describe('orphans and cycles group by attribute, not invented ancestry (design.m
     expect(find(tree, 's-child')?.status).toBe('error')
   })
 })
+
+describe('kyber.* attributes are not timeline evidence (D11)', () => {
+  it('a session label naming subagent and title is neither subagent nor auxiliary', () => {
+    // The label is the user's title for the session, written under kyber.session.label. The
+    // step's prompt text carries the same words. Neither is span evidence: the timeline reads
+    // the record's name, op and raw attributes, and kyber.* is the projection's own namespace.
+    // Today the label's value matches both markers, so the step is marked subagent and auxiliary.
+    const timeline = buildTimeline([
+      span('s-root', 'opencode.request', { op: 'agent.invoke', durationMs: 5000 }),
+      span('s-step', 'opencode.step', {
+        parentSpanId: 's-root',
+        timestamp: at(1000),
+        durationMs: 1000,
+        parts: [{ part: 'conversation_history', text: 'fix subagent title' }],
+        raw: { 'kyber.session.label': 'fix subagent title' },
+        cost: priced(0.02),
+      }),
+    ])
+
+    expect(find(timeline, 's-step')?.isSubagent).toBe(false)
+    expect(find(timeline, 's-step')?.isAuxiliary).toBe(false)
+    expect(subagentSessions(timeline)).toEqual([])
+    expect(auxiliarySpend(timeline)).toEqual({ basis: 'unknown', status: 'no_rate' })
+  })
+
+  it('a tool named subagent is still subagent evidence', () => {
+    const timeline = buildTimeline([
+      span('s-root', 'opencode.request', { op: 'agent.invoke', durationMs: 5000 }),
+      span('s-tool', 'subagent', {
+        parentSpanId: 's-root',
+        op: 'tool.invoke',
+        timestamp: at(1000),
+        durationMs: 400,
+        cost: priced(0),
+      }),
+    ])
+
+    expect(find(timeline, 's-tool')?.isSubagent).toBe(true)
+    expect(subagentSessions(timeline)).toEqual([
+      { spanId: 's-tool', parentSpanId: 's-root', name: 'subagent' },
+    ])
+  })
+
+  it('a step whose request kind is title is still auxiliary', () => {
+    // The request kind rides in a plugin attribute that is not kyber.*, so the title marker
+    // still counts as evidence. Passes on today's timeline and must keep passing.
+    const timeline = buildTimeline([
+      span('s-root', 'opencode.request', { op: 'agent.invoke', durationMs: 5000 }),
+      span('s-title', 'opencode.step', {
+        parentSpanId: 's-root',
+        timestamp: at(2000),
+        durationMs: 600,
+        raw: { 'opencode.request.kind': 'title' },
+        cost: priced(0.01),
+      }),
+    ])
+
+    expect(find(timeline, 's-title')?.isAuxiliary).toBe(true)
+    expect(auxiliarySpend(timeline)).toEqual({
+      basis: 'harness',
+      status: 'priced',
+      value: 0.01,
+      currency: 'USD',
+    })
+  })
+})

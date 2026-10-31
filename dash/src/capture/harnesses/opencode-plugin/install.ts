@@ -327,7 +327,7 @@ export function installOpencodePlugin(
       consent: preserve ? ensureConsent(paths, false) : 'none',
       out: [
         `opencode plugin: ${disposition} ${pluginFile}`,
-        `harness opencode: restart OpenCode so it loads the ${upgrade ? 'upgraded ' : ''}capture plugin`,
+        'harness opencode: OpenCode 2.x picks up the capture plugin for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.',
       ],
     })
   }

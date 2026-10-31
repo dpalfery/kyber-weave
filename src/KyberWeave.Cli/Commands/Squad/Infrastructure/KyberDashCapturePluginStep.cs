@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
@@ -32,7 +33,6 @@ public enum CapturePluginStepOutcome
 internal sealed class KyberDashCapturePluginStep
 {
     private const string UnknownCommandMarker = "unknown command";
-    private const string VerdictPrefix = "opencode plugin: ";
 
     /// <summary>
     ///     The bound for the plugin verb. It starts KyberDash and reads or writes the OpenCode config, so it gets
@@ -60,7 +60,7 @@ internal sealed class KyberDashCapturePluginStep
         return new KyberDashCapturePluginStep(ProcessExecutor.WithTimeout(PluginVerbTimeout), LocateKyberDash);
     }
 
-    /// <summary>Runs the verb against one OpenCode global root and prints one or two lines about it.</summary>
+    /// <summary>Runs the verb against one OpenCode global root, prints its verdict, and relays its OpenCode guidance.</summary>
     /// <param name="openCodeRoot">The OpenCode global root Squad resolved, passed as <c>--config-dir</c>.</param>
     /// <param name="dryRun">Whether the Squad run is a dry run; passed through as <c>--dry-run</c>.</param>
     public CapturePluginStepOutcome Run(string openCodeRoot, bool dryRun)
@@ -122,8 +122,8 @@ internal sealed class KyberDashCapturePluginStep
         AnsiConsole.MarkupLine(verdict.Length == 0
             ? "OpenCode capture plugin: ok"
             : Markup.Escape(verdict));
-        if (PluginChanged(verdict))
-            AnsiConsole.MarkupLine("[bold]Restart OpenCode to load the new capture plugin.[/]");
+        foreach (string guidance in KyberDashGuidance.HarnessOpenCodeLines(result.StandardOutput))
+            AnsiConsole.MarkupLine(Markup.Escape(guidance));
 
         return CapturePluginStepOutcome.Completed;
     }
@@ -156,16 +156,6 @@ internal sealed class KyberDashCapturePluginStep
         }
 
         step.Run(roots[0].GlobalRoot, dryRun);
-    }
-
-    /// <summary>Whether the verb's verdict means the plugin file on disk changed, so OpenCode must restart.</summary>
-    private static bool PluginChanged(string verdict)
-    {
-        if (!verdict.StartsWith(VerdictPrefix, StringComparison.Ordinal))
-            return false;
-
-        string[] fields = verdict.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return fields.Length >= 3 && fields[2] is "installed" or "upgraded";
     }
 
     private static List<string> Arguments(string openCodeRoot, bool dryRun)

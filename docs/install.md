@@ -468,8 +468,8 @@ run, with no second command:
 
 `--no-restart` skips the engine and tray steps. The plugin step still runs when the plugin is
 installed. `--no-kyberdash` skips all three. A failed step is reported by name and does not roll back
-the binaries. When the plugin file changed, the output says to restart OpenCode, because KyberDash
-cannot restart it.
+the binaries. When the plugin file changed, the output says: `OpenCode 2.x picks up the capture plugin for new
+sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.` KyberDash cannot restart OpenCode itself.
 
 Update the tray directly with:
 

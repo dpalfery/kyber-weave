@@ -94,6 +94,7 @@ const copilotStablePath = (home: string) =>
 const copilotInsidersPath = (home: string) =>
   join(home, 'Library', 'Application Support', 'Code - Insiders', 'User', 'settings.json')
 const opencodePath = (home: string) => join(home, '.config', 'opencode', 'opencode.jsonc')
+const opencodePluginPath = (home: string) => join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js')
 const codexPath = (home: string) => join(home, '.codex', 'config.toml')
 const piSettingsPath = (home: string) => join(home, '.pi', 'agent', 'settings.json')
 const piObservMePath = (home: string) => join(home, '.pi', 'agent', 'observme.yaml')
@@ -404,13 +405,7 @@ describe('GET /api/kyber/capture', () => {
         expect.stringMatching(/^content consent: not set/),
       ],
     })
-    expect(harnessById(body, 'opencode').manualSteps).toEqual([
-      {
-        id: 'opencode-otel-endpoint',
-        text: 'OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from',
-        env: { name: 'OTEL_EXPORTER_OTLP_ENDPOINT', value: 'http://127.0.0.1:4318' },
-      },
-    ])
+    expect(harnessById(body, 'opencode').manualSteps).toEqual([])
 
     expect(harnessById(body, 'codex').statusLines).toEqual([
       'no [otel] table is present; coverage comes from session files',
@@ -904,7 +899,8 @@ describe('POST /api/kyber/capture', () => {
     expect(asBody(body).outcome).toBe('wrote')
     expect(asBody(body).receiver).toMatchObject({ enableFailed: false })
     expect(readSetting(deps.store, SETTING_KEYS.receiverHosted)).toBe('on')
-    expect(readFileSync(opencodePath(home), 'utf8')).toContain('"openTelemetry": true')
+    expect(readFileSync(opencodePath(home), 'utf8')).toBe('{}\n')
+    expect(existsSync(opencodePluginPath(home))).toBe(true)
   })
 
   it('answers 200 with enableFailed when the receiver-setting write fails AFTER the config write', async () => {
@@ -912,7 +908,7 @@ describe('POST /api/kyber/capture', () => {
     writeConfig(opencodePath(home), '{}\n')
     const deps = makeCaptureDeps(captureSettings(home))
     // The receiver-hosted write is the only store write the route makes; failing it after
-    // the config write is the recorded ordering, so the config stands and the failure is
+    // the plugin install is the recorded ordering, so the install stands and the failure is
     // reported in the receiver block rather than as a 5xx.
     const original = deps.store.setMetadata.bind(deps.store)
     vi.spyOn(deps.store, 'setMetadata').mockImplementation((key: string, value: string) => {
@@ -934,9 +930,9 @@ describe('POST /api/kyber/capture', () => {
       lastManagedHarnessDisabled: false,
     })
     expect(typeof doc.receiver?.['willEnable']).toBe('boolean')
-    // The config write happened before the setting write, so both stand recorded.
-    expect(readFileSync(opencodePath(home), 'utf8')).toContain('"openTelemetry": true')
-    expect(existsSync(receiptPathForHome(home))).toBe(true)
+    // The plugin install happened before the setting write, so both stand.
+    expect(readFileSync(opencodePath(home), 'utf8')).toBe('{}\n')
+    expect(existsSync(opencodePluginPath(home))).toBe(true)
     // The sqlite message names a real path on this machine; it stays off the wire.
     expect(raw).not.toContain('/Users/secret')
     expect(raw).not.toContain('SQLITE_BUSY')
@@ -957,8 +953,7 @@ describe('POST /api/kyber/capture', () => {
     expect(second.status).toBe(200)
     expect(asBody(second.body).outcome).toBe('noop')
     const events = asBody(second.body).events ?? []
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ kind: 'noop', harness: 'opencode', fileId: 'opencode-config' })
+    expect(events.map((event) => event.fileId)).not.toContain('opencode-config')
     expect(readFileSync(opencodePath(home), 'utf8')).toBe(afterFirst)
   })
 
@@ -982,9 +977,11 @@ describe('POST /api/kyber/capture', () => {
     expect(readFileSync(opencodePath(home), 'utf8')).toBe(seed)
     // Disabling the last managed harness never stops the receiver.
     expect(readSetting(deps.store, SETTING_KEYS.receiverHosted)).toBe('on')
-    const receipt = JSON.parse(readFileSync(receiptPathForHome(home), 'utf8')) as {
-      files: Array<{ path: string }>
-    }
+    // The plugin-only writer never receipts opencode.jsonc, so there is no entry for disable to drop.
+    const receiptPath = receiptPathForHome(home)
+    const receipt = existsSync(receiptPath)
+      ? (JSON.parse(readFileSync(receiptPath, 'utf8')) as { files: Array<{ path: string }> })
+      : { files: [] as Array<{ path: string }> }
     expect(receipt.files.some((file) => file.path === opencodePath(home))).toBe(false)
   })
 

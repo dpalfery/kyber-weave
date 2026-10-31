@@ -28,6 +28,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
+    "gate:opencode-live": "node scripts/opencode-live-gate/run.mjs",
     "prepublishOnly": "npm run build:cli",
     "report:fixtures": "tsx src/tools/report-fixtures.ts",
     "memory:store": "tsx src/tools/store-memory.ts"

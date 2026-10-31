@@ -1,35 +1,41 @@
 // Shared fixture: harness-collection matrix into a temp canon.db (never ~/.kyberdash/canon.db).
+//
+// Two kinds of row live here, and only one of them is capture proof:
+// - OpenCode 2.2.1 run A (fixtures/v2/runA) is replayed through the production modules: plugin ->
+//   OTLP JSON body -> receiver decode -> canonical ingest -> projection. It is the only OpenCode row
+//   in this world that proves capture, and no session, run or execution row of it is written by hand.
+// - Every other row is a rendering-only seed, written straight into the store. A seed gives the
+//   dashboard a shape to render; it says nothing about what a harness captured.
 
 import { mkdtempSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { buildHarnessRollup } from '../src/canon/harnesses.js'
+import { ingestBatch } from '../src/canon/ingest.js'
+import { projectCanonicalStore } from '../src/canon/projection.js'
 import { CanonStore } from '../src/canon/store.js'
+import { KYBERDASH_OPENCODE_CONTEXT_ENV } from '../src/capture/harnesses/opencode-plugin/consent.js'
+import { createSetup } from '../src/capture/harnesses/opencode-plugin/entry.js'
+import {
+  OWNED_SESSION_ID,
+  consentPathIn,
+  createHost,
+  receiver,
+  replayRunA,
+  start,
+  stopPlugin,
+} from '../src/capture/harnesses/opencode-plugin/testing.js'
+import { decodeOtlpJson } from '../src/otel/receiver.js'
 
 export const USER_CANON = join(homedir(), '.kyberdash', 'canon.db')
 
 export const MEASURED_HARNESS = 'claude-code'
-// Plugin row: visible not_measurable session (not the native Effect quarantine/no-session row). Direct store upsert exercises rendering only, bypassing the adapter vote.
+// The honest-empty row is a rendering-only seed on the `opencode` harness, the same harness the replay writes.
 export const HONEST_EMPTY_HARNESS = 'opencode'
 export const ZERO_RECORD_HARNESS = 'droid'
-
-// C1 measured-opencode round trip: same harness id as the honest-empty plugin
-// row (`opencode`), second session/run pair carrying model identity, token
-// usage and a tool invocation through the T8 direct-upsert projection seam.
-// The honest-empty session stays byte-identical; the harness now holds both,
-// so HarnessDetail still reports unmeasurable dimensions (skill/continuity)
-// while the measured run drills into model/tokens/tools/cost.
-//
-// The shared harness id is deliberate, not an oversight: the plugin row really
-// is `opencode`, and the round trip has to prove that the same harness can
-// hold a measured run beside an honest-empty one. Both the honest-empty and the
-// measured spec cases assert the OTHER run is present, so neither can pass by
-// quietly dropping its sibling.
-export const MEASURED_OPENCODE_SESSION_ID = 'hc-opencode-measured-session-1'
-export const MEASURED_OPENCODE_RUN_ID = 'hc-opencode-measured-run-1'
-export const MEASURED_OPENCODE_EXEC_ID = 'hc-opencode-measured-exec-1'
-export const MEASURED_OPENCODE_MODEL = 'opencode-go/muse-spark-1.3-contributor'
+/** The session the production replay writes for OpenCode run A (fixtures/v2/runA). */
+export const OPENCODE_REPLAY_SESSION_ID = OWNED_SESSION_ID
 
 export type CollectedWorld = {
   root: string
@@ -60,161 +66,11 @@ export async function refreshTempCanon(root = createTempRoot()): Promise<Collect
   // schema or constraint change), and without the close the failure leaks the
   // store and its file lock into the rest of the run.
   try {
-    store.upsertSession({
-      sessionId: 'hc-measured-session-1',
-      harness: MEASURED_HARNESS,
-      label: 'harness-collection measured session',
-      started: '2026-09-06T10:00:00.000Z',
-      ended: '2026-09-06T10:05:00.000Z',
-      payload: {
-        id: 'hc-measured-session-1',
-        session_id: 'hc-measured-session-1',
-        harness: MEASURED_HARNESS,
-        context: {
-          measurable: true,
-          contextLimit: 200000,
-          contextLimitSource: 'reported',
-          turns: [
-            { pressure: 0.42, headroom: 116000 },
-            { pressure: 0.35, headroom: 130000 },
-          ],
-        },
-        summary: {
-          turn_count: 2,
-          total_input: 2000,
-          total_output: 500,
-          total_cache_read: 800,
-          cost: { status: 'priced', value: 0.012, basis: 'published', currency: 'USD' },
-        },
-      },
-    })
-
-    store.upsertRun({
-      runId: 'hc-measured-run-1',
-      harness: MEASURED_HARNESS,
-      label: 'harness-collection measured run',
-      groupingBasis: 'explicit',
-      started: '2026-09-06T10:00:00.000Z',
-      ended: '2026-09-06T10:05:00.000Z',
-      executionCount: 1,
-    })
-
-    store.upsertExecution({
-      executionId: 'hc-measured-exec-1',
-      runId: 'hc-measured-run-1',
-      sessionId: 'hc-measured-session-1',
-      harness: MEASURED_HARNESS,
-      isRoot: true,
-      started: '2026-09-06T10:00:00.000Z',
-      ended: '2026-09-06T10:05:00.000Z',
-      parentLinkage: 'measured',
-    })
-
-    store.upsertSession({
-      sessionId: 'hc-honest-session-1',
-      harness: HONEST_EMPTY_HARNESS,
-      label: 'harness-collection honest-empty session',
-      started: '2026-09-06T11:00:00.000Z',
-      ended: '2026-09-06T11:02:00.000Z',
-      payload: {
-        id: 'hc-honest-session-1',
-        session_id: 'hc-honest-session-1',
-        harness: HONEST_EMPTY_HARNESS,
-        context: { measurable: false },
-        summary: { turn_count: 1 },
-      },
-    })
-
-    store.upsertRun({
-      runId: 'hc-honest-run-1',
-      harness: HONEST_EMPTY_HARNESS,
-      label: 'harness-collection honest-empty run',
-      groupingBasis: 'explicit',
-      started: '2026-09-06T11:00:00.000Z',
-      ended: '2026-09-06T11:02:00.000Z',
-      executionCount: 1,
-    })
-
-    store.upsertExecution({
-      executionId: 'hc-honest-exec-1',
-      runId: 'hc-honest-run-1',
-      sessionId: 'hc-honest-session-1',
-      harness: HONEST_EMPTY_HARNESS,
-      isRoot: true,
-      started: '2026-09-06T11:00:00.000Z',
-      ended: '2026-09-06T11:02:00.000Z',
-      parentLinkage: 'measured',
-    })
-
-    // C1 measured-opencode: adapter-shaped session (model identity + token
-    // usage + tool invocation) projected through the same direct-upsert seam.
-    // Tokens mirror the A2 current-shape opencode numbers (18044 in / 71 out /
-    // 113 cache-read) so the figures are real measured counters, never zeros.
-    // Cost carries an explicit published basis with a real value so the
-    // dashboard resolves a basis instead of "no published rate".
-    store.upsertSession({
-      sessionId: MEASURED_OPENCODE_SESSION_ID,
-      harness: HONEST_EMPTY_HARNESS,
-      label: 'harness-collection measured opencode session',
-      started: '2026-09-06T12:00:00.000Z',
-      ended: '2026-09-06T12:05:00.000Z',
-      payload: {
-        id: MEASURED_OPENCODE_SESSION_ID,
-        session_id: MEASURED_OPENCODE_SESSION_ID,
-        harness: HONEST_EMPTY_HARNESS,
-        context: {
-          measurable: true,
-          contextLimit: 200000,
-          contextLimitSource: 'reported',
-          turns: [{ pressure: 0.38, headroom: 124000 }],
-        },
-        summary: {
-          turn_count: 1,
-          total_input: 18044,
-          total_output: 71,
-          total_cache_read: 113,
-          total_cache_creation: 0,
-          models: [MEASURED_OPENCODE_MODEL],
-          cost: { status: 'priced', value: 0.012, basis: 'published', currency: 'USD' },
-          tool_calls: 1,
-          tools_invoked: ['Bash'],
-        },
-        turns: [
-          {
-            index: 0,
-            spanId: 'hc-opencode-measured-turn-0',
-            timestamp: '2026-09-06T12:05:00.000Z',
-            model: MEASURED_OPENCODE_MODEL,
-            input: 18044,
-            output: 71,
-            cache_read: 113,
-            cache_creation: 0,
-          },
-        ],
-        tools: [{ name: 'Bash', schema_tokens: 0, invocations: 1, turns_resident: 1, errors: 0 }],
-      },
-    })
-
-    store.upsertRun({
-      runId: MEASURED_OPENCODE_RUN_ID,
-      harness: HONEST_EMPTY_HARNESS,
-      label: 'harness-collection measured opencode run',
-      groupingBasis: 'explicit',
-      started: '2026-09-06T12:00:00.000Z',
-      ended: '2026-09-06T12:05:00.000Z',
-      executionCount: 1,
-    })
-
-    store.upsertExecution({
-      executionId: MEASURED_OPENCODE_EXEC_ID,
-      runId: MEASURED_OPENCODE_RUN_ID,
-      sessionId: MEASURED_OPENCODE_SESSION_ID,
-      harness: HONEST_EMPTY_HARNESS,
-      isRoot: true,
-      started: '2026-09-06T12:00:00.000Z',
-      ended: '2026-09-06T12:05:00.000Z',
-      parentLinkage: 'measured',
-    })
+    await replayOpencodeRunA(store, root)
+    // Projection rebuilds the derived rows from `records` and would prune a seeded row that has no
+    // records behind it, so the rendering-only seeds are written after it.
+    seedMeasuredClaudeCode(store)
+    seedRenderingOnlyOpencode(store)
 
     buildHarnessRollup(store)
     // Bounded zero-record seed: droid never gains a session or run, but its
@@ -227,4 +83,141 @@ export async function refreshTempCanon(root = createTempRoot()): Promise<Collect
     store.close()
     throw error
   }
+}
+
+/**
+ * Replays OpenCode 2.2.1 run A through the production modules, in capture order. Content consent is
+ * on through the env override, so the session carries the consent-on figures. Nothing here writes a
+ * session, run or execution row: the projection derives them from the ingested spans.
+ */
+async function replayOpencodeRunA(store: CanonStore, root: string): Promise<void> {
+  const wire = receiver()
+  const host = createHost()
+  await stage('plugin', async () => {
+    const cleanup = await start(
+      createSetup({
+        fetchFn: wire.fetch,
+        env: { [KYBERDASH_OPENCODE_CONTEXT_ENV]: '1' },
+        consentPath: consentPathIn(root),
+      }),
+      host,
+    )
+    await replayRunA(host)
+    await stopPlugin(cleanup)
+  })
+  if (wire.accepted.length === 0) {
+    throw new Error('OpenCode round trip stopped at the plugin stage: no OTLP body was accepted')
+  }
+
+  const spans = await stage('receiver decode', () =>
+    wire.accepted.flatMap((body) => decodeOtlpJson(JSON.stringify(body))),
+  )
+  await stage('canonical ingest', () => ingestBatch(spans, store))
+  await stage('projection', () => projectCanonicalStore(store))
+}
+
+/** Names the stage that failed, so the boot's error says which production module broke first. */
+async function stage<T>(name: string, work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`OpenCode round trip stopped at the ${name} stage: ${reason}`, { cause: error })
+  }
+}
+
+/** Rendering-only seed: a measured claude-code session, run and execution written straight into the store. */
+function seedMeasuredClaudeCode(store: CanonStore): void {
+  store.upsertSession({
+    sessionId: 'hc-measured-session-1',
+    harness: MEASURED_HARNESS,
+    label: 'harness-collection measured session',
+    started: '2026-09-06T10:00:00.000Z',
+    ended: '2026-09-06T10:05:00.000Z',
+    payload: {
+      id: 'hc-measured-session-1',
+      session_id: 'hc-measured-session-1',
+      harness: MEASURED_HARNESS,
+      context: {
+        measurable: true,
+        contextLimit: 200000,
+        contextLimitSource: 'reported',
+        turns: [
+          { pressure: 0.42, headroom: 116000 },
+          { pressure: 0.35, headroom: 130000 },
+        ],
+      },
+      summary: {
+        turn_count: 2,
+        total_input: 2000,
+        total_output: 500,
+        total_cache_read: 800,
+        cost: { status: 'priced', value: 0.012, basis: 'published', currency: 'USD' },
+      },
+    },
+  })
+
+  store.upsertRun({
+    runId: 'hc-measured-run-1',
+    harness: MEASURED_HARNESS,
+    label: 'harness-collection measured run',
+    groupingBasis: 'explicit',
+    started: '2026-09-06T10:00:00.000Z',
+    ended: '2026-09-06T10:05:00.000Z',
+    executionCount: 1,
+  })
+
+  store.upsertExecution({
+    executionId: 'hc-measured-exec-1',
+    runId: 'hc-measured-run-1',
+    sessionId: 'hc-measured-session-1',
+    harness: MEASURED_HARNESS,
+    isRoot: true,
+    started: '2026-09-06T10:00:00.000Z',
+    ended: '2026-09-06T10:05:00.000Z',
+    parentLinkage: 'measured',
+  })
+}
+
+/**
+ * rendering-only seed — not capture proof. The honest-empty `opencode` row is a visible,
+ * unmeasurable session written straight into the store, so the dashboard has an unmeasurable row to
+ * render. It says nothing about what OpenCode captured; the replay in `replayOpencodeRunA` does that.
+ */
+function seedRenderingOnlyOpencode(store: CanonStore): void {
+  store.upsertSession({
+    sessionId: 'hc-honest-session-1',
+    harness: HONEST_EMPTY_HARNESS,
+    label: 'rendering-only seed — not capture proof',
+    started: '2026-09-06T11:00:00.000Z',
+    ended: '2026-09-06T11:02:00.000Z',
+    payload: {
+      id: 'hc-honest-session-1',
+      session_id: 'hc-honest-session-1',
+      harness: HONEST_EMPTY_HARNESS,
+      context: { measurable: false },
+      summary: { turn_count: 1 },
+    },
+  })
+
+  store.upsertRun({
+    runId: 'hc-honest-run-1',
+    harness: HONEST_EMPTY_HARNESS,
+    label: 'harness-collection honest-empty run',
+    groupingBasis: 'explicit',
+    started: '2026-09-06T11:00:00.000Z',
+    ended: '2026-09-06T11:02:00.000Z',
+    executionCount: 1,
+  })
+
+  store.upsertExecution({
+    executionId: 'hc-honest-exec-1',
+    runId: 'hc-honest-run-1',
+    sessionId: 'hc-honest-session-1',
+    harness: HONEST_EMPTY_HARNESS,
+    isRoot: true,
+    started: '2026-09-06T11:00:00.000Z',
+    ended: '2026-09-06T11:02:00.000Z',
+    parentLinkage: 'measured',
+  })
 }

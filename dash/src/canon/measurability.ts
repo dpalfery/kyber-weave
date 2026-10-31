@@ -99,7 +99,10 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['claude', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['claude-code', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['codex', ['schema_cost', 'tool_definitions']],
-  ['opencode', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  // OpenCode has no entry: it has no transcript reader. Its sessions come from the capture
+  // plugin, which supplies content per turn (with the user's consent), so no bucket is
+  // declared unmeasurable up front. `measurabilityFor` still falls back to
+  // FILE_SOURCE_UNMEASURABLE for a file-sourced OpenCode record.
   ['kilo', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
   ['kilo-code', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
   // The shared-runtime harness reads the same kilo.db store as its provider,
@@ -717,6 +720,15 @@ export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
 const OPENCODE_NO_CAPTURE_REASON =
   'OpenCode exports no session telemetry unless the KyberDash capture plugin has recorded sessions; none carrying this counter were observed.'
 
+/**
+ * What the capture plugin adds once it is installed: counters always, content only with
+ * the user's consent. Appended to the prefix survey's reason, which is about content.
+ * The base reason above is also pinned verbatim by the dimension answers, so the consent
+ * condition rides beside it rather than inside it.
+ */
+const OPENCODE_CONTENT_CONSENT_NOTE =
+  'Even with the capture plugin, prompt and conversation content is recorded only with content consent, and no prefix bytes are exported.'
+
 const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
   [
     'copilot',
@@ -831,12 +843,12 @@ const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability,
   [
     'opencode',
     {
-      status: 'not_measurable',
-      confidence: 'documented',
-      cacheRead: false,
-      cacheCreation: false,
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
       reason:
-        OPENCODE_NO_CAPTURE_REASON,
+        'The KyberDash capture plugin exports cache read and cache write counters on every OpenCode model call it records; OpenCode itself exports no session telemetry, so a session the plugin did not record carries none.',
     },
   ],
 ])
@@ -960,7 +972,7 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
       prefixBytes: false,
       fallback: 'none',
       reason:
-        `${OPENCODE_NO_CAPTURE_REASON} No prefix bytes are exported at all.`,
+        `${OPENCODE_NO_CAPTURE_REASON} ${OPENCODE_CONTENT_CONSENT_NOTE}`,
     },
   ],
 ])
@@ -983,8 +995,8 @@ export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'c
   // Only an uncatalogued harness (`not_measurable` with `assumed`
   // confidence) falls back to the data — a documented negative is a
   // verified record even when its status is not literally `unsupported`
-  // (re-review #2: Kilo 7 — OpenCode is catalogued `not_measurable` with
-  // documented confidence, and its absent counters are absence, not data).
+  // (re-review #2: Kilo 7 — a documented negative is a catalogued record, and
+  // its absent counters are absence, not data).
   if (availability.confidence === 'assumed') return true
   if (availability.status === 'unsupported') return false
   // The per-counter flags are the record for every other catalogued
@@ -1128,6 +1140,12 @@ export function harnessDimensionAvailability(
 
   // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
   if (dim === 'cache_hit_rate' || dim === 'cache_efficiency' || dim === 'cache') {
+    if (normalized === 'opencode') {
+      // The survey says the capture plugin exports the counters; that is a capability, not
+      // a finding. With no recorded session carrying them, the static answer is still the
+      // no-capture refusal, and the evidence above is what lifts it (D7).
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
+    }
     const cache = cacheAvailability(normalized)
     if (cache.status === 'unsupported' || cache.status === 'not_measurable') {
       return unavailable(cache.reason)

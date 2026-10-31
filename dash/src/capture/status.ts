@@ -14,6 +14,7 @@ import {
   declaredFiles,
   exporterResolutionFor,
   fileIdFor,
+  isPluginOnly,
   loadReceiptLenient,
   presentKeys,
   readTextIfPresent,
@@ -100,18 +101,7 @@ export type StatusContext = {
  * dashboard listens on, never this server's own environment (D13) — the
  * server cannot see the shell the harness is launched from.
  */
-function manualStepsFor(writer: CaptureHarnessWriter, endpoint: string): CaptureManualStep[] {
-  if (writer.id === 'opencode') {
-    return [
-      {
-        id: 'opencode-otel-endpoint',
-        text:
-          'OpenCode reads the OTLP endpoint from its process environment (upstream #13438), ' +
-          'not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from',
-        env: { name: 'OTEL_EXPORTER_OTLP_ENDPOINT', value: endpoint },
-      },
-    ]
-  }
+function manualStepsFor(writer: CaptureHarnessWriter): CaptureManualStep[] {
   if (writer.id === 'antigravity') {
     return [
       {
@@ -391,8 +381,28 @@ function buildOne(
         },
       ],
       warnings: [],
-      manualSteps: manualStepsFor(writer, ctx.endpoint),
+      manualSteps: manualStepsFor(writer),
       statusLines: lines,
+    }
+  }
+
+  if (isPluginOnly(writer)) {
+    // OpenCode is captured by its plugin alone: its state is the plugin's (installed and
+    // current, outdated, or modified), and no config key is declared, read or drift-checked.
+    // The consent and plugin lines are decided here, in the engine; the drawer only renders them.
+    const plugin = writer.filePlugin.state(ctx.home, ctx.env)
+    return {
+      id: writer.id,
+      displayName: writer.displayName,
+      mode: 'managed',
+      installed: detection.installed,
+      installEvidence: [...detection.evidence],
+      state: plugin.state,
+      receipt: plugin.receipt ? 'recorded' : 'absent',
+      files: [],
+      warnings: [],
+      manualSteps: manualStepsFor(writer),
+      statusLines: [...writer.filePlugin.describeStatus(ctx.home, ctx.env)],
     }
   }
 
@@ -423,7 +433,7 @@ function buildOne(
         },
       ],
       warnings: [],
-      manualSteps: manualStepsFor(writer, ctx.endpoint),
+      manualSteps: manualStepsFor(writer),
       statusLines: lines.length > 0 ? lines : [writer.reason],
     }
   }
@@ -474,7 +484,7 @@ function buildOne(
     receipt: recorded ? 'recorded' : 'absent',
     files: analyses.map((analysis) => analysis.status),
     warnings: [...ownerValueWarnings(files, analyses, ctx), ...configWarnings, ...exporterWarnings],
-    manualSteps: manualStepsFor(writer, ctx.endpoint),
+    manualSteps: manualStepsFor(writer),
     // The plugin and consent state are decided here, in the engine; the drawer only renders them.
     statusLines: [...exporterLines, ...(writer.filePlugin?.describeStatus(ctx.home, ctx.env) ?? [])],
   }

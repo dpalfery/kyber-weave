@@ -94,7 +94,7 @@ describe('runCaptureAction: enable', () => {
     expect(existsSync(receiptPathForHome(home))).toBe(false)
   })
 
-  it('writes, then reports noop on the second enable', async () => {
+  it('writes only the plugin file on the first enable, then reports noop with opencode.jsonc untouched', async () => {
     const home = makeHome()
     writeConfig(opencodePath(home), '{}\n')
 
@@ -104,26 +104,15 @@ describe('runCaptureAction: enable', () => {
       {
         kind: 'wrote',
         harness: 'opencode',
-        fileId: 'opencode-config',
-        path: opencodePath(home),
-        changes: [{ key: 'experimental.openTelemetry', after: true }],
-      },
-      // T4: OpenCode now also owns its capture plugin file (strict install).
-      {
-        kind: 'wrote',
-        harness: 'opencode',
         fileId: 'plugin',
         path: join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js'),
       },
     ])
-    const written = readFileSync(opencodePath(home), 'utf8')
 
     const second = await runCaptureAction(request(home, 'opencode', 'enable'))
     expect(second.outcome).toBe('noop')
-    expect(second.events).toEqual([
-      { kind: 'noop', harness: 'opencode', fileId: 'opencode-config', path: opencodePath(home) },
-    ])
-    expect(readFileSync(opencodePath(home), 'utf8')).toBe(written)
+    expect(second.events.map((event) => event.fileId)).not.toContain('opencode-config')
+    expect(readFileSync(opencodePath(home), 'utf8')).toBe('{}\n')
   })
 
   it('records a before value that is a JSON boolean as a boolean', async () => {
@@ -164,61 +153,47 @@ describe('runCaptureAction: enable', () => {
     expect(existsSync(insidersRoot(home))).toBe(true)
   })
 
-  it('refuses a config that does not parse with a reason and no message', async () => {
+  it('leaves an unparseable opencode.jsonc byte-identical and names no config event', async () => {
     const home = makeHome()
     writeConfig(opencodePath(home), '{not json')
     const result = await runCaptureAction(request(home, 'opencode', 'enable'))
-    expect(result.outcome).toBe('refused')
-    expect(result.reason).toBe('unparseable')
-    expect(result.events[0]).toMatchObject({ kind: 'refused', reason: 'unparseable', harness: 'opencode' })
+    expect(result.events.map((event) => event.fileId)).not.toContain('opencode-config')
     expect(readFileSync(opencodePath(home), 'utf8')).toBe('{not json')
   })
 })
 
 describe('runCaptureAction: disable', () => {
-  it('previews a would-restore on a dry run, then restores key-level and byte-exact', async () => {
+  it('previews a plugin removal on a dry run, then removes only the plugin and leaves opencode.jsonc byte-exact', async () => {
     const home = makeHome()
     const seed = '{\n  // owner comment\n}\n'
     writeConfig(opencodePath(home), seed)
     await runCaptureAction(request(home, 'opencode', 'enable'))
-    const enabled = readFileSync(opencodePath(home), 'utf8')
+    const pluginPath = join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js')
 
     const preview = await runCaptureAction(request(home, 'opencode', 'disable', { dryRun: true }))
     expect(preview.outcome).toBe('previewed')
     expect(preview.events).toEqual([
-      // T4: the installed plugin file is part of the disable preview.
-      {
-        kind: 'would-restore',
-        harness: 'opencode',
-        fileId: 'plugin',
-        path: join(home, '.config', 'opencode', 'plugins', 'kyberdash-opencode.js'),
-      },
-      {
-        kind: 'would-restore',
-        harness: 'opencode',
-        fileId: 'opencode-config',
-        path: opencodePath(home),
-        changes: [{ key: 'experimental.openTelemetry', before: true }],
-      },
+      { kind: 'would-restore', harness: 'opencode', fileId: 'plugin', path: pluginPath },
     ])
-    expect(readFileSync(opencodePath(home), 'utf8')).toBe(enabled)
+    expect(existsSync(pluginPath)).toBe(true)
 
     const restored = await runCaptureAction(request(home, 'opencode', 'disable'))
     expect(restored.outcome).toBe('wrote')
     expect(restored.events).toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: 'restored', fileId: 'opencode-config' })]),
+      expect.arrayContaining([expect.objectContaining({ kind: 'restored', fileId: 'plugin' })]),
     )
+    expect(restored.events.map((event) => event.fileId)).not.toContain('opencode-config')
+    expect(existsSync(pluginPath)).toBe(false)
     expect(readFileSync(opencodePath(home), 'utf8')).toBe(seed)
   })
 
-  it('reports noop when nothing was ever enabled', async () => {
+  it('reports noop when nothing was ever enabled, and names no config event', async () => {
     const home = makeHome()
     writeConfig(opencodePath(home), '{}\n')
     const result = await runCaptureAction(request(home, 'opencode', 'disable'))
     expect(result.outcome).toBe('noop')
-    expect(result.events).toEqual([
-      { kind: 'noop', harness: 'opencode', fileId: 'opencode-config', path: opencodePath(home) },
-    ])
+    expect(result.events.map((event) => event.fileId)).not.toContain('opencode-config')
+    expect(readFileSync(opencodePath(home), 'utf8')).toBe('{}\n')
   })
 
   it('refuses on drift with the entries, leaving every byte untouched', async () => {
@@ -544,7 +519,7 @@ describe('runCaptureAction: shape', () => {
 })
 
 describe('runCapture: structured events beside the unchanged text', () => {
-  it('returns an events array and the same text the CLI always printed', async () => {
+  it('returns an events array beside the text, naming only the plugin file for OpenCode', async () => {
     const home = makeHome()
     writeConfig(opencodePath(home), '{}\n')
     const result = await runCapture('enable', {
@@ -554,9 +529,8 @@ describe('runCapture: structured events beside the unchanged text', () => {
       harnessIds: ['opencode'],
       fetchHealth: NO_LISTENER,
     })
-    expect(result.stdout).toContain(`harness opencode: enabled: ${opencodePath(home)} (updated)`)
-    // The config file, then the OpenCode plugin file (T4).
-    expect(result.events.map((event) => `${event.fileId}:${event.kind}`)).toEqual(['opencode-config:wrote', 'plugin:wrote'])
+    expect(result.stdout).not.toContain(opencodePath(home))
+    expect(result.events.map((event) => `${event.fileId}:${event.kind}`)).toEqual(['plugin:wrote'])
   })
 
   it('bounds the receiver probe by probeTimeoutMs', async () => {

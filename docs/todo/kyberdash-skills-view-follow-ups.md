@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberDash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-31
 ---
 
 # KyberDash skills view follow-ups
@@ -18,7 +18,7 @@ These items were raised when the [skills view plan](../archive/plans/2026-10-13-
 
 **(b) Payload growth from per-turn listings.** Each turn stores its own `skills_listed` array. The owner's estimate for a 7,000-turn Antigravity session is about 0.85 MB at 25 skills and 3.4 MB at 100 skills, with the whole payload reaching up to 12 MB. The estimate was not re-measured at closeout. Store listing deltas instead of a full array per turn.
 
-**(c) Missing captures.** Pi, OpenCode and Copilot CLI have no captures. Their listing is `not_measurable`, and their wire formats are unverified (see the READMEs under `dash/src/canon/fixtures/skills/`). The Claude Desktop `skill_listing` is also unverified. No Copilot skill invocation record has been observed. Each source needs a sanitized capture before any listing support is added.
+**(c) Missing captures.** Pi and Copilot CLI have no captures. Their listing is `not_measurable`, and their wire formats are unverified (see the READMEs under `dash/src/canon/fixtures/skills/`). The Claude Desktop `skill_listing` is also unverified. No Copilot skill invocation record has been observed. Each source needs a sanitized capture before any listing support is added. OpenCode is no longer in this item: its listing comes from the V2 capture plugin ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)), and its live check is the OpenCode live gate.
 
 **(d) Minor cleanups.**
 - `SkillRow.derivedTokens` (`dash/src/canon/skills.ts:63`) is not used by production code. The payload's `derived_tokens` is computed from the first-observed description.
