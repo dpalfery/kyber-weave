@@ -206,6 +206,13 @@ public sealed class DocumentSectionGraph
         List<DocGraphEdge> edges,
         Dictionary<string, List<string>> inbound)
     {
+        // [text]() and [text](#) carry no destination. Treating them as the source
+        // document adds a section-to-preamble edge and an inbound label for the link text.
+        if (string.IsNullOrEmpty(link.Path) && string.IsNullOrEmpty(link.Fragment))
+        {
+            return;
+        }
+
         string combined = link.Path;
         if (string.IsNullOrEmpty(combined))
         {

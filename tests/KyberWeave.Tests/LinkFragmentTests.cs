@@ -103,6 +103,38 @@ public sealed class LinkFragmentTests
         Assert.True(graph.InboundLabelsByLeafId.ContainsKey(fragmentLeaf.Id));
     }
 
+    [Fact]
+    public void AnEmptyFragmentDoesNotLinkASectionToItsOwnPreamble()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/linker.md", """
+                                       ---
+                                       id: docs/source
+                                       title: Source
+                                       doc-type: reference
+                                       status: current
+                                       owner: Maintainers
+                                       last-reviewed: 2026-10-31
+                                       ---
+
+                                       # Source
+
+                                       ## Topic
+
+                                       See [see](#) and [blank]() in this section.
+                                       """);
+
+        DocumentSet set = fixture.Load();
+        DocumentModel source = Assert.Single(set.Documents, doc => doc.RelativePath == "6-Docs/linker.md");
+        Assert.Contains(source.LinkTargets, link => link.Text == "see" && link.Fragment.Length == 0);
+
+        DocumentSectionGraph graph = DocumentSectionGraph.Build(set.Documents);
+        Assert.DoesNotContain(graph.Contribution.Edges, edge => edge.Label == "SECTION_LINK");
+        Assert.DoesNotContain(
+            graph.InboundLabelsByLeafId.SelectMany(pair => pair.Value),
+            label => label is "see" or "blank");
+    }
+
     /// <summary>
     /// Stand-in for T8 link extraction via <see cref="DocumentLoader.ExtractBodyLinks"/>.
     /// </summary>
