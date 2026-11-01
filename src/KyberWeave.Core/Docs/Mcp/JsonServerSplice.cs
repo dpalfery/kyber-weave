@@ -122,7 +122,8 @@ public static class JsonServerSplice
     /// input unchanged.
     /// </returns>
     /// <exception cref="ArgumentException">
-    /// The key path is empty, or <paramref name="entryJson"/> is not a JSON object.
+    /// The key path is empty, or <paramref name="entryJson"/> is not a JSON object — a body that is
+    /// malformed JSON is that same refusal, not a parse failure escaping to the caller.
     /// </exception>
     public static JsonSplicePlan Plan(
         byte[] document,
@@ -142,7 +143,7 @@ public static class JsonServerSplice
                 nameof(serverKeyPath));
         }
 
-        if (JsonNode.Parse(entryJson) is not JsonObject entry)
+        if (ParseEntry(entryJson) is not JsonObject entry)
         {
             throw new ArgumentException(
                 $"an entry body must be a JSON object, but '{entryJson}' is not one.",
@@ -206,6 +207,31 @@ public static class JsonServerSplice
     /// file and an inserted entry are formatted by one set of rules rather than two.
     /// </summary>
     internal static string RenderDocument(JsonNode? document) => Render(document, indent: 0);
+
+    /// <summary>
+    /// The parsed entry body, or null when it is valid JSON that is not an object.
+    /// </summary>
+    /// <remarks>
+    /// A body that is not JSON at all is the caller's argument being wrong in exactly the way the
+    /// contract names, so <see cref="JsonException"/> is translated rather than escaping as itself:
+    /// the caller passed a string this method could not read, and the refusal it needs to handle is
+    /// the same one a well-formed non-object produces.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The body cannot be parsed as JSON.</exception>
+    private static JsonNode? ParseEntry(string entryJson)
+    {
+        try
+        {
+            return JsonNode.Parse(entryJson);
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException(
+                $"an entry body must be a JSON object, but '{entryJson}' cannot be read as JSON: {exception.Message}",
+                nameof(entryJson),
+                exception);
+        }
+    }
 
     private static JsonSplicePlan Refuse(JsonSpliceOutcome outcome, byte[] document, string? message) =>
         new(outcome, JsonInsertionPoint.AbsentContainer, -1, [], document, message);
