@@ -1056,6 +1056,79 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// An orchestrator whose own capability profile denies <c>filesystem.read</c> renders a note
+    /// that names <c>mcp__kyber-weave__*</c> among the withheld wildcards and gives the read denial
+    /// as the reason.
+    /// </summary>
+    /// <remarks>
+    /// The shipped corpus lets the orchestrator profile read, so
+    /// <see cref="RenderAsync_Claude_GrantsKyberWeaveToThePureOrchestratorAndWithholdsTheOtherTwo"/>
+    /// exercises the note's grant branch and the deny branch had no test at all: a receipt that
+    /// kept the two-server withholding list, or kept the routing-only reason, described a grant the
+    /// subagent file does not make — the false claim the note exists to prevent.
+    ///
+    /// The entitlement half is read from <see cref="SquadMcpGrantProjection"/> rather than from the
+    /// renderer, so the fixture is proven to reach the deny branch instead of agreeing with
+    /// whatever the renderer did. The wording is the contract under test and is therefore pinned
+    /// as a literal: a drifted reason is a changed claim in the one place a review or a
+    /// <c>squad doctor</c> run reads without re-deriving the rule.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Claude_WithholdsKyberWeaveFromAnOrchestratorThatCannotRead()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedOrchestrator();
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Claude),
+            "The fixture's orchestrator profile still allows filesystem.read, so the render reaches "
+            + "the granting branch and the denial this test pins is never exercised.");
+
+        SquadRenderResult result = await new SquadRendererRegistry([new ClaudeRenderer()])
+            .RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Claude],
+                SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The note states what the subagent file withholds, so the file has to withhold all three:
+        // a receipt naming a server the tools list still carries is the same falsehood reversed.
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.DoesNotContain("mcp__kyber-weave__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, conductor.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+
+        // The withholding list names kyber-weave beside the two carve-out servers: the grant branch
+        // omits the third wildcard, so its absence would recreate the defect this pins.
+        Assert.Contains(
+            "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*",
+            record.Details,
+            StringComparison.Ordinal);
+
+        // The reason follows the same branch: read denial is why the third server is lost, while
+        // the routing-only phrasing describes an orchestrator that still carries it.
+        Assert.Contains(
+            "because this agent's capability profile does not allow filesystem.read",
+            record.Details,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "because a role that only routes work has no use for code-graph or library lookups",
+            record.Details,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The pure orchestrator is granted <c>kyber-weave</c> and keeps its withholding on
     /// <c>codegraph</c> and <c>context7</c>.
     /// </summary>

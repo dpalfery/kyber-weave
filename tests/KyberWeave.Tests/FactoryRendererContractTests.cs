@@ -1443,6 +1443,22 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
 
     private const string ReadOnlyProfile = "read-only";
 
+    /// <summary>
+    /// The primary agent the pure-orchestrator wording is asserted on. It is the only shipped
+    /// agent whose capability profile is the orchestrator, and a primary agent is the only one
+    /// whose degradation receipt carries the entry-point-skill note.
+    /// </summary>
+    private const string ConductorAgent = "conductor";
+
+    /// <summary>
+    /// The Copilot roster a read-denied orchestrator can still justify: the three tools the
+    /// catalog marks ungoverned and the one its <c>delegate: allow</c> covers. The shipped
+    /// roster also names read, search, and network tools, and the source validator rejects any
+    /// of those against a profile that denies the capability it needs.
+    /// </summary>
+    private const string ReadDeniedOrchestratorCopilotTools =
+        "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo, agent]";
+
     private readonly TempDirectory _temp = new();
 
     private McpDeclarationCorpusFixture()
@@ -1496,6 +1512,29 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
         return fixture;
     }
 
+    /// <summary>
+    /// Copies the canonical corpus and denies <c>filesystem.read</c> in the corpus's own
+    /// <c>orchestrator</c> profile, leaving every profile name intact.
+    /// </summary>
+    /// <remarks>
+    /// Denied in place rather than through a clone in the manner of
+    /// <see cref="WithFileReadDeniedAgent"/>, because the withholding note a renderer states keys on
+    /// the profile's identity as well as on its permissions: an agent repointed at a
+    /// differently-named read-denied profile is no longer a pure orchestrator, so the branch that
+    /// names the withholding is never reached and a test built on it would assert nothing.
+    ///
+    /// The conductor's Copilot roster is narrowed with it. The source validator checks every
+    /// Copilot tool against the shared profile, so a read-denied orchestrator cannot keep the read,
+    /// search, or network tools the shipped roster declares and the source would not load at all.
+    /// </remarks>
+    internal static McpDeclarationCorpusFixture WithFileReadDeniedOrchestrator()
+    {
+        McpDeclarationCorpusFixture fixture = CopyCanonical();
+        fixture.DenyFileReadInProfile(SquadMcpGrantProjection.PureOrchestratorProfile);
+        fixture.NarrowCopilotTools(ConductorAgent, ReadDeniedOrchestratorCopilotTools);
+        return fixture;
+    }
+
     private static McpDeclarationCorpusFixture CopyCanonical()
     {
         McpDeclarationCorpusFixture fixture = new();
@@ -1510,23 +1549,7 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
         string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
         string[] lines = File.ReadAllLines(path);
 
-        int start = Array.IndexOf(lines, $"  {sourceProfileName}:");
-        if (start < 0)
-        {
-            throw new InvalidOperationException(
-                $"Expected '{path}' to declare profile '{sourceProfileName}' to clone.");
-        }
-
-        int end = start + 1;
-        while (end < lines.Length && !IsProfileHeader(lines[end]))
-        {
-            end++;
-        }
-
-        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
-        {
-            end--;
-        }
+        (int start, int end) = LocateProfileBlock(lines, sourceProfileName, path);
 
         List<string> clone = [.. lines[start..end]];
         clone[0] = $"  {FileReadDeniedProfile}:";
@@ -1554,6 +1577,75 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
+    /// <summary>
+    /// Rewrites the <c>filesystem.read</c> decision of <paramref name="profileName"/> to
+    /// <c>deny</c> inside that profile's own block, so the profile keeps its identity and loses
+    /// one permission.
+    /// </summary>
+    private void DenyFileReadInProfile(string profileName)
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        string[] lines = File.ReadAllLines(path);
+
+        (int start, int end) = LocateProfileBlock(lines, profileName, path);
+
+        int rewritten = 0;
+        for (int index = start; index < end; index++)
+        {
+            if (lines[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
+            {
+                lines[index] = "      filesystem.read: deny";
+                rewritten++;
+            }
+        }
+
+        // Exactly one, not at least one: rewriting a second read decision would deny the
+        // permission somewhere the test did not intend, and the fixture would then differ from
+        // the canonical corpus in two places instead of the one it names.
+        if (rewritten != 1)
+        {
+            throw new InvalidOperationException(
+                $"Profile '{profileName}' in '{path}' declares {rewritten} 'filesystem.read' "
+                + "permissions; in-place denial needs exactly one.");
+        }
+
+        File.WriteAllText(
+            path,
+            string.Join("\n", lines) + "\n",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// The half-open line range of one profile block: its <c>  &lt;name&gt;:</c> header up to the
+    /// next profile header, with trailing blank lines trimmed so a clone does not carry the
+    /// separator that belongs between blocks.
+    /// </summary>
+    private static (int Start, int End) LocateProfileBlock(
+        string[] lines,
+        string profileName,
+        string path)
+    {
+        int start = Array.IndexOf(lines, $"  {profileName}:");
+        if (start < 0)
+        {
+            throw new InvalidOperationException(
+                $"Expected '{path}' to declare profile '{profileName}'.");
+        }
+
+        int end = start + 1;
+        while (end < lines.Length && !IsProfileHeader(lines[end]))
+        {
+            end++;
+        }
+
+        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
+        {
+            end--;
+        }
+
+        return (start, end);
+    }
+
     private void RepointAgent(string agentName)
     {
         string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
@@ -1570,18 +1662,40 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
                 $"Expected '{path}' to declare a 'capability-profile' line to repoint.");
         }
 
-        string narrowed = Regex.Replace(
-            repointed,
-            "^copilot-tools: .*$",
-            "copilot-tools: [vscode, todo, search, web]",
-            RegexOptions.Multiline);
-        if (string.Equals(narrowed, repointed, StringComparison.Ordinal))
+        File.WriteAllText(
+            path,
+            Narrowed(repointed, path, "copilot-tools: [vscode, todo, search, web]"),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// Replaces the agent's <c>copilot-tools</c> line with the one the caller supplies.
+    /// </summary>
+    /// <remarks>
+    /// A read-denied profile cannot justify the read, search, or network tools an agent declares,
+    /// and <c>SquadSourceValidator.ValidateCopilotToolCapabilities</c> rejects the mismatch at load
+    /// time — so every variant that denies a capability has to narrow the Copilot roster to match,
+    /// or the render under test never gets as far as running.
+    /// </remarks>
+    private void NarrowCopilotTools(string agentName, string tools)
+    {
+        string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
+        File.WriteAllText(
+            path,
+            Narrowed(File.ReadAllText(path), path, tools),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static string Narrowed(string text, string path, string tools)
+    {
+        string narrowed = Regex.Replace(text, "^copilot-tools: .*$", tools, RegexOptions.Multiline);
+        if (string.Equals(narrowed, text, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Expected '{path}' to declare a 'copilot-tools' line to narrow.");
         }
 
-        File.WriteAllText(path, narrowed, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return narrowed;
     }
 
     /// <summary>
