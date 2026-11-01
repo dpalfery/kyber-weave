@@ -692,6 +692,14 @@ declaration the configuration loader rejects is the one exception: it fails the 
 the existing `KW-CONFIG-001` path, before the check runs. A repository that declares no
 servers prints no section at all.
 
+**What it proves, and what it does not.** The check reads configuration bytes and never
+starts a harness. A clean report means each in-play harness's file declares the server with
+the command the repository declared, and that the binary resolves on `PATH` — the whole of
+what a check confined to the repository can establish. Whether a live session then lists that
+server's tools is a separate observation, made once after wiring: open the harness in this
+repository and confirm the declared server's tools appear. Until it is made, read "wired" as
+wired correctly on disk, not as reachable from a running agent.
+
 `--no-mcp-check` skips the check, the prompt and any repair, and prints one line saying so.
 
 ### The prompt, and what happens without a terminal

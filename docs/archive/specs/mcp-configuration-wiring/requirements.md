@@ -1,11 +1,11 @@
 ---
-id: specs/mcp-configuration-wiring/requirements
+id: archive/specs/mcp-configuration-wiring/requirements
 title: MCP configuration wiring requirements
 doc-type: requirements
-status: draft
+status: archived
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 documentation-impact: extends-component
 impact-components:
   - DocGraph
@@ -22,22 +22,24 @@ keywords:
 
 # Requirements Document
 
-**Phase status:** Approved — 2026-10-31, conductor `AUTONOMOUS_APPROVAL: requirements-phase-approval`, provenance `autonomous: recommendation accepted`. Recorded as D15 in the Decisions table.
+**Status:** Archived
+**Archive Date:** 2026-11-01
+**Phase status:** Delivered and verified — every criterion below was checked against the shipped code and tests, not against this document. The phase approval (2026-10-31, conductor `AUTONOMOUS_APPROVAL: requirements-phase-approval`, provenance `autonomous: recommendation accepted`) is recorded as D15; the mid-execution amendment is D19. The council's re-review of the remediated change returned `APPROVE`, alongside the reserved-path `NEEDS_HUMAN` verdict that task 8 predicted and accepted (TK3). Durable content is mapped in [Closeout mapping](#closeout-mapping).
 **Requirement amendment (2026-10-31, D19):** criterion 5.4 gained one clarifying sentence mid-execution, settling that a selected repair target is not gated on the in-play heuristic (2.2). Amending a requirement is a re-approval of it; the re-approval and its provenance are recorded in the Decisions table as D19 (a conductor-directed correction).
-**Specification status: Ready — approved for execution 2026-10-31 (`AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`); recorded in [tasks.md](tasks.md) as TK7 and AP1.** Frontmatter `status` stays `draft` because the ontology's closed vocabulary has no `ready` value; the lifecycle Ready is this body status line and the specification index row.
+**Execution:** authorized 2026-10-31 (`AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`), recorded in [tasks.md](tasks.md) as TK7 and AP1.
 **Autonomy:** autonomous
 **Development mode:** test-first
 
 ## Introduction
 
 The repository's own instruction files tell agents to use tools the host harness may not be
-able to reach. The root [`AGENTS.md`](../../../AGENTS.md) prescribes a CodeGraph-first
+able to reach. The root [`AGENTS.md`](../../../../AGENTS.md) prescribes a CodeGraph-first
 exploration order and the kyber-weave documentation MCP tools; every canonical agent carries
 the shared discovery-order block naming `codegraph_explore` and `docs_explore` /
 `docs_for_symbol` / `docs_glossary`; and the `architect` contract goes further — after every
 plan write it runs exactly `docs_validate` and `docs_drift`, and states verbatim: "If either
 tool is absent or the root differs, return `STATUS: BLOCKED` and name the gap"
-([`products/kyber-squad/agents/architect.md`](../../../products/kyber-squad/agents/architect.md)).
+([`products/kyber-squad/agents/architect.md`](../../../../products/kyber-squad/agents/architect.md)).
 Nothing checks whether the host project actually has those MCP servers configured. The
 consequence is observed, not hypothetical: an `architect` run on this repository returned
 `STATUS: BLOCKED` naming the absence of `docs_validate` and `docs_drift`, because its
@@ -45,7 +47,7 @@ session had no kyber-weave MCP tools at all; two further architect sessions in t
 investigation found the docs MCP tools and the CodeGraph tool absent from their catalogs.
 
 The repository already documents the wiring recipe per harness in
-[`docs/docgraph/mcp-runbook.md`](../../docgraph/mcp-runbook.md) — seven clients, five
+[`docs/docgraph/mcp-runbook.md`](../../../docgraph/mcp-runbook.md) — seven clients, five
 incompatible document shapes — but a recipe nobody is told to follow at the moment of
 adoption is not a configuration. The gap is detection and remedy, not documentation.
 
@@ -353,11 +355,11 @@ what `docs init` will ask and what the repair will write.
 9.1. The DocGraph MCP runbook SHALL document the check-and-repair flow and the exact
 wiring recipe for every harness the remedy covers — including ZCode, which has no row in
 the wiring table today.
-9.2. [`docs/docgraph/onboarding.md`](../../docgraph/onboarding.md) SHALL list the check
+9.2. [`docs/docgraph/onboarding.md`](../../../docgraph/onboarding.md) SHALL list the check
 among the steps `docs init` performs, with the opt-out, the prompt's non-interactive
 behaviour (Requirement 4), and the always-human consequence of editing the declaration
 (1.6).
-9.3. [`docs/cli-command-surface.md`](../../cli-command-surface.md) SHALL gain the repair
+9.3. [`docs/cli-command-surface.md`](../../../cli-command-surface.md) SHALL gain the repair
 command with its verbs, flags, and exit codes, and SHALL describe `docs init`'s new check
 step and opt-out.
 9.4. The configuration documentation SHALL describe the required-server declaration
@@ -443,13 +445,46 @@ file's closeout stands alone.
 
 | ID | Durable design item | Answers | Target component | Target doc type | Target document |
 |---|---|---|---|---|---|
-| H1 | The per-harness MCP configuration shape catalog: file, server key, entry shape, substitution semantics, in-play marker — for all eight harnesses, including ZCode, which has no row in the wiring table today | R2, R5 | DocGraph | runbook | [`docs/docgraph/mcp-runbook.md`](../../docgraph/mcp-runbook.md) |
-| H2 | The required-server declaration schema in the host configuration, and the always-human consequence of editing it | R1 | DocGraph | reference | [`docs/configuration.md`](../../configuration.md), [`docs/docgraph/onboarding.md`](../../docgraph/onboarding.md) |
-| H3 | The `docs init` check step: report lines, new rule ids, exit behaviour, opt-out | R2, R3 | DocGraph | onboarding | [`docs/docgraph/onboarding.md`](../../docgraph/onboarding.md), [`docs/cli-command-surface.md`](../../cli-command-surface.md) |
-| H4 | The prompt and non-interactive contract: terminal-gated, decline-on-redirect, no consent flag on `docs init` | R4 | DocGraph | reference | [`docs/cli-command-surface.md`](../../cli-command-surface.md) |
-| H5 | The repair command: target selection, insertion-only write policy, receipt and removal, refusals, dry-run, exit codes | R5, R6 | DocGraph | runbook | [`docs/docgraph/mcp-runbook.md`](../../docgraph/mcp-runbook.md), [`docs/cli-command-surface.md`](../../cli-command-surface.md) |
-| H6 | The ownership-boundary ADR — the record of the D16 repository-scope write exception versus ADR 0026 | R8 | DocGraph | adr | new ADR under [`docs/adr/`](../../adr/README.md) |
-| H7 | The docs-init / Squad separation statement: who may write harness MCP configuration, and that Squad still does not | R7 | KyberSquad | architecture | [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md) (cross-reference only; no boundary change) |
+| H1 | The per-harness MCP configuration shape catalog: file, server key, entry shape, substitution semantics, in-play marker — for all eight harnesses, including ZCode, which has no row in the wiring table today | R2, R5 | DocGraph | runbook | [`docs/docgraph/mcp-runbook.md`](../../../docgraph/mcp-runbook.md) |
+| H2 | The required-server declaration schema in the host configuration, and the always-human consequence of editing it | R1 | DocGraph | reference | [`docs/configuration.md`](../../../configuration.md), [`docs/docgraph/onboarding.md`](../../../docgraph/onboarding.md) |
+| H3 | The `docs init` check step: report lines, new rule ids, exit behaviour, opt-out | R2, R3 | DocGraph | onboarding | [`docs/docgraph/onboarding.md`](../../../docgraph/onboarding.md), [`docs/cli-command-surface.md`](../../../cli-command-surface.md) |
+| H4 | The prompt and non-interactive contract: terminal-gated, decline-on-redirect, no consent flag on `docs init` | R4 | DocGraph | reference | [`docs/cli-command-surface.md`](../../../cli-command-surface.md) |
+| H5 | The repair command: target selection, insertion-only write policy, receipt and removal, refusals, dry-run, exit codes | R5, R6 | DocGraph | runbook | [`docs/docgraph/mcp-runbook.md`](../../../docgraph/mcp-runbook.md), [`docs/cli-command-surface.md`](../../../cli-command-surface.md) |
+| H6 | The ownership-boundary ADR — the record of the D16 repository-scope write exception versus ADR 0026 | R8 | DocGraph | adr | new ADR under [`docs/adr/`](../../../adr/README.md) |
+| H7 | The docs-init / Squad separation statement: who may write harness MCP configuration, and that Squad still does not | R7 | KyberSquad | architecture | [`docs/kyber-squad/architecture.md`](../../../kyber-squad/architecture.md) (cross-reference only; no boundary change) |
+
+## Closeout mapping
+
+Verified at closeout (2026-11-01) against the shipped code and tests, not against this
+document. Every row of this file's Decisions table (D1–D19) and every harvest row (H1–H7) is
+mapped below to a live governed document. **ADR disposition: [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)**
+records the D16 boundary, ahead of the write path (R8.3, design DD20, task 5) — no ADR waiver
+is claimed for it.
+
+| ID | Canonical destination |
+|---|---|
+| D1, D2, D10 | [CLI command surface](../../../cli-command-surface.md) — the two separate verbs, the check among `docs init`'s steps, and the exit-code rows |
+| D3, D5, D19 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire) |
+| D4, D14, D18 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) — the docs-init / Squad split, and `squad`'s diagnostic surface left alone |
+| D6, D17 | [Configuration: MCP servers](../../../configuration.md#mcp-servers) — the declaration's home and the always-human consequence of editing it |
+| D7, D8, D11 | [MCP runbook: the check](../../../docgraph/mcp-runbook.md#the-check) — the in-play markers, repository scope only, and the absent-binary classes |
+| D9 | [MCP runbook: the receipt](../../../docgraph/mcp-runbook.md#the-receipt), [MCP runbook: what the repair writes](../../../docgraph/mcp-runbook.md#what-the-repair-writes-and-what-it-will-not) — the write bounds, refusal, and dry run |
+| D12 | [Component catalog](../../../catalog.md) — the two components this specification extends, DocGraph and Distribution |
+| D13, D16 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| D15 | Documentation waiver — the requirements-phase approval is a historical record, not a surviving architectural, operational, or behavioural invariant; it is preserved permanently in this document's Decisions table. |
+| H1 | [MCP runbook](../../../docgraph/mcp-runbook.md) — the per-harness shape catalog, the ZCode row, and the writable/snippet-only table |
+| H2 | [Configuration: MCP servers](../../../configuration.md#mcp-servers), [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) |
+| H3 | [Install](../../../install.md) — what an adopting repository's `docs init` now checks and offers; [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring), [CLI command surface](../../../cli-command-surface.md), [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| H4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [CLI command surface](../../../cli-command-surface.md) |
+| H5 | [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire), [MCP runbook: `docs mcp-unwire`](../../../docgraph/mcp-runbook.md#docs-mcp-unwire), [CLI command surface](../../../cli-command-surface.md) |
+| H6 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) |
+
+**Requirement verification.** R1–R9 are met by delivered code with a named test each; R10.1
+and R10.2 are met with one honest limit — live acceptance, a real harness session reaching
+the server after the repair, stays the owner's check and is `[NOT LIVE-VERIFIED]` (10.2, G3).
+R10.3's test-first *ordering* cannot be verified from the archived bundle: the RED runs live
+in the worker sessions, not in gate output.
 
 ## GAPS
 

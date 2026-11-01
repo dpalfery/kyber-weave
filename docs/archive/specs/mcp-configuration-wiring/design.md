@@ -1,11 +1,11 @@
 ---
-id: specs/mcp-configuration-wiring/design
+id: archive/specs/mcp-configuration-wiring/design
 title: MCP configuration wiring design
 doc-type: spec
-status: draft
+status: archived
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 documentation-impact: extends-component
 impact-components:
   - DocGraph
@@ -23,9 +23,10 @@ keywords:
 
 # Design Document
 
-**Phase status:** Approved — 2026-10-31, conductor `AUTONOMOUS_APPROVAL: design-phase-approval`, provenance `autonomous: recommendation accepted`. Recorded as DD17 in the Decisions table.
+**Status:** Archived
+**Archive Date:** 2026-11-01
+**Phase status:** Delivered and verified — the design below was checked against the shipped code, not the other way round. The phase approval (2026-10-31, conductor `AUTONOMOUS_APPROVAL: design-phase-approval`, provenance `autonomous: recommendation accepted`) is recorded as DD17; DG3 and DG4 were decided as DD18 and DD19; the ADR-number correction is DD20. Durable content is mapped in [Closeout mapping](#closeout-mapping).
 **Design amendment (2026-10-31, D19):** §5's Defaults bullet was corrected mid-execution to agree with R5.4 as clarified by the requirements' D19 (a conductor-directed correction): a named `mcp-wire` target is not gated on the in-play heuristic, and an absent target file is created.
-**Specification status: Ready — approved for execution 2026-10-31 (`AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`); recorded in [tasks.md](tasks.md) as TK7 and AP1.** Frontmatter `status` stays `draft` because the ontology's closed vocabulary has no `ready` value; the lifecycle Ready is this body status line and the specification index row.
 **Requirements:** [requirements.md](requirements.md) — approved 2026-10-31
 (`AUTONOMOUS_APPROVAL: requirements-phase-approval`, provenance `autonomous: recommendation
 accepted`; recorded there as D15)
@@ -256,7 +257,7 @@ MCP wiring:
 
 - Rule ids are new, permanent, declared as `public const string` next to the emitting
   class (`McpWiringInspector`), and added to
-  [`docs/ci-pipelines/rule-reference.md`](../../ci-pipelines/rule-reference.md) in the same
+  [`docs/ci-pipelines/rule-reference.md`](../../../ci-pipelines/rule-reference.md) in the same
   change (the rule that every rule id is documented there):
   - `KW-MCP-WIRE-001` — warning: a declared required server is not wired for an in-play
     harness. Hint: the exact `docs mcp-wire --target <harness>` command.
@@ -465,22 +466,22 @@ request as the write path, before any file outside this repository is written):
 
 ### 9. Documentation (R9)
 
-- [`docs/docgraph/mcp-runbook.md`](../../docgraph/mcp-runbook.md): a ZCode row in the
+- [`docs/docgraph/mcp-runbook.md`](../../../docgraph/mcp-runbook.md): a ZCode row in the
   wiring table (file paths and `mcp.servers` per the verified source, entry body marked
   unpinned), and a "Checking and wiring" section: the `docs init` check, `--no-mcp-check`,
   the prompt's non-interactive behaviour, `docs mcp-wire`/`mcp-unwire` with flags and
   exit codes, the receipt and its location, and the writable-set boundary (Codex/ZCode/
   Copilot snippet-only).
-- [`docs/docgraph/onboarding.md`](../../docgraph/onboarding.md): the check among the
+- [`docs/docgraph/onboarding.md`](../../../docgraph/onboarding.md): the check among the
   steps `docs init` performs; the always-human consequence of editing the declaration.
-- [`docs/cli-command-surface.md`](../../cli-command-surface.md): both verbs with flags
+- [`docs/cli-command-surface.md`](../../../cli-command-surface.md): both verbs with flags
   and exit codes; `docs init`'s new check step and `--no-mcp-check`.
-- [`docs/configuration.md`](../../configuration.md): the `mcp.required-servers` schema.
-- [`docs/ci-pipelines/rule-reference.md`](../../ci-pipelines/rule-reference.md): the six
+- [`docs/configuration.md`](../../../configuration.md): the `mcp.required-servers` schema.
+- [`docs/ci-pipelines/rule-reference.md`](../../../ci-pipelines/rule-reference.md): the six
   `KW-MCP-WIRE-*` ids.
-- [`docs/adr/0051-…`](../../adr/README.md) and the `docs/adr/README.md` index row; the
-  one-sentence Squad split in [`docs/kyber-squad/architecture.md`](../../kyber-squad/architecture.md).
-- [`docs/install.md`](../../install.md): one line — what an adopting repository's `docs
+- [`docs/adr/0051-…`](../../../adr/README.md) and the `docs/adr/README.md` index row; the
+  one-sentence Squad split in [`docs/kyber-squad/architecture.md`](../../../kyber-squad/architecture.md).
+- [`docs/install.md`](../../../install.md): one line — what an adopting repository's `docs
   init` now checks and offers.
 
 ## Data models
@@ -599,9 +600,32 @@ Core tests drive everything through the pure functions; CLI tests pin the seams.
 
 ## Closeout mapping
 
-_To be completed at closeout: each design decision (DD1–DD16), each harvest item (H1–H7),
-and the requirements' D15–D18 mapped to their destination, with the ADR disposition
-(ADR 0051, per §8) and the two merge-ready documentation checks recorded._
+Complete as of 2026-11-01. The stub that stood here named "DD1–DD16" and "the requirements'
+D15–D18"; the table as it actually stands at closeout holds **DD1–DD20**, so every row of it
+is mapped below, together with the harvest items H1–H7. ADR disposition: **ADR 0051**
+(§8, DD15, DD20, task 5) — no ADR waiver is claimed. Both merge-ready documentation checks
+exit 0 after the archive move.
+
+| ID | Canonical destination |
+|---|---|
+| DD1, DD14 | [CLI command surface](../../../cli-command-surface.md) — the two verbs, their flags, and the exit-code table |
+| DD2 | [Configuration: MCP servers](../../../configuration.md#mcp-servers) — the `required-servers` schema, its defaults, and the load-time refusal |
+| DD3 | [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) — the section written once and never rewritten, `--force` included |
+| DD4, DD5, DD7 | [MCP runbook: the check](../../../docgraph/mcp-runbook.md#the-check) — the in-play heuristic, the `PATH` resolution, and severity by declared level |
+| DD6 | [Rule reference](../../../ci-pipelines/rule-reference.md) — `KW-MCP-WIRE-001` through `006`, each with its severity and hint |
+| DD8 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal) |
+| DD9, DD10, DD11, DD12, DD18, DD19 | [MCP runbook: what the repair writes](../../../docgraph/mcp-runbook.md#what-the-repair-writes-and-what-it-will-not) — insertion without re-serialization, the TOML read side, and each snippet-only harness with its declared widening path |
+| DD13 | [MCP runbook: the receipt](../../../docgraph/mcp-runbook.md#the-receipt) — the path, the schema, and the drift-refusing removal |
+| DD15, DD20 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) — the boundary record and the number it finally took |
+| DD16 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) — Squad owns droid-level visibility, the docs branch owns harness-level wiring |
+| DD17 | Documentation waiver — the design-phase approval is a historical record, not a surviving architectural, operational, or behavioural invariant; it is preserved permanently in this document's Decisions table. |
+| H1 | [MCP runbook](../../../docgraph/mcp-runbook.md) — the shape catalog, the ZCode row, and the writable/snippet-only table |
+| H2 | [Configuration: MCP servers](../../../configuration.md#mcp-servers), [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) |
+| H3 | [Install](../../../install.md) — what an adopting repository's `docs init` now checks and offers; [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring), [CLI command surface](../../../cli-command-surface.md), [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| H4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [CLI command surface](../../../cli-command-surface.md) |
+| H5 | [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire), [MCP runbook: `docs mcp-unwire`](../../../docgraph/mcp-runbook.md#docs-mcp-unwire), [CLI command surface](../../../cli-command-surface.md) |
+| H6 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) |
 
 ## Gaps carried forward
 
@@ -633,7 +657,9 @@ and the requirements' D15–D18 mapped to their destination, with the ADR dispos
   own documentation or source — again a deliberate, temporary narrowing, not an omission.
   The check still covers Codex; widening is the declared path in DD19.
 - **DG5:** Live acceptance (a real harness session reaching the server after the repair)
-  remains the owner's check, `[NOT LIVE-VERIFIED]` until performed (requirements G3).
+  remains the owner's check, `[NOT LIVE-VERIFIED]` until performed (requirements G3). Carried
+  forward at closeout as TG2 in [tasks.md](tasks.md), where it stays open — the deterministic
+  suite proves the configuration, not the session.
 - **DG6:** The requirements' G4 (exact spellings deferred) is resolved by this design:
   verbs `docs mcp-wire` / `docs mcp-unwire`, flag `--no-mcp-check`, ids
   `KW-MCP-WIRE-001..006`, section `mcp.required-servers`, receipt

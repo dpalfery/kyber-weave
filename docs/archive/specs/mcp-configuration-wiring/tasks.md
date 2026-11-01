@@ -1,11 +1,11 @@
 ---
-id: specs/mcp-configuration-wiring/tasks
+id: archive/specs/mcp-configuration-wiring/tasks
 title: MCP configuration wiring tasks
 doc-type: spec
-status: draft
+status: archived
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 documentation-impact: extends-component
 impact-components:
   - DocGraph
@@ -21,8 +21,9 @@ keywords:
 
 # Implementation Tasks
 
-**Phase status:** Approved — 2026-10-31, conductor `AUTONOMOUS_APPROVAL: tasks-phase-approval`, provenance `autonomous: recommendation accepted`. Recorded as TK7 in the Decisions table.
-**Specification status: Ready — approved for execution 2026-10-31 (AP1, `AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`), at the declared scale `extends-component`, components `DocGraph` and `Distribution`.** The conductor dispatches the tasks; this recording authorizes execution and does not start it. Frontmatter `status` stays `draft` because the ontology's closed vocabulary has no `ready` value; the lifecycle Ready is this body status line and the specification index row.
+**Status:** Archived
+**Archive Date:** 2026-11-01
+**Phase status:** Delivered and verified — every leaf below is ticked against delivered work, not against this list. The tasks-phase approval (2026-10-31, conductor `AUTONOMOUS_APPROVAL: tasks-phase-approval`, provenance `autonomous: recommendation accepted`) is recorded as TK7, and the execution authorization as AP1, both taken at the declared scale `extends-component`, components `DocGraph` and `Distribution`. Durable content is mapped in [Closeout mapping](#closeout-mapping).
 **Development mode:** test-first
 **Autonomy:** autonomous
 
@@ -49,7 +50,7 @@ sequencing; no task makes a design decision.
 - **Rule ids are permanent.** This feature adds `KW-MCP-WIRE-001` through
   `KW-MCP-WIRE-006`, declared as `public const string` next to the class that emits them
   (tasks 3 and 4), and documented in
-  [`docs/ci-pipelines/rule-reference.md`](../../ci-pipelines/rule-reference.md) (task 9).
+  [`docs/ci-pipelines/rule-reference.md`](../../../ci-pipelines/rule-reference.md) (task 9).
   `KW-*` ids are added, never renumbered, never reused — the repository rule suppressions
   and SARIF baselines key on. `KW-MCP-ROOT-001/002` already belong to the MCP server's
   stderr startup diagnostics and are not touched.
@@ -79,7 +80,7 @@ sequencing; no task makes a design decision.
 
 ## Tasks
 
-- [ ] 1. **Declaration config model and loader** · R1.1, R1.2, R1.4, R1.5 · design §1
+- [x] 1. **Declaration config model and loader** · R1.1, R1.2, R1.4, R1.5 · design §1
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`.
   - **Files:**
     - new `src/KyberWeave.Core/Configuration/McpConfig.cs`
@@ -104,7 +105,7 @@ sequencing; no task makes a design decision.
     - **GREEN:** the class passes, and the existing configuration loader tests pass
       unchanged.
 
-- [ ] 2. **Scaffold writes — and never rewrites — the declaration section** · R1.3,
+- [x] 2. **Scaffold writes — and never rewrites — the declaration section** · R1.3,
   R1.5 · design §1 (DD3, D17)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 1.
   - **Files:**
@@ -153,7 +154,7 @@ sequencing; no task makes a design decision.
       not a weakening: the requirement and design are untouched, and the old fixtures
       encoded the behaviour R1.3 changes.
 
-- [ ] 3. **Harness catalog, inspector, resolver, TOML scanner — the check engine**
+- [x] 3. **Harness catalog, inspector, resolver, TOML scanner — the check engine**
   · R2.1–R2.8, R3.1–R3.3, R6.1 (check side) · design §2, §3, §6 (DD4, DD5, DD6, DD7)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 1.
   - **Files:**
@@ -189,7 +190,7 @@ sequencing; no task makes a design decision.
     - **RED reason:** the types do not exist (compile failure).
     - **GREEN:** both classes pass; no `src/KyberWeave.Core/Squad/**` file changed.
 
-- [ ] 4. **JSON splice, repairer, receipt — the bounded writer** · R5.4–R5.11, R6.2, R6.3
+- [x] 4. **JSON splice, repairer, receipt — the bounded writer** · R5.4–R5.11, R6.2, R6.3
   · design §5, §6 (DD9, DD10, DD11, DD12, DD13)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 1, 3, 5.
   - **Files:**
@@ -228,7 +229,7 @@ sequencing; no task makes a design decision.
     - **RED reason:** the types do not exist (compile failure).
     - **GREEN:** all three classes pass.
 
-- [ ] 5. **ADR 0051 — the ownership boundary** · R8.1–R8.3 · design §8 (D16, DD15)
+- [x] 5. **ADR 0051 — the ownership boundary** · R8.1–R8.3 · design §8 (D16, DD15)
   - **Implementer:** `docs-dev`. **No-test task**; replacement validation below.
   **Depends on:** none (Wave A); **predecessor of 4** — the boundary is recorded before the
   write-path implementation lands, and before the shipped remedy writes any file outside
@@ -246,7 +247,7 @@ sequencing; no task makes a design decision.
   - **Validation:** `docs validate .` and `docs drift .` exit 0 (no `--merge-ready`, this
     specification active); the ADR is in the corpus and names every element above.
 
-- [ ] 6. **`docs init`: the check step, `--no-mcp-check`, and the terminal-gated prompt**
+- [x] 6. **`docs init`: the check step, `--no-mcp-check`, and the terminal-gated prompt**
   · R2.1, R3.3–R3.6, R4.1–R4.8 · design §3, §4 (DD7, DD8)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 3, 4.
   - **Files:**
@@ -277,7 +278,7 @@ sequencing; no task makes a design decision.
     - **RED reason:** no check step exists (no output, no seams, no flag).
     - **GREEN:** the class passes, and the existing `DocsInit` tests pass unchanged.
 
-- [ ] 7. **`docs mcp-wire` and `docs mcp-unwire`** · R5.1–R5.3, R5.10, R6.2 · design §5
+- [x] 7. **`docs mcp-wire` and `docs mcp-unwire`** · R5.1–R5.3, R5.10, R6.2 · design §5
   (DD1, DD14)
   - **Implementer:** `csharp-dev`. **Tests:** `test-dev`. **Depends on:** 4.
   - **Files:**
@@ -311,7 +312,7 @@ sequencing; no task makes a design decision.
     - **GREEN:** the class passes; the docs branch remains symmetric
       (one `WithDescription`, at least one `WithExample` per verb).
 
-- [ ] 8. **Dogfood: the declaration in this repository** · R1.3, R1.6 · design §1 (D17)
+- [x] 8. **Dogfood: the declaration in this repository** · R1.3, R1.6 · design §1 (D17)
   - **Implementer:** `csharp-dev`. **No-test task**; replacement validation below.
   **Depends on:** 2, 6.
   - **Files:** `.kyber-weave/kyber-weave.yml` (only).
@@ -327,7 +328,7 @@ sequencing; no task makes a design decision.
   - **Validation:** `docs validate .` and `docs drift .` exit 0 after the edit; `git diff`
     shows only the appended block; a `docs init .` re-run is a no-op for the section.
 
-- [ ] 9. **Documentation harvest** · R9.1–R9.5, H1–H7 · design §9
+- [x] 9. **Documentation harvest** · R9.1–R9.5, H1–H7 · design §9
   - **Implementer:** `docs-dev`. **No-test task**; replacement validation below.
   **Depends on:** 6, 7 (the documented surface — flags, exit codes, prompt contract — is
   final).
@@ -355,7 +356,7 @@ sequencing; no task makes a design decision.
     lands at its declared target with the design's wording; no page claims Squad installs
     or owns harness MCP configuration (R9.5).
 
-- [ ] 10. **Whole-change review (conductor-run)** · R7, R10.2
+- [x] 10. **Whole-change review (conductor-run)** · R7, R10.2
   - **Not a worker task.** The conductor runs the declared gate suite
     (`dotnet run --project src/KyberWeave.Cli -c Release -- review gates . --out
     artifacts/gates.json`) and the council over the whole change. **Depends on:** 1–9.
@@ -366,7 +367,7 @@ sequencing; no task makes a design decision.
   - **Test contract (verification, not new tests):** the declared suite above is the
     evidence a review cites.
 
-- [ ] 11. **Specification closeout** · final task
+- [x] 11. **Specification closeout** · final task
   - **Implementer:** `docs-dev`, assigned through the conductor. **Depends on:** 10 and
     the owner's approve-and-execute authorization.
   - **Files:** this specification's three files,
@@ -403,10 +404,18 @@ sequencing; no task makes a design decision.
 
 The authoritative harvest table is [design.md's](design.md#design-harvest) (H1–H7, each
 with its target component and doc type); task 9 lands every row at its declared target.
-The design changed no target after approval, so the table is carried forward unrefined:
-H1 runbook (DocGraph), H2 reference (DocGraph), H3 onboarding + reference (DocGraph ·
-CI Pipelines), H4 reference (DocGraph), H5 runbook + reference (DocGraph), H6 adr
-(DocGraph), H7 architecture (KyberSquad).
+The design changed no target after approval, so the table was carried forward unrefined.
+The ids are repeated here so this artifact's own closeout stands alone:
+
+| ID | Design item | Target component and doc type | Landed by |
+|---|---|---|---|
+| H1 | The per-harness shape catalog: files, keys, in-play markers, writability, substitution semantics; ZCode cited from `ZCodeMcpConfiguration.cs`; ZCode row added to the runbook | DocGraph · runbook | Task 9 |
+| H2 | The `mcp.required-servers` declaration schema, scaffold default, and the always-human escalation consequence | DocGraph · reference | Task 9 |
+| H3 | The `docs init` check step: `KW-MCP-WIRE-001..004` ids, severities, unchanged exit code, `--no-mcp-check` | DocGraph · CI Pipelines · onboarding and reference | Task 9 |
+| H4 | The prompt and non-interactive contract: terminal-gated, decline-on-redirect, no consent flag, satisfiable inside `docs init` alone | DocGraph · reference | Task 9 |
+| H5 | `docs mcp-wire` / `docs mcp-unwire`: target selection, insertion without re-serialization, receipt and drift-refusing removal, dry run, exit codes | DocGraph · runbook and reference | Task 9 |
+| H6 | ADR 0051 — the D16 repository-scope write exception versus ADR 0026 | DocGraph · adr | Task 5 |
+| H7 | The docs-init / Squad split: Squad owns droid-level visibility, the docs branch owns harness-level wiring, Squad writes nothing | KyberSquad · architecture | Task 9 |
 
 ## Decisions
 
@@ -432,9 +441,29 @@ appended here:
 
 ## Closeout mapping
 
-_To be completed at task 11: every decision id (D15–D19, DD17–DD20, TK1–TK8, AP1) and
-harvest item (H1–H7) mapped to its destination, with the ADR disposition (ADR 0051) and
-the merge-ready documentation checks recorded._
+Complete as of 2026-11-01. The stub that stood here named "D15–D19, DD17–DD20, TK1–TK8,
+AP1"; this artifact's own table holds **TK1–TK8 and AP1**, so those are mapped here, and the
+requirements' D1–D19 and design's DD1–DD20 are mapped in their own artifacts (the closeout
+range was corrected twice during execution, from TK1–TK6 to TK1–TK8 plus AP1, so the table
+as it stands is what governs). ADR disposition: **ADR 0051**, task 5 — no ADR waiver.
+
+| ID | Canonical destination |
+|---|---|
+| TK1 | Documentation waiver — delivery sequencing is a plan-time arrangement with no surviving architectural, operational, or behavioural invariant; the ordering it imposed is realised in the landed commits and in TK2's row. |
+| TK2 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md) — the boundary record landed before the write path, which is the ordering R8.3 fixes |
+| TK3 | [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) — the always-human consequence of the dogfood edit, stated for the operator |
+| TK4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal) — the tested contract the seams exist to pin |
+| TK5 | [MCP runbook: what the repair writes](../../../docgraph/mcp-runbook.md#what-the-repair-writes-and-what-it-will-not) — each snippet-only harness and its declared widening path |
+| TK6 | [MCP runbook: the check](../../../docgraph/mcp-runbook.md#the-check) — what the check proves, and the live step it cannot perform |
+| TK7, AP1 | Documentation waiver — the tasks-phase approval and the execution authorization are historical records, not surviving invariants; both are preserved permanently in this document's Decisions table. |
+| TK8 | [Configuration: MCP servers](../../../configuration.md#mcp-servers) — the append-only behaviour the modernised fixtures now pin as properties |
+| H1 | [MCP runbook](../../../docgraph/mcp-runbook.md) — the shape catalog, the ZCode row, and the writable/snippet-only table |
+| H2 | [Configuration: MCP servers](../../../configuration.md#mcp-servers), [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) |
+| H3 | [Install](../../../install.md) — what an adopting repository's `docs init` now checks and offers; [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring), [CLI command surface](../../../cli-command-surface.md), [Rule reference](../../../ci-pipelines/rule-reference.md) |
+| H4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [CLI command surface](../../../cli-command-surface.md) |
+| H5 | [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire), [MCP runbook: `docs mcp-unwire`](../../../docgraph/mcp-runbook.md#docs-mcp-unwire), [CLI command surface](../../../cli-command-surface.md) |
+| H6 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) |
 
 ## Gaps carried forward
 
@@ -449,7 +478,38 @@ the merge-ready documentation checks recorded._
   `docs validate .` (no `--merge-ready`, this specification active) — `result: pass`,
   0 errors, 0 warnings; `docs drift .` — `result: pass`, 0 errors, 0 warnings. The
   results stand for this checkout and are the gate evidence recorded in TK7.
-- **TG2:** Live acceptance (design DG5) remains the owner's check, carried by task 11.
+- **TG2 (updated at closeout, 2026-11-01 — still open):** Live acceptance (design DG5) remains
+  the owner's check, and delivery notes remain `[NOT LIVE-VERIFIED]`. What the deterministic
+  suite covers is every behaviour a fixture can drive (R10.1); what no test in this bundle
+  covers is a real harness session that, after the repair, lists the declared server's tools —
+  the check reads configuration bytes and never starts a harness, which is now stated to the
+  operator in [the runbook](../../../docgraph/mcp-runbook.md#the-check). The row closes when
+  the owner records that observation, not when the suite is green.
+- **TG4 (accepted finding, carried for the owner's decision, 2026-11-01): one `DocsApp`
+  builder copied three times.** Accepted as Minor by the council's re-review:
+  `tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs` adds a third copy of the six-line `DocsApp`
+  command-app builder, identical to the copies in `DocsInitReviewGatesTests.cs` and
+  `GateCatalogueToolchainTests.cs`. The copies can diverge, so a `docs init` registration defect
+  could pass one suite and fail another. The suggestion on record is to move `DocsApp` into
+  `McpWiringFixture` and have all three suites call it. No `docs/todo` entry is created — a
+  review finding does not by itself authorize a repository change.
+- **TG5 (accepted finding, carried for the owner's decision, 2026-11-01): the atomic-write
+  idiom has a third copy.** Accepted as Minor:
+  `src/KyberWeave.Core/Docs/Mcp/McpWiringRepairer.cs` is a third implementation of the
+  temp-file-then-rename idiom that `ManagedGlossaryService.AtomicWrite` and
+  `StatusLineReceiptStore.Write` already provide — and the three already disagree, the receipt
+  store using a predictable `<path>.tmp` with no cleanup. A durability fix landing in one copy
+  leaves the others behind.
+- **TG6 (observed at closeout, carried for the owner's decision, 2026-11-01):
+  `KW-MCP-WIRE-002` cannot separate "wired, differently spelled" from "wired wrong".** The
+  finding compares the declared launch command with the wired one as text, allowing exactly one
+  substitution: the declaration's `.` spelled as that harness's own repository-root token. A
+  wired entry that names the binary by **absolute path** — or by a path the harness expands,
+  such as `${userHome}/.local/bin/kyber-weave-mcp` — is therefore still reported as a
+  difference even though it launches. This repository's own `.cursor/mcp.json` is in that
+  state, so `docs init` here reports a `KW-MCP-WIRE-002` for Cursor. The finding is accurate and
+  the repair correctly refuses to touch an existing entry, so nothing is broken — but an
+  operator cannot distinguish the two cases, and the remedy line asks for a by-hand edit.
 - **TG3:** The DG3/DG4 widening work (ZCode entry body; Codex relative-path semantics) is
   deliberately not scheduled (TK5); each is a catalog flip plus a runbook row once its
   named source is consulted.
