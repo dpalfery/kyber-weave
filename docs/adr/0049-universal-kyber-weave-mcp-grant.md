@@ -123,6 +123,21 @@ The change lands on top of the Factory per-droid whitelist delivered in
    emitted only when the derived grant is empty — the same shape the Factory whitelist record
    already uses. A granted agent records no withholding claim.
 
+   **Why Claude grants a wildcard and the others enumerate.** Claude's allow-list accepts
+   `mcp__<server>__*`, so the grant is one entry and every tool the server exposes is reachable
+   without a renderer edit. ZCode, Devin and Command Code expand no wildcard, so they name the
+   eight tools literally; that is not a preference for enumeration but the only form those
+   harnesses accept, and it is why the roster they enumerate is the toolchain's
+   `required-mcp-tools` rather than a list of their own. The asymmetry has a consequence worth
+   stating: **a tool added to the `kyber-weave` server later reaches every Claude agent with no
+   renderer change and no failing test**, because the wildcard grants whatever the server
+   exposes. Today every tool on that server is declared `ReadOnly`, so the exposure is
+   read-only, and the server's tool set is fixed by the roster the toolchain guard pins — a
+   mutating tool would need a new capability decision before the wildcard could carry it to
+   Claude. The three enumerating targets would need no such decision to be widened, and that
+   asymmetry is the argument for enumerating everywhere if the server's tool set ever becomes
+   mutable rather than by decision.
+
 6. **`conductor` receives the Copilot entry through canonical frontmatter.** Copilot's per-agent
    tool grant comes from the agent's own `copilot-tools` list, which is canonical source rather
    than renderer output, so the grant is one entry in `conductor.md` and no renderer change. This
