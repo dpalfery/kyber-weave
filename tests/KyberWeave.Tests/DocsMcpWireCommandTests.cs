@@ -769,6 +769,38 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.DoesNotContain("removing", unwire.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A carriage return is a line break to the file that wrote it and a cursor move to the terminal:
+    /// on screen it returns the cursor to column zero, so whatever is written next lands on top of the
+    /// line the operator was about to copy. The block renderer produces the snippet an operator pastes
+    /// into a harness's configuration file, so a server named with one must not put it there.
+    /// </summary>
+    /// <remarks>
+    /// The block mode keeps line structure on purpose — a snippet's rows are what make it pasteable —
+    /// so the guarantee is not "no control characters": it is that the only line break a block carries
+    /// is the one a terminal treats as a break and not as a move.
+    /// </remarks>
+    [Fact]
+    public void ABlockNeverPassesACarriageReturnThroughToTheTerminal()
+    {
+        string rendered = TerminalText.Block("servers = [\"foo\rbar\"]");
+
+        Assert.DoesNotContain('\r', rendered);
+        Assert.Contains("foo", rendered, StringComparison.Ordinal);
+        Assert.Contains("bar", rendered, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A Windows-authored snippet reaches this renderer with CRLF pairs, and the operator pastes what
+    /// was shown: a pair must stay one line break, and must not gain the space a folded line break
+    /// would leave at the start of every row.
+    /// </summary>
+    [Fact]
+    public void ABlockKeepsACrlfPairAsOneLineBreakAndAddsNoIndentation()
+    {
+        Assert.Equal("a\nb", TerminalText.Block("a\r\nb"));
+    }
+
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
             null!,

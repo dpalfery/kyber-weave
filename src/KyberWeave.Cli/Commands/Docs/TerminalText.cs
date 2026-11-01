@@ -60,8 +60,19 @@ internal static class TerminalText
     /// A block of text: no escape sequences, its own line structure kept, capped.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The line breaks are load-bearing here — a snippet's indentation and row separators are what
     /// make it pasteable — so only the control characters that address the terminal are removed.
+    /// </para>
+    /// <para>
+    /// The one break a block carries is the line feed, because that is the only one that means the
+    /// same thing to a file and to a terminal. A carriage return is a row separator in a file and a
+    /// cursor move on a screen: it returns the cursor to column zero, so the next write lands on top
+    /// of the line the operator was about to paste. A server named <c>foo\rOVERWRITTEN:</c> would
+    /// therefore show the operator a snippet they are not going to write, in the one mode whose whole
+    /// purpose is to be copied — so a CR is normalised to a line feed rather than kept, and the LF of
+    /// a CRLF pair is consumed with it so a Windows-authored snippet gains no blank row.
+    /// </para>
     /// </remarks>
     internal static string Block(string? text) => Clean(text, MaxBlockLength, keepLineBreaks: true);
 
@@ -81,9 +92,29 @@ internal static class TerminalText
                 continue;
             }
 
-            if (current is '\n' or '\r' or '\t' or '\u2028' or '\u2029')
+            // A tab is whitespace rather than a line break: kept in a block, because indentation is
+            // part of what makes a pasted snippet worth pasting, and folded into a line elsewhere.
+            if (current == '\t')
             {
-                cleaned.Append(keepLineBreaks ? current : ' ');
+                cleaned.Append(keepLineBreaks ? '\t' : ' ');
+                continue;
+            }
+
+            if (current is '\n' or '\r' or '\u2028' or '\u2029')
+            {
+                if (!keepLineBreaks)
+                {
+                    cleaned.Append(' ');
+                    continue;
+                }
+
+                // Every break this set recognises becomes the one break that means the same thing to
+                // a file and to a terminal, and a CRLF pair stays a single break rather than gaining
+                // an empty row.
+                if (current == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+                    index++;
+
+                cleaned.Append('\n');
                 continue;
             }
 
