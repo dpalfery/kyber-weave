@@ -557,7 +557,18 @@ public sealed class FactoryRenderer : ISquadRenderer
     /// </summary>
     private static string DescribeMcpServers(IReadOnlyList<string> mcpServers)
     {
-        return $"mcpServers: [{string.Join(", ", mcpServers)}]";
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["mcpServers"] = new FactoryYamlFlowSequence(mcpServers)
+        };
+
+        // Serialize through the same converter the droid frontmatter uses, so the caveat's
+        // spelling is the rendered value rather than a hand-joined approximation of it. A
+        // hand-joined name containing a comma would read as two servers in the receipt.
+        lock (SerializerLock)
+        {
+            return YamlSerializer.Serialize(frontmatter).TrimEnd('\r', '\n');
+        }
     }
 
     /// <summary>
@@ -616,6 +627,31 @@ public sealed class FactoryRenderer : ISquadRenderer
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
+            // An unresolvable profile grants no MCP servers, so the rendered whitelist is empty
+            // even though no permission detail is available. The exclusion still has to be
+            // visible in the receipt; yielding nothing here would make it silent.
+            List<string> unresolvedDetails = [];
+            if (mcpServers.Count == 0)
+            {
+                unresolvedDetails.Add(McpWithheldSentence);
+            }
+
+            if (entryPointSkillNote is not null)
+            {
+                unresolvedDetails.Add(entryPointSkillNote);
+            }
+
+            if (unresolvedDetails.Count > 0)
+            {
+                yield return new SquadDegradationRecord(
+                    SquadTargetCatalog.GetToken(SquadTarget.Factory),
+                    agent.Name,
+                    agent.Name,
+                    "permission-not-expressible",
+                    agent.BodyDigest,
+                    string.Join(" ", unresolvedDetails));
+            }
+
             yield break;
         }
 
