@@ -42,6 +42,16 @@ public static class McpConfigLoader
 
     private static RequiredMcpServer ParseServer(string name, McpServerYaml? declaration)
     {
+        // The map key is the server name: it is the key a harness entry is written under, the
+        // subject a diagnostic quotes, and — for Codex — a TOML table header. A blank one names
+        // none of those, so it is refused here rather than carried into three consumers.
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new YamlException(
+                $"{SectionPath} has a server with a blank name ('{name}'). Every declared server needs a name: "
+                + "it is the key its harness entries, its findings and a TOML table are written under.");
+        }
+
         string where = $"{SectionPath}.{name}";
 
         return new RequiredMcpServer(
