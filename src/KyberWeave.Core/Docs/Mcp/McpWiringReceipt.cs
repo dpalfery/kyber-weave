@@ -131,6 +131,33 @@ public sealed class McpWiringReceipt
     }
 
     /// <summary>
+    /// Whether a path is a repository-relative name this code may combine with a root: one that has no
+    /// root of its own, and no segment that climbs out of the tree.
+    /// </summary>
+    /// <param name="relativePath">The path as a record, or a catalog row, spells it.</param>
+    /// <remarks>
+    /// The receipt is local state on disk, so its records are worth exactly what that file is worth —
+    /// which is nothing: a hand-edited or corrupted receipt can name <c>../../somewhere/else</c> or an
+    /// absolute path, and a removal that combined it with the root would restore or delete bytes
+    /// outside the repository it was asked to repair (2.6, 5.2).
+    /// </remarks>
+    internal static bool RepositoryRelative(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
+            return false;
+
+        foreach (string segment in relativePath
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (string.Equals(segment, "..", StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The records of a document whose shape matches the schema, or null when it does not.
     /// </summary>
     /// <param name="files">The document's file list, exactly as it was deserialized.</param>
@@ -150,9 +177,12 @@ public sealed class McpWiringReceipt
         if (files is null)
             return null;
 
-        foreach (McpWiringReceiptRecord record in files)
+        // A null element of the array is a shape the schema does not admit either, and it is the one
+        // the nullable annotation on the list cannot exclude.
+        foreach (McpWiringReceiptRecord? record in files)
         {
-            if (string.IsNullOrWhiteSpace(record?.Path)
+            if (record is null
+                || !RepositoryRelative(record.Path)
                 || record.Servers is null
                 || record.Servers.Any(string.IsNullOrEmpty)
                 || string.IsNullOrEmpty(record.PostSha256))

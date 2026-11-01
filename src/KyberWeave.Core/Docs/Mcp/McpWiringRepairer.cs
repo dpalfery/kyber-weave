@@ -227,8 +227,19 @@ public static class McpWiringRepairer
         McpWiringReceiptRecord? record = records.Find(
             candidate => McpWiringReceipt.SamePath(candidate.Path, path));
 
-        string fullPath = ContainedPath(root, path)
-            ?? throw new InvalidOperationException($"'{path}' does not resolve inside the repository");
+        if (ContainedPath(root, path) is not { } fullPath)
+        {
+            return (Refused(
+                harness,
+                path,
+                record?.Servers ?? [],
+                McpWiringReceipt.DriftCode,
+                $"{path} does not resolve inside the repository, so nothing was removed: a record has to name a file "
+                    + "in the tree this command was given",
+                $"Report this: {McpWiringReceipt.RelativePath} names '{record?.Path ?? path}', and a path that leaves "
+                    + "the repository cannot be restored from.").Change,
+                false);
+        }
 
         // Removal restores the bytes the receipt captured, so through a link it would write those
         // bytes into whichever file the link names — outside the repository, and over a file this
@@ -387,8 +398,18 @@ public static class McpWiringRepairer
                 Snippet(row, declared));
         }
 
-        string fullPath = ContainedPath(root, path)
-            ?? throw new InvalidOperationException($"'{path}' does not resolve inside the repository");
+        if (ContainedPath(root, path) is not { } fullPath)
+        {
+            return Refused(
+                harness,
+                path,
+                [],
+                RefusalCode,
+                $"{path} does not resolve inside the repository, so nothing was written: a repository-scope file has "
+                    + "to name a path in the tree this command was given",
+                $"Report this: the harness catalog names '{path}' for {harness}, and a path that leaves the repository "
+                    + "cannot be wired.");
+        }
 
         // A link in the tree makes this repository-scope path name a file somebody else owns, and
         // reading or writing through it leaves the repository entirely (2.6, 5.2, ADR 0051). The
@@ -1161,8 +1182,21 @@ public static class McpWiringRepairer
 
     private static string Digest(byte[] content) => Convert.ToHexString(SHA256.HashData(content));
 
+    /// <summary>
+    /// The absolute path of a repository-relative file, or null when the name does not resolve inside
+    /// the repository.
+    /// </summary>
+    /// <remarks>
+    /// Every target path passes through here, so a name that is absolute or climbs out of the tree is
+    /// refused in one place rather than in each caller. The catalog's rows are this repository's own
+    /// constant and a receipt's paths are validated where the receipt is read, so this is a last line
+    /// rather than a first: it is the one place where a defect in either would reach the filesystem,
+    /// and the one place the containment claim is made.
+    /// </remarks>
     internal static string? ContainedPath(string root, string relativePath) =>
-        Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        McpWiringReceipt.RepositoryRelative(relativePath)
+            ? Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar))
+            : null;
 
     /// <summary>
     /// Keeps a write's audit note visible when the receipt could not be written. The files are
