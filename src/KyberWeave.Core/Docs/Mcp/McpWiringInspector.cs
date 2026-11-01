@@ -114,8 +114,15 @@ public static class McpWiringInspector
     /// <summary>Inspects a repository against this process's <c>PATH</c>.</summary>
     /// <param name="repositoryRoot">The repository whose repository-scope files are read.</param>
     /// <param name="config">The servers the repository declares.</param>
+    /// <remarks>
+    /// The root is passed to the resolver as well as to the tree walk, so a declared launch command
+    /// spelled as a relative path — <c>./bin/kyber-weave-mcp</c>, which is how a repository points at
+    /// the binary it builds — resolves against the repository being inspected. Resolving it against
+    /// the working directory instead made the answer depend on where the operator stood when they ran
+    /// the command: the same tree was wired from the repository root and unwired from anywhere else.
+    /// </remarks>
     public static McpWiringReport Inspect(string repositoryRoot, McpConfig config) =>
-        Inspect(repositoryRoot, config, LaunchCommandResolver.FromEnvironment());
+        Inspect(repositoryRoot, config, LaunchCommandResolver.FromEnvironment(repositoryRoot));
 
     /// <summary>Inspects a repository against an injected search path.</summary>
     /// <param name="repositoryRoot">The repository whose repository-scope files are read.</param>
