@@ -876,7 +876,7 @@ public static class McpWiringInspector
     /// tree, and telling the operator to run a command that will refuse again is worse than silence.
     /// </summary>
     private static string LinkedHint(string namedPath, string linkedSegment) =>
-        string.Equals(linkedSegment, namedPath, StringComparison.OrdinalIgnoreCase)
+        string.Equals(linkedSegment, namedPath, StringComparison.Ordinal)
             ? $"Replace {namedPath} with a real file inside the repository: copy its content out of the linked "
                 + "file, delete the link, and leave the copy in place. Kyber-Weave reads and writes "
                 + "repository-scope files only, because anything else is a configuration a fresh checkout does "
