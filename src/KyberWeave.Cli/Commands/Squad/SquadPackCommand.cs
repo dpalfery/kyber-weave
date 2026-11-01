@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
@@ -51,11 +52,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
 
-        // Packing writes the canonical source tree deterministically (SquadPacker) with no
-        // external toolchain in the loop, so there is nothing left to gate here — loading
-        // still validates the source itself (malformed manifests, profiles, agents, or
-        // skills throw SquadSourceValidationException before anything is packed).
-        _ = SquadSourceLoader.Load(sourcePath);
+        string? companionSkillsRoot = SquadCompanionSkills.ResolveRoot(sourcePath);
 
         string version = !string.IsNullOrWhiteSpace(settings.Version)
             ? ReleaseVersion.Normalize(settings.Version)
@@ -66,19 +63,23 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
 
         try
         {
+            // The archives carry products/kyber-squad plus .apm/skills, so the composed tree is what gets loaded.
+            // Loading only the Squad tree would let a bad companion skill through to install time.
+            ValidateComposedTree(sourcePath, companionSkillsRoot, version);
+
             if (string.Equals(settings.Format, "apm", StringComparison.OrdinalIgnoreCase))
             {
-                string apmArchive = SquadPacker.PackApm(sourcePath, outDir, version);
+                string apmArchive = SquadPacker.PackApm(sourcePath, outDir, version, companionSkillsRoot);
                 AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(apmArchive)}[/].[/]");
             }
             else if (string.Equals(settings.Format, "plugins", StringComparison.OrdinalIgnoreCase))
             {
-                string pluginsArchive = SquadPacker.PackPlugins(sourcePath, outDir, version);
+                string pluginsArchive = SquadPacker.PackPlugins(sourcePath, outDir, version, companionSkillsRoot);
                 AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(pluginsArchive)}[/].[/]");
             }
             else
             {
-                (string apmArchive, string pluginsArchive, string checksumPath) = SquadPacker.PackAll(sourcePath, outDir, version);
+                (string apmArchive, string pluginsArchive, string checksumPath) = SquadPacker.PackAll(sourcePath, outDir, version, companionSkillsRoot);
                 AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(apmArchive)}[/].[/]");
                 AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(pluginsArchive)}[/].[/]");
                 AnsiConsole.MarkupLine($"[green]Generated checksums at [bold]{Markup.Escape(checksumPath)}[/].[/]");
@@ -94,6 +95,30 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     public int Execute(CommandContext context, SquadPackSettings settings) => Execute(context, settings, CancellationToken.None);
+
+    /// <summary>
+    /// Packs the APM archive into a scratch folder, extracts it, and loads it. Checking the extracted archive, rather
+    /// than the source, sees the names and bytes that install will see. Nothing is written to the output folder here,
+    /// and the scratch folder is removed on every path.
+    /// </summary>
+    private static void ValidateComposedTree(string sourcePath, string? companionSkillsRoot, string version)
+    {
+        string scratch = Path.Combine(Path.GetTempPath(), $"kyber-squad-pack-{Guid.NewGuid():N}");
+        try
+        {
+            string archive = SquadPacker.PackApm(sourcePath, scratch, version, companionSkillsRoot);
+            string tree = Path.Combine(scratch, "tree");
+            ZipFile.ExtractToDirectory(archive, tree);
+            _ = SquadSourceLoader.Load(tree);
+        }
+        finally
+        {
+            if (Directory.Exists(scratch))
+            {
+                Directory.Delete(scratch, recursive: true);
+            }
+        }
+    }
 
     private static string ResolveVersion()
     {

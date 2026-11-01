@@ -1,8 +1,13 @@
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 
 /// <summary>Stages a local kyber-squad checkout as the release source in place of a download.</summary>
+/// <remarks>
+/// The checkout carries the same companion skills as a release archive, from the same <see cref="SquadCompanionSkills"/>
+/// type, so a CLI run from a checkout deploys what an installed release deploys.
+/// </remarks>
 internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
 {
     private readonly string _sourceRoot;
@@ -12,9 +17,16 @@ internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
         _sourceRoot = sourceRoot;
     }
 
+    /// <remarks>
+    /// The companion skills are resolved before the destination is created. A name clash throws from here, so a
+    /// failed extraction leaves nothing behind and reports nothing as extracted.
+    /// </remarks>
     public Task<SquadReleaseResult> DownloadAndExtractAsync(SquadReleaseRequest request,
         CancellationToken cancellationToken = default)
     {
+        IReadOnlyList<(string RelativePath, string SourcePath)> companionFiles =
+            SquadCompanionSkills.Collect(_sourceRoot, SquadCompanionSkills.ResolveRoot(_sourceRoot));
+
         Directory.CreateDirectory(request.DestinationPath);
         List<string> extractedFiles = [];
 
@@ -22,11 +34,17 @@ internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
         {
             string relativePath = Path.GetRelativePath(_sourceRoot, sourceFilePath);
             string destinationFilePath = Path.Combine(request.DestinationPath, relativePath);
-            string? destinationFileDirectory = Path.GetDirectoryName(destinationFilePath);
-            if (destinationFileDirectory is not null) Directory.CreateDirectory(destinationFileDirectory);
-
-            File.Copy(sourceFilePath, destinationFilePath, true);
+            CopyFile(sourceFilePath, destinationFilePath);
             extractedFiles.Add(relativePath.Replace(Path.DirectorySeparatorChar, '/'));
+        }
+
+        foreach ((string relativePath, string sourceFilePath) in companionFiles)
+        {
+            string destinationFilePath = Path.Combine(
+                request.DestinationPath,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            CopyFile(sourceFilePath, destinationFilePath);
+            extractedFiles.Add(relativePath);
         }
 
         extractedFiles.Sort(StringComparer.Ordinal);
@@ -39,6 +57,14 @@ internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
             extractedFiles);
 
         return Task.FromResult(result);
+    }
+
+    private static void CopyFile(string sourceFilePath, string destinationFilePath)
+    {
+        string? destinationFileDirectory = Path.GetDirectoryName(destinationFilePath);
+        if (destinationFileDirectory is not null) Directory.CreateDirectory(destinationFileDirectory);
+
+        File.Copy(sourceFilePath, destinationFilePath, true);
     }
 
     public void Dispose()
