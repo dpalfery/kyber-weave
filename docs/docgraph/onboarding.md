@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 ---
 
 # Adopting DocGraph in an existing repository
@@ -78,8 +78,59 @@ template](../ci-pipelines/workflows-runbook.md#the-review-gate-template).
 
 The same conservative rule applies to `.kyber-weave/.gitignore`: an effective `cache/`
 entry is preserved, a missing one is appended without disturbing other patterns, and a
-later negation is countered with a final narrow entry. `--force` does not replace this
+later negation is countered with a final narrow entry. An MCP wiring receipt additionally
+earns a `receipts/` entry there, for the same reason. `--force` does not replace this
 operator-owned file.
+
+### MCP wiring
+
+`docs init` also declares and checks the MCP servers your agent instructions rely on. The
+declaration is the `mcp:` section of `.kyber-weave/kyber-weave.yml`, scaffolded with one
+server — `kyber-weave`, launched `kyber-weave-mcp --repo-root .`, first-party — and yours
+from the moment it exists:
+
+```yaml
+mcp:
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
+```
+
+After the scaffold and the skill deploy, `docs init` checks whether each declared server is
+wired in each harness's **repository-scope** configuration — the committed file your team
+shares — and prints one `MCP wiring:` section: an `ok` line per harness that is wired, a
+`warn` line with a copy-ready `docs mcp-wire --target <harness>` command per fixable gap, and
+an `info` line for a harness that is not in play. It reads no file under your home
+directory, writes nothing, and **does not change the exit code**: a scaffold that succeeded
+exits 0 with findings, exactly as the APM-missing and retired-skill paths do. A declaration
+the loader rejects fails the run as `KW-CONFIG-001`, before the check.
+
+```bash
+kyber-weave docs init . --no-mcp-check   # skip the check, the prompt, and any repair
+```
+
+Where the check found a fixable gap **and** stdin is an interactive terminal, `docs init`
+offers a yes/no question naming the files and servers it would write. It defaults to no;
+confirming writes through the same bounded path as `docs mcp-wire` and reports each file it
+wrote; declining writes nothing and leaves the printed command in place. **When stdin is not
+an interactive terminal — redirected, piped, no TTY, as in CI — it never prompts, never
+writes, and the output ends with the manual repair command.** `docs init` has no consent
+flag; a script that wants the repair runs
+[`docs mcp-wire`](mcp-runbook.md#docs-mcp-wire), whose invocation is the consent.
+
+**Editing the declaration escalates for human review in this repository, and in any host
+that copies the policy.** `.kyber-weave/kyber-weave.yml` is on this repository's
+`review.policy.always-human` list, so **any** change to it — the MCP declaration included —
+escalates by path alone, before any finding is weighed. That is deliberate rather than
+incidental: the declaration decides which servers your instructions depend on, and the
+scaffolded default is part of what a reviewer sees and approves. Adopting repositories that
+carry the same policy inherit the same consequence.
+
+The per-harness recipes, the two repair verbs, their flags and exit codes, and the harnesses
+the repair will not write are in the [MCP runbook](mcp-runbook.md#checking-and-wiring). The
+schema and its keys are in [configuration](../configuration.md#mcp-servers).
 
 ### APM is an expected dependency
 
@@ -108,8 +159,8 @@ deployed, the same skills already arrive through `kyber-weave squad install` and
 kyber-weave docs init . --no-skill
 ```
 
-`docs init` itself does not change: it has no new flag and no new default, and a repository that
-uses Kyber-Docs without Kyber-Squad keeps this APM path. See
+The APM deploy path itself does not change: no existing flag or default moves, and a
+repository that uses Kyber-Docs without Kyber-Squad keeps this path. See
 [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
 The default target is `agent-skills`, which installs to `.agents/skills/` and is read by

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 ---
 
 # Installing Kyber-Weave
@@ -559,6 +559,13 @@ What an installing repository gets, and which step writes it:
   never edits an existing `review:` section, even with `--force`, and a newer binary
   never alters what runs for an unchanged configuration. `kyber-weave review catalogue`
   prints the catalogue for newer releases, to copy in by hand.
+- **`docs init` declares and checks the MCP servers your instructions rely on.** It
+  scaffolds one server into the host config's `mcp:` section, then reports harness by
+  harness whether each declared server is wired in that harness's repository-scope
+  configuration, with a copy-ready `docs mcp-wire --target <harness>` command per gap and,
+  at a terminal, a yes/no offer to perform the repair. It writes nothing in CI, changes no
+  exit code, and `--no-mcp-check` skips it. See the [MCP
+  runbook](docgraph/mcp-runbook.md#checking-and-wiring).
 
 ## External dependencies
 

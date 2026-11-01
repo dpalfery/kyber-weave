@@ -6,10 +6,13 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
+  - HarnessMcpCatalog
+  - McpWiringInspector
+  - McpWiringRepairer
 ---
 
 # Running the DocGraph MCP server
@@ -54,6 +57,7 @@ keys differ, and they differ more than you would expect:
 | [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
 | [Codex CLI](#codex-cli) | `~/.codex/config.toml` | `[mcp_servers.<name>]` | TOML, and the table name is snake_case; custom agents inherit the session's servers and cannot override them |
 | [opencode](#opencode) | `opencode.json` | `mcp` | Command and arguments are one array |
+| [ZCode](#zcode) | `zcode.json`, or `.zcode/config.json` | `mcp.servers` | A nested key path, and the files are found by walking up to the worktree root |
 | [Command Code](#command-code) | `.mcp.json` (repo root) | `mcpServers` | Same shape as Claude Code; a subagent reaches a tool only when its own `tools` list names it |
 | [Kilo](#kilo) | `kilo.jsonc` | `mcp` | Per-agent reach is the agent frontmatter `permission` map entry `kyber-weave_*: allow` — an approval grant, not isolation |
 | [Antigravity](#antigravity) | `.agents/mcp_config.json` (workspace) | `mcpServers` | The agent file carries its own `mcpServers` entry; MCP tools default to Ask until a policy pattern allows them |
@@ -493,6 +497,37 @@ and the environment key is `environment`, not `env`:
 }
 ```
 
+### ZCode
+
+ZCode reads its project-scope servers from **two** files, tried in this order: `zcode.json`,
+then `.zcode/config.json`. The files are resolved by walking from the working directory up
+to the git worktree root, so the file can sit at the worktree root rather than at the
+directory the process started in; with no `.git` above it, the starting directory is the
+only one that counts. The key path is nested, and it is the one thing here that is not
+shaped like any other client's:
+
+```text
+mcp.servers.<server-name>
+```
+
+The tier paths, the `.zcode/` marker, and the `mcp.servers` key path are pinned against
+`ZCodeMcpConfiguration`, verified against zai-org/ZCode 3.14.0 on 2026-09-21. **The body of
+an entry inside `mcp.servers` is not pinned anywhere in this repository**, so no entry is
+printed here and none is written: an invented body produces a configuration ZCode cannot
+load, which is worse than a step that is visibly the operator's. Read the body's keys from
+ZCode's own `mcpSchema` — the source the 2026-09-21 verification used — and declare the
+server named `kyber-weave` there, launched as `kyber-weave-mcp --repo-root .`.
+
+The user tier (`<storage>/cli/config.json`) is **user scope**: the check never reads it and
+the repair never writes it. A server wired only there is reported as not wired for the
+repository, which is the right report for a configuration the team shares.
+
+**Nothing writes this harness yet.** `docs mcp-wire --target zcode` refuses with
+`KW-MCP-WIRE-005`, names the file and the reason, and prints the place the entry goes. The
+declared widening path is one verified fact: pin the entry body against `mcpSchema`, add it
+to the catalog row, and flip that row's writability — a catalog edit, not a structural
+change ([ADR 0051](../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)).
+
 ### From source
 
 Any of the above works against a source build by swapping the command:
@@ -557,6 +592,207 @@ stderr the client may not surface — is worth checking before blaming the repo 
 This fallback applies to the retrieval corpus initialized at startup. The analysis and
 glossary tools reload the current config for each call and return an unavailable response
 until the invalid config is fixed; they do not analyze on defaults.
+
+## Checking and wiring
+
+The recipes above are written by hand, one file and one key path at a time, and nothing
+above notices when one of them is missing. That gap is what the check and the two repair
+commands close: the repository declares which servers its agent instructions rely on,
+`docs init` reports where the declaration is not honoured, and a named repair writes it.
+
+### The declaration
+
+The declaration is the `mcp:` section of `.kyber-weave/kyber-weave.yml` — the same host
+configuration every other setting lives in, and the full schema is in
+[configuration](../configuration.md#mcp-servers):
+
+```yaml
+mcp:
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
+```
+
+`command` is argv — the program first, then its arguments — never a shell line, for the
+same reason `review.gates` takes argv. `provenance` is `first-party` (a binary Kyber-Weave
+ships, today `kyber-weave-mcp`) or `third-party` (a binary you install, such as `codegraph`),
+and it decides which fix an absent binary gets. `level` is `required` (the default when the
+key is absent) or `recommended`, and it decides whether a gap is a warning or an `info`
+line. An optional `install` carries the exact manual command to print when a third-party
+binary is absent; Kyber-Weave prints it and never runs it.
+
+`docs init` scaffolds the section with exactly one server when it creates a host
+configuration, and appends it — leaving every other byte alone — when an existing file has
+none. Once the section exists it is yours: no run of `docs init` ever rewrites it.
+
+The declaration is independent of Squad. It is not read from `toolchain.yml`'s
+`required-mcp-tools` roster or from `products/kyber-squad/mcp.json`, and the check and the
+repair read neither.
+
+### The check
+
+`docs init` checks the wiring on every successful scaffold, after the skill deploy and the
+retired-skill warnings and before its `Next:` block, and prints one unfolded section:
+
+```text
+MCP wiring:
+  ok    factory: kyber-weave wired
+  warn  KW-MCP-WIRE-001 cursor: server 'kyber-weave' is not wired (.cursor/mcp.json)
+        Fix: kyber-weave docs mcp-wire --target cursor
+  warn  KW-MCP-WIRE-003 factory: server 'kyber-weave' is wired but 'kyber-weave-mcp' is not on PATH
+        This Kyber-Weave installation is broken; run: kyber-weave update
+  info  KW-MCP-WIRE-004 claude-code: not checked (no '.mcp.json' and no marker to detect it)
+```
+
+What it reports:
+
+| Id | Level | Raised when |
+|---|---|---|
+| `KW-MCP-WIRE-001` | warning for a `required` server, `info` for a `recommended` one | a declared server is not wired for a harness in play, or the file could not be read |
+| `KW-MCP-WIRE-002` | same as above | the entry is wired but its launch command differs from the declaration; the line names both |
+| `KW-MCP-WIRE-003` | same as above | the entry is wired — or would be — but the launch binary does not resolve on `PATH` |
+| `KW-MCP-WIRE-004` | `info`, always | the harness is not in play, has no marker to detect it, or keeps its configuration in repository settings |
+
+A harness is "in play" when its repository-scope configuration file or its marker directory
+exists — `.factory/`, `.cursor/`, `.vscode/`, `.codex/`, `.zcode/`, or the configuration file
+itself where no marker exists. Detection is a heuristic and the output claims no more than
+that: a harness with neither signal gets one `info` line naming what was looked for, never a
+warning. Claude Code has no marker besides `.mcp.json`, so a repository with neither is
+informed rather than failed.
+
+The check writes nothing, reads **repository scope only** — no file under the home directory
+is opened, for any harness — and does not change `docs init`'s exit code: a scaffold that
+succeeded exits 0 with findings, exactly as the APM-missing and retired-skill paths do. A
+declaration the configuration loader rejects is the one exception: it fails the run through
+the existing `KW-CONFIG-001` path, before the check runs. A repository that declares no
+servers prints no section at all.
+
+`--no-mcp-check` skips the check, the prompt and any repair, and prints one line saying so.
+
+### The prompt, and what happens without a terminal
+
+When the check found at least one fixable gap, `docs init` offers a yes/no question naming
+exactly which files and which servers the repair would write. It defaults to **no**.
+Confirming performs the repair through the same write path `docs mcp-wire` uses and reports,
+per file, what was written, then the receipt's location. Declining writes nothing — the
+findings and their printed commands stand, so the same repair is one command away.
+
+**When stdin is not an interactive terminal — redirected, piped, no TTY, CI — the command
+never prompts, never writes, and the output ends with the printed manual repair command.**
+`docs init` has no consent flag and acquires none: a non-interactive run that wants the
+repair runs `docs mcp-wire`, whose invocation is the consent.
+
+### `docs mcp-wire`
+
+```bash
+kyber-weave docs mcp-wire [path] [--target <targets>] [--dry-run]
+```
+
+`path` defaults to `.`. `--target` is a comma list of harness slugs.
+
+- **No `--target`**: a preview. It lists the harnesses in play and the gaps found, names each
+  writable harness no marker can detect in this tree — naming one is the only way to write
+  it — and writes nothing. Exits 0.
+- **A named target is written whether or not its harness is in play.** The selection is the
+  consent, and for Claude Code and opencode, whose only repository-scope artefact is the
+  configuration file, "not in play" and "file absent" are the same condition: the canonical
+  file is created.
+- **A named target that already holds every declared server** is reported and skipped at
+  exit 0, not treated as an error — otherwise a second run would fail on the first one's
+  success.
+- **A refused target** exits 1, names the file and the reason, and writes nothing to that
+  file: a slug the catalog does not know, a malformed or foreign document, an entry with the
+  same server name already present, a harness the repair does not write, an absent binary.
+  Other named targets still proceed.
+- `--dry-run` prints the exact per-file change, writes nothing — not even the receipt — and
+  exits what the real run would have exited.
+
+### `docs mcp-unwire`
+
+```bash
+kyber-weave docs mcp-unwire [path] [--target <targets>]
+```
+
+Removal works from the receipt, not from the declaration, so a repository whose `mcp:`
+section is malformed can still be unwound. An `inserted` file is restored to the bytes the
+repair found; a `created` file is deleted. With no `--target` it lists the files the receipt
+records and removes nothing. It exits 0 when every named file was restored or deleted, and 1
+on any refusal: a slug the catalog does not know, no receipt record, a file that is gone, or
+a current digest that differs from the recorded one.
+
+That last case is the point of the verb. **A file that changed after the repair is drift, and
+drift is refused** (`KW-MCP-WIRE-006`) rather than restored over someone else's edit.
+
+### The receipt
+
+Every write is recorded in `.kyber-weave/receipts/mcp-wiring.json` — schema version 1, one
+record per file, latest write wins — holding the file's path, the mode (`created` or
+`inserted`), the servers written, the pre-write and post-write SHA-256 digests, a UTC
+timestamp, and, for an inserted file, the pre-write bytes it captured — a digest proves a
+restore is safe, but it cannot produce the bytes to restore. `docs init` adds `receipts/` to
+`.kyber-weave/.gitignore` beside `cache/`.
+
+It is the writer's local undo record and nobody else's. Teammates receive the committed
+configuration file and never need the receipt; their removal path is `git revert`.
+
+### What the repair writes, and what it will not
+
+| Harness | Target slug | Repository-scope file | Server key | Repair |
+|---|---|---|---|---|
+| Factory | `factory` | `.factory/mcp.json` | `mcpServers` | Writes |
+| Claude Code | `claude-code` | `.mcp.json` | `mcpServers` | Writes |
+| Cursor | `cursor` | `.cursor/mcp.json` | `mcpServers` | Writes |
+| VS Code | `vscode` | `.vscode/mcp.json` | `servers` | Writes |
+| opencode | `opencode` | `opencode.json` | `mcp` | Writes |
+| Codex CLI | `codex` | `.codex/config.toml` | `mcp_servers` | Snippet only |
+| ZCode | `zcode` | `zcode.json`, `.zcode/config.json` | `mcp.servers` | Snippet only |
+| Copilot coding agent | `copilot-coding-agent` | none — repository settings | `mcpServers` | Snippet only |
+
+The three snippet-only rows are checked and never written, and each says why:
+
+- **Codex** is refused because its repository-scope relative-path semantics are unverified:
+  the runbook's verified form is an absolute path, which cannot go into a committed file
+  without breaking every other teammate. The unblocking source is Codex's own documentation
+  or source for how a project-scope `--repo-root .` resolves; verifying it adds the form
+  here and flips that catalog row's writability.
+- **ZCode** is refused because the entry body inside `mcp.servers` is pinned nowhere in this
+  repository — see [ZCode](#zcode). The unblocking source is ZCode's `mcpSchema`.
+- **The Copilot coding agent** has no file to write: its configuration is repository
+  settings, and the binary has to be installed by the workflow step in
+  `.github/workflows/copilot-setup-steps.yml` first. See [GitHub Copilot coding
+  agent](#github-copilot-coding-agent).
+
+Widening any of the three is a pinned fact plus a catalog edit, never a change to the write
+bounds ([ADR 0051](../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)).
+
+The five writable rows all follow one policy, and each bound is a rule rather than a
+convenience:
+
+- **Insertion-only, textually.** A harness document is never parsed into a model and written
+  back out. The splice is computed in full before the first byte moves, so a refusal writes
+  nothing and a partial write cannot happen.
+- **Bytes the repair did not write are not touched.** Comments, key order, formatting and a
+  trailing comma survive byte-for-byte; the repair never reformats, reorders, or
+  re-serializes.
+- **An existing entry is never modified.** A file already holding an entry with the declared
+  server's name is refused for that file, with the difference reported.
+- **An absent binary is never installed and never written.** A third-party server whose
+  binary does not resolve on `PATH` is refused for every harness; a missing
+  `kyber-weave-mcp` is reported as a broken Kyber-Weave installation, to be repaired with
+  `kyber-weave update`.
+- **Repository scope only.** `~/.factory/mcp.json`, `~/.cursor/mcp.json`,
+  `~/.codex/config.toml`, `~/.config/opencode/opencode.json` and ZCode's user storage are
+  never written and never read; they are reported with the manual snippet.
+- **The root follows the harness's own substitution rule.** VS Code gets
+  `${workspaceFolder}`; Factory, Claude Code, Cursor and opencode get `.`, the
+  workspace-relative form each documents. Codex substitutes no workspace variable and its
+  verified form is an absolute path, which is one more reason its entry is the operator's to
+  paste and not the repair's to write.
+
+Five more clients above have recipes here and no catalog row — Command Code, Kilo,
+Antigravity, Pi, and Warp. Nothing checks or writes them; the recipe is the whole grant.
 
 ## Provenance on every answer
 

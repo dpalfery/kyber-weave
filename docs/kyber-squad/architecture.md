@@ -398,7 +398,10 @@ flowchart LR
   documents the operator's half rather than writing it. The operator's half
   is spelled out in the [MCP runbook](../docgraph/mcp-runbook.md#factory), because a dispatched
   droid needs both halves — Squad's whitelist names a server, and the operator's file launches
-  it — and `squad doctor` checks neither.
+  it — and `squad doctor` checks neither. **Squad owns droid-level visibility; the docs branch
+  owns harness-level wiring** — the `mcp:` declaration, `docs init`'s check, and `docs
+  mcp-wire` — and Squad writes no harness MCP configuration for any harness ([ADR
+  0051](../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)).
 
 ### Cross-Process Mutex Lease
 
