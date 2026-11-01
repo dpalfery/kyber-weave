@@ -436,7 +436,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 {
                     AnsiConsole.MarkupLine(
                         $"  [green]ok[/]    {Markup.Escape(row.Harness)}: "
-                        + $"{Markup.Escape(string.Join(", ", declared.Select(server => server.Name)))} wired");
+                        + $"{Markup.Escape(TerminalText.Line(string.Join(", ", declared.Select(server => server.Name))))} wired");
                     continue;
                 }
 
@@ -447,6 +447,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     }
 
     /// <summary>Prints one finding with its rule id, then its remedy on the line beneath.</summary>
+    /// <remarks>
+    /// The message names the declared server and the hint quotes the declared and the wired command,
+    /// so both are text somebody else wrote — <c>kyber-weave.yml</c> or a harness's own configuration
+    /// — and both go through <see cref="TerminalText"/> before the terminal sees them.
+    /// </remarks>
     private static void PrintFinding(McpWiringFinding finding)
     {
         string level = finding.Severity switch
@@ -458,7 +463,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         AnsiConsole.MarkupLine(
             $"  {level} {Markup.Escape(finding.Code)} {Markup.Escape(finding.Harness)}: "
-            + Markup.Escape(finding.Message));
+            + Markup.Escape(TerminalText.Line(finding.Message)));
 
         // A not-detectable line's hint is a paragraph of advice about a harness nobody claimed to
         // use; every other finding's hint is the command that closes it, and that is printed
@@ -468,7 +473,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         // statement of how. The exception is decided by the catalog's shape — repository settings,
         // not a file — rather than by the harness's name.
         if (AdviceBelongsToOperator(finding) && !string.IsNullOrWhiteSpace(finding.Hint))
-            AnsiConsole.MarkupLine($"        [grey]{Markup.Escape(finding.Hint)}[/]");
+            AnsiConsole.MarkupLine($"        [grey]{Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
     }
 
     /// <summary>
@@ -521,7 +526,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             fixes.Select(fix => $"{fix.Harness} ({fix.Path}) adding {string.Join(", ", fix.Servers)}"));
 
         return AnsiConsole.Confirm(
-            Markup.Escape($"Wire the declared MCP servers now? This writes {targets}."),
+            Markup.Escape(TerminalText.Line($"Wire the declared MCP servers now? This writes {targets}.")),
             defaultValue: false);
     }
 
@@ -555,20 +560,20 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 {
                     wrote = true;
                     AnsiConsole.MarkupLine(
-                        $"  [green]wrote[/]  {Markup.Escape(path)} ({Markup.Escape(string.Join(", ", change.Servers))})");
+                        $"  [green]wrote[/]  {Markup.Escape(path)} ({Markup.Escape(TerminalText.Line(string.Join(", ", change.Servers)))})");
 
                     if (!string.IsNullOrWhiteSpace(change.Message))
-                        AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(change.Message)}[/]");
+                        AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
 
                     continue;
                 }
 
                 AnsiConsole.MarkupLine(
                     $"  [yellow]refused[/] {Markup.Escape(change.Code ?? McpWiringRepairer.RefusalCode)} "
-                    + Markup.Escape(change.Message ?? $"{path} was not written."));
+                    + Markup.Escape(TerminalText.Line(change.Message ?? $"{path} was not written.")));
 
                 if (!string.IsNullOrWhiteSpace(change.Hint))
-                    AnsiConsole.MarkupLine($"          [grey]{Markup.Escape(change.Hint)}[/]");
+                    AnsiConsole.MarkupLine($"          [grey]{Markup.Escape(TerminalText.Line(change.Hint))}[/]");
             }
 
             if (wrote)

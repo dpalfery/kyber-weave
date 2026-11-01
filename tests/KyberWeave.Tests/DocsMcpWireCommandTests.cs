@@ -70,6 +70,13 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     /// </summary>
     private const string NoTarget = "";
 
+    /// <summary>
+    /// The escape sequence the hostile-input cases carry: SGR red, which a terminal obeys and no
+    /// operator wrote. Both the declaration and a harness's own file are untrusted input, and a
+    /// control character in either reaches the terminal unless the rendering path removes it.
+    /// </summary>
+    private const string EscapeSequence = "\u001b[31m";
+
     private readonly TempDirectory _root = new();
 
     public DocsMcpWireCommandTests()
@@ -501,6 +508,75 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(0, second.Result);
         Assert.DoesNotContain(RefusalCode, second.Output, StringComparison.Ordinal);
         Assert.Equal(written, File.ReadAllBytes(path));
+    }
+
+    /// <summary>
+    /// The manual snippet is written as-is, because Spectre markup would eat its brackets — so the
+    /// server name inside it reaches the terminal untouched unless the rendering path removes the
+    /// control characters first. A name carrying an escape sequence would otherwise colour, move or
+    /// clear the operator's terminal, and the name comes from <c>kyber-weave.yml</c>.
+    /// </summary>
+    [Fact]
+    public void AServerNameCarryingAnEscapeSequenceIsRemovedFromTheSnippet()
+    {
+        // The YAML carries the escape as its own \x1b escape, so the declaration on disk is
+        // printable and the loader is what turns it into the control character.
+        Write(
+            ".kyber-weave/kyber-weave.yml",
+            "mcp:\n"
+            + "  required-servers:\n"
+            + "    \"evil\\x1b[31mserver\":\n"
+            + $"      command: ['{BinaryPath}', --repo-root, .]\n"
+            + "      provenance: first-party\n"
+            + "      level: required\n");
+
+        CapturedConsoleExecution<int> execution = Wire(Codex);
+
+        Assert.Equal(1, execution.Result);
+        Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("[mcp_servers.evilserver]", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A finding's hint and message quote the declared command and the wired one, and both come from
+    /// a file: the declaration from <c>kyber-weave.yml</c>, the wired entry from the harness's own
+    /// configuration. A token carrying an escape sequence or a line break must not reach the
+    /// terminal, or the operator's console — not the finding — is what the file describes.
+    /// </summary>
+    [Fact]
+    public void CommandsCarryingEscapeSequencesAreRemovedFromTheFinding()
+    {
+        Write(
+            ".kyber-weave/kyber-weave.yml",
+            "mcp:\n"
+            + "  required-servers:\n"
+            + $"    {ServerName}:\n"
+            + $"      command: ['{BinaryPath}', \"--token\", \"evil\\x1b[31mtok\"]\n"
+            + "      provenance: first-party\n"
+            + "      level: required\n");
+
+        WriteJson(
+            ".mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    [ServerName] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = "wired" + EscapeSequence + "binary",
+                        ["args"] = new JsonArray("--repo-root", ".")
+                    }
+                }
+            });
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpWiringInspector.CommandDiffersCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("eviltok", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("wiredbinary", execution.Output, StringComparison.Ordinal);
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>

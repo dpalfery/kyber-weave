@@ -156,6 +156,12 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     }
 
     /// <summary>Reports one change — or one refusal — as the operator reads it.</summary>
+    /// <remarks>
+    /// Every value here that came out of a file goes through <see cref="TerminalText"/> first. A
+    /// server name is written in <c>kyber-weave.yml</c> and a message or hint quotes it, so markup
+    /// escaping alone — which only stops a bracket being read as a tag — would leave a control
+    /// character to the terminal.
+    /// </remarks>
     internal static void PrintChange(McpWiringFileChange change, bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(change);
@@ -168,18 +174,20 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             AnsiConsole.MarkupLine($"  [red]{Markup.Escape(change.Code ?? "refused")}[/] [bold]{harness}[/] {file}");
 
             if (!string.IsNullOrEmpty(change.Message))
-                AnsiConsole.MarkupLine($"    {Markup.Escape(change.Message)}");
+                AnsiConsole.MarkupLine($"    {Markup.Escape(TerminalText.Line(change.Message))}");
 
             if (!string.IsNullOrEmpty(change.Hint))
-                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(change.Hint)}[/]");
+                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(change.Hint))}[/]");
 
             if (!string.IsNullOrEmpty(change.Snippet))
             {
                 AnsiConsole.MarkupLine("    [grey]Paste this into that file instead:[/]");
 
                 // Written raw: a snippet is TOML or JSON, and Spectre markup would read its
-                // brackets as tags and drop them.
-                AnsiConsole.WriteLine(change.Snippet);
+                // brackets as tags and drop them. That leaves the terminal as the only thing
+                // parsing it, and a server name inside the snippet is a name somebody else wrote —
+                // so the control characters go before the brackets are allowed through.
+                AnsiConsole.WriteLine(TerminalText.Block(change.Snippet));
             }
 
             return;
@@ -188,7 +196,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         AnsiConsole.MarkupLine($"  {Verb(change.Outcome, dryRun)} [bold]{file}[/] [grey]({harness})[/]{Servers(change)}");
 
         if (!string.IsNullOrEmpty(change.Message))
-            AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(change.Message)}[/]");
+            AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
     }
 
     /// <summary>
@@ -209,7 +217,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             ? "adding"
             : "removing";
 
-        return $" [grey]{verb}[/] {Markup.Escape(string.Join(", ", change.Servers))}";
+        return $" [grey]{verb}[/] {Markup.Escape(TerminalText.Line(string.Join(", ", change.Servers)))}";
     }
 
     /// <summary>
@@ -361,9 +369,18 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         string file = row is not null && row.Paths.Count > 0 ? row.Paths[0] : "its configuration file";
 
         AnsiConsole.MarkupLine(
-            $"  [green]nothing to write[/] [bold]{Markup.Escape(harness)}[/] [grey]({Markup.Escape(file)} already holds {Markup.Escape(Declared(config))})[/]");
+            $"  [green]nothing to write[/] [bold]{Markup.Escape(harness)}[/] [grey]({Markup.Escape(file)} already holds {Markup.Escape(TerminalText.Line(Declared(config)))})[/]");
     }
 
+    /// <summary>
+    /// Prints one finding with its rule identifier, its subject and its remedy.
+    /// </summary>
+    /// <remarks>
+    /// The hint quotes the declared command and the command the harness's own file holds, and both
+    /// are untrusted: the declaration is whatever was cloned, and the harness configuration belongs
+    /// to the harness. <see cref="TerminalText"/> removes the control characters before either one
+    /// reaches the terminal.
+    /// </remarks>
     private static void PrintFinding(McpWiringFinding finding)
     {
         string style = finding.Severity switch
@@ -375,11 +392,11 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
         string about = string.IsNullOrEmpty(finding.Server)
             ? Markup.Escape(finding.Harness)
-            : $"{Markup.Escape(finding.Harness)} [grey]({Markup.Escape(finding.Server)})[/]";
+            : $"{Markup.Escape(finding.Harness)} [grey]({Markup.Escape(TerminalText.Line(finding.Server))})[/]";
 
         AnsiConsole.MarkupLine(
-            $"  [grey]{Markup.Escape(finding.Code)}[/] {about}: {Markup.Escape(finding.Message)}");
-        AnsiConsole.MarkupLine($"    [{style}]→ {Markup.Escape(finding.Hint)}[/]");
+            $"  [grey]{Markup.Escape(finding.Code)}[/] {about}: {Markup.Escape(TerminalText.Line(finding.Message))}");
+        AnsiConsole.MarkupLine($"    [{style}]→ {Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
     }
 
     private static string Verb(McpWiringChangeOutcome outcome, bool dryRun) => outcome switch
