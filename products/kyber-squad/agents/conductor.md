@@ -59,6 +59,7 @@ Defect-first precedence is unchanged in both cases: a concrete failure is diagno
 
 ## Shared lifecycle invariants
 
+- **Run-start documentation check.** When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — run `kyber-weave doctor --check` before dispatching any worker. It never writes. Record one line in the run record: `run-start doctor: <exit> <check ids>`. **Warn and continue**; never block a run on it, and never install anything. On exit 1 with `codegraph.index` and the binary present, run `kyber-weave doctor --provision` once — repository-local `codegraph init .` is authorised by the root `AGENTS.md`. On exit 3 the `codegraph` executable is missing: in supervised mode ask the user, quoting the printed `fix:` line; in autonomous mode record it as pending human review. Do not install it in either mode.
 - `development-mode` is `test-first` or `standard`. Omission defaults to `test-first`; only an explicit user opt-out selects `standard`.
 - `autonomy` is `supervised` or `autonomous`, resolved from the prompt, then the repository default, then `supervised`. Read [the autonomy contract](conductor/references/autonomy.md) before the first gate; it governs who answers every gate below. Supervised behaviour is unchanged.
 - Persist the selected mode in the plan or specification task artifact before approval. A mode change after approval reopens approval of the affected Test contract or verification contract.

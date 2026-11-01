@@ -134,6 +134,21 @@ review:
     # The model-profile skill teaches preset authoring for every harness. It is
     # gated like the rest so the command examples and per-harness table cannot
     # drift from the CLI surface without a failing gate.
+    # The codegraph skill is the first skill whose subject is a third-party tool rather
+    # than a Kyber-Weave product surface: it drives `kyber-weave doctor` and never runs
+    # `codegraph` itself, so the gates below pin its trigger wording like any other skill.
+    - id: skill-validate-codegraph
+      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/codegraph]
+      blocking: true
+    - id: skill-lint-codegraph
+      include: *skill-codegraph-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/codegraph, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-codegraph
+      include: *skill-codegraph-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/codegraph, --fail-on, critical]
+      blocking: true
     - id: skill-validate-model-profile
       include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-model-profile]

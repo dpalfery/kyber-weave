@@ -36,6 +36,12 @@ This applies where a human reads the text and nowhere else. The investigator's v
 
 # Workflow
 
+## 0. Run-start documentation check
+
+When the repository has governed docs — `.kyber-weave/kyber-weave.yml` exists at the git root and the `docs-root` it declares resolves to an existing directory — run `kyber-weave doctor --check` before anything else. It is read-only. Record one line in the run record: `run-start doctor: <exit> <check ids>`.
+
+**Warn and continue.** A failure is a line in the record, never a stop, and nothing is ever installed. Exit 1 with `codegraph.index` and the binary present: run `kyber-weave doctor --provision` once (repository-local init is authorised by the root `AGENTS.md`). Exit 3, the `codegraph` executable is missing: in supervised mode ask the user, quoting the printed `fix:` line; in autonomous mode record it as pending human review. Do not install it in either mode. When the repository has no governed docs, skip this step entirely.
+
 ## 1. Investigate — always first, always delegated
 
 Spawn `bug-crusher-investigator` with everything the human gave you: the failing command, the stack trace, the error text, the file they mentioned, what they were doing when it broke. Include the raw output verbatim rather than your summary of it — your paraphrase of a stack trace is already a diagnosis, and diagnosing is not your job.
@@ -94,6 +100,6 @@ You keep ownership when a defect escalates; you do not hand the human off to `co
 
 ## 6. Report
 
-Close with what actually happened, in the response format. The report covers what broke, the root cause, what changed, the verification output, whether a regression test was added, and the review verdict. Include the run record and the docs-dev review outcome in the report and the pull request description, which carries the same report. If you escalated, say what tripped it — the human is calibrating when to reach for this skill versus `conductor`, and that signal is the most useful thing you can give them.
+Close with what actually happened, in the response format. The report covers what broke, the root cause, what changed, the verification output, whether a regression test was added, and the review verdict. Include the `run-start doctor:` line from step 0, the run record and the docs-dev review outcome in the report and the pull request description, which carries the same report. If you escalated, say what tripped it — the human is calibrating when to reach for this skill versus `conductor`, and that signal is the most useful thing you can give them.
 
 Paste the verification output verbatim; the format shapes the prose around it, not the evidence.
