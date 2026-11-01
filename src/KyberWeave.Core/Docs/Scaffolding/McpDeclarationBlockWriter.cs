@@ -95,14 +95,15 @@ public static partial class McpDeclarationBlockWriter
     }
 
     /// <summary>
-    /// Returns <paramref name="configText"/> with the declaration appended after one blank line,
-    /// in the file's existing newline style, ending the file with exactly one newline.
+    /// Returns <paramref name="configText"/> with the declaration appended after one blank line, in
+    /// the file's existing newline style, ending the file with exactly one newline after the block.
     /// </summary>
     /// <remarks>
-    /// Every byte before the appended lines is the operator's, unchanged. Trailing blank lines
-    /// collapse to the single blank line that separates the section, because leaving them would
-    /// put the block an arbitrary distance from the file's last entry and produce a different
-    /// result on every run that edited the tail.
+    /// Every byte of <paramref name="configText"/> is the operator's, returned unchanged — trailing
+    /// blank lines included. Collapsing their tail to a single separator would be a byte this tool
+    /// edited that it was never asked to edit, and the review block's diff would then show a change
+    /// nobody made; the block is separated from whatever whitespace the file ends with instead, so
+    /// only the appended lines are new.
     /// </remarks>
     public static string AppendBlock(string configText)
     {
@@ -113,11 +114,40 @@ public static partial class McpDeclarationBlockWriter
             ? DeclarationYaml
             : DeclarationYaml.Replace("\n", newline, StringComparison.Ordinal);
 
-        string prefix = configText.TrimEnd('\r', '\n');
-        return prefix.Length == 0
-            ? block + newline
-            : prefix + newline + newline + block + newline;
+        return configText + Separator(configText, newline) + block + newline;
     }
+
+    /// <summary>
+    /// What stands between the operator's last byte and the block: nothing for an empty file or one
+    /// that already ends with a blank line, one line break for a file that ends with a break, and a
+    /// break plus one for a file that ends mid-line.
+    /// </summary>
+    private static string Separator(string configText, string newline)
+    {
+        if (configText.Length == 0 || EndsWithBlankLine(configText))
+            return string.Empty;
+
+        return IsLineBreak(configText[^1]) ? newline : newline + newline;
+    }
+
+    /// <summary>
+    /// True when the file's last two line breaks are adjacent, so the tail already separates the
+    /// block by a blank line and another one would add a gap the operator never wrote.
+    /// </summary>
+    private static bool EndsWithBlankLine(string configText)
+    {
+        int index = configText.Length - 1;
+        if (index < 0 || !IsLineBreak(configText[index]))
+            return false;
+
+        index = configText[index] == '\n' && index > 0 && configText[index - 1] == '\r'
+            ? index - 2
+            : index - 1;
+
+        return index >= 0 && IsLineBreak(configText[index]);
+    }
+
+    private static bool IsLineBreak(char value) => value is '\r' or '\n';
 
     /// <summary>
     /// The line ending the file itself uses: whichever of CRLF, LF or a lone CR it holds most of,
