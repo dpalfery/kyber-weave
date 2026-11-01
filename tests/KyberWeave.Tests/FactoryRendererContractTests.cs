@@ -84,13 +84,6 @@ public sealed class FactoryRendererContractTests : IDisposable
     ];
 
     /// <summary>
-    /// The capability profile whose holder routes work rather than researching it, which
-    /// <c>ClaudeRenderer</c> also excludes from the standard MCP grant. Declared here rather
-    /// than read from the renderer so the expectation cannot drift with the implementation.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
-
-    /// <summary>
     /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
     /// Keeping the empty case word-for-word is what makes the withholding visible and
     /// distinguishable from a deliberate whitelist.
@@ -518,12 +511,21 @@ public sealed class FactoryRendererContractTests : IDisposable
                     + "mcp.json does not declare. Squad does not invent Factory MCP server names."));
         }
 
-        // The shipped claims: the read-entitled specialists carry the documentation server,
-        // and the pure orchestrator carries none.
+        // The shipped claims: the read-entitled specialists carry the documentation server, and
+        // so does the orchestrator — kyber-weave hands an agent the coding standards it is held
+        // to, which a role that delegates work needs as much as the roles it delegates to.
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "architect"));
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "code-reviewer"));
         Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "review-lens"));
-        Assert.Empty(RenderedMcpServers(result, "conductor"));
+        Assert.Equal(["kyber-weave"], RenderedMcpServers(result, "conductor"));
+
+        // The orchestrator's grant is the rule, not the exception: assert it against the
+        // source-computed entitlement so a re-added carve-out fails here as well as above.
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Factory),
+            "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
+            + "cannot state the conductor is entitled to kyber-weave.");
     }
 
     /// <summary>
@@ -622,9 +624,14 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// <summary>
     /// A primary agent's entry-point caveat names the droid's actual <c>mcpServers</c> value.
     /// The entry-point skill runs in the main session under the session's permissions, so the
-    /// caveat has to describe what the droid beside it really withholds. <c>conductor</c>'s
-    /// wording stays verbatim because its whitelist is empty.
+    /// caveat has to describe what the droid beside it really withholds — a caveat that names an
+    /// empty whitelist for a droid that carries one tells the reader the opposite of the truth.
     /// </summary>
+    /// <remarks>
+    /// Every primary agent in the shipped squad is read-entitled, the conductor included, so the
+    /// non-empty form is the one the shipped corpus exercises. The empty form is pinned by
+    /// <see cref="RenderAsync_Factory_EmptyMcpDeclarationFailsClosedForEveryDroid"/>.
+    /// </remarks>
     [Fact]
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
@@ -636,7 +643,7 @@ public sealed class FactoryRendererContractTests : IDisposable
             Scope: SquadDeploymentScope.Project));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int whitelistedPrimaries = 0;
+        List<string> whitelistedPrimaries = [];
         foreach (SquadAgent agent in source.Agents.Where(
                      candidate => candidate.Invocation == SquadInvocation.Primary))
         {
@@ -647,7 +654,7 @@ public sealed class FactoryRendererContractTests : IDisposable
                 continue;
             }
 
-            whitelistedPrimaries++;
+            whitelistedPrimaries.Add(agent.Name);
             SquadDegradationRecord record = Assert.Single(
                 result.Degradations,
                 d => string.Equals(d.CanonicalIdentity, agent.Name, StringComparison.Ordinal) &&
@@ -661,21 +668,13 @@ public sealed class FactoryRendererContractTests : IDisposable
         }
 
         Assert.True(
-            whitelistedPrimaries > 0,
+            whitelistedPrimaries.Count > 0,
             "The shipped squad renders no whitelisted primary agent, so the entry-point caveat is "
             + "never exercised with a non-empty mcpServers value.");
 
-        SquadDegradationRecord conductorRecord = Assert.Single(
-            result.Degradations,
-            d => string.Equals(d.CanonicalIdentity, "conductor", StringComparison.Ordinal) &&
-                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
-        Assert.NotNull(conductorRecord.Details);
-        Assert.Contains(
-            "The same-name entry point at .factory/skills/conductor/SKILL.md runs under the "
-            + "session's permissions; the droid's explicit tools allow-list and mcpServers: [] do "
-            + "not apply to it.",
-            conductorRecord.Details,
-            StringComparison.Ordinal);
+        // The orchestrator is one of them: its caveat must name the server it carries, not the
+        // empty list it used to.
+        Assert.Contains("conductor", whitelistedPrimaries, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -752,6 +751,18 @@ public sealed class FactoryRendererContractTests : IDisposable
                      string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
             Assert.NotNull(withheld.Details);
             Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+
+            // A primary agent's entry-point caveat names the empty value too: with no server
+            // declared there is nothing for the caveat to point at, and the caveat still has to
+            // describe the droid beside it.
+            if (agent.Invocation == SquadInvocation.Primary &&
+                string.Equals(
+                    source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
+                    "skill",
+                    StringComparison.Ordinal))
+            {
+                Assert.Contains("mcpServers: []", withheld.Details, StringComparison.Ordinal);
+            }
         }
     }
 
@@ -877,12 +888,11 @@ public sealed class FactoryRendererContractTests : IDisposable
     /// restatement of the shipped corpus.
     /// </summary>
     /// <remarks>
-    /// Every non-orchestrator profile in the shipped squad allows <c>filesystem.read</c>, which
-    /// leaves the clause indistinguishable from "every non-orchestrator profile is entitled":
-    /// dropping it from the renderer, or narrowing a profile to deny reads, would keep the rest
-    /// of this suite green while a role whose own profile withholds file reads was handed a
-    /// documentation server it has no grant to use. This case is what makes the clause fail a
-    /// build instead.
+    /// Every profile in the shipped squad allows <c>filesystem.read</c>, which leaves the clause
+    /// indistinguishable from "every profile is entitled": dropping it from the renderer, or
+    /// narrowing a profile to deny reads, would keep the rest of this suite green while a role
+    /// whose own profile withholds file reads was handed a documentation server it has no grant
+    /// to use. This case is what makes the clause fail a build instead.
     /// </remarks>
     [Fact]
     public async Task RenderAsync_Factory_WithholdsTheWhitelistWhenTheProfileDeniesFileRead()
@@ -1433,38 +1443,23 @@ public sealed class FactoryRendererContractTests : IDisposable
 
     /// <summary>
     /// The <c>mcpServers</c> value a droid must render: every declared server when the agent's
-    /// capability profile allows <c>filesystem.read</c> and the profile is not the pure
-    /// orchestrator, otherwise the empty list.
+    /// capability profile allows <c>filesystem.read</c>, otherwise the empty list.
     /// </summary>
     /// <remarks>
-    /// This is the entitlement condition the other MCP-granting renderers already implement.
-    /// It is restated here rather than called from the renderer so the test states the contract
-    /// instead of echoing the implementation.
+    /// The entitlement is read from <see cref="SquadMcpGrantProjection"/> rather than from the
+    /// renderer, so the test states the contract instead of echoing the implementation. The
+    /// orchestrator is not carved out of it: <c>kyber-weave</c> carries
+    /// <c>agent_coding_standards</c>, and the conductor has to hand its delegates the standards
+    /// they are held to.
     /// </remarks>
     private static IReadOnlyList<string> ExpectedFactoryMcpServers(
         SquadSource source,
         SquadAgent agent,
         IReadOnlyList<string> declaredServers)
     {
-        if (string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal))
-        {
-            return [];
-        }
-
-        if (!source.CapabilityProfiles.Profiles.TryGetValue(
-                agent.CapabilityProfile,
-                out SquadCapabilityProfile? profile))
-        {
-            return [];
-        }
-
-        bool grantsDocumentRead =
-            profile.Permissions.TryGetValue(
-                "filesystem.read",
-                out SquadPermissionDecision decision) &&
-            decision == SquadPermissionDecision.Allow;
-
-        return grantsDocumentRead ? declaredServers : [];
+        return SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Factory)
+            ? declaredServers
+            : [];
     }
 
     /// <summary>The rendered droid's frontmatter, located by the identity the agent names.</summary>
@@ -1564,6 +1559,22 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
 
     private const string ReadOnlyProfile = "read-only";
 
+    /// <summary>
+    /// The primary agent the pure-orchestrator wording is asserted on. It is the only shipped
+    /// agent whose capability profile is the orchestrator, and a primary agent is the only one
+    /// whose degradation receipt carries the entry-point-skill note.
+    /// </summary>
+    private const string ConductorAgent = "conductor";
+
+    /// <summary>
+    /// The Copilot roster a read-denied orchestrator can still justify: the three tools the
+    /// catalog marks ungoverned and the one its <c>delegate: allow</c> covers. The shipped
+    /// roster also names read, search, and network tools, and the source validator rejects any
+    /// of those against a profile that denies the capability it needs.
+    /// </summary>
+    private const string ReadDeniedOrchestratorCopilotTools =
+        "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo, agent]";
+
     private readonly TempDirectory _temp = new();
 
     private McpDeclarationCorpusFixture()
@@ -1617,6 +1628,39 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
         return fixture;
     }
 
+    internal static McpDeclarationCorpusFixture WithServersAndFileReadDeniedAgent(
+        string agentName,
+        params string[] serverNames)
+    {
+        McpDeclarationCorpusFixture fixture = WithServers(serverNames);
+        fixture.AddReadDeniedVariantOf(ReadOnlyProfile);
+        fixture.RepointAgent(agentName);
+        return fixture;
+    }
+
+    /// <summary>
+    /// Copies the canonical corpus and denies <c>filesystem.read</c> in the corpus's own
+    /// <c>orchestrator</c> profile, leaving every profile name intact.
+    /// </summary>
+    /// <remarks>
+    /// Denied in place rather than through a clone in the manner of
+    /// <see cref="WithFileReadDeniedAgent"/>, because the withholding note a renderer states keys on
+    /// the profile's identity as well as on its permissions: an agent repointed at a
+    /// differently-named read-denied profile is no longer a pure orchestrator, so the branch that
+    /// names the withholding is never reached and a test built on it would assert nothing.
+    ///
+    /// The conductor's Copilot roster is narrowed with it. The source validator checks every
+    /// Copilot tool against the shared profile, so a read-denied orchestrator cannot keep the read,
+    /// search, or network tools the shipped roster declares and the source would not load at all.
+    /// </remarks>
+    internal static McpDeclarationCorpusFixture WithFileReadDeniedOrchestrator()
+    {
+        McpDeclarationCorpusFixture fixture = CopyCanonical();
+        fixture.DenyFileReadInProfile(SquadMcpGrantProjection.PureOrchestratorProfile);
+        fixture.NarrowCopilotTools(ConductorAgent, ReadDeniedOrchestratorCopilotTools);
+        return fixture;
+    }
+
     private static McpDeclarationCorpusFixture CopyCanonical()
     {
         McpDeclarationCorpusFixture fixture = new();
@@ -1631,23 +1675,7 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
         string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
         string[] lines = File.ReadAllLines(path);
 
-        int start = Array.IndexOf(lines, $"  {sourceProfileName}:");
-        if (start < 0)
-        {
-            throw new InvalidOperationException(
-                $"Expected '{path}' to declare profile '{sourceProfileName}' to clone.");
-        }
-
-        int end = start + 1;
-        while (end < lines.Length && !IsProfileHeader(lines[end]))
-        {
-            end++;
-        }
-
-        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
-        {
-            end--;
-        }
+        (int start, int end) = LocateProfileBlock(lines, sourceProfileName, path);
 
         List<string> clone = [.. lines[start..end]];
         clone[0] = $"  {FileReadDeniedProfile}:";
@@ -1675,6 +1703,75 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
+    /// <summary>
+    /// Rewrites the <c>filesystem.read</c> decision of <paramref name="profileName"/> to
+    /// <c>deny</c> inside that profile's own block, so the profile keeps its identity and loses
+    /// one permission.
+    /// </summary>
+    private void DenyFileReadInProfile(string profileName)
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        string[] lines = File.ReadAllLines(path);
+
+        (int start, int end) = LocateProfileBlock(lines, profileName, path);
+
+        int rewritten = 0;
+        for (int index = start; index < end; index++)
+        {
+            if (lines[index].TrimStart().StartsWith("filesystem.read:", StringComparison.Ordinal))
+            {
+                lines[index] = "      filesystem.read: deny";
+                rewritten++;
+            }
+        }
+
+        // Exactly one, not at least one: rewriting a second read decision would deny the
+        // permission somewhere the test did not intend, and the fixture would then differ from
+        // the canonical corpus in two places instead of the one it names.
+        if (rewritten != 1)
+        {
+            throw new InvalidOperationException(
+                $"Profile '{profileName}' in '{path}' declares {rewritten} 'filesystem.read' "
+                + "permissions; in-place denial needs exactly one.");
+        }
+
+        File.WriteAllText(
+            path,
+            string.Join("\n", lines) + "\n",
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// The half-open line range of one profile block: its <c>  &lt;name&gt;:</c> header up to the
+    /// next profile header, with trailing blank lines trimmed so a clone does not carry the
+    /// separator that belongs between blocks.
+    /// </summary>
+    private static (int Start, int End) LocateProfileBlock(
+        string[] lines,
+        string profileName,
+        string path)
+    {
+        int start = Array.IndexOf(lines, $"  {profileName}:");
+        if (start < 0)
+        {
+            throw new InvalidOperationException(
+                $"Expected '{path}' to declare profile '{profileName}'.");
+        }
+
+        int end = start + 1;
+        while (end < lines.Length && !IsProfileHeader(lines[end]))
+        {
+            end++;
+        }
+
+        while (end > start + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
+        {
+            end--;
+        }
+
+        return (start, end);
+    }
+
     private void RepointAgent(string agentName)
     {
         string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
@@ -1691,18 +1788,40 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
                 $"Expected '{path}' to declare a 'capability-profile' line to repoint.");
         }
 
-        string narrowed = Regex.Replace(
-            repointed,
-            "^copilot-tools: .*$",
-            "copilot-tools: [vscode, todo, search, web]",
-            RegexOptions.Multiline);
-        if (string.Equals(narrowed, repointed, StringComparison.Ordinal))
+        File.WriteAllText(
+            path,
+            Narrowed(repointed, path, "copilot-tools: [vscode, todo, search, web]"),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// Replaces the agent's <c>copilot-tools</c> line with the one the caller supplies.
+    /// </summary>
+    /// <remarks>
+    /// A read-denied profile cannot justify the read, search, or network tools an agent declares,
+    /// and <c>SquadSourceValidator.ValidateCopilotToolCapabilities</c> rejects the mismatch at load
+    /// time — so every variant that denies a capability has to narrow the Copilot roster to match,
+    /// or the render under test never gets as far as running.
+    /// </remarks>
+    private void NarrowCopilotTools(string agentName, string tools)
+    {
+        string path = Path.Combine(ProductRoot, "agents", $"{agentName}.md");
+        File.WriteAllText(
+            path,
+            Narrowed(File.ReadAllText(path), path, tools),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static string Narrowed(string text, string path, string tools)
+    {
+        string narrowed = Regex.Replace(text, "^copilot-tools: .*$", tools, RegexOptions.Multiline);
+        if (string.Equals(narrowed, text, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Expected '{path}' to declare a 'copilot-tools' line to narrow.");
         }
 
-        File.WriteAllText(path, narrowed, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return narrowed;
     }
 
     /// <summary>

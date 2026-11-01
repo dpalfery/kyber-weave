@@ -5,7 +5,7 @@ description: "Primary orchestrator and default entry point: accepts a plan, spec
 invocation: primary
 model-profile: orchestration
 capability-profile: orchestrator
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, "kyber-weave/*", agent]
 delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []

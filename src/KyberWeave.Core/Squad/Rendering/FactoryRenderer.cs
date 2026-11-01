@@ -38,14 +38,17 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// excludes every server, an absent key keeps the parent's availability, and a scalar is
 /// rejected. This renderer therefore never omits the key and never emits a scalar. Its value
 /// is the whitelist the droid is entitled to — exactly the servers the squad's own
-/// <c>mcp.json</c> declares, in ordinal order — for a droid whose capability profile allows
-/// <c>filesystem.read</c> and is not the pure orchestrator (profile id <c>orchestrator</c>),
-/// and <c>[]</c> for every other droid. Squad does not invent Factory MCP server names: a
-/// name that reaches a droid came from the squad's own declaration, and a squad that declares
-/// none grants none. Only an empty whitelist records <c>permission-not-expressible</c> saying
-/// parent MCP was not inherited; a deliberately whitelisted droid is a non-degraded outcome
-/// and makes no such claim, so the two outcomes stay distinguishable in the degradation
-/// stream.
+/// <c>mcp.json</c> declares, in ordinal order — for a droid whose capability profile resolves
+/// and allows <c>filesystem.read</c>, the pure orchestrator (profile id <c>orchestrator</c>)
+/// included, and <c>[]</c> for every other droid. The orchestrator keeps its grant because the
+/// declared server carries <c>agent_coding_standards</c>, the tool that hands an agent the
+/// standards it is held to, and the role that assigns work is the role deciding which standards
+/// apply to whom (ADR 0050).
+/// Squad does not invent Factory MCP server names: a name that reaches a droid came from the
+/// squad's own declaration, and a squad that declares none grants none. Only an empty whitelist
+/// records <c>permission-not-expressible</c> saying parent MCP was not inherited; a deliberately
+/// whitelisted droid is a non-degraded outcome and makes no such claim, so the two outcomes stay
+/// distinguishable in the degradation stream.
 /// </para>
 /// <para>
 /// Profile-declared shared identities suppress their skill projections per the native
@@ -72,14 +75,6 @@ public sealed class FactoryRenderer : ISquadRenderer
 {
     private const string DroidsDirectory = ".factory/droids";
     private const string SkillsDirectory = ".factory/skills";
-
-    /// <summary>
-    /// The capability profile whose holder routes work rather than researching it, which
-    /// <see cref="ClaudeRenderer"/> also excludes from the standard MCP grant. Declared by id
-    /// here for the same reason those renderers do: the exemption belongs to the role, not to
-    /// a permission the profile happens to carry.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
 
     /// <summary>
     /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
@@ -507,38 +502,24 @@ public sealed class FactoryRenderer : ISquadRenderer
 
     /// <summary>
     /// The MCP servers a droid is entitled to declare: the squad's declared servers in ordinal
-    /// order when <see cref="GrantsMcp"/> holds, and the empty list otherwise. Falling back to
-    /// the declaration for an unresolvable profile would grant a role its profile says nothing
-    /// about, so the empty list is the fail-closed answer as well as the orchestrator's.
+    /// order when <see cref="CapabilityDegradations.GrantsUniversalMcpServers"/> holds, and the
+    /// empty list otherwise. Falling back to the declaration for an unresolvable profile would
+    /// grant a role its profile says nothing about, so the empty list is the fail-closed answer.
     /// </summary>
+    /// <remarks>
+    /// The entitlement is the universal one rather than the orchestrator-excluded rule the other
+    /// targets apply to <c>codegraph</c> and <c>context7</c>: the server this whitelist names is
+    /// the squad's declared documentation server, and the conductor is entitled to it like every
+    /// other readable profile (ADR 0050).
+    /// </remarks>
     private static IReadOnlyList<string> ResolveMcpServers(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> declaredMcpServers)
     {
-        if (!GrantsMcp(agent, capabilityProfiles))
-        {
-            return [];
-        }
-
-        return declaredMcpServers;
-    }
-
-    /// <summary>
-    /// Whether a droid is entitled to the declared MCP servers: any role allowed to read the
-    /// filesystem, except a pure orchestrator, which routes work rather than researching it.
-    /// Mirrors the rule <see cref="ClaudeRenderer"/>, <see cref="ZCodeRenderer"/>, and
-    /// <see cref="DevinRenderer"/> apply to their own MCP grants, so Factory does not hand a
-    /// role a research surface its capability profile denies.
-    /// </summary>
-    private static bool GrantsMcp(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        return !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-               capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
-               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-               decision == SquadPermissionDecision.Allow;
+        return CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles)
+            ? declaredMcpServers
+            : [];
     }
 
     /// <summary>

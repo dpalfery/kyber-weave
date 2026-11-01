@@ -588,6 +588,66 @@ public sealed class KiloRendererContractTests : IDisposable
         });
     }
 
+    /// <summary>
+    ///     Every agent the source entitles to <c>kyber-weave</c> — the pure orchestrator included —
+    ///     carries the server's wildcard entry in an emitted <c>permission</c> map, spelled with the
+    ///     hyphen Kilo preserves.
+    /// </summary>
+    /// <remarks>
+    ///     Kilo gates MCP tools through the same <c>permission</c> map as its built-in tools, under
+    ///     the namespaced key <c>{server}_{tool}</c>, with the server name sanitized only for
+    ///     characters outside <c>[a-zA-Z0-9_-]</c>. The hyphen in <c>kyber-weave</c> therefore
+    ///     survives, and a <c>kyber_weave_*</c> spelling would parse cleanly and match no tool at
+    ///     all — which is why the emitted bytes are pinned, not only the parsed key.
+    ///     <para>
+    ///     The expectation is computed from the loaded source through
+    ///     <see cref="SquadMcpGrantProjection" /> and never read back from the renderer, so a
+    ///     renderer that re-added the orchestrator exclusion fails here instead of agreeing with
+    ///     itself. The map is an approval map, so a non-entitled agent is pinned to emitting no
+    ///     entry rather than a <c>deny</c>: absence of <c>allow</c> is the withholding.
+    ///     </para>
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Kilo_GrantsKyberWeaveToEveryReadEntitledAgent()
+    {
+        const string KyberWeaveWildcard = "kyber-weave_*";
+        const string UnderscoreSpelling = "kyber_weave_*";
+        const string conductor = "conductor";
+
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        IReadOnlySet<string> entitled = SquadMcpGrantProjection.KyberWeaveEntitledAgents(source, SquadTarget.Kilo);
+        Assert.Contains(conductor, entitled, StringComparer.Ordinal);
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Kilo);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".kilo/agents/{agent.Name}.md");
+            string text = Encoding.UTF8.GetString(file.Content.Span);
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(text, agent.Name);
+
+            if (!entitled.Contains(agent.Name))
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("permission")),
+                    $"Agent '{agent.Name}' is not entitled to {SquadMcpGrantProjection.KyberWeaveServer} "
+                    + "but renders a permission map, which this renderer emits only for an entitled agent.");
+                continue;
+            }
+
+            YamlMappingNode permission = RequireMapping(frontmatter, "permission", agent.Name);
+            Assert.Equal("allow", RequireScalar(permission, KyberWeaveWildcard, agent.Name));
+
+            int frontmatterEnd = text.IndexOf("\n---\n", StringComparison.Ordinal);
+            string frontmatterText = text[..(frontmatterEnd + 1)];
+            Assert.Contains(KyberWeaveWildcard, frontmatterText, StringComparison.Ordinal);
+            Assert.DoesNotContain(UnderscoreSpelling, frontmatterText, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task RenderAsync_ConcurrentRenders_ProduceConsistentOutputWithoutLocking()
     {
@@ -647,6 +707,24 @@ public sealed class KiloRendererContractTests : IDisposable
 
         return Assert.IsType<YamlScalarNode>(value).Value
                ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+    }
+
+    /// <summary>
+    ///     Reads a nested mapping the way <see cref="RequireScalar" /> reads a scalar, naming the
+    ///     keys that were present so a missing map is diagnosable from the failure alone.
+    /// </summary>
+    private static YamlMappingNode RequireMapping(YamlMappingNode node, string key, string identity)
+    {
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"'{identity}' frontmatter is missing required mapping '{key}'. Present keys: {presentKeys}.");
+        }
+
+        return Assert.IsType<YamlMappingNode>(value);
     }
 
     /// <summary>
