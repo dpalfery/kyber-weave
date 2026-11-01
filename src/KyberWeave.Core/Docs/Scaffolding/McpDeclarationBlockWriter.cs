@@ -83,9 +83,8 @@ public static partial class McpDeclarationBlockWriter
     /// after <c>---</c> may open with the key. Both read as present, so the block is not appended;
     /// neither can produce the duplicate section a line-ending-blind match produced. A root-level
     /// flow mapping — <c>{"mcp": {...}}</c>, which is valid YAML — reads as absent, because the key
-    /// does not start a line. Recognising that shape is a YAML load's job, and a load is what this
-    /// check must survive; a file already written in flow style is outside what a block-section
-    /// append can extend, so the append is the operator's cue that the file needs them to write it.
+    /// starts no line. A document written in that style is outside what a block-section append can
+    /// serve, and this check does not claim otherwise.
     /// </para>
     /// </remarks>
     public static bool HasMcpSection(string configText)
@@ -101,9 +100,9 @@ public static partial class McpDeclarationBlockWriter
     /// <remarks>
     /// Every byte of <paramref name="configText"/> is the operator's, returned unchanged — trailing
     /// blank lines included. Collapsing their tail to a single separator would be a byte this tool
-    /// edited that it was never asked to edit, and the review block's diff would then show a change
-    /// nobody made; the block is separated from whatever whitespace the file ends with instead, so
-    /// only the appended lines are new.
+    /// edited that it was never asked to edit, and the host configuration's diff would then show a
+    /// change nobody made; the block is separated from whatever whitespace the file ends with
+    /// instead, so only the appended lines are new.
     /// </remarks>
     public static string AppendBlock(string configText)
     {
