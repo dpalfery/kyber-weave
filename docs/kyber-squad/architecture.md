@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -19,6 +19,8 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
+  - adr/0050-universal-kyber-weave-mcp-grant
 sections:
   "#":
     keywords:
@@ -70,6 +72,8 @@ code-refs:
   - SquadInstanceLinkPlanner
   - SquadInstanceLinkSync
   - ISquadLinkFileSystem
+  - SquadCompanionSkills
+  - SquadPacker
 ---
 
 # Kyber-Squad architecture
@@ -88,7 +92,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["24 Canonical Agents\n(agents/*.md)"]
-        Skills["29 Canonical Skills\n(skills/*)"]
+        Skills["28 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
     end
 
@@ -144,9 +148,31 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 29 top-level `SKILL.md`
-  identities. The canonical tree separately retains 87 supplemental files, giving 116 recursive
-  skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+  identities under `products/kyber-squad/skills/`. The canonical tree separately retains 88
+  supplemental files, giving 116 recursive skill-tree files; `SquadPacker` carries that complete
+  recursive tree into both package formats.
+- **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
+  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
+  skills, 91 supplemental resources, and 125 skill-tree files. `SquadCompanionSkills` is the one type
+  both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
+  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
+  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
+  Squad skills.
+- **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
+  `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
+  link at `.apm`, `.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder
+  inside a companion skill is refused, and the error names the link. `squad pack` exits 1 and writes no
+  archive. The checkout release source throws before it writes anything; a copy failure after that can
+  leave partial files, which the Squad installer removes along with the destination.
+- **Pack validation**: `squad pack` loads the real Squad tree, then packs the composed tree into a
+  scratch folder, extracts it, and loads it. The scratch folder is removed on every path. A refused pack
+  leaves the previous archive at the output path, and so does a failed write: each archive goes to a
+  temporary file beside its target and replaces it only when complete.
+- **Known limitation**: A symbolic link inside `products/kyber-squad/` that points outside the repository
+  is still packed when no loaded file references it. The pack walk follows links, and the loader checks
+  only the files it reads. The gap predates the composed tree. Closing it is a separate follow-up, not
+  part of this design.
 - **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
   domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
   `capability-profile`, `tools`, `delegates-to`); concrete `AgentIR` / `SkillIR` representations
@@ -166,6 +192,14 @@ Grant (allow) > Review (ask) > Deny (deny) > Default (withhold)
 1. **Capability Taxonomy**: Maps high-level operations (`filesystem.read`, `filesystem.write`, `process.execute`, `network.fetch`, `network.publish`) to platform-specific tools.
 2. **Non-Broadening Guarantee**: Target-specific renderers may restrict or narrow permissions, but must **never** grant capabilities beyond what the canonical agent specification authorizes.
 3. **Structured Degradations**: Where target platforms lack granular permissions or cannot enforce delegation boundaries, Squad emits explicit degradation records in the deployment receipt rather than guessing or silently granting ambient privileges.
+
+**MCP reach is not a capability.** No lattice entry names an MCP server:
+`products/kyber-squad/profiles/capabilities.yml` declares exactly `filesystem.read`,
+`filesystem.search`, `filesystem.write`, `process.execute`, `network.read`,
+`network.publish`, and `delegate`. A per-agent MCP grant is renderer-derived from the
+entitlement rule in §8, so which servers an agent can call is a rendering contract rather than a
+lattice decision — and a grant that reaches past a profile's own decision is recorded as an
+accepted widening where it is made, not folded into the taxonomy.
 
 ### Architect documentation gates through MCP
 
@@ -353,6 +387,18 @@ flowchart LR
   project's host config prints one hint — run `kyber-weave docs init` to write the gates
   for the declared technologies — instead of writing them. The hint never changes the
   verb's exit code, and global scope never prints it, because there is no project.
+
+- **Factory MCP wiring splits between Squad and the operator, and the split is a standing rule.**
+  Squad owns the **droid whitelist**: the per-droid `mcpServers` value rendered into each droid
+  file Squad writes, and nothing more. Squad owns **no Factory settings file** — it does not
+  create, write, adopt, or check `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
+  (global scope), and it invents no Factory server names for an operator to have to match. Those
+  files are user-owned, and the operator owns the app-level configuration in them. This is the
+  same boundary the task-gate bullet above draws: Squad renders the artifacts it owns and
+  documents the operator's half rather than writing it. The operator's half
+  is spelled out in the [MCP runbook](../docgraph/mcp-runbook.md#factory), because a dispatched
+  droid needs both halves — Squad's whitelist names a server, and the operator's file launches
+  it — and `squad doctor` checks neither.
 
 ### Cross-Process Mutex Lease
 
@@ -717,9 +763,12 @@ and validates.
   and every `ext:` entry's extension must be declared in `pi-extensions`. `PiRenderer`
   appends the declared `pi-tools` after the capability-derived `tools` CSV and emits the
   declared extensions as a YAML sequence (the live-verified form); agents without an
-  overlay render `extensions: false` exactly as before. Only `research-agent` carries the
-  overlay today, with the live-verified `pi-mcp-adapter` wiring
-  ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
+  overlay of either kind render `extensions: false` exactly as before.
+  `research-agent` is now the only canonical agent that still declares this overlay by hand, and
+  it does so for the `context7` pairs
+  ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)); the `kyber-weave` half is
+  renderer-derived for every read-entitled agent and needs no canonical declaration — see the MCP
+  bullet below.
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
@@ -777,23 +826,104 @@ and validates.
   consequently pins every key in the taxonomy, writing `deny` wherever the lattice does not
   grant. A target whose permission model is an allow-list — Claude, ZCode, Pi — needs no such
   treatment, because omitting a name there withholds it.
-- **MCP grants differ per target, and `zcode` and `devin` enumerate.** `ClaudeRenderer`
-  grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
-  `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
-  The pure-orchestrator MCP withholding applies to the subagent file only; an entry-point skill
-  invoked as `/<name>` in the main conversation inherits the session's MCP servers. ZCode
+- **MCP grants differ per target, and `zcode` and `devin` enumerate.** One rule decides
+  entitlement on every target that can express a per-agent grant: the `kyber-weave` server is
+  granted to every agent whose capability profile resolves and allows `filesystem.read` — the
+  pure orchestrator included — while `codegraph` and `context7` keep the original
+  non-orchestrator-only rule ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The
+  surviving carve-out is narrow on purpose: the orchestrator's work depends on
+  `agent_coding_standards`, and does not depend on symbol lookup or third-party documentation
+  lookup. `ClaudeRenderer` therefore grants `mcp__kyber-weave__*` to every read-entitled agent and
+  withholds `mcp__codegraph__*` and `mcp__context7__*` from the profile id `orchestrator`. The
+  predicate lives once, on `CapabilityDegradations`, and a cross-renderer parity guard pins each
+  renderer's suite to that one predicate, so no target's grant can drift from another's. The
+  withholding that remains applies to the subagent file only; an entry-point skill invoked as
+  `/<name>` in the main conversation inherits the session's MCP servers.
+  **The orchestrator's own reach is a deliberate, recorded widening.** `conductor`'s capability
+  profile denies `filesystem.search`, so handing it the eight documentation tools reaches text
+  that profile withholds. It is accepted rather than denied for three reasons: every tool on that
+  server is declared `ReadOnly`, the alternative is an orchestrator that cannot read the standard
+  it is asked to enforce, and `process.execute: deny` and every other profile decision are
+  untouched. [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) records it in those
+  terms, so a later reader does not have to rediscover that it is one. ZCode
   registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare those servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
-  The conductor has no MCP tools by default. Its only exception is the opt-in operator channel
-  overlay, described in the next bullet.
+  `conductor` reaches the eight `kyber-weave` tool names on ZCode and no `codegraph` or
+  `context7` name. Its only other MCP grant is the opt-in operator channel overlay, described in
+  the next bullet.
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
   because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
   generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
   server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
+  The orchestrator is granted nothing on this target, structurally rather than narrowly: a Devin
+  primary agent lowers to a skill, a Devin skill carries no rendered `allowed-tools`, and the
+  renderer emits that key on the subagent path alone — so `conductor` reaches `kyber-weave` only
+  through the session it runs in. Devin and Pi are the two such targets, and the parity guard
+  pins both by name.
+  `OpenCodeRenderer` expresses the same grant as the server-scoped permission key
+  `kyber-weave_*`, and `CommandCodeRenderer` as the enumerated `mcp__kyber-weave__<tool>` names
+  in the agent's `tools`; on Command Code the `permission-not-expressible` sentence about parent
+  MCP is conditional on the derived grant being empty, so a granted agent records no withholding
+  claim. Copilot takes the grant from canonical source rather than from a renderer: each agent's
+  own `copilot-tools` frontmatter carries `kyber-weave/*`, and `conductor` gains that one entry
+  there.
+  `FactoryRenderer` has no tool allow-list to extend, because a Factory droid's MCP reach is a
+  **server** list: its `mcpServers` key. Factory reads an omitted key as "inherit the parent
+  session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
+  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today exactly
+  `kyber-weave`, launched `kyber-weave-mcp --repo-root .` — and emits it for any agent whose
+  capability profile allows `filesystem.read`, under the shared entitlement predicate that
+  `ClaudeRenderer`, `ZCodeRenderer`, and `DevinRenderer` apply to their own grants, so
+  `conductor` carries `mcpServers: [kyber-weave]` like every other droid. `[]` remains the
+  fail-closed value for a profile that grants no read entitlement and for a squad that declares no
+  servers, and no droid ever omits the key, because omission is the inherited-and-therefore-widened
+  case. A non-empty whitelist is a distinguished, non-degraded outcome: the
+  `permission-not-expressible` detail that parent MCP was excluded is recorded only for the empty
+  list, so the frontmatter value and the receipt agree.
+  Widening that whitelist is a declared edit rather than a renderer change: naming a server in
+  `mcp.json` is what puts it in the list, and `SquadToolchainRosterGuardTests` fails until the
+  same name is a `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun
+  the squad's own roster contract. `codegraph` and `context7` are absent on Factory because the
+  squad's `mcp.json` does not declare them, although Claude grants their tools: a Claude
+  allow-list entry that matches no configured server is inert, whereas a Factory entry names a
+  server the operator must already have configured.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
+  **Three landed grants, each in the form its harness actually reads, and three exclusions by
+  citation.** `PiRenderer` derives the overlay for every entitled **subagent**: `extensions:
+  [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one
+  `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool. The namespace maps the
+  server name's hyphen to an underscore, so the tool entries are `mcp__kyber_weave__…`; the
+  hyphenated `mcp__kyber-weave__…` spelling registers against no Pi tool and is wrong, even though
+  the same hyphen is correct on Claude, ZCode, Devin, and Command Code
+  ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). That form belongs to
+  `pi-mcp-adapter` **6.0.0**, the release whose deferred-tool surface first registered tools as
+  `mcp__<server>__<tool>`; **7.0.0** is the supported target, and an operator still on 5.x keeps
+  the `mcp` proxy entry working while the enumerable per-tool names resolve to nothing. A primary
+  agent lowers to `.pi/skills/<name>/SKILL.md`, whose frontmatter carries no `tools` or
+  `extensions`, so `conductor` cannot hold the grant on that form and its record says so.
+  `KiloRenderer` emits `permission: {kyber-weave_*: allow}` for every entitled agent. Kilo's
+  permission map is an **approval** lattice, not a visibility allow-list: `allow` runs a call
+  without the ask prompt and hides nothing, and only a `deny` whose pattern is `*` removes a tool
+  from the model. MCP tools are keyed `{server}_{tool}` with the server name sanitized only
+  outside `[a-zA-Z0-9_-]`, so the hyphen survives and the wildcard is `kyber-weave_*` — an
+  underscore spelling parses and matches nothing. The grant matters most on a headless subagent,
+  whose ask fails closed; it restricts nothing. An unentitled agent emits no `permission` key,
+  which is the withholding, because a `deny` would assert a decision the capability lattice cannot
+  derive. `AntigravityRenderer` emits an `mcpServers` array entry `{name, command, args}` for every
+  entitled agent, with `command` and `args` read from the squad's own `mcp.json`, so the rendered
+  line is the one the operator's MCP configuration launches; a missing or malformed declaration
+  yields no entry. MCP names never enter that target's `tools:` list — Antigravity resolves it
+  against its executor registry and fails fast on an unmapped name — and no `enable_mcp_tools` key
+  is emitted, because a frontmatter-declared server is not gated by it. On both Kilo and
+  Antigravity the server half stays the operator's: Kilo's `mcp` key in `kilo.jsonc`, and
+  Antigravity's workspace `.agents/mcp_config.json`. Cursor,
+  Codex, and Warp carry no per-agent key at all: Cursor subagents inherit every parent tool
+  including MCP, Codex custom agents inherit the parent's MCP servers and cannot override them,
+  and Squad's Warp surface is role skills, which carry no tool scoping. A per-agent key invented
+  for any of the three would be a claim the harness does not honour.
 - **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:
   `CopilotRenderer` appends the `<name>/*` tool entry and the overlay text
   (`agents/conductor/overlays/operator-channel.md`) to the conductor only when the gate holds. The gate
@@ -1386,6 +1516,7 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — Lock and receipt state in the user home, the project registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) — the widened `kyber-weave` MCP grant, the narrowed carve-out, and the per-target grant forms
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 
@@ -33,11 +35,51 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// recorded as <c>permission-not-expressible</c>. Declared skills carry no frontmatter capability
 /// keys, only identity and license.
 /// </para>
+/// <para>
+/// <b>MCP reach is declared per agent, in <c>mcpServers</c>, and nowhere else.</b> The
+/// <c>kyber-weave</c> server is granted to every agent whose capability profile resolves and allows
+/// <c>filesystem.read</c> — <c>conductor</c> included, because the server carries
+/// <c>agent_coding_standards</c> and the role that assigns work is the role deciding which standards
+/// apply to whom (ADR 0050). The grant goes through
+/// <see cref="CapabilityDegradations.GrantsUniversalMcpServers"/>, the one shared predicate, rather
+/// than a renderer-local copy of the rule. The pure-orchestrator carve-out that survives for
+/// <c>codegraph</c> and <c>context7</c> is not expressed here: this renderer declares neither
+/// server, so there is nothing to withhold from anyone.
+/// </para>
+/// <para>
+/// The emitted entry shape was live-probed against the installed <c>agy</c> 1.4.12 rather than read
+/// off vendor documentation, following the discipline ADR 0022 established for every Antigravity
+/// capability: <c>mcpServers</c> is an array of objects, each entry
+/// <c>{name, command, args}</c>, and that entry — not the single-key map spelling
+/// <c>- kyber-weave: {command, args}</c>, which listed and ran but was never called — is the one the
+/// probe invoked successfully. <c>args</c> carries <c>--repo-root .</c>, workspace-relative, because
+/// an absolute path can be overridden by a same-named global server definition and because
+/// workspace-relative is what the rest of Squad emits.
+/// </para>
+/// <para>
+/// Three probe findings bound this emission. The <c>tools</c> allow-list does <b>not</b> gate MCP
+/// availability — an agent whose tools list held only <c>view_file</c> still called an MCP tool — so
+/// no MCP tool name is added there, and none may ever be: Antigravity validates <c>tools</c> entries
+/// against its executor registry and fails fast on an unmapped name
+/// (<c>unknown component: tool "..." not found in registry</c>, surfaced on stderr with exit code
+/// 0, so the failure is silent to a caller reading only the exit code). <c>enable_mcp_tools: false</c>
+/// does not block a server declared in frontmatter either, so no such key is emitted to enable one.
+/// Unknown frontmatter keys are ignored, which is why the entry has to be exactly the probed shape
+/// rather than merely a plausible one.
+/// </para>
 /// </remarks>
 public sealed class AntigravityRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".agents/agents";
     private const string SkillsDirectory = ".agents/skills";
+
+    /// <summary>
+    /// The server every read-entitled agent gets, and the only one this target declares. Named here
+    /// because the grant is a property of the squad's own <c>mcp.json</c> entry whose launch
+    /// definition is emitted verbatim; a second server would need its own declaration and its own
+    /// probe before it could be rendered (ADR 0050 decision 7).
+    /// </summary>
+    private const string UniversalMcpServer = "kyber-weave";
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -95,6 +137,18 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
 
+        // Read once: the launch definition comes from the squad's own declaration, so no renderer
+        // holds a second copy of the command line that could drift from mcp.json.
+        McpServerDeclaration? kyberWeaveServer = ResolveUniversalMcpServer(source);
+
+        // A null server has two causes that must not be conflated: the squad never declared the key,
+        // or it declared it in a form the loader rejects. The roster names the tools either way, so
+        // the first case is a squad whose mcp.json has been renamed or truncated, and every agent
+        // silently loses the grant. The second is rejected at load time and is not reported here.
+        McpDeclarationShape mcpShape = ReadMcpShape(source.McpConfiguration);
+        bool universalToolsDeclared =
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools).Count > 0;
+
         // Emit canonical skills first, preserving the established ordering.
         foreach (SquadSkill skill in source.Skills)
         {
@@ -109,6 +163,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 agent,
                 source.CapabilityProfiles,
                 source.ModelProfiles,
+                kyberWeaveServer,
                 request.Scope));
         }
 
@@ -121,7 +176,10 @@ public sealed class AntigravityRenderer : ISquadRenderer
             SquadDegradationRecord? permission = BuildPermissionDegradation(
                 agent,
                 source.CapabilityProfiles.Profiles,
-                capabilityVocabulary);
+                capabilityVocabulary,
+                kyberWeaveServer,
+                mcpShape,
+                universalToolsDeclared);
             if (permission is not null)
             {
                 degradations.Add(permission);
@@ -191,6 +249,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         SquadAgent agent,
         SquadCapabilityProfiles capabilityProfiles,
         SquadModelProfiles modelProfiles,
+        McpServerDeclaration? kyberWeaveServer,
         SquadDeploymentScope scope)
     {
         ValidateCanonicalName(agent.Name);
@@ -212,7 +271,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
 
         // Key order: name, description, model, tools, enable_write_tools,
-        // enable_subagent_tools, reasoning_effort, mainAgent (conductor only)
+        // enable_subagent_tools, reasoning_effort, mainAgent (conductor only), mcpServers
         YamlMappingNode frontmatter = new();
         frontmatter.Add("name", agent.Name);
         frontmatter.Add("description", ToSingleLineScalar(agent.Description));
@@ -258,6 +317,19 @@ public sealed class AntigravityRenderer : ISquadRenderer
             frontmatter.Add("reasoning_effort", reasoningEffort);
         }
 
+        // mcpServers: the grant vehicle this harness actually reads. Entitlement is the shared
+        // rule, so the conductor is granted here like any other read-entitled profile (ADR 0050).
+        // The name is deliberately absent from 'tools': Antigravity resolves that list against its
+        // executor registry, and an MCP tool name is not a registry component. The server is also
+        // not gated by 'enable_mcp_tools', so no key is emitted to switch it on.
+        if (kyberWeaveServer is not null &&
+            CapabilityDegradations.GrantsUniversalMcpServers(
+                agent.CapabilityProfile,
+                capabilityProfiles.Profiles))
+        {
+            frontmatter.Add("mcpServers", BuildMcpServersNode(kyberWeaveServer));
+        }
+
         string yaml;
         lock (SerializerLock)
         {
@@ -287,6 +359,122 @@ public sealed class AntigravityRenderer : ISquadRenderer
             Encoding.UTF8.GetBytes(builder.ToString()),
             "antigravity");
     }
+
+    /// <summary>
+    ///     The shape of the raw MCP declaration: whether <c>mcpServers</c> is a well-formed object, and whether it
+    ///     carries the <c>kyber-weave</c> key.
+    /// </summary>
+    /// <param name="IsObject">Whether <c>mcpServers</c> exists and is a JSON object.</param>
+    /// <param name="DeclaresUniversalServer">Whether that object carries the <c>kyber-weave</c> key.</param>
+    /// <remarks>
+    ///     <see cref="ResolveUniversalMcpServer"/> answers null for a missing key, a missing <c>mcpServers</c>
+    ///     object, and an unusable entry alike. Only the first is an operator-visible misconfiguration: a source
+    ///     that declares no <c>mcpServers</c> object at all, or one whose entry the loader rejects, has nothing to
+    ///     report to the agent, because the loader rejects those states before a real source reaches this renderer.
+    /// </remarks>
+    private readonly record struct McpDeclarationShape(bool IsObject, bool DeclaresUniversalServer);
+
+    private static McpDeclarationShape ReadMcpShape(JsonElement mcpConfiguration)
+    {
+        if (mcpConfiguration.ValueKind != JsonValueKind.Object
+            || !mcpConfiguration.TryGetProperty("mcpServers", out JsonElement servers)
+            || servers.ValueKind != JsonValueKind.Object)
+        {
+            return new McpDeclarationShape(false, false);
+        }
+
+        return new McpDeclarationShape(
+            true,
+            servers.TryGetProperty(CapabilityDegradations.UniversalMcpServer, out _));
+    }
+
+    /// <summary>
+    /// The launch definition the squad's own <c>mcp.json</c> declares for
+    /// <see cref="UniversalMcpServer"/>, or <see langword="null"/> when it declares none.
+    /// </summary>
+    /// <remarks>
+    /// The declaration is the source rather than a literal in this file, so the rendered command
+    /// line is the one the operator's MCP configuration is written to launch. A missing, malformed,
+    /// or renamed entry yields <see langword="null"/> — the fail-closed answer — because emitting a
+    /// guessed command would point the agent at a server nothing is configured to start. The
+    /// canonical source loader has already validated the shape (<c>command</c> a non-empty string,
+    /// <c>args</c> a string array), so the checks here guard a hand-built
+    /// <see cref="SquadSource"/> rather than the shipped JSON.
+    /// </remarks>
+    private static McpServerDeclaration? ResolveUniversalMcpServer(SquadSource source)
+    {
+        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object ||
+            !servers.TryGetProperty(UniversalMcpServer, out JsonElement server) ||
+            server.ValueKind != JsonValueKind.Object ||
+            !server.TryGetProperty("command", out JsonElement commandElement) ||
+            !server.TryGetProperty("args", out JsonElement argsElement) ||
+            argsElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        string? command = commandElement.ValueKind == JsonValueKind.String
+            ? commandElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return null;
+        }
+
+        List<string> args = [];
+        foreach (JsonElement arg in argsElement.EnumerateArray())
+        {
+            // Asked exactly the way the command branch above asks it: is this element the kind the
+            // declaration requires? GetString alone would not answer that — it throws for any kind
+            // but String or Null, so a numeric, boolean, or object element would raise during render
+            // instead of withholding the grant, and the caller would see an exception where this
+            // method promises a null. A malformed element is one more reason to reject the whole
+            // declaration, which is the same answer every other branch gives.
+            string? value = arg.ValueKind == JsonValueKind.String ? arg.GetString() : null;
+            if (value is null)
+            {
+                return null;
+            }
+
+            args.Add(value);
+        }
+
+        return new McpServerDeclaration(UniversalMcpServer, command, args);
+    }
+
+    /// <summary>
+    /// The <c>mcpServers</c> sequence an agent's frontmatter carries: one entry, in the shape the
+    /// live probe called successfully.
+    /// </summary>
+    /// <remarks>
+    /// Each entry is an object with <c>name</c>, <c>command</c>, and <c>args</c>. The alternative
+    /// spelling — a sequence whose items each map the server name to its definition — listed and ran
+    /// under <c>agy</c> 1.4.12 but was never actually invoked, so it is not emitted: an unverified
+    /// shape is a guess, and a guessed grant is a fabricated one (ADR 0022's discipline). <c>args</c>
+    /// is written as a flow sequence to keep it on one line beside the command it belongs to.
+    /// </remarks>
+    private static YamlSequenceNode BuildMcpServersNode(McpServerDeclaration declaration)
+    {
+        YamlSequenceNode args = new() { Style = SequenceStyle.Flow };
+        foreach (string arg in declaration.Args)
+        {
+            args.Add(arg);
+        }
+
+        YamlMappingNode entry = new();
+        entry.Add("name", declaration.Name);
+        entry.Add("command", declaration.Command);
+        entry.Add("args", args);
+
+        return new YamlSequenceNode(entry);
+    }
+
+    /// <summary>
+    /// A declared MCP server's launch definition, carried from the source to the frontmatter entry
+    /// without either holding a second copy of the command line.
+    /// </summary>
+    private sealed record McpServerDeclaration(string Name, string Command, IReadOnlyList<string> Args);
 
     private static string[] ResolveToolsForAgent(
         SquadAgent agent,
@@ -412,7 +600,10 @@ public sealed class AntigravityRenderer : ISquadRenderer
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        McpServerDeclaration? kyberWeaveServer,
+        McpDeclarationShape mcpShape,
+        bool universalToolsDeclared)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -447,7 +638,31 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         if (notIsolable is not null)
         {
-            return notIsolable;
+            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
+            if (missingServer is not null)
+            {
+                // A shell-escape agent in a squad that dropped the server would otherwise lose the
+                // grant with only the shell-escape record to show for it. The grant gap is a separate
+                // condition from the shell gap, so it rides along in the same per-agent record rather
+                // than being skipped by this early return. The entitlement check rides along too: a
+                // profile that also denies filesystem.read stays grantless after the server comes
+                // back, and only this record can say so.
+                return notIsolable with
+                {
+                    Details = JoinSentences(
+                        notIsolable.Details,
+                        WithEntitlementGap(missingServer, agent.CapabilityProfile, capabilityProfiles)),
+                };
+            }
+
+            // No usable declaration at all: the shell gap is still reported, and a denying profile
+            // is still worth naming, because the grant would be withheld even with a declaration.
+            // The sentence names only the entitlement, never a server, so the pinned silence for
+            // malformed declarations stands for entitled profiles.
+            string? entitlementGap = EntitlementGapSentence(agent.CapabilityProfile, capabilityProfiles);
+            return entitlementGap is null
+                ? notIsolable
+                : notIsolable with { Details = JoinSentences(notIsolable.Details, entitlementGap) };
         }
 
         // If process.execute is not the gap, check for other capability constraints
@@ -458,7 +673,32 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 decision != SquadPermissionDecision.Deny)
             .ToList();
 
-        if (constrained.Count == 0)
+        List<string> details = [];
+        if (constrained.Count > 0)
+        {
+            details.Add(
+                $"Capability profile '{agent.CapabilityProfile}' constrains " +
+                $"{string.Join(", ", constrained)} but Antigravity agent frontmatter cannot fully express " +
+                "permission boundaries; the deployed agent's behaviour is governed by the capability " +
+                "profile and the harness default interaction model.");
+        }
+
+        // The MCP sentence states the actual condition and only when it holds. A granted agent's
+        // frontmatter carries the entry, so a withholding claim beside it would contradict the
+        // render; an ungranted agent carries the sentence naming what it lost and the rule that lost
+        // it, which is the only way the two outcomes are distinguishable in this stream.
+        string? withheldMcp = DescribeWithheldMcp(
+            agent.CapabilityProfile,
+            capabilityProfiles,
+            kyberWeaveServer,
+            mcpShape,
+            universalToolsDeclared);
+        if (withheldMcp is not null)
+        {
+            details.Add(withheldMcp);
+        }
+
+        if (details.Count == 0)
         {
             return null;
         }
@@ -469,10 +709,123 @@ public sealed class AntigravityRenderer : ISquadRenderer
             agent.Name,
             "permission-not-expressible",
             agent.BodyDigest,
-            $"Capability profile '{agent.CapabilityProfile}' constrains " +
-            $"{string.Join(", ", constrained)} but Antigravity agent frontmatter cannot fully express " +
-            "permission boundaries; the deployed agent's behaviour is governed by the capability " +
-            "profile and the harness default interaction model.");
+            string.Join(" ", details));
+    }
+
+    /// <summary>
+    /// The sentence a degradation record carries when the <c>kyber-weave</c> grant did not reach the
+    /// agent, or <see langword="null"/> when there is nothing withheld to report.
+    /// </summary>
+    /// <remarks>
+    /// Three outcomes, not two. The squad may declare no such server — nothing was granted, so
+    /// nothing was withheld and the record says nothing. The profile may satisfy the entitlement, in
+    /// which case the frontmatter carries the entry and the sentence would be untrue. Only a profile
+    /// outside the rule reaches the sentence, and it names the one server, the profile, and the
+    /// capability the entitlement rests on, so a reader does not have to re-derive which of several
+    /// conditions removed the grant.
+    /// </remarks>
+    private static string? DescribeWithheldMcp(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        McpServerDeclaration? kyberWeaveServer,
+        McpDeclarationShape mcpShape,
+        bool universalToolsDeclared)
+    {
+        if (kyberWeaveServer is null)
+        {
+            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
+            if (missingServer is not null)
+            {
+                // A missing declaration and a denying profile are two independent reasons the agent has
+                // no grant. Reporting only the first would hide the second: an operator who restores the
+                // server would watch this agent stay grantless with no record saying why.
+                return WithEntitlementGap(missingServer, profileName, capabilityProfiles);
+            }
+
+            // No usable declaration at all. Entitled profiles stay silent here — the loader rejects
+            // these states before a real source reaches this renderer — but a denying profile is still
+            // worth naming, since the grant would be withheld even with a declaration.
+            return EntitlementGapSentence(profileName, capabilityProfiles);
+        }
+
+        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+        {
+            return null;
+        }
+
+        return $"Declared MCP server '{kyberWeaveServer.Name}' is withheld from this agent: capability " +
+            $"profile '{profileName}' does not allow '{CapabilityDegradations.FileReadCapability}', " +
+            "which is the entitlement the kyber-weave grant rests on.";
+    }
+
+    /// <summary>
+    ///     The sentence for a squad whose declaration is missing the server while the roster still
+    ///     declares its tools, or <see langword="null"/> when there is nothing to report.
+    /// </summary>
+    /// <remarks>
+    ///     Only a well-formed <c>mcpServers</c> object without the key is an operator-visible
+    ///     misconfiguration. A source that declares no <c>mcpServers</c> object at all, or one whose
+    ///     entry the loader rejects, has nothing to report: the loader rejects those states before a
+    ///     real source reaches this renderer, so a record there would report a degradation the render
+    ///     does not have.
+    /// </remarks>
+    private static string? MissingServerSentence(McpDeclarationShape mcpShape, bool universalToolsDeclared)
+    {
+        // The roster declares the tools, so the grant is intended; the squad's mcp.json simply has
+        // no server under that name. Nothing was withheld — there was nothing to withhold — so this
+        // is a configuration record, not a withholding claim, and it is the only signal an operator
+        // gets for a renamed or dropped declaration.
+        return universalToolsDeclared && mcpShape.IsObject && !mcpShape.DeclaresUniversalServer
+            ? "The toolchain roster declares the kyber-weave MCP tools, but the squad's mcp.json " +
+              "declares no 'kyber-weave' server, so no per-agent grant could be emitted. Add the " +
+              "server back under that exact name."
+            : null;
+    }
+
+    /// <summary>
+    /// Appends the denied-entitlement clause to a missing-server sentence when the profile would
+    /// stay grantless even with the server declared, and returns the sentence unchanged otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Both call sites — the D10 early return and the null-server branch — go through this one
+    /// helper so a triple-gap agent is reported the same way on either path.
+    /// </remarks>
+    private static string WithEntitlementGap(
+        string missingServer,
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+        {
+            return missingServer;
+        }
+
+        return missingServer + " Capability profile '" + profileName + "' also does not allow '" +
+            CapabilityDegradations.FileReadCapability + "', so this agent would not receive the " +
+            "grant even with the server declared.";
+    }
+
+    /// <summary>
+    /// The entitlement-only sentence for a squad whose declaration cannot be resolved at all:
+    /// no <c>mcpServers</c> object, or an entry the loader rejects. Names only the denying profile,
+    /// never a server, so the pinned silence for malformed declarations stands for entitled profiles.
+    /// </summary>
+    private static string? EntitlementGapSentence(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        return CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
+            ? null
+            : $"Capability profile '{profileName}' does not allow " +
+              $"'{CapabilityDegradations.FileReadCapability}', so no per-agent grant could be emitted " +
+              "for this agent.";
+    }
+
+    /// <summary>
+    /// Joins two single-line detail sentences, tolerating a missing first half.</summary>
+    private static string JoinSentences(string? first, string second)
+    {
+        return string.IsNullOrWhiteSpace(first) ? second : first + " " + second;
     }
 
     /// <summary>

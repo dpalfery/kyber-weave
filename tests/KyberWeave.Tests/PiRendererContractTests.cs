@@ -50,7 +50,8 @@ public sealed class PiRendererContractTests : IDisposable
     /// plain <c>tools:</c> names must be built-ins and subagents inherit the
     /// <c>-builtin:mcp</c> global opt-out — so it is refused under the unknown-name rule).
     /// Web access arrives only via the canonical agent-file overlay (<c>pi-extensions</c> /
-    /// <c>pi-tools</c>, pinned by <c>RenderAsync_Pi_ResearchAgentRendersVerifiedOverlayWiring</c>).
+    /// <c>pi-tools</c>, pinned by
+    /// <c>RenderAsync_Pi_ResearchAgentKeepsItsDeclaredContext7OverlayAlongsideTheDerivedGrant</c>).
     /// <c>network.publish</c> remains absent because Pi has no built-in tool for it.
     /// <c>delegate</c> is handled separately because it produces
     /// <c>allowed_subagents</c>, not a tool.
@@ -67,9 +68,10 @@ public sealed class PiRendererContractTests : IDisposable
     private static readonly string[] ToolOrder = ["read", "grep", "find", "ls", "edit", "write", "bash"];
 
     /// <summary>
-    /// The live-verified overlay wiring (plan D10, probe sequence 2026-10-24): the only
-    /// <c>pi-tools</c> entries any canonical agent may declare. The renderer appends them
-    /// after the capability-derived CSV in declared canonical order.
+    /// The live-verified overlay wiring (plan D10, probe sequence 2026-10-24):
+    /// <c>research-agent</c>'s declared <c>pi-tools</c>. The renderer emits them after the
+    /// capability-derived CSV in declared canonical order, then the derived <c>kyber-weave</c>
+    /// entries this suite pins separately.
     /// </summary>
     private static readonly string[] ResearchAgentOverlayTools =
     [
@@ -77,6 +79,22 @@ public sealed class PiRendererContractTests : IDisposable
         "ext:pi-mcp-adapter/mcp__context7__resolve_library_id",
         "ext:pi-mcp-adapter/mcp__context7__query_docs",
     ];
+
+    /// <summary>The extension id the derived overlay is carried by.</summary>
+    private const string PiMcpAdapterExtension = "pi-mcp-adapter";
+
+    /// <summary>The adapter's proxy tool, which reaches any configured MCP server by name.</summary>
+    private const string PiMcpProxyToolEntry = "ext:pi-mcp-adapter/mcp";
+
+    /// <summary>The server ADR 0050 widens to every read-entitled agent.</summary>
+    private const string KyberWeaveServer = "kyber-weave";
+
+    /// <summary>
+    /// The namespace the adapter gives <c>kyber-weave</c>: the server name with <c>-</c> mapped
+    /// to <c>_</c> before any other character is replaced, so <c>mcp__kyber_weave__*</c> and
+    /// never <c>mcp__kyber-weave__*</c>.
+    /// </summary>
+    private const string KyberWeaveNamespace = "kyber_weave";
 
     /// <summary>
     /// Shared identities are read from the loaded fallback profiles so this suite follows
@@ -113,6 +131,81 @@ public sealed class PiRendererContractTests : IDisposable
         }
 
         return ToolOrder.Where(tool => granted.Contains(tool)).ToArray();
+    }
+
+    /// <summary>
+    /// The overlay entries the renderer derives for a <c>kyber-weave</c> grant on the adapter's
+    /// deferred/tool-search surface: the proxy entry, then one entry per tool
+    /// <c>toolchain.yml</c> declares for that server, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    /// Spelled here from the roster and the adapter's published naming rule rather than read
+    /// back from <see cref="PiRenderer"/>. A suite that took the answer from the renderer could
+    /// not disagree with it, so a renderer that dropped the grant, dropped a roster tool,
+    /// reordered them, or emitted the hyphenated namespace would satisfy its own expectation.
+    /// </remarks>
+    private static IReadOnlyList<string> DerivedKyberWeaveOverlayTools(SquadSource source)
+    {
+        return
+        [
+            PiMcpProxyToolEntry,
+            .. source.Toolchain.RequiredMcpTools[KyberWeaveServer]
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"ext:{PiMcpAdapterExtension}/mcp__{KyberWeaveNamespace}__{PiDeferredToolName(tool)}")
+        ];
+    }
+
+    /// <summary>
+    /// The adapter's tool segment: every character outside <c>[A-Za-z0-9_]</c> becomes
+    /// <c>_</c>, which is what spells <c>query-docs</c> as <c>query_docs</c>.
+    /// </summary>
+    private static string PiDeferredToolName(string toolName)
+    {
+        return string.Concat(toolName.Select(
+            character => char.IsAsciiLetterOrDigit(character) || character == '_' ? character : '_'));
+    }
+
+    /// <summary>
+    /// The <c>tools</c> CSV one agent is expected to render: the capability-derived built-ins,
+    /// then the agent's declared <c>pi-tools</c>, then the derived overlay minus anything already
+    /// present — the merge order the <see cref="PiRenderer"/> remarks state.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedTools(SquadSource source, SquadAgent agent)
+    {
+        List<string> tools = [.. ComputeExpectedTools(source.CapabilityProfiles.Profiles[agent.CapabilityProfile])];
+        HashSet<string> seen = new(tools, StringComparer.Ordinal);
+
+        IEnumerable<string> derived = SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Pi)
+            ? DerivedKyberWeaveOverlayTools(source)
+            : [];
+
+        foreach (string entry in agent.PiTools.Concat(derived))
+        {
+            if (seen.Add(entry))
+            {
+                tools.Add(entry);
+            }
+        }
+
+        return tools;
+    }
+
+    /// <summary>
+    /// The <c>extensions</c> sequence one agent is expected to render: its declared
+    /// <c>pi-extensions</c>, with <c>pi-mcp-adapter</c> appended for a granted agent that did not
+    /// declare it. An agent outside the grant keeps exactly what it declared, so its untouched
+    /// declaration is not evidence the renderer granted anything.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedExtensions(SquadSource source, SquadAgent agent)
+    {
+        List<string> extensions = [.. agent.PiExtensions];
+        if (SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Pi) &&
+            !extensions.Contains(PiMcpAdapterExtension, StringComparer.Ordinal))
+        {
+            extensions.Add(PiMcpAdapterExtension);
+        }
+
+        return extensions;
     }
 
     /// <summary>
@@ -328,13 +421,7 @@ public sealed class PiRendererContractTests : IDisposable
             }
 
             SquadCapabilityProfile capabilityProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            IReadOnlyList<string> expectedTools = ComputeExpectedTools(capabilityProfile);
-            if (string.Equals(agent.Name, "research-agent", StringComparison.Ordinal))
-            {
-                // D10 overlay scope: research-agent alone carries the live-verified wiring.
-                // The renderer appends the declared pi-tools after the capability-derived CSV.
-                expectedTools = [.. expectedTools, .. ResearchAgentOverlayTools];
-            }
+            IReadOnlyList<string> expectedTools = ExpectedTools(source, agent);
 
             string rawTools = RequireScalar(frontmatter, "tools", agent.Name);
             IReadOnlyList<string> actualTools = ParseCsvList(rawTools);
@@ -352,13 +439,16 @@ public sealed class PiRendererContractTests : IDisposable
                 Assert.Equal("none", rawTools);
             }
 
-            if (string.Equals(agent.Name, "research-agent", StringComparison.Ordinal))
+            // The declared overlay is the vehicle for everything outside the derived grant, and
+            // the derived grant is what turns the key from `false` into a sequence.
+            IReadOnlyList<string> expectedExtensions = ExpectedExtensions(source, agent);
+            if (expectedExtensions.Count == 0)
             {
-                AssertExtensionsSequence(frontmatter, "research-agent", ["pi-mcp-adapter"]);
+                Assert.Equal("false", RequireScalar(frontmatter, "extensions", agent.Name));
             }
             else
             {
-                Assert.Equal("false", RequireScalar(frontmatter, "extensions", agent.Name));
+                AssertExtensionsSequence(frontmatter, agent.Name, [.. expectedExtensions]);
             }
 
             bool delegateAllowed =
@@ -410,18 +500,19 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Deployed-wiring pin for the 2026-10-24 reversal (plan D1/D9/D10/D11): the read-only
-    /// <c>research-agent</c> renders the verified overlay wiring — <c>extensions:</c> as the
-    /// YAML sequence <c>[pi-mcp-adapter]</c> (the exact form proven live) and the three
-    /// <c>ext:</c> tools appended after the seven-tool capability CSV — with <c>bash</c>
-    /// absent, proving the read-only no-shell boundary survived the change. No <c>mcp</c>
-    /// token: bare <c>mcp</c> is refused by the loader's unknown-name rule. This renders the
-    /// real canonical source, so it transitively guards both the canonical declaration and
-    /// the renderer emission.
+    /// The declared overlay survives the derived grant. <c>research-agent</c> renders the
+    /// verified wiring of the 2026-10-24 reversal (plan D1/D9/D10/D11) — <c>extensions:</c> as
+    /// the YAML sequence <c>[pi-mcp-adapter]</c>, the exact form proven live, and its three
+    /// declared <c>ext:</c> tools after the capability CSV — and now carries the derived
+    /// <c>kyber-weave</c> entries after them, which is the merge order rather than a replacement.
+    /// <c>bash</c> stays absent (the read-only no-shell boundary), no bare <c>mcp</c> token
+    /// appears (the loader's unknown-name rule), and the <c>context7</c> pair appears once —
+    /// the derived grant reuses the agent's declared proxy entry rather than repeating it.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Pi_ResearchAgentRendersVerifiedOverlayWiring()
+    public async Task RenderAsync_Pi_ResearchAgentKeepsItsDeclaredContext7OverlayAlongsideTheDerivedGrant()
     {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -433,11 +524,29 @@ public sealed class PiRendererContractTests : IDisposable
             Encoding.UTF8.GetString(file.Content.Span),
             "research-agent");
 
+        IReadOnlyList<string> tools = ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent"));
+
+        SquadAgent researchAgent = Assert.Single(source.Agents, agent => agent.Name == "research-agent");
+        string[] builtIns =
+            [.. ComputeExpectedTools(source.CapabilityProfiles.Profiles[researchAgent.CapabilityProfile])];
+
+        // The derived list starts with the proxy entry the agent already declares, so it
+        // contributes only the kyber-weave names. Building the expectation this way states the
+        // merge rule a second time rather than delegating it to the shared helper.
+        string[] derivedKyberWeave =
+        [
+            .. DerivedKyberWeaveOverlayTools(source)
+                .Where(entry => !ResearchAgentOverlayTools.Contains(entry, StringComparer.Ordinal))
+        ];
+
+        Assert.Equal([.. builtIns, .. ResearchAgentOverlayTools, .. derivedKyberWeave], tools);
         Assert.Equal(
-            ["read", "grep", "find", "ls", .. ResearchAgentOverlayTools],
-            ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
-        Assert.DoesNotContain("bash", ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
-        Assert.DoesNotContain("mcp", ParseCsvList(RequireScalar(frontmatter, "tools", "research-agent")));
+            tools.Count,
+            tools.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain("bash", tools);
+        Assert.DoesNotContain("mcp", tools);
+        Assert.Contains("ext:pi-mcp-adapter/mcp__context7__resolve_library_id", tools);
+        Assert.Contains("ext:pi-mcp-adapter/mcp__context7__query_docs", tools);
         AssertExtensionsSequence(frontmatter, "research-agent", ["pi-mcp-adapter"]);
         Assert.Contains(
             "extensions: [pi-mcp-adapter]",
@@ -446,10 +555,136 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Every agent whose capability profile resolves and allows <c>filesystem.read</c> carries
+    /// the derived <c>kyber-weave</c> overlay, whichever agent declares it — ADR 0050's decision,
+    /// and the reason <c>conductor</c>'s position in the roster changes nothing about its
+    /// entitlement. The hyphenated namespace spelling fails here deliberately: the adapter's
+    /// deferred surface maps <c>kyber-weave</c> to <c>kyber_weave</c>, so an entry spelled
+    /// <c>mcp__kyber-weave__*</c> resolves against no registered Pi tool.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_EveryReadEntitledSubagentCarriesTheDerivedKyberWeaveOverlay()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        IReadOnlyList<string> derived = DerivedKyberWeaveOverlayTools(source);
+
+        SquadAgent[] entitled = source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Subagent)
+            .Where(agent => SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Pi))
+            .ToArray();
+
+        // The canonical corpus entitles every profile to file read, so an empty set here would
+        // make the loop vacuous and this test meaningless.
+        Assert.NotEmpty(entitled);
+
+        foreach (SquadAgent agent in entitled)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".pi/agents/{agent.Name}.md");
+
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                agent.Name);
+
+            IReadOnlyList<string> tools = ParseCsvList(RequireScalar(frontmatter, "tools", agent.Name));
+
+            Assert.All(derived, entry => Assert.True(
+                tools.Contains(entry, StringComparer.Ordinal),
+                $"Agent '{agent.Name}' is entitled to '{KyberWeaveServer}' but renders no '{entry}'. " +
+                $"Rendered tools: {string.Join(", ", tools)}."));
+            Assert.DoesNotContain(tools, tool => tool.Contains("mcp__kyber-weave__", StringComparison.Ordinal));
+            Assert.Equal(tools.Count, tools.Distinct(StringComparer.Ordinal).Count());
+            AssertExtensionsSequence(frontmatter, agent.Name, [.. ExpectedExtensions(source, agent)]);
+        }
+    }
+
+    /// <summary>
+    /// An agent outside the entitlement renders no overlay of its own: <c>extensions: false</c>
+    /// and no <c>ext:</c> entry in <c>tools</c>. The derivation is entitlement-driven, so a
+    /// failure here is the renderer granting on something other than <c>filesystem.read</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_AgentsOutsideTheFileReadEntitlementRenderNoOverlay()
+    {
+        using PiFileReadDeniedFixture fixture = PiFileReadDeniedFixture.Create();
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+
+        SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == PiFileReadDeniedFixture.TestAgentName);
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Pi),
+            $"Fixture profile '{PiFileReadDeniedFixture.DeniedProfileName}' must deny "
+            + "'filesystem.read', or this test cannot observe a non-entitled agent.");
+
+        SquadRendererRegistry registry = new([new PiRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Pi],
+            Scope: SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{agent.Name}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent.Name);
+
+        Assert.Equal("false", RequireScalar(frontmatter, "extensions", agent.Name));
+        IReadOnlyList<string> tools = ParseCsvList(RequireScalar(frontmatter, "tools", agent.Name));
+        Assert.DoesNotContain(tools, tool => tool.StartsWith("ext:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <c>conductor</c> is entitled to <c>kyber-weave</c> but cannot carry it on Pi: a primary
+    /// agent lowers to a top-level skill, which declares no <c>tools</c> or <c>extensions</c>.
+    /// The projection that loses the grant has to say so — a silent absence is indistinguishable
+    /// from the grant never having been decided.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_LoweredPrimarySkillRecordsTheKyberWeaveGrantItCannotCarry()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Pi),
+            "ADR 0050 entitles the pure orchestrator to 'kyber-weave'.");
+        Assert.DoesNotContain(result.Files, f => f.RelativePath == $".pi/agents/{conductor.Name}.md");
+
+        SquadDeploymentFile skill = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/skills/{conductor.Name}/SKILL.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skill.Content.Span),
+            conductor.Name);
+
+        Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("tools")));
+        Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("extensions")));
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == conductor.Name && d.Code == "permission-not-expressible");
+
+        Assert.Contains(KyberWeaveServer, record.Details ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("skill", record.Details ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An agent whose capability profile denies every built-in must still render a
     /// <c>tools</c> CSV carrying exactly its declared <c>pi-tools</c> overlay entries:
     /// the overlay is appended after the (here empty) capability-derived CSV rather than
-    /// collapsing to <c>none</c> or leaking a built-in.
+    /// collapsing to <c>none</c> or leaking a built-in. The profile also denies
+    /// <c>filesystem.read</c>, so this is the declared-overlay case for an agent outside the
+    /// ADR 0050 grant: what renders is what the canonical body declared, and nothing derived.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools()
@@ -1304,9 +1539,11 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
 /// Copies the real <c>products/kyber-squad</c> corpus, adds a capability profile denying
 /// every built-in, and repoints one delegate-free agent at it with a <c>pi-tools</c>
 /// overlay, so <see cref="PiRendererContractTests.RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools"/>
-/// can observe an overlay-only <c>tools</c> CSV. The agent keeps only capability-free
-/// Copilot tools (<c>vscode/toolSearch</c>, <c>vscode/askQuestions</c>, <c>todo</c>) so the
-/// repointed profile still passes the Copilot cross-check.
+/// can observe an overlay-only <c>tools</c> CSV. The profile denies <c>filesystem.read</c> as
+/// well, which makes the agent a declared-overlay case outside the ADR 0050 grant. The agent
+/// keeps only capability-free Copilot tools (<c>vscode/toolSearch</c>,
+/// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
+/// cross-check.
 /// </summary>
 internal sealed class PiOverlayOnlyFixture : IDisposable
 {
@@ -1352,6 +1589,73 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
                 "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]\n" +
                 "pi-extensions: [pi-mcp-adapter]\n" +
                 "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]",
+                StringComparison.Ordinal);
+
+        if (string.Equals(original, mutated, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{agentPath}' to carry the read-only profile and full Copilot roster to repoint.");
+        }
+
+        File.WriteAllText(agentPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return fixture;
+    }
+
+    public void Dispose() => _temp.Dispose();
+}
+
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus, adds a capability profile denying
+/// every capability, and repoints one agent with no declared Pi overlay at it, so
+/// <see cref="PiRendererContractTests.RenderAsync_Pi_AgentsOutsideTheFileReadEntitlementRenderNoOverlay"/>
+/// can observe the <c>extensions: false</c> default for an agent outside the ADR 0050 grant.
+/// The agent keeps only capability-free Copilot tools (<c>vscode/toolSearch</c>,
+/// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
+/// cross-check, exactly as <see cref="PiOverlayOnlyFixture"/> does.
+/// </summary>
+internal sealed class PiFileReadDeniedFixture : IDisposable
+{
+    internal const string TestAgentName = "review-triage";
+    internal const string DeniedProfileName = "pi-file-read-denied";
+
+    private readonly TempDirectory _temp = new();
+
+    private PiFileReadDeniedFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static PiFileReadDeniedFixture Create()
+    {
+        PiFileReadDeniedFixture fixture = new();
+        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+
+        string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
+        File.AppendAllText(
+            capabilitiesPath,
+            $"""
+              {DeniedProfileName}:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: deny
+            """,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        string agentPath = Path.Combine(fixture.ProductRoot, "agents", TestAgentName + ".md");
+        string original = File.ReadAllText(agentPath);
+        string mutated = original
+            .Replace("capability-profile: read-only", $"capability-profile: {DeniedProfileName}", StringComparison.Ordinal)
+            .Replace(
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, \"codegraph/*\", \"kyber-weave/*\", \"context7/resolve-library-id\", \"context7/query-docs\", search, web]",
+                "copilot-tools: [vscode/toolSearch, vscode/askQuestions, todo]",
                 StringComparison.Ordinal);
 
         if (string.Equals(original, mutated, StringComparison.Ordinal))

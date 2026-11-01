@@ -18,58 +18,54 @@ public static class SquadPacker
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
     /// <summary>
-    /// Creates the APM distribution archive containing canonical manifests, profiles, agents, and skills.
+    /// Creates the APM distribution archive containing canonical manifests, profiles, agents, and skills. The skills
+    /// under the optional companion root (<c>.apm/skills</c>) are packed beside the Squad skills.
     /// </summary>
     public static string PackApm(
         string sourcePath,
         string outDirectory,
-        string version)
+        string version,
+        string? companionSkillsRoot = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        Directory.CreateDirectory(outDirectory);
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-{version}.zip");
 
-        if (File.Exists(archivePath))
-        {
-            File.Delete(archivePath);
-        }
-
+        // Collect before touching the output folder, so a refused pack keeps the last good archive at this path.
         List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectApmEntries(sourcePath));
+            CollectApmEntries(sourcePath, companionSkillsRoot));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
-        WriteDeterministicZip(archivePath, entries);
+        Directory.CreateDirectory(outDirectory);
+        WriteArchive(archivePath, entries);
         return archivePath;
     }
 
     /// <summary>
     /// Creates the Agent Plugins v1.0.0 distribution archive containing canonical skills, MCP configuration, and plugin manifest.
+    /// The companion skills take the same skill trees as the APM archive, and add no agents.
     /// </summary>
     public static string PackPlugins(
         string sourcePath,
         string outDirectory,
-        string version)
+        string version,
+        string? companionSkillsRoot = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        Directory.CreateDirectory(outDirectory);
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-plugin-{version}.zip");
 
-        if (File.Exists(archivePath))
-        {
-            File.Delete(archivePath);
-        }
-
+        // Collect before touching the output folder, so a refused pack keeps the last good archive at this path.
         List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectPluginsEntries(sourcePath, version));
+            CollectPluginsEntries(sourcePath, version, companionSkillsRoot));
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
-        WriteDeterministicZip(archivePath, entries);
+        Directory.CreateDirectory(outDirectory);
+        WriteArchive(archivePath, entries);
         return archivePath;
     }
 
@@ -79,10 +75,11 @@ public static class SquadPacker
     public static (string ApmArchivePath, string PluginsArchivePath, string ChecksumFilePath) PackAll(
         string sourcePath,
         string outDirectory,
-        string version)
+        string version,
+        string? companionSkillsRoot = null)
     {
-        string apmArchive = PackApm(sourcePath, outDirectory, version);
-        string pluginsArchive = PackPlugins(sourcePath, outDirectory, version);
+        string apmArchive = PackApm(sourcePath, outDirectory, version, companionSkillsRoot);
+        string pluginsArchive = PackPlugins(sourcePath, outDirectory, version, companionSkillsRoot);
 
         string apmSha256 = ComputeSha256(File.ReadAllBytes(apmArchive));
         string pluginsSha256 = ComputeSha256(File.ReadAllBytes(pluginsArchive));
@@ -97,7 +94,9 @@ public static class SquadPacker
         return (apmArchive, pluginsArchive, checksumFilePath);
     }
 
-    private static List<(string RelativePath, byte[] Content)> CollectApmEntries(string sourcePath)
+    private static List<(string RelativePath, byte[] Content)> CollectApmEntries(
+        string sourcePath,
+        string? companionSkillsRoot)
     {
         List<(string RelativePath, byte[] Content)> entries = [];
 
@@ -132,10 +131,14 @@ public static class SquadPacker
             entries.Add((relPath, content));
         }
 
+        entries.AddRange(CollectCompanionEntries(sourcePath, companionSkillsRoot));
         return entries;
     }
 
-    private static List<(string RelativePath, byte[] Content)> CollectPluginsEntries(string sourcePath, string version)
+    private static List<(string RelativePath, byte[] Content)> CollectPluginsEntries(
+        string sourcePath,
+        string version,
+        string? companionSkillsRoot)
     {
         List<(string RelativePath, byte[] Content)> entries = [];
 
@@ -171,7 +174,21 @@ public static class SquadPacker
             }
         }
 
+        entries.AddRange(CollectCompanionEntries(sourcePath, companionSkillsRoot));
         return entries;
+    }
+
+    /// <summary>
+    /// The companion skills as archive entries. They are collected with the Squad entries, so the sort and the
+    /// response-preferences fill see one list, and an archive stays a function of its inputs.
+    /// </summary>
+    private static List<(string RelativePath, byte[] Content)> CollectCompanionEntries(
+        string sourcePath,
+        string? companionSkillsRoot)
+    {
+        return SquadCompanionSkills.Collect(sourcePath, companionSkillsRoot)
+            .Select(file => (file.RelativePath, ReadNormalizedFile(file.SourcePath)))
+            .ToList();
     }
 
     /// <summary>
@@ -223,13 +240,43 @@ public static class SquadPacker
         return ext is ".md" or ".yml" or ".yaml" or ".json" or ".toml" or ".txt" or ".ps1" or ".sh";
     }
 
-    private static void WriteDeterministicZip(string zipPath, List<(string RelativePath, byte[] Content)> entries)
+    /// <summary>
+    /// Writes one archive at <paramref name="archivePath"/>. The entries go to a temporary file beside the target, which
+    /// replaces the target only once the write is complete. A failed write therefore leaves the previous archive in place
+    /// and no partial zip. <paramref name="beforeEntry"/> runs before each entry is written; it exists so a test can fail
+    /// a write part way through, as a full disk would.
+    /// </summary>
+    internal static void WriteArchive(
+        string archivePath,
+        List<(string RelativePath, byte[] Content)> entries,
+        Action<string>? beforeEntry = null)
+    {
+        string temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            WriteDeterministicZip(temporaryPath, entries, beforeEntry);
+            File.Move(temporaryPath, archivePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static void WriteDeterministicZip(
+        string zipPath,
+        List<(string RelativePath, byte[] Content)> entries,
+        Action<string>? beforeEntry)
     {
         using FileStream fileStream = new(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
         using ZipArchive archive = new(fileStream, ZipArchiveMode.Create, leaveOpen: false);
 
         foreach ((string relPath, byte[] content) in entries)
         {
+            beforeEntry?.Invoke(relPath);
             ZipArchiveEntry entry = archive.CreateEntry(relPath, CompressionLevel.Optimal);
             entry.LastWriteTime = FixedTimestamp;
 

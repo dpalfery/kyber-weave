@@ -78,13 +78,72 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// <b><c>extensions</c>.</b> <c>extensions: false</c> loads no extensions for the agent —
-/// emitted unconditionally on every rendered agent without a canonical overlay per the owner's
-/// Q1-A decision, so Squad agents on Pi reach no CodeGraph, docs MCP, or web tooling beyond
-/// the seven built-ins. An agent declaring the canonical <c>pi-extensions</c> overlay instead
-/// emits that list as a YAML sequence (the exact form live-verified 2026-10-24; the CSV-scalar
-/// form is unverified and is not emitted).
+/// emitted on every rendered agent that carries no overlay of either kind, per the owner's
+/// Q1-A decision, so a role outside the MCP entitlement reaches no CodeGraph, docs MCP, or web
+/// tooling beyond the built-ins. An agent declaring the canonical <c>pi-extensions</c> overlay,
+/// or receiving the derived <c>kyber-weave</c> overlay described below, instead emits the
+/// merged list as a YAML sequence (the exact form live-verified 2026-10-24; the CSV-scalar form
+/// is unverified and is not emitted).
 /// This combines with <c>allowed_subagents</c> without conflict, because nested-subagent
 /// tools are injected directly rather than through a loaded extension.
+/// </para>
+/// <para>
+/// <b>Derived <c>kyber-weave</c> overlay (ADR 0050).</b> Every agent whose capability profile
+/// resolves and allows <c>filesystem.read</c> receives the <c>pi-mcp-adapter</c> extension and
+/// the <c>kyber-weave</c> tool entries even when its canonical body declares no overlay: the
+/// proxy entry <c>ext:pi-mcp-adapter/mcp</c> first, then one entry per tool
+/// <c>toolchain.yml</c> declares for that server. The pure-orchestrator carve-out does not
+/// apply to this server — <c>conductor</c> is entitled on the same file-read rule as every
+/// other agent — because <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and the role
+/// that assigns work is the role deciding which standards apply to whom. The declared
+/// <c>pi-extensions</c> and <c>pi-tools</c> remain the vehicle for everything else: the
+/// <c>context7</c> pair stays a hand-authored declaration on <c>research-agent</c>, the ADR 0019
+/// precedent for this overlay. The three lists merge rather than replace — built-ins, then
+/// declared entries, then derived ones — keeping first occurrence, so an agent that already
+/// declares the proxy tool renders it once.
+/// </para>
+/// <para>
+/// <b>Why the hyphen becomes an underscore.</b> The server name contains a hyphen and this
+/// surface does not. <c>pi-mcp-adapter</c>'s deferred/tool-search surface names a tool
+/// <c>mcp__&lt;namespace&gt;__&lt;tool&gt;</c>, where the namespace maps the server name with
+/// <c>-</c> to <c>_</c> before any other character is mapped, and the tool segment takes the
+/// same treatment. So this server's namespace is <c>kyber_weave</c> and its entries are
+/// <c>ext:pi-mcp-adapter/mcp__kyber_weave__agent_coding_standards</c> and its seven siblings,
+/// never <c>mcp__kyber-weave__*</c> — which resolves against no registered Pi tool. The
+/// <c>mcp__context7__query_docs</c> precedent in the corpus does not reveal the mapping, because
+/// that server name has no hyphen; the tool segment is what turns <c>query-docs</c> into
+/// <c>query_docs</c>. The hyphenated spelling exists only on the adapter's <i>direct</i>-tool
+/// surface (<c>kyber-weave_docs_status</c>), and this renderer never declares onto that surface:
+/// Squad's declarations target the <c>ext:</c> surface, so the underscored namespace is the
+/// one to use.
+/// </para>
+/// <para>
+/// <b>Version skew, checked.</b> The naming rule was verified against <c>pi-mcp-adapter</c>
+/// <b>7.0.0</b> (published 2026-10-25, the current release) by running its published
+/// <c>deferred-tool-surface.ts</c> <c>formatDeferredToolName</c> over this roster, which
+/// returned the eight underscored names above. It arrived in <b>6.0.0</b>: 5.4.0, which one
+/// machine here still runs, has no per-tool deferred registration at all and would name these
+/// tools <c>kyber-weave_agent_coding_standards</c>, so 5.x cannot be the target — the corpus's
+/// checked-in <c>mcp__context7__resolve_library_id</c> entry resolves on no version before
+/// 6.0.0 either. An operator still on 5.x keeps the <c>mcp</c> proxy entry working and loses
+/// only the enumerable per-tool names.
+/// </para>
+/// <para>
+/// <b>Server configuration stays the operator's.</b> Squad writes no harness settings file (the
+/// standing no-settings decision). The adapter reads its servers from a project
+/// <c>.mcp.json</c>, a user-global <c>~/.config/mcp/mcp.json</c>, <c>~/.agents/mcp.json</c>, or
+/// Pi's own agent-directory <c>mcp.json</c>, and a project-scoped server needs a trust approval
+/// on first use. This renderer declares the extension and the tool ids and configures no
+/// server, so a deployment with no <c>kyber-weave</c> entry renders the overlay and reaches
+/// nothing through it until the operator adds one.
+/// </para>
+/// <para>
+/// <b>Owner probe.</b> That these entries resolve in a live session — the extension registering
+/// the names and a subagent calling one — is not something a renderer test can establish. It
+/// remains an owner probe, and until it is run the derived wiring is recorded
+/// <c>[NOT LIVE-VERIFIED]</c>. A primary agent lowers to a skill, which declares no
+/// <c>tools</c> or <c>extensions</c>, so <c>conductor</c> cannot carry the grant on this target
+/// and its <c>permission-not-expressible</c> record says so.
 /// </para>
 /// <para>
 /// <b><c>allowed_subagents</c> enforcement and depth cap.</b> The key is off by default and
@@ -120,6 +179,21 @@ public sealed class PiRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".pi/agents";
     private const string SkillsDirectory = ".pi/skills";
+
+    /// <summary>The MCP extension every agent carrying a derived overlay loads.</summary>
+    private const string McpAdapterExtension = "pi-mcp-adapter";
+
+    /// <summary>
+    /// The adapter's proxy tool: it reaches any configured MCP server by name, so it is the one
+    /// entry that keeps working whichever version registered the per-tool names.
+    /// </summary>
+    private const string McpProxyToolEntry = "ext:pi-mcp-adapter/mcp";
+
+    /// <summary>
+    /// The MCP server ADR 0050 widened to every read-entitled agent, the pure orchestrator
+    /// included, because it carries <c>agent_coding_standards</c>.
+    /// </summary>
+    private const string KyberWeaveMcpServer = "kyber-weave";
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Pi's built-in tool names, verified
@@ -219,6 +293,11 @@ public sealed class PiRenderer : ISquadRenderer
         // permission-not-expressible details without a renderer change.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
+        // Derived once: the roster and the adapter's naming rule are target-wide, so a
+        // per-agent re-derivation could only produce the same list at greater cost.
+        IReadOnlyList<string> kyberWeaveOverlayTools =
+            ResolveKyberWeaveOverlayTools(source.Toolchain.RequiredMcpTools);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -230,6 +309,7 @@ public sealed class PiRenderer : ISquadRenderer
                     agent,
                     source.ModelProfiles.Profiles,
                     source.CapabilityProfiles.Profiles,
+                    kyberWeaveOverlayTools,
                     request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -253,6 +333,7 @@ public sealed class PiRenderer : ISquadRenderer
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
                             capabilityVocabulary,
+                            kyberWeaveOverlayTools,
                             true));
                         continue;
                     }
@@ -274,7 +355,8 @@ public sealed class PiRenderer : ISquadRenderer
                     agent,
                     fallbackProfile,
                     source.CapabilityProfiles.Profiles,
-                    capabilityVocabulary));
+                    capabilityVocabulary,
+                    kyberWeaveOverlayTools));
             }
             else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
             {
@@ -321,6 +403,7 @@ public sealed class PiRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> mcpOverlayTools,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -340,18 +423,29 @@ public sealed class PiRenderer : ISquadRenderer
             frontmatter["thinking"] = thinkingLevel;
         }
 
+        // Two sources, one merged surface: the entitlement derives the kyber-weave overlay for
+        // any agent allowed to read the filesystem (ADR 0050), and the agent's own declaration
+        // carries everything else. A roster with no kyber-weave entry, or a profile outside the
+        // entitlement, derives nothing — so an unmatched grant can never load an extension whose
+        // only purpose is that server.
+        bool carriesMcpOverlay = mcpOverlayTools.Count > 0 &&
+            CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles);
+
         // Always emit tools: omitting the key grants every built-in (widening). The
         // capability-derived CSV comes first in the fixed ToolOrder; the declared pi-tools
-        // overlay entries follow in declared canonical order.
-        IReadOnlyList<string> capabilityTools = ResolveTools(agent, capabilityProfiles);
-        IReadOnlyList<string> tools = [.. capabilityTools, .. agent.PiTools];
+        // overlay entries follow in declared canonical order, then the derived ones.
+        IReadOnlyList<string> tools = MergeTools(
+            ResolveTools(agent, capabilityProfiles),
+            agent.PiTools,
+            carriesMcpOverlay ? mcpOverlayTools : []);
         frontmatter["tools"] = tools.Count == 0 ? "none" : string.Join(", ", tools);
 
-        // Every agent without a canonical overlay, unconditionally (owner decision Q1-A,
-        // 2026-09-14); an overlay agent emits the declared extension ids as a YAML sequence.
-        frontmatter["extensions"] = agent.PiExtensions.Count == 0
+        // Every agent without an overlay of either kind gets `false` (owner decision Q1-A,
+        // 2026-09-14); an overlay agent emits the merged extension ids as a YAML sequence.
+        IReadOnlyList<string> extensions = MergeExtensions(agent.PiExtensions, carriesMcpOverlay);
+        frontmatter["extensions"] = extensions.Count == 0
             ? false
-            : new PiExtensionsFlowSequence(agent.PiExtensions);
+            : new PiExtensionsFlowSequence(extensions);
 
         if (IsDelegateAllowed(agent, capabilityProfiles) && agent.DelegatesTo.Count > 0)
         {
@@ -516,6 +610,114 @@ public sealed class PiRenderer : ISquadRenderer
         return ToolOrder.Where(granted.Contains).ToArray();
     }
 
+    /// <summary>
+    /// The overlay entries that reach <see cref="KyberWeaveMcpServer"/> through
+    /// <c>pi-mcp-adapter</c>, in emission order: the proxy tool, then one entry per tool
+    /// <paramref name="requiredMcpTools"/> declares for that server, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    /// A roster without the server yields no entries, which is what keeps an unmatched grant
+    /// from loading an extension for a server nobody declared. The tool segment is spelled the
+    /// way the adapter's deferred surface registers it — see this type's remarks on why the
+    /// server name's hyphen becomes an underscore here and nowhere else.
+    /// </remarks>
+    /// <param name="requiredMcpTools">The toolchain roster, keyed by MCP server name.</param>
+    private static IReadOnlyList<string> ResolveKyberWeaveOverlayTools(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
+    {
+        if (!requiredMcpTools.TryGetValue(KyberWeaveMcpServer, out IReadOnlyList<string>? tools))
+        {
+            return [];
+        }
+
+        string namespacePrefix = $"ext:{McpAdapterExtension}/mcp__{McpServerNamespace(KyberWeaveMcpServer)}__";
+
+        return
+        [
+            McpProxyToolEntry,
+            .. tools
+                .Order(StringComparer.Ordinal)
+                .Select(tool => namespacePrefix + McpToolName(tool))
+        ];
+    }
+
+    /// <summary>
+    /// The namespace the adapter gives a server: hyphens become underscores before any other
+    /// character is mapped, which is why <c>kyber-weave</c> is reached as <c>kyber_weave</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only the hyphen is mapped, because the one server this renderer derives an overlay for is
+    /// the only name it is ever handed and a hyphen is the only character that name has outside
+    /// <c>[A-Za-z0-9_]</c>. The adapter's own rule also code-point-encodes anything else; a
+    /// second derived server with such a character would have to bring that rule with it rather
+    /// than assume this one covers it.
+    /// </remarks>
+    private static string McpServerNamespace(string serverName)
+    {
+        return serverName.Replace('-', '_');
+    }
+
+    /// <summary>
+    /// The adapter's tool segment: every character outside <c>[A-Za-z0-9_]</c> becomes
+    /// <c>_</c>, which is what spells <c>query-docs</c> as <c>query_docs</c>.
+    /// </summary>
+    private static string McpToolName(string toolName)
+    {
+        return string.Concat(toolName.Select(
+            character => char.IsAsciiLetterOrDigit(character) || character == '_' ? character : '_'));
+    }
+
+    /// <summary>
+    /// Appends the declared and derived overlay entries to the capability-derived built-ins,
+    /// keeping the first occurrence of each so an agent that already declares an entry the
+    /// derivation would add renders it once.
+    /// </summary>
+    /// <param name="capabilityTools">The built-ins the capability profile grants, in fixed order.</param>
+    /// <param name="declaredTools">The agent's own <c>pi-tools</c>, in declared order.</param>
+    /// <param name="derivedTools">The renderer-derived entries, in emission order.</param>
+    private static IReadOnlyList<string> MergeTools(
+        IReadOnlyList<string> capabilityTools,
+        IReadOnlyList<string> declaredTools,
+        IReadOnlyList<string> derivedTools)
+    {
+        if (declaredTools.Count == 0 && derivedTools.Count == 0)
+        {
+            return capabilityTools;
+        }
+
+        List<string> merged = [.. capabilityTools];
+        HashSet<string> seen = new(capabilityTools, StringComparer.Ordinal);
+
+        foreach (string tool in declaredTools.Concat(derivedTools))
+        {
+            if (seen.Add(tool))
+            {
+                merged.Add(tool);
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Appends the adapter to the declared extension ids when a derived overlay needs it,
+    /// leaving an agent that already declares it — or that receives no derived overlay —
+    /// exactly as the canonical body declared it.
+    /// </summary>
+    /// <param name="declaredExtensions">The agent's own <c>pi-extensions</c>, in declared order.</param>
+    /// <param name="deriveOverlay">Whether the renderer derived an overlay for this agent.</param>
+    private static IReadOnlyList<string> MergeExtensions(
+        IReadOnlyList<string> declaredExtensions,
+        bool deriveOverlay)
+    {
+        if (!deriveOverlay || declaredExtensions.Contains(McpAdapterExtension, StringComparer.Ordinal))
+        {
+            return declaredExtensions;
+        }
+
+        return [.. declaredExtensions, McpAdapterExtension];
+    }
+
     private static bool IsDelegateAllowed(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
@@ -626,6 +828,7 @@ public sealed class PiRenderer : ISquadRenderer
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary,
+        IReadOnlyList<string> mcpOverlayTools,
         bool reusedCanonicalSkill = false)
     {
         string projectionText = reusedCanonicalSkill
@@ -648,6 +851,12 @@ public sealed class PiRenderer : ISquadRenderer
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
+        // An entitled primary agent loses the derived overlay on this target, and a loss the
+        // receipt does not name is indistinguishable from a grant that was never decided. Only
+        // the entitled case is stated, so the record never claims a grant the profile lacks.
+        bool losesMcpOverlay = mcpOverlayTools.Count > 0 &&
+            CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles);
+
         yield return new SquadDegradationRecord(
             "pi",
             agent.Name,
@@ -659,7 +868,13 @@ public sealed class PiRenderer : ISquadRenderer
             "are not enforced: a top-level Pi skill runs under the harness default tool " +
             "set, not the canonical capability lattice, and its delegates-to roster " +
             $"({rosterText}) is instruction-only, not a runtime-enforced " +
-            "'allowed_subagents' list.");
+            "'allowed_subagents' list." +
+            (losesMcpOverlay
+                ? " The '" + KyberWeaveMcpServer + "' MCP overlay a rendered agent file carries " +
+                  "cannot be expressed here: a Pi skill declares no 'tools' or 'extensions', so " +
+                  "this entry point reaches that server only if the session it runs in already " +
+                  "has it configured."
+                : string.Empty));
     }
 
     private static string CollapseToSingleLine(string value)
