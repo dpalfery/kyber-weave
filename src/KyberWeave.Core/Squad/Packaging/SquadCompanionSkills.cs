@@ -52,7 +52,7 @@ public static class SquadCompanionSkills
     /// forward slashes) and its source path. A null companion root lists nothing.
     /// </summary>
     /// <remarks>
-    /// A companion name that equals a Squad skill or a Squad agent throws <see cref="SquadSourceValidationException"/>.
+    /// A companion name that equals a Squad skill or a Squad agent, ignoring case, throws <see cref="SquadSourceValidationException"/>.
     /// Failing closed keeps either side from silently shadowing the other: one skill would otherwise vanish from every
     /// harness with no signal. A symbolic link at a companion skill's directory, its <c>SKILL.md</c>, or any file or folder
     /// nested in it throws for the same reason. The exception carries no partial list, so no caller can report a partial tree.
@@ -154,15 +154,37 @@ public static class SquadCompanionSkills
 
     private static void RejectClash(string squadSourceRoot, string name)
     {
-        if (Directory.Exists(Path.Combine(squadSourceRoot, "skills", name)))
+        string? squadSkill = EntryNamedIgnoringCase(Path.Combine(squadSourceRoot, "skills"), name, isDirectory: true);
+        if (squadSkill is not null)
         {
-            throw Clash(name, "Squad skill", $"products/kyber-squad/skills/{name}");
+            throw Clash(name, "Squad skill", $"products/kyber-squad/skills/{squadSkill}");
         }
 
-        if (File.Exists(Path.Combine(squadSourceRoot, "agents", $"{name}.md")))
+        string? squadAgent = EntryNamedIgnoringCase(Path.Combine(squadSourceRoot, "agents"), $"{name}.md", isDirectory: false);
+        if (squadAgent is not null)
         {
-            throw Clash(name, "Squad agent", $"products/kyber-squad/agents/{name}.md");
+            throw Clash(name, "Squad agent", $"products/kyber-squad/agents/{squadAgent}");
         }
+    }
+
+    /// <summary>
+    /// The entry of <paramref name="directory"/> whose name equals <paramref name="entryName"/> ignoring case, or null. The
+    /// folder is listed rather than probed by path, because a probe follows the host's own case rules: on Linux
+    /// <c>Task-Gate</c> would find no <c>task-gate</c>, and the install on macOS or Windows would then collide.
+    /// </summary>
+    private static string? EntryNamedIgnoringCase(string directory, string entryName, bool isDirectory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return null;
+        }
+
+        IEnumerable<string> paths = isDirectory
+            ? Directory.EnumerateDirectories(directory)
+            : Directory.EnumerateFiles(directory);
+        return paths
+            .Select(path => Path.GetFileName(path))
+            .FirstOrDefault(fileName => string.Equals(fileName, entryName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static SquadSourceValidationException Clash(string name, string kind, string squadPath)

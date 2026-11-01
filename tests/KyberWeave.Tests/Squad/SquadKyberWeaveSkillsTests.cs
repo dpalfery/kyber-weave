@@ -328,6 +328,28 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     }
 
     /// <summary>
+    /// Decision D5, fail closed, across case: a companion name that differs from a Squad name only in case is the same name
+    /// on a case-insensitive install (macOS and Windows), so pack refuses it on every host. The clash probe asked the host's
+    /// file system, which on a case-sensitive host (Linux) sees no clash, so the two names collided only at install time.
+    /// </summary>
+    [Theory]
+    [InlineData("Task-Gate", "products/kyber-squad/skills/task-gate")]
+    [InlineData("Architect", "products/kyber-squad/agents/architect.md")]
+    public void PackFailsClosedWhenAnApmSkillNameDiffersOnlyInCaseFromASquadName(string clashingName, string squadSource)
+    {
+        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), clashingName);
+        string outDirectory = Path.Combine(_temp.Path, "case-clash-out");
+
+        SquadPackRun run = PackInto(repository, "all", outDirectory);
+
+        AssertExit(run.ExitCode, run.Output, 1);
+        Assert.Empty(ArchivesIn(outDirectory));
+        string output = Compact(run.Output);
+        Assert.Contains(Compact(squadSource), output, StringComparison.Ordinal);
+        Assert.Contains(Compact($".apm/skills/{clashingName}"), output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The checkout release source feeds a CLI run from a checkout, so it must carry the companion skills too and list
     /// them in its extracted files, as the archive path does.
     /// </summary>
