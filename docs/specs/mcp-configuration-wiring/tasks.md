@@ -117,6 +117,20 @@ sequencing; no task makes a design decision.
     other byte unchanged; an existing `mcp:` section is never touched, with or without
     `--force` (host-owned after write). The scaffold's gitignore write adds `receipts/`
     beside `cache/` (DD13).
+  - **Modernisation — implementer `test-dev`, dispatched alongside the implementation:**
+    the existing fixtures in `tests/KyberWeave.Tests/DocsScaffolderTests.cs` and
+    `tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs` pin the **absence** of what R1.3
+    adds — the exact-content gitignore pins (`"cache/\n"` and its merge results), the
+    byte-identical host-config pins, the config-prefix pins, and the review-section
+    extraction that runs to end of file. This step modernises those assertions in the same
+    change as the writer, not after it: byte-exact pins of the old output become property
+    assertions that still pin what the fixtures were protecting — the operator's own bytes
+    preserved, the appended content exactly the new block (and, for the ignore file, the
+    `receipts/` line joining `cache/` without regenerating it), and `Updated` reported only
+    when something was appended. Tests in those two files that pin behaviour R1.3 does not
+    change stay unchanged. This is the recorded TK8 correction, a deliberate change to the
+    fixtures, not a weakening of the suite. It runs alongside the implementation and must
+    land before this task is accepted.
   - **Test contract:**
     - **New file:** `tests/KyberWeave.Tests/McpDeclarationBlockWriterTests.cs`, class
       `McpDeclarationBlockWriterTests`.
@@ -125,7 +139,19 @@ sequencing; no task makes a design decision.
       appended block; an existing config with it is unchanged, with and without `--force`;
       `.kyber-weave/.gitignore` gains `receipts/` and keeps `cache/`.
     - **RED reason:** the writer does not exist (compile failure).
-    - **GREEN:** the class passes, and the existing `DocsScaffolder` tests pass unchanged.
+    - **GREEN:** the `McpDeclarationBlockWriterTests` class passes, and the existing
+      assertions in `tests/KyberWeave.Tests/DocsScaffolderTests.cs` and
+      `tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs` that pin the **absence** of the
+      `mcp:` declaration and of `receipts/` are modernised in the same change — converted
+      from byte-exact pins of the old output into property assertions that still pin the
+      behaviour that matters: the operator's own bytes survive as an exact prefix of the
+      written file, the appended content is exactly the rendered `mcp:` block (and, for the
+      ignore file, the `receipts/` line joining `cache/` without regenerating it), and the
+      scaffold outcome reports `Updated` when something was appended and `Preserved` when
+      nothing was. Assertions in those two files that pin behaviour R1.3 does not change
+      must still pass unchanged. The modernisation is a deliberate, recorded change (TK8),
+      not a weakening: the requirement and design are untouched, and the old fixtures
+      encoded the behaviour R1.3 changes.
 
 - [ ] 3. **Harness catalog, inspector, resolver, TOML scanner — the check engine**
   · R2.1–R2.8, R3.1–R3.3, R6.1 (check side) · design §2, §3, §6 (DD4, DD5, DD6, DD7)
@@ -388,6 +414,7 @@ appended here:
 | TK6 | Is live acceptance automated? | No. A real harness session reaching the server after the repair stays the owner's live check (design DG5); delivery notes remain `[NOT LIVE-VERIFIED]` until it is performed. Task 11 carries the note into closeout. | Consistent with prior renderer plans; the deterministic tests (R10.1) cover everything a fixture can. | autonomous: recommendation accepted |
 | TK7 | Are these tasks approved? | Yes: tasks phase approved; with it, all three phases are approved and the specification is Ready. | Conductor gate `AUTONOMOUS_APPROVAL: tasks-phase-approval` (2026-10-31). Gate evidence, from the conductor's run against this checkout (2026-10-31): `docs_status` reported `provenance: root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=142`, a root identical to `git rev-parse --show-toplevel` for this checkout (branch `feat/squad-response-format`, HEAD `8943b6a`), so the provenance root matches; `docs validate .` (no `--merge-ready`, this specification active) — `result: pass`, 0 errors, 0 warnings; `docs drift .` — `result: pass`, 0 errors, 0 warnings. TG1 is closed by this evidence. | autonomous: recommendation accepted |
 | AP1 | Approve and execute this specification at the declared scale? | Approved. Execute at the declared scale `extends-component`, components `DocGraph` and `Distribution`. The conductor dispatches the tasks; this recording authorizes execution and does not start it. | Consolidated conductor gate `AUTONOMOUS_APPROVAL: approve-and-execute` (2026-10-31), presented together with the tasks approval (TK7) because the tasks digest reported `GAPS: none` and `OPEN_QUESTIONS: none`. Readiness verified: all three phases approved (requirements D15, design DD17, tasks TK7); this artifact records `development-mode: test-first` and its Test contract; the always-human consequence on `.kyber-weave/kyber-weave.yml` (task 8) and the rule-id permanence rule (`KW-MCP-WIRE-001..006`, added, never renumbered or reused) are recorded in the task preamble; the declared scale and the harvest H1–H7 with their target components are present and consistent across the artifacts. | autonomous: recommendation accepted |
+| TK8 | Task 2's GREEN line demanded the existing `DocsScaffolder` tests pass unchanged, while R1.3 requires the scaffold to write exactly what those tests pin the absence of — which governs? | The requirement governs; the acceptance wording was stale. The criterion now requires the `McpDeclarationBlockWriterTests` class to pass **and** the modernisation, in the same change, of the existing assertions in `DocsScaffolderTests.cs` and `DocsInitReviewGatesTests.cs` that pin the absence of the `mcp:` declaration and of `receipts/` — byte-exact pins of the old output become property assertions (the operator's own bytes preserved as an exact prefix, the appended content exactly the new block, `Updated` reported when something was appended). An explicit `test-dev` step inside task 2 performs it alongside the implementation, before the task is accepted. | Nothing is weakened and no requirement moves: R1.3 (a fresh host configuration gains the `mcp:` declaration) and DD13 (`.kyber-weave/.gitignore` gains `receipts/` beside `cache/`) are unchanged and deliberate — the old fixtures encoded the behaviour the requirement changes. The modernisation preserves exactly what those fixtures were protecting — the operator's own bytes, the exact appended content, the honest `Updated`/`Preserved` outcome — while tests pinning behaviour R1.3 does not change still pass unchanged. The task 2 RED test-dev worker found the contradiction and escalated rather than weakening its own tests; the pinned assertions were verified by reading them (`FreshInitCreatesOnlyTheNarrowCacheIgnoreAndNoEmptyGlossary`, the cache-ignore merge and encoding-prefix pins, `ForceDoesNotOverwriteTheHostConfig`, `AnUnchangedDocsRootLeavesTheConfigByteForByteIdentical`, `AnExistingReviewSectionSurvivesDocsInitUnchanged`, and the review-section-to-EOF extraction behind `DocsInitWritesTheApprovedReviewBlock`). | autonomous: recommendation accepted (conductor-directed correction, 2026-10-31) |
 
 ## Closeout mapping
 
