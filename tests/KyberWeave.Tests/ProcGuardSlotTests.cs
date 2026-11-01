@@ -227,7 +227,8 @@ public sealed class ProcGuardSlotTests : IDisposable
     /// <para>
     /// The guarantee is about wall-clock time, so the holder is released only once the queue wait has passed the timeout. The
     /// wrapped <c>sleep 0.3</c> keeps the command alive across the guard's first poll, where a timeout that had started at
-    /// the queue would trip.
+    /// the queue would trip. The 3 s timeout leaves the healthy run 2 s of headroom on a machine busy enough to delay the
+    /// command, because the guard counts whole epoch seconds.
     /// </para>
     /// </remarks>
     [Fact]
@@ -236,10 +237,10 @@ public sealed class ProcGuardSlotTests : IDisposable
         SkipIfBashUnavailable();
         SeedLock(SlotName, 1, Environment.ProcessId, "slow-holder");
         string stderrFile = Path.Combine(work.Path, "queued.err");
-        TimeSpan timeout = TimeSpan.FromSeconds(2);
+        TimeSpan timeout = TimeSpan.FromSeconds(3);
 
         Task<GuardRun> queued = Task.Run(() => RunGuard(
-            ["run", "--slot", SlotName, "--slot-wait", "30", "--timeout", "2", "--", "sleep", "0.3"], stderrFile));
+            ["run", "--slot", SlotName, "--slot-wait", "30", "--timeout", "3", "--", "sleep", "0.3"], stderrFile));
         await WaitForStderrAsync(stderrFile, "waiting", QueuedDeadline);
         Stopwatch queuedFor = Stopwatch.StartNew();
         while (queuedFor.Elapsed < timeout + TimeSpan.FromMilliseconds(500))
