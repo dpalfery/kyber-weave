@@ -423,6 +423,13 @@ and `docs mcp-wire` writes the gaps into the harnesses an operator names; the re
 verbs, and their exit codes are in the [MCP
 runbook](docgraph/mcp-runbook.md#checking-and-wiring).
 
+The check reads **repository scope only**, so both ways a path can leave the repository are
+refusals rather than reads. A configuration under a home directory is never opened. A
+repository-scope path that is a symbolic link is refused as well — the check reports it as a
+symbolic link it did not read, and neither repair verb writes through it, because the bytes
+would land in whichever file the link names. A linked configuration is therefore checked
+against nothing: the report says the server is not wired until a real file stands in the tree.
+
 | Key | Default | Effect |
 |---|---|---|
 | `required-servers` | empty | The declared servers, keyed by the name an MCP client sees |

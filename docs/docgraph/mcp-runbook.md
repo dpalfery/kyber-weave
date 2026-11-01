@@ -650,10 +650,21 @@ What it reports:
 
 | Id | Level | Raised when |
 |---|---|---|
-| `KW-MCP-WIRE-001` | warning for a `required` server, `info` for a `recommended` one | a declared server is not wired for a harness in play, or the file could not be read |
-| `KW-MCP-WIRE-002` | same as above | the entry is wired but its launch command differs from the declaration; the line names both |
+| `KW-MCP-WIRE-001` | warning for a `required` server, `info` for a `recommended` one | a declared server is not wired for a harness in play, or the file could not be read — including a configuration that reached the repository as a symbolic link, which is not read at all |
+| `KW-MCP-WIRE-002` | same as above | the entry is wired but its launch command differs from the declaration, once the harness's own spelling of the repository root is allowed for; the line names both. Never fixable, so never offered as a repair |
 | `KW-MCP-WIRE-003` | same as above | the entry is wired — or would be — but the launch binary does not resolve on `PATH` |
 | `KW-MCP-WIRE-004` | `info`, always | the harness is not in play, has no marker to detect it, or keeps its configuration in repository settings |
+
+**The comparison allows one substitution, and only one.** The repair writes the harness's own
+spelling of the repository root, so VS Code gets `${workspaceFolder}` where the declaration
+says `.`, and Factory, Claude Code, Cursor and opencode keep the declaration's `.`. The check
+therefore compares a wired root token against the declaration's `.` **as that harness's own
+spelling of the same directory**, and compares every other token as raw text. The tolerance is
+deliberately not global: `${workspaceFolder}` in a Claude Code entry is a directory literally
+named that to a harness which substitutes nothing, so it must not compare equal there. This is
+what makes the second-run contract below true for every writable harness — the file the repair
+wrote is a file the check passes, so a second `mcp-wire` over it reports `nothing to write` at
+exit 0 rather than refusing its own success.
 
 A harness is "in play" when its repository-scope configuration file or its marker directory
 exists — `.factory/`, `.cursor/`, `.vscode/`, `.codex/`, `.zcode/`, or the configuration file
@@ -661,6 +672,13 @@ itself where no marker exists. Detection is a heuristic and the output claims no
 that: a harness with neither signal gets one `info` line naming what was looked for, never a
 warning. Claude Code has no marker besides `.mcp.json`, so a repository with neither is
 informed rather than failed.
+
+The one exception is the harness whose configuration is repository settings rather than a file
+— today the Copilot coding agent. There is no file to read and no repair to offer, so its
+`info` line is followed by the advice that closes it: the entry to add to the repository's
+Copilot MCP configuration and the workflow step that installs the binary. That advice is
+printed for that shape of harness and for no other; every other undetectable harness still
+reports the single line naming the marker that was looked for.
 
 The check writes nothing, reads **repository scope only** — no file under the home directory
 is opened, for any harness — and does not change `docs init`'s exit code: a scaffold that
@@ -678,6 +696,18 @@ exactly which files and which servers the repair would write. It defaults to **n
 Confirming performs the repair through the same write path `docs mcp-wire` uses and reports,
 per file, what was written, then the receipt's location. Declining writes nothing — the
 findings and their printed commands stand, so the same repair is one command away.
+
+The question is built from fixable gaps alone — a server that is not wired, on a harness the
+repair writes, with no link on the path to the file. Three findings are reported and never
+offered. A differing launch command (`KW-MCP-WIRE-002`) is never fixable, because closing it
+means modifying an entry that already exists and the repair never touches one; its hint names
+the exact command the entry should carry, quotes the wire command only with the caveat that it
+refuses the existing entry, and so amounts to an edit by hand — or a deletion of the entry,
+after which the wire command can add it back. An absent binary (`KW-MCP-WIRE-003`) is never
+fixable either, because the remedy is installing software and Kyber-Weave installs none but its
+own. And a configuration that reached the repository as a symbolic link is not fixable, because
+the repair refuses the file the check refused to read. None of the three appears in the
+question.
 
 **When stdin is not an interactive terminal — redirected, piped, no TTY, CI — the command
 never prompts, never writes, and the output ends with the printed manual repair command.**
@@ -699,15 +729,28 @@ kyber-weave docs mcp-wire [path] [--target <targets>] [--dry-run]
   consent, and for Claude Code and opencode, whose only repository-scope artefact is the
   configuration file, "not in play" and "file absent" are the same condition: the canonical
   file is created.
-- **A named target that already holds every declared server** is reported and skipped at
-  exit 0, not treated as an error — otherwise a second run would fail on the first one's
-  success.
+- **A named target that already holds every declared server, launched as declared,** is
+  reported and skipped at exit 0, not treated as an error — otherwise a second run would fail
+  on the first one's success. The test is the check's own, so a root the repair wrote in the
+  harness's spelling counts as the declared `.`: wiring VS Code writes
+  `${workspaceFolder}`, and the run after it reports `nothing to write` instead of refusing
+  the entry the first run created.
 - **A refused target** exits 1, names the file and the reason, and writes nothing to that
   file: a slug the catalog does not know, a malformed or foreign document, an entry with the
-  same server name already present, a harness the repair does not write, an absent binary.
-  Other named targets still proceed.
-- `--dry-run` prints the exact per-file change, writes nothing — not even the receipt — and
-  exits what the real run would have exited.
+  same server name already present, a harness the repair does not write, an absent binary, or
+  a configuration that is a symbolic link — refused before it is read, so not one byte of the
+  target is opened. Other named targets still proceed.
+- `--dry-run` prints the exact per-file change — the file, the harness, the servers it would
+  gain, and whether the file exists yet — writes nothing, not even the receipt, and exits what
+  the real run would have exited:
+
+  ```text
+    would create .factory/mcp.json (factory) adding kyber-weave
+    would insert into .vscode/mcp.json (vscode) adding kyber-weave
+  ```
+
+  The real run prints the same lines with `created` and `inserted into` in place of `would
+  create` and `would insert into`.
 
 ### `docs mcp-unwire`
 
@@ -719,8 +762,10 @@ Removal works from the receipt, not from the declaration, so a repository whose 
 section is malformed can still be unwound. An `inserted` file is restored to the bytes the
 repair found; a `created` file is deleted. With no `--target` it lists the files the receipt
 records and removes nothing. It exits 0 when every named file was restored or deleted, and 1
-on any refusal: a slug the catalog does not know, no receipt record, a file that is gone, or
-a current digest that differs from the recorded one.
+on any refusal: a slug the catalog does not know, no receipt record, a file that is gone, a
+current digest that differs from the recorded one, or a file that is a symbolic link —
+refused ahead of the receipt lookup, because restoring the recorded bytes through the link
+would write them into whichever file it names.
 
 That last case is the point of the verb. **A file that changed after the repair is drift, and
 drift is refused** (`KW-MCP-WIRE-006`) rather than restored over someone else's edit.
@@ -785,6 +830,9 @@ convenience:
 - **Repository scope only.** `~/.factory/mcp.json`, `~/.cursor/mcp.json`,
   `~/.codex/config.toml`, `~/.config/opencode/opencode.json` and ZCode's user storage are
   never written and never read; they are reported with the manual snippet.
+- **A symbolic link is refused, not followed.** A repository-scope path that is a link names a
+  file outside the tree just as surely as a home-directory path does, so the check does not
+  read it and neither verb writes through it. See [Symbolic links](#symbolic-links).
 - **The root follows the harness's own substitution rule.** VS Code gets
   `${workspaceFolder}`; Factory, Claude Code, Cursor and opencode get `.`, the
   workspace-relative form each documents. Codex substitutes no workspace variable and its
@@ -793,6 +841,34 @@ convenience:
 
 Five more clients above have recipes here and no catalog row — Command Code, Kilo,
 Antigravity, Pi, and Warp. Nothing checks or writes them; the recipe is the whole grant.
+
+### Symbolic links
+
+A repository-scope configuration cannot be a symbolic link. The link's own path is inside the
+tree, so every containment check passes, while the bytes behind it live wherever it points —
+which makes `ln -s ~/.mcp.json .mcp.json`, the idiom for sharing one configuration across
+checkouts, a way to turn a repository-scope write into a write to the user scope. One guard
+decides this question (`McpConfigurationLink` in Core) and all three paths ask it, so the read
+path, the write path and the removal path cannot give three different answers:
+
+| Path | What happens | Rule id |
+|---|---|---|
+| the check | the linked file is not read; the finding says the path is a symbolic link and was not read; the harness is reported as not wired and is not offered as a repair | `KW-MCP-WIRE-001` |
+| the repair | refused **before** the read, so zero bytes of the target are opened and zero written; the diagnostic names the file and that it is a symbolic link | `KW-MCP-WIRE-005` |
+| the removal | refused ahead of the receipt lookup; zero bytes written; the diagnostic names the file | `KW-MCP-WIRE-006` |
+
+Every segment below the repository root is tested, not only the file itself, so a linked
+`.vscode/` beside an ordinary `mcp.json` is refused the same way and the clause names the
+segment: `<path> lies behind the symbolic link '.vscode'`. A link whose target is gone is
+still a link, and still not something these commands may read through or write into.
+
+The remedy is the same on all three paths: copy the content out of the linked file, delete the
+link, leave the real file in the tree, and run the command again. The check's hint says that
+rather than naming the wire command, because pointing at a repair that will refuse again is
+worse than silence. With this guard in place, [ADR
+0051](../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)'s promise that
+these commands never write and never read a user-scope configuration is enforced rather than
+merely intended.
 
 ## Provenance on every answer
 

@@ -562,9 +562,11 @@ What an installing repository gets, and which step writes it:
 - **`docs init` declares and checks the MCP servers your instructions rely on.** It
   scaffolds one server into the host config's `mcp:` section, then reports harness by
   harness whether each declared server is wired in that harness's repository-scope
-  configuration, with a copy-ready `docs mcp-wire --target <harness>` command per gap and,
-  at a terminal, a yes/no offer to perform the repair. It writes nothing in CI, changes no
-  exit code, and `--no-mcp-check` skips it. See the [MCP
+  configuration, with a copy-ready `docs mcp-wire --target <harness>` command per fixable gap
+  — an entry whose launch command differs, or a configuration that is a symbolic link, is
+  reported with the edit to make by hand and is never offered as a repair — and, at a
+  terminal, a yes/no offer to perform the repair. It writes nothing in CI, changes no exit
+  code, and `--no-mcp-check` skips it. See the [MCP
   runbook](docgraph/mcp-runbook.md#checking-and-wiring).
 
 ## External dependencies

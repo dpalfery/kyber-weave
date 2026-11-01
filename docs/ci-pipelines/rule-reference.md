@@ -87,12 +87,18 @@ runbook](../docgraph/mcp-runbook.md#checking-and-wiring).
 
 | Id | Severity | Meaning | Hint |
 |---|---|---|---|
-| `KW-MCP-WIRE-001` | Warning for a `required` server, Info for a `recommended` one | A declared server is not wired for an in-play harness, or its file could not be read | `kyber-weave docs mcp-wire --target <harness>`; for a harness the repair does not write, the file to edit by hand |
-| `KW-MCP-WIRE-002` | Warning for a `required` server, Info for a `recommended` one | A wired entry's launch command differs from the declaration; the line names both | The wire command, noting it refuses an entry that already exists, or the edit to make by hand on a snippet-only harness |
+| `KW-MCP-WIRE-001` | Warning for a `required` server, Info for a `recommended` one | A declared server is not wired for an in-play harness, or its file could not be read — including a configuration that is a symbolic link, which is not read at all | `kyber-weave docs mcp-wire --target <harness>`; for a harness the repair does not write, or a linked configuration, the file to fix or edit by hand |
+| `KW-MCP-WIRE-002` | Warning for a `required` server, Info for a `recommended` one | A wired entry's launch command differs from the declaration, once the harness's own spelling of the repository root (`${workspaceFolder}` for VS Code, `.` elsewhere) is allowed for; the line names both. Never fixable, so it is never offered as a repair | The edit that makes the entry run the declared command. On a writable harness the hint also quotes the wire command with the caveat that it refuses an entry that already exists, so the entry is edited — or deleted and re-added — by hand |
 | `KW-MCP-WIRE-003` | Warning for a `required` server, Info for a `recommended` one | The wired entry's launch binary is not resolvable on `PATH` | First-party: `kyber-weave update`, because the installation is broken. Third-party: the declaration's `install` text verbatim, or a manual pointer when it carries none — never an installation |
 | `KW-MCP-WIRE-004` | Info | The harness is not in play, has no marker to detect it, or its configuration is repository settings rather than a file | `No action unless this repository uses <harness>`; where the repair may write it, the wire command, otherwise the Copilot settings and workflow-step pointer |
-| `KW-MCP-WIRE-005` | Error — `docs mcp-wire` only | The target was refused and nothing was written to it: malformed or foreign document, an entry with the same server name already present, a harness the repair does not write, or an absent binary | The file and the reason, plus the snippet to paste for a snippet-only harness, or the install repair for an absent binary |
-| `KW-MCP-WIRE-006` | Error — `docs mcp-unwire` only | Removal was refused: no receipt record for the file, a file that is gone, or a current digest that differs from the receipt's post-write digest | The receipt path, both digests, and the choice to make by hand — the removal never restores over a later edit |
+| `KW-MCP-WIRE-005` | Error — `docs mcp-wire` only | The target was refused and nothing was written to it: malformed or foreign document, an entry with the same server name already present, a harness the repair does not write, an absent binary, or a configuration that is a symbolic link — refused before the read, so not one byte of the target is opened | The file and the reason, plus the snippet to paste for a snippet-only harness, or the install repair for an absent binary |
+| `KW-MCP-WIRE-006` | Error — `docs mcp-unwire` only | Removal was refused: no receipt record for the file, a file that is gone, a current digest that differs from the receipt's post-write digest, or a file that is a symbolic link — refused ahead of the receipt lookup | The receipt path, both digests, and the choice to make by hand — the removal never restores over a later edit |
+
+`docs init` prints the hint beneath a finding so it can be copied, with one exception: a
+not-detectable line is advice about a harness nobody claimed to use, so its hint is withheld.
+The Copilot coding agent is the exception to that exception — its configuration is repository
+settings rather than a file, so its hint *is* its report and is printed, while every other
+undetectable harness still reports one `info` line and nothing more.
 
 ## Skills — [Skill governance](../context-hygiene/skills.md)
 
