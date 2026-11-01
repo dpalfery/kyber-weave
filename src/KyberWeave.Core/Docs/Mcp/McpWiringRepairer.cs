@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Mcp;
 
@@ -322,7 +323,7 @@ public static class McpWiringRepairer
             if (preWrite is null)
                 File.Delete(fullPath);
             else
-                WriteAtomically(fullPath, preWrite);
+                AtomicFile.WriteAllBytes(fullPath, preWrite);
         }
         catch (IOException exception)
         {
@@ -507,7 +508,7 @@ public static class McpWiringRepairer
 
         try
         {
-            WriteAtomically(fullPath, planned);
+            AtomicFile.WriteAllBytes(fullPath, planned);
         }
         catch (IOException exception)
         {
@@ -1029,44 +1030,6 @@ public static class McpWiringRepairer
         server.Command.Count > 0 ? server.Command[0] : "(nothing)";
 
     private static string Digest(byte[] content) => Convert.ToHexString(SHA256.HashData(content));
-
-    /// <summary>
-    /// Writes <paramref name="content"/> to <paramref name="path"/> by renaming a sibling temporary
-    /// file over it, so the target is never observable half-written.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A harness configuration is a file the whole team inherits, and <see cref="File.WriteAllBytes(string, byte[])"/>
-    /// truncates in place: a run killed between the truncation and the last byte leaves a zero-length
-    /// or partial document that every teammate then commits, and the removal path refuses it — there
-    /// is no receipt yet, and the digest no longer matches one. The receipt is recorded only after
-    /// the write returns, so the window is real rather than theoretical.
-    /// </para>
-    /// <para>
-    /// The temporary file is a unique sibling in the same directory, because a rename is atomic only
-    /// within a volume. This is the idiom <c>ManagedGlossaryService.AtomicWrite</c> and
-    /// <c>StatusLineReceiptStore.Write</c> already use.
-    /// </para>
-    /// </remarks>
-    private static void WriteAtomically(string path, byte[] content)
-    {
-        string directory = Path.GetDirectoryName(path)
-            ?? throw new InvalidOperationException($"The configuration path '{path}' has no parent directory.");
-
-        Directory.CreateDirectory(directory);
-        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            File.WriteAllBytes(temporaryPath, content);
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
-    }
 
     private static string FullPath(string root, string relativePath) =>
         Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));

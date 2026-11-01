@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Utilities.StatusLine;
@@ -62,17 +63,7 @@ internal sealed class StatusLineReceiptStore
     internal void Write(StatusLineReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
-
-        string directory = Path.GetDirectoryName(ReceiptPath) ??
-            throw new InvalidOperationException($"Receipt path '{ReceiptPath}' has no parent directory.");
-        Directory.CreateDirectory(directory);
-
-        string temporaryPath = ReceiptPath + ".tmp";
-        File.WriteAllText(
-            temporaryPath,
-            Serialize(receipt),
-            new UTF8Encoding(false));
-        File.Move(temporaryPath, ReceiptPath, overwrite: true);
+        AtomicFile.WriteAllText(ReceiptPath, Serialize(receipt));
     }
 
     /// <summary>Removes the receipt, so a completed removal leaves no ownership record behind.</summary>

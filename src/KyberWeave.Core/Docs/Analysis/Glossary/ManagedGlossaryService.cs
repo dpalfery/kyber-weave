@@ -4,6 +4,7 @@ using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Model;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Parsing;
 using Markdig;
 using Markdig.Syntax;
@@ -195,7 +196,7 @@ public sealed class ManagedGlossaryService
         bool written = false;
         if (write && changed)
         {
-            AtomicWrite(merged);
+            AtomicFile.WriteAllText(_filePath, merged);
             written = true;
         }
 
@@ -894,23 +895,6 @@ public sealed class ManagedGlossaryService
         }
 
         return string.Join(newline, lines) + newline;
-    }
-
-    private void AtomicWrite(string markdown)
-    {
-        string directory = Path.GetDirectoryName(_filePath)
-            ?? throw new InvalidOperationException("The glossary path has no parent directory.");
-        Directory.CreateDirectory(directory);
-        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(_filePath)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(temporaryPath, markdown);
-            File.Move(temporaryPath, _filePath, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        }
     }
 
     private static void ValidateProposals(IReadOnlyList<GlossaryProposal> proposals)

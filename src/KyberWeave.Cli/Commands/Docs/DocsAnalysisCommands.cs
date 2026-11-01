@@ -5,6 +5,7 @@ using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
+using KyberWeave.Core.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -83,7 +84,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.OutputPath);
             ReviewExportResult result = _service.ExportReview(settings);
-            AtomicTextFile.Write(settings.OutputPath, result.Json);
+            AtomicFile.WriteAllText(settings.OutputPath, result.Json);
             DiagnosticReport report = result.Diagnostics;
             report.AddMetric("exportedReviewCharacters", result.ExportedExcerptCharacters);
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
@@ -201,34 +202,4 @@ internal static class DocsAnalysisCommandErrors
         string command,
         string code = DocumentationReviewExchange.ReviewRuleCode) =>
         CommandHelpers.Finish(Report(exception, code), settings, command, "Operation");
-}
-
-internal static class AtomicTextFile
-{
-    public static void Write(string path, string content)
-    {
-        string absolute = Path.GetFullPath(path);
-        string directory = Path.GetDirectoryName(absolute)
-            ?? throw new ArgumentException("The output path has no parent directory.", nameof(path));
-        Directory.CreateDirectory(directory);
-        string temporary = Path.Combine(directory, $".{Path.GetFileName(absolute)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(temporary, content);
-            File.Move(temporary, absolute, overwrite: true);
-        }
-        finally
-        {
-            // Best-effort cleanup: a delete failure must not replace the write or move
-            // failure the caller needs to diagnose.
-            try
-            {
-                File.Delete(temporary);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // The temporary file is left behind; the primary exception is preserved.
-            }
-        }
-    }
 }
