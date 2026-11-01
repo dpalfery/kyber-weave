@@ -67,7 +67,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
     /// <summary>
     ///     A host-owned <c>review:</c> section is never rewritten, with or without
-    ///     <c>--force</c>. Regenerating it would discard gates the operator tuned by hand.
+    ///     <c>--force</c>. Regenerating it would discard gates the operator tuned by hand. The
+    ///     run adds the <c>mcp:</c> declaration the file lacks and nothing else.
     /// </summary>
     [Theory]
     [InlineData(false)]
@@ -90,7 +91,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsScaffolder.Scaffold(repo, force: force);
 
-        Assert.Equal(original, File.ReadAllText(ConfigPath(repo)));
+        // The operator's file, hand-owned review section included, is an exact prefix of what
+        // was written; the declaration is the only thing appended after it.
+        Assert.Equal(original + AppendedMcpDeclaration("\n"), File.ReadAllText(ConfigPath(repo)));
     }
 
     /// <summary>
@@ -118,7 +121,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     /// <summary>
     ///     Adding the section must not touch any other byte: comments, key order, and the
     ///     file's newline style belong to the operator. Both newline styles are covered because
-    ///     the append uses the file's existing style.
+    ///     the append uses the file's existing style. The <c>mcp:</c> declaration is appended
+    ///     ahead of the review section, so everything before <c>review:</c> is the operator's
+    ///     bytes plus exactly that declaration.
     /// </summary>
     [Theory]
     [InlineData("\n")]
@@ -140,7 +145,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string updated = File.ReadAllText(ConfigPath(repo));
         Assert.Contains(newline + "review:", updated, StringComparison.Ordinal);
         int reviewIndex = updated.IndexOf(newline + "review:", StringComparison.Ordinal);
-        Assert.Equal(original.TrimEnd('\r', '\n') + newline, updated.Substring(0, reviewIndex));
+        Assert.Equal(
+            original.TrimEnd('\r', '\n') + AppendedMcpDeclaration(newline),
+            updated.Substring(0, reviewIndex));
     }
 
     /// <summary>
@@ -418,6 +425,24 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string directory = Path.Combine(repo, ".kyber-weave");
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml.ToString());
+    }
+
+    /// <summary>
+    ///     The <c>mcp:</c> declaration exactly as <c>docs init</c> appends it to a file whose
+    ///     newline style is <paramref name="newline"/>: one blank line separating it from the
+    ///     operator's last byte, the block, and a single trailing newline.
+    /// </summary>
+    /// <remarks>
+    ///     The block's own text is <c>McpDeclarationBlockWriterTests</c>' subject. Referencing
+    ///     the same constant keeps these fixtures on what they protect: that the operator's
+    ///     bytes are an exact prefix and the declaration is appended after exactly one blank
+    ///     line, in the file's own newline style.
+    /// </remarks>
+    private static string AppendedMcpDeclaration(string newline)
+    {
+        return newline + newline +
+            McpDeclarationBlockWriter.DeclarationYaml.Replace("\n", newline, StringComparison.Ordinal) +
+            newline;
     }
 
     /// <summary>

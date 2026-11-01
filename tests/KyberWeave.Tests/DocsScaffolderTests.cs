@@ -54,6 +54,18 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
+    /// <summary>
+    /// The <c>mcp:</c> declaration exactly as <c>docs init</c> appends it: one blank line
+    /// separating it from the operator's last byte, the block, and a single trailing newline.
+    /// </summary>
+    /// <remarks>
+    /// The block's own text is <c>McpDeclarationBlockWriterTests</c>' subject. Referencing the
+    /// same constant here keeps these fixtures focused on what they protect — that the append
+    /// is exactly the declaration and nothing besides it, so every operator byte before it is
+    /// still there in order.
+    /// </remarks>
+    private static string AppendedMcpDeclaration => "\n\n" + McpDeclarationBlockWriter.DeclarationYaml + "\n";
+
     [Theory]
     [InlineData("docs")]
     [InlineData("6-Docs")]
@@ -259,15 +271,16 @@ public sealed class DocsScaffolderTests : IDisposable
 
     /// <summary>
     /// Analysis persistence is allowed only after the repository-owned state directory has
-    /// the exact narrow ignore entry. A fresh init must establish that safety without also
-    /// creating a glossary that has no reviewed senses.
+    /// the exact narrow ignore entry, and the wiring receipts directory is ignored beside it.
+    /// A fresh init must establish that safety without also creating a glossary that has no
+    /// reviewed senses.
     /// </summary>
     [Fact]
-    public void FreshInitCreatesOnlyTheNarrowCacheIgnoreAndNoEmptyGlossary()
+    public void FreshInitCreatesOnlyTheNarrowLocalStateIgnoresAndNoEmptyGlossary()
     {
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
 
-        Assert.Equal("cache/\n", Read(".kyber-weave/.gitignore"));
+        Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
         Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "glossary.md")));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
@@ -276,21 +289,21 @@ public sealed class DocsScaffolderTests : IDisposable
 
     /// <summary>
     /// The state ignore file may contain operator-owned entries. Init owns only the narrow
-    /// cache line, including under <c>--force</c>, and must not regenerate the rest.
+    /// cache line and the receipts line beside it, including under <c>--force</c>, and must
+    /// not regenerate the rest.
     /// </summary>
     [Fact]
     public void ForceMergesCacheIgnoreWithoutReplacingExistingLines()
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"),
-            "# operator entry\nlocal-notes/");
+        const string existing = "# operator entry\nlocal-notes/";
+        File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
 
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, force: true);
 
-        Assert.Equal(
-            "# operator entry\nlocal-notes/\ncache/\n",
-            Read(".kyber-weave/.gitignore"));
+        // The operator's bytes are an exact prefix; the boundary newline and the two narrow
+        // entries are the only thing appended.
+        Assert.Equal(existing + "\ncache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
         Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
@@ -311,13 +324,14 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsScaffolder.Scaffold(_temp.Path);
 
-        Assert.Equal(existing + "cache/\n", Read(".kyber-weave/.gitignore"));
+        Assert.Equal(existing + "cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
     }
 
     /// <summary>
-    /// Re-running init must not duplicate or reformat an already effective ignore entry.
-    /// This keeps the merge byte-stable for hosts that maintain other local-state rules.
+    /// Re-running init must not duplicate or reformat an entry the file already carries. The
+    /// first run adds the receipts entry the host does not have yet and the second adds
+    /// nothing, so the merge stays byte-stable for hosts that maintain other local-state rules.
     /// </summary>
     [Fact]
     public void CacheIgnoreMergeIsIdempotentAndPreservesExistingBytes()
@@ -329,15 +343,23 @@ public sealed class DocsScaffolderTests : IDisposable
         ScaffoldResult first = DocsScaffolder.Scaffold(_temp.Path);
         ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, force: true);
 
-        Assert.Equal(existing, Read(".kyber-weave/.gitignore"));
+        // The operator's bytes are an exact prefix and the receipts entry joins the cache
+        // entry without the cache line being regenerated or repeated.
+        Assert.Equal(existing + "receipts/\n", Read(".kyber-weave/.gitignore"));
         Assert.Single(
             File.ReadAllLines(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore")),
             line => StringComparer.Ordinal.Equals(line, "cache/"));
-        Assert.All(
-            [first, second],
-            result => Assert.Equal(
-                ScaffoldOutcome.Preserved,
-                result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore").Outcome));
+        Assert.Single(
+            File.ReadAllLines(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore")),
+            line => StringComparer.Ordinal.Equals(line, "receipts/"));
+
+        // Only the run that had something to append reports a change; the repeat preserves.
+        Assert.Equal(
+            ScaffoldOutcome.Updated,
+            first.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore").Outcome);
+        Assert.Equal(
+            ScaffoldOutcome.Preserved,
+            second.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore").Outcome);
     }
 
     /// <summary>
@@ -356,7 +378,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsScaffolder.Scaffold(_temp.Path);
 
-        byte[] appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\n");
+        byte[] appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\nreceipts/\r\n");
         Assert.Equal(originalBytes.Concat(appendedBytes), File.ReadAllBytes(path));
         Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
     }
@@ -365,7 +387,7 @@ public sealed class DocsScaffolderTests : IDisposable
     /// A host config carries settings this scaffolder's template knows nothing about —
     /// harness profiles, catalog column overrides, closed vocabularies. Regenerating it
     /// under <c>--force</c> would discard all of them to restate a docs root the file
-    /// already had.
+    /// already had. The one thing the run adds is the MCP declaration the file lacks.
     /// </summary>
     [Fact]
     public void ForceDoesNotOverwriteTheHostConfig()
@@ -374,12 +396,14 @@ public sealed class DocsScaffolderTests : IDisposable
 
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, force: true);
 
-        Assert.Equal(HandMaintainedConfig, Read(ConfigPath));
+        // The operator's file is an exact prefix of what was written; the declaration is the
+        // only thing appended after it.
+        Assert.Equal(HandMaintainedConfig + AppendedMcpDeclaration, Read(ConfigPath));
 
         ScaffoldedFile entry = result.Files.Single(f => f.RelativePath == ConfigPath);
-        Assert.Equal(ScaffoldOutcome.Preserved, entry.Outcome);
-        Assert.Equal("your configuration, kept as-is; --force does not overwrite it", entry.Note);
-        Assert.False(entry.Written);
+        Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
+        Assert.Equal("the mcp declaration appended; the rest of the file is untouched", entry.Note);
+        Assert.True(entry.Written);
     }
 
     /// <summary>
@@ -404,12 +428,13 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.Equal(["archive"], config.Ontology.ExcludedPathSegments);
         Assert.Equal(".agents/agents", config.Harness.Profiles[HarnessKind.Claude].DirectoryName);
 
-        // Verbatim, not merely semantically: comments and key order are the operator's.
+        // Verbatim, not merely semantically: comments and key order are the operator's, and
+        // the rewritten docs-root is the only byte of theirs that changed.
         string text = Read(ConfigPath);
         Assert.Equal(
             HandMaintainedConfig.Replace(
                 "docs-root: 6-Docs  # moved in 2024", "docs-root: 'handbook'  # moved in 2024",
-                StringComparison.Ordinal),
+                StringComparison.Ordinal) + AppendedMcpDeclaration,
             text);
 
         Assert.Equal(ScaffoldOutcome.Updated, result.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
@@ -417,17 +442,25 @@ public sealed class DocsScaffolderTests : IDisposable
 
     /// <summary>
     /// A re-run that resolves the root out of the config must not rewrite the file it just
-    /// read: an unchanged docs root is not a reason to touch operator state.
+    /// read: an unchanged docs root is not a reason to touch operator state. The first run
+    /// adds the declaration the file lacks, and the run after it finds both and writes
+    /// nothing.
     /// </summary>
     [Fact]
-    public void AnUnchangedDocsRootLeavesTheConfigByteForByteIdentical()
+    public void AnUnchangedDocsRootAppendsOnlyTheMcpDeclaration()
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult first = DocsScaffolder.Scaffold(_temp.Path);
 
-        Assert.Equal(HandMaintainedConfig, Read(ConfigPath));
-        Assert.Equal(ScaffoldOutcome.Preserved, result.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
+        string afterFirst = HandMaintainedConfig + AppendedMcpDeclaration;
+        Assert.Equal(afterFirst, Read(ConfigPath));
+        Assert.Equal(ScaffoldOutcome.Updated, first.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
+
+        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal(afterFirst, Read(ConfigPath));
+        Assert.Equal(ScaffoldOutcome.Preserved, second.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
     }
 
     /// <summary>
@@ -528,7 +561,7 @@ public sealed class DocsScaffolderTests : IDisposable
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
 
         Assert.False(File.Exists(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml")));
-        Assert.Equal("cache/\n", Read(".kyber-weave/.gitignore"));
+        Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
