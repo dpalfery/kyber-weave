@@ -679,6 +679,50 @@ public sealed class FactoryRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// The entry-point caveat's <c>mcpServers</c> fragment parses back to the droid's
+    /// whitelist, so the receipt cannot spell one server name as two.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_EntryPointCaveatMcpServersFragmentParsesAsTheWhitelist()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("a, b");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        Assert.Equal(["a, b"], declared);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent[] whitelistedPrimaries =
+        [
+            .. source.Agents.Where(
+                agent => agent.Invocation == SquadInvocation.Primary &&
+                         ExpectedFactoryMcpServers(source, agent, declared).Count > 0)
+        ];
+        Assert.NotEmpty(whitelistedPrimaries);
+        SquadAgent primary = whitelistedPrimaries[0];
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, primary.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+
+        Match fragment = Regex.Match(record.Details, @"mcpServers: (\[[^\]]*\])");
+        Assert.True(
+            fragment.Success,
+            $"Agent '{primary.Name}' caveat does not name its mcpServers value: {record.Details}");
+
+        YamlStream caveat = new();
+        caveat.Load(new StringReader($"mcpServers: {fragment.Groups[1].Value}"));
+        YamlMappingNode caveatFrontmatter = Assert.IsType<YamlMappingNode>(caveat.Documents[0].RootNode);
+        Assert.Equal(declared, RequireSequence(caveatFrontmatter, "mcpServers", primary.Name));
+    }
+
+    /// <summary>
     /// A squad that declares no MCP server at all fails closed: every droid renders
     /// <c>mcpServers: []</c> and every droid keeps the withholding sentence, so an empty
     /// declaration can never turn into a grant.
@@ -709,6 +753,78 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.NotNull(withheld.Details);
             Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>
+    /// An agent whose capability profile cannot be resolved still carries the MCP withholding
+    /// receipt for its empty whitelist, so the fail-closed exclusion is visible rather than
+    /// silent.
+    /// </summary>
+    /// <remarks>
+    /// The renderer defends against an unresolvable profile even though the source loader
+    /// normally rejects one: a preloaded source can reach it. Withholding the whitelist without
+    /// the receipt would make the exclusion invisible in the only stream a doctor run inspects.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_RecordsMcpWithholdingWhenTheCapabilityProfileIsUnresolved()
+    {
+        string agentName = "review-lens";
+        SquadSource canonical = TestSquadCorpus.CanonicalSource;
+        Assert.Contains(canonical.Agents, agent => agent.Name == agentName);
+        SquadSource source = canonical with
+        {
+            Agents =
+            [
+                .. canonical.Agents.Select(agent =>
+                    string.Equals(agent.Name, agentName, StringComparison.Ordinal)
+                        ? agent with { CapabilityProfile = "unresolved-profile" }
+                        : agent)
+            ]
+        };
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.Empty(RenderedMcpServers(result, agentName));
+        SquadDegradationRecord withheld = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, agentName, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(withheld.Details);
+        Assert.Contains(McpWithheldSentence, withheld.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A declared server name that contains YAML flow indicators still renders as exactly one
+    /// entry, so the frontmatter cannot invent names the squad never declared.
+    /// </summary>
+    /// <remarks>
+    /// The value is YAML the Factory parser reads, not a display string. A plain scalar spelled
+    /// inside a flow sequence treats <c>,</c>, <c>[</c>, and <c>]</c> as structure, so a name
+    /// such as <c>a,b</c> would silently become two servers unless the emitter is allowed to
+    /// quote it.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Factory_McpServerNamesWithFlowIndicatorsStayOneEntry()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServers("a,b", "bracket[server]", "plain");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        IReadOnlyList<string> declared = SquadMcpDeclaration.ServerNames(source);
+        Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
+
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: fixture.ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadAgent entitled = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal(declared, RenderedMcpServers(result, entitled.Name));
     }
 
     /// <summary>
