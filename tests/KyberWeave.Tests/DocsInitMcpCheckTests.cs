@@ -691,7 +691,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         List<string> arguments = ["docs", "init", repository, "--no-skill"];
         arguments.AddRange(extraArguments);
 
-        return ProcessConsoleCapture.Run(() => DocsApp().Run(arguments.ToArray()));
+        return ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(arguments.ToArray()));
     }
 
     private static void AssertSucceeded(CapturedConsoleExecution<int> execution) =>
@@ -715,18 +715,6 @@ public sealed class DocsInitMcpCheckTests : IDisposable
             $"No output line carried '{token}'. Output:{Environment.NewLine}{output}");
 
         return matching[0];
-    }
-
-    private static CommandApp DocsApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("docs", docs => { docs.AddCommand<DocsInitCommand>("init"); });
-        });
-
-        return app;
     }
 }
 

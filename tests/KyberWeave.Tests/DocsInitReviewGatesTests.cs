@@ -3,14 +3,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Commands.Docs;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Tests.Fakes;
-using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -160,7 +157,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            DocsApp().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
+            CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
 
         Assert.True(
             execution.Result == 0,
@@ -179,7 +176,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewRepo(["azure"]);
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -199,7 +196,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            DocsApp().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
+            CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
 
         Assert.True(
             execution.Result == 0,
@@ -232,7 +229,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -260,7 +257,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "hand-owned review");
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -307,7 +304,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         File.AppendAllText(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
         string reportPath = Path.Combine(_temp.Path, "rust-gates-" + Guid.NewGuid().ToString("N") + ".json");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => ReviewApp().Run(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run(
         [
             "review", "gates", repo, "--agent", "rust-dev", "--task", "r6-4-probe",
             "--paths", "src/lib.rs", "--out", reportPath
@@ -461,29 +458,6 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target);
         }
-    }
-
-    private static CommandApp DocsApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("docs", docs => { docs.AddCommand<DocsInitCommand>("init"); });
-        });
-        return app;
-    }
-
-    private static CommandApp ReviewApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });
-        });
-        return app;
     }
 
     private static void MustGit(string repo, params string[] arguments)

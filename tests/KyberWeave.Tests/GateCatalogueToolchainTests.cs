@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using KyberWeave.Cli.Commands.Docs;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using Spectre.Console.Cli;
@@ -191,7 +189,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         Commit(repo, "fixture");
 
         CapturedConsoleExecution<int> init = ProcessConsoleCapture.Run(
-            () => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            () => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
         Assert.True(
             init.Result == 0,
             $"docs init exited {init.Result} on the {family} {variant} fixture. " +
@@ -270,39 +268,15 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     }
 
     /// <summary>
-    /// The CLI boundary: a strict-parsing <see cref="CommandApp"/> with the docs and review
-    /// branches registered, driven with console output captured and the process-wide console
-    /// lock held. The report path travels in the arguments, so parallel cases never share one.
+    /// The CLI boundary: the shared strict docs-and-review app, driven with console output
+    /// captured and the process-wide console lock held. The report path travels in the arguments,
+    /// so parallel cases never share one.
     /// </summary>
     private static CliRun Gates(string[] arguments)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CreateApp().Run(arguments));
+            () => CommandAppFixture.DocsInitWithReviewGates().Run(arguments));
         return new CliRun(execution.Result, execution.Output);
-    }
-
-    private static CommandApp DocsApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("docs", docs => { docs.AddCommand<DocsInitCommand>("init"); });
-        });
-        return app;
-    }
-
-    private static CommandApp CreateApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("docs", docs => { docs.AddCommand<DocsInitCommand>("init"); });
-            config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });
-        });
-        return app;
     }
 
     private static JsonDocument ReadReport(string reportPath)
