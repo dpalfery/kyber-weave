@@ -42,7 +42,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// server is a server the agent cannot call. This renderer therefore names the
 /// <c>kyber-weave</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
 /// whose capability profile resolves and allows <c>filesystem.read</c> — the pure orchestrator
-/// included, because that server carries <c>agent_coding_standards</c> (ADR 0049). It names that
+/// included, because that server carries <c>agent_coding_standards</c> (ADR 0050). It names that
 /// one server and no other: <c>codegraph</c> and <c>context7</c> keep the orchestrator carve-out,
 /// and this target never named them before the widening either, so it is not the surface on
 /// which that carve-out is expressed. Where the grant is empty — a profile that denies the read,
@@ -176,7 +176,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         // Read from canonical source through the shared derivation rather than a renderer-local
         // list, so a tool renamed upstream is a source edit, the doctor check reads the same
         // roster, and this target cannot disagree with the others about which server is which
-        // entitlement class (ADR 0049 decision 4).
+        // entitlement class (ADR 0050 decision 4).
         IReadOnlyList<string> universalMcpToolNames =
             CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
 

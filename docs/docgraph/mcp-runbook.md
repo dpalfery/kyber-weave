@@ -129,7 +129,7 @@ So there are two grants, made by two owners, and only one of them is your config
   allows `filesystem.read`, the pure orchestrator `conductor` included. One of that server's tools
   is `agent_coding_standards`, and the orchestrator is asked to hold specialists to standards it
   could not otherwise read, so the orchestration reasoning that used to exclude it does not reach
-  this server ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). `mcpServers: []`
+  this server ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). `mcpServers: []`
   remains the fail-closed value for a droid whose profile grants no read entitlement and for a
   squad that declares no servers, and no droid ever omits the key: omission would inherit the
   session's servers, which is silent widening. The contract is stated in
@@ -227,7 +227,7 @@ Kilo declares MCP servers under an `mcp` key in `kilo.jsonc`
 (kilo.ai/docs/customize/custom-subagents, read 2026-10-31).
 
 **What Squad emits.** For every agent entitled to `kyber-weave` — `conductor` included —
-`KiloRenderer` writes one frontmatter key ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)):
+`KiloRenderer` writes one frontmatter key ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)):
 
 ```yaml
 permission:
@@ -280,7 +280,7 @@ MCP tools default to **Ask** on Antigravity, so approval goes through that clien
 
 **What Squad emits.** For every agent entitled to `kyber-weave` — `conductor` included — the
 renderer adds one array entry to the agent file under `.agents/agents/<name>/agent.md`
-([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)):
+([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)):
 
 ```yaml
 mcpServers:
@@ -329,7 +329,7 @@ file, which carries no server definition at all.
 
 **What Squad emits.** Every entitled agent file gets a derived overlay in its `.pi/agents/<name>.md`
 frontmatter, merged with whatever the agent declares itself
-([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). `extensions` gains
+([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). `extensions` gains
 `pi-mcp-adapter`, and `tools` gains two kinds of entry: the proxy tool
 `ext:pi-mcp-adapter/mcp`, then one entry per tool the roster declares for the server, in ordinal
 order:
@@ -865,7 +865,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kyber-weave` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
+| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Every droid the shipped squad renders is granted `kyber-weave` — `conductor` included — so a `[]` no longer means "this is the orchestrator": it means the droid's capability profile grants no read entitlement, or the squad declares no servers ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
 | A ZCode agent lists no MCP tools, and `squad doctor` fails the install | ZCode expands no wildcard and `toolchain.yml`'s `required-mcp-tools` are hard connected-server requirements for every agent, `conductor` included. Declare the `kyber-weave` server in the ZCode MCP configuration, or the install does not pass |
 | A Kilo agent has no `permission` key, or an MCP call prompts instead of running | The key is emitted only for an agent entitled to `kyber-weave`, and `allow` is an approval rather than a visibility grant — check the agent's capability profile, then the `mcp` key in `kilo.jsonc`. An agent with no key is outside the entitlement by design; a subagent that prompts will fail closed. A `kyber_weave_*` key would match nothing, so check the hyphen. See [Kilo](#kilo) |
 | An Antigravity agent lists no MCP tools | Check the agent file's `mcpServers` entry and the workspace `.agents/mcp_config.json`, then the client's `mcp(server/*)` policy patterns — MCP tools default to Ask there. Adding an MCP tool name to `tools:` does not help and makes the executor construction fail with `unknown component` on stderr. See [Antigravity](#antigravity) |

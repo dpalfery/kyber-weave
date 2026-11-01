@@ -36,7 +36,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// future edit to that partition differently from its neighbour, and its degradation receipt will
 /// then name a server the render still withholds or grants — invisibly, because a contract suite
 /// reads the grant from source and can compare two renderers only where both render a principal.
-/// See ADR 0049 decision 4.
+/// See ADR 0050 decision 4.
 /// </para>
 /// </remarks>
 internal static class CapabilityDegradations
@@ -45,7 +45,7 @@ internal static class CapabilityDegradations
     /// The MCP server every agent needs: granted on the file-read entitlement alone, the pure
     /// orchestrator included, and never withheld on a profile's identity. It carries
     /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
-    /// (ADR 0049).
+    /// (ADR 0050).
     /// </summary>
     /// <remarks>
     /// Declared here rather than in each renderer because the server is one half of the partition
@@ -80,7 +80,7 @@ internal static class CapabilityDegradations
     /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to,
     /// and the role that assigns work is the role deciding which standards apply to whom — so
     /// withholding it from the orchestrator withheld it from the one agent whose job depends on
-    /// it (ADR 0049). Every tool on that server is read-only, so the grant adds no write, no
+    /// it (ADR 0050). Every tool on that server is read-only, so the grant adds no write, no
     /// execution, and no network reach.
     /// <para>
     /// The profile is named rather than read off <see cref="SquadAgent.CapabilityProfile"/> because
@@ -117,7 +117,7 @@ internal static class CapabilityDegradations
     /// <remarks>
     /// <c>codegraph</c> and <c>context7</c> are the servers this predicate exists for. A role that
     /// only routes work has no use for code-graph or library lookups, and granting them would hand
-    /// it a research surface its own profile is not written for (ADR 0049 decision 2).
+    /// it a research surface its own profile is not written for (ADR 0050 decision 2).
     /// <para>
     /// The two rules differ only by the orchestrator clause, so they are two named predicates
     /// rather than one predicate with a boolean parameter: a call site then states which class of
@@ -142,7 +142,7 @@ internal static class CapabilityDegradations
     /// Two named members rather than one member with a filter argument, for the reason the two
     /// predicates above are two named methods: a call site then states which class of server it is
     /// asking for, and neither call site decides on its own what belongs to the class. That
-    /// decision is the partition, and it is made here once (ADR 0049 decision 4).
+    /// decision is the partition, and it is made here once (ADR 0050 decision 4).
     /// </remarks>
     /// <param name="requiredMcpTools">The toolchain's declared <c>required-mcp-tools</c> roster.</param>
     public static IReadOnlyList<string> OrchestratorExcludedMcpToolNames(

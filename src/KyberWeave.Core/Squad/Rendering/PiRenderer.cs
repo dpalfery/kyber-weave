@@ -88,7 +88,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// tools are injected directly rather than through a loaded extension.
 /// </para>
 /// <para>
-/// <b>Derived <c>kyber-weave</c> overlay (ADR 0049).</b> Every agent whose capability profile
+/// <b>Derived <c>kyber-weave</c> overlay (ADR 0050).</b> Every agent whose capability profile
 /// resolves and allows <c>filesystem.read</c> receives the <c>pi-mcp-adapter</c> extension and
 /// the <c>kyber-weave</c> tool entries even when its canonical body declares no overlay: the
 /// proxy entry <c>ext:pi-mcp-adapter/mcp</c> first, then one entry per tool
@@ -190,7 +190,7 @@ public sealed class PiRenderer : ISquadRenderer
     private const string McpProxyToolEntry = "ext:pi-mcp-adapter/mcp";
 
     /// <summary>
-    /// The MCP server ADR 0049 widened to every read-entitled agent, the pure orchestrator
+    /// The MCP server ADR 0050 widened to every read-entitled agent, the pure orchestrator
     /// included, because it carries <c>agent_coding_standards</c>.
     /// </summary>
     private const string KyberWeaveMcpServer = "kyber-weave";
@@ -424,7 +424,7 @@ public sealed class PiRenderer : ISquadRenderer
         }
 
         // Two sources, one merged surface: the entitlement derives the kyber-weave overlay for
-        // any agent allowed to read the filesystem (ADR 0049), and the agent's own declaration
+        // any agent allowed to read the filesystem (ADR 0050), and the agent's own declaration
         // carries everything else. A roster with no kyber-weave entry, or a profile outside the
         // entitlement, derives nothing — so an unmatched grant can never load an extension whose
         // only purpose is that server.

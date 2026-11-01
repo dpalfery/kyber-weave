@@ -1,5 +1,5 @@
 ---
-id: adr/0049-universal-kyber-weave-mcp-grant
+id: adr/0050-universal-kyber-weave-mcp-grant
 title: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included
 doc-type: adr
 status: current
@@ -10,7 +10,7 @@ decided-by: []
 supersedes: []
 ---
 
-# ADR 0049: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included
+# ADR 0050: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included
 
 ## Status
 

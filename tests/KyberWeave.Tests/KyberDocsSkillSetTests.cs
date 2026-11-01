@@ -83,9 +83,10 @@ public sealed class KyberDocsSkillSetTests
     }
 
     /// <summary>
-    /// Kyber-Docs skills deploy through <c>docs init</c> into <c>.apm/skills</c>, never
-    /// through Squad: no <c>kyber-docs-*</c> directory or skill identity may live in the
-    /// Squad source tree. This guard passes on the phase-1 tree by design.
+    /// Kyber-Docs skills are never duplicated into the Squad source tree: no <c>kyber-docs-*</c>
+    /// directory or skill identity may live under <c>products/kyber-squad</c>. Their single source
+    /// is <c>.apm/skills</c>, and Squad adds them from there when it builds the tree, so they still
+    /// reach every Squad deployment. This guard passes on the phase-1 tree by design.
     /// </summary>
     [Fact]
     public void NoKyberDocsSkillLivesInSquad()

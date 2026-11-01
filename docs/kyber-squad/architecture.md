@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -19,7 +19,8 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
-  - adr/0049-universal-kyber-weave-mcp-grant
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
+  - adr/0050-universal-kyber-weave-mcp-grant
 sections:
   "#":
     keywords:
@@ -71,6 +72,8 @@ code-refs:
   - SquadInstanceLinkPlanner
   - SquadInstanceLinkSync
   - ISquadLinkFileSystem
+  - SquadCompanionSkills
+  - SquadPacker
 ---
 
 # Kyber-Squad architecture
@@ -89,7 +92,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["24 Canonical Agents\n(agents/*.md)"]
-        Skills["29 Canonical Skills\n(skills/*)"]
+        Skills["28 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
     end
 
@@ -145,9 +148,31 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 29 top-level `SKILL.md`
-  identities. The canonical tree separately retains 87 supplemental files, giving 116 recursive
-  skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+  identities under `products/kyber-squad/skills/`. The canonical tree separately retains 88
+  supplemental files, giving 116 recursive skill-tree files; `SquadPacker` carries that complete
+  recursive tree into both package formats.
+- **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
+  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
+  skills, 91 supplemental resources, and 125 skill-tree files. `SquadCompanionSkills` is the one type
+  both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
+  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
+  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
+  Squad skills.
+- **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
+  `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
+  link at `.apm`, `.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder
+  inside a companion skill is refused, and the error names the link. `squad pack` exits 1 and writes no
+  archive. The checkout release source throws before it writes anything; a copy failure after that can
+  leave partial files, which the Squad installer removes along with the destination.
+- **Pack validation**: `squad pack` loads the real Squad tree, then packs the composed tree into a
+  scratch folder, extracts it, and loads it. The scratch folder is removed on every path. A refused pack
+  leaves the previous archive at the output path, and so does a failed write: each archive goes to a
+  temporary file beside its target and replaces it only when complete.
+- **Known limitation**: A symbolic link inside `products/kyber-squad/` that points outside the repository
+  is still packed when no loaded file references it. The pack walk follows links, and the loader checks
+  only the files it reads. The gap predates the composed tree. Closing it is a separate follow-up, not
+  part of this design.
 - **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
   domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
   `capability-profile`, `tools`, `delegates-to`); concrete `AgentIR` / `SkillIR` representations
@@ -805,7 +830,7 @@ and validates.
   entitlement on every target that can express a per-agent grant: the `kyber-weave` server is
   granted to every agent whose capability profile resolves and allows `filesystem.read` — the
   pure orchestrator included — while `codegraph` and `context7` keep the original
-  non-orchestrator-only rule ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). The
+  non-orchestrator-only rule ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The
   surviving carve-out is narrow on purpose: the orchestrator's work depends on
   `agent_coding_standards`, and does not depend on symbol lookup or third-party documentation
   lookup. `ClaudeRenderer` therefore grants `mcp__kyber-weave__*` to every read-entitled agent and
@@ -819,7 +844,7 @@ and validates.
   that profile withholds. It is accepted rather than denied for three reasons: every tool on that
   server is declared `ReadOnly`, the alternative is an orchestrator that cannot read the standard
   it is asked to enforce, and `process.execute: deny` and every other profile decision are
-  untouched. [ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md) records it in those
+  untouched. [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) records it in those
   terms, so a later reader does not have to rediscover that it is one. ZCode
   registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
@@ -873,7 +898,7 @@ and validates.
   server name's hyphen to an underscore, so the tool entries are `mcp__kyber_weave__…`; the
   hyphenated `mcp__kyber-weave__…` spelling registers against no Pi tool and is wrong, even though
   the same hyphen is correct on Claude, ZCode, Devin, and Command Code
-  ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). That form belongs to
+  ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). That form belongs to
   `pi-mcp-adapter` **6.0.0**, the release whose deferred-tool surface first registered tools as
   `mcp__<server>__<tool>`; **7.0.0** is the supported target, and an operator still on 5.x keeps
   the `mcp` proxy entry working while the enumerable per-tool names resolve to nothing. A primary
@@ -1491,7 +1516,7 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — Lock and receipt state in the user home, the project registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
-- [ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md) — the widened `kyber-weave` MCP grant, the narrowed carve-out, and the per-target grant forms
+- [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md) — the widened `kyber-weave` MCP grant, the narrowed carve-out, and the per-target grant forms
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

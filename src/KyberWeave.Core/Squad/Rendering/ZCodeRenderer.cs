@@ -128,7 +128,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// included. That server carries <c>agent_coding_standards</c>, the tool that hands an agent the
 /// standards it is held to, and the role that assigns work is the role deciding which standards
 /// apply to whom; withholding it withheld it from the one agent whose job depends on it
-/// (ADR 0049). <c>codegraph</c> and <c>context7</c> keep the carve-out the other targets apply:
+/// (ADR 0050). <c>codegraph</c> and <c>context7</c> keep the carve-out the other targets apply:
 /// a role that only routes work has no use for code-graph or library lookups, and granting them
 /// would hand it a research surface its own profile denies.
 /// </para>
@@ -143,7 +143,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>kyber-weave</c> becomes one for every ZCode principal, the orchestrator included:
 /// <c>squad doctor</c> fails an install without that server connected instead of it degrading to
 /// a missing tool. That is intended — the grant is only useful if the server is there — and it is
-/// recorded in ADR 0049 and the requirements row that names it. Every tool on the server is
+/// recorded in ADR 0050 and the requirements row that names it. Every tool on the server is
 /// read-only, so nothing about <c>process.execute: deny</c> or any other profile decision moves.
 /// </para>
 /// <para>

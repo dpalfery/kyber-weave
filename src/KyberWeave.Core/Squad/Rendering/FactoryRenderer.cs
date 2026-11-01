@@ -43,7 +43,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// included, and <c>[]</c> for every other droid. The orchestrator keeps its grant because the
 /// declared server carries <c>agent_coding_standards</c>, the tool that hands an agent the
 /// standards it is held to, and the role that assigns work is the role deciding which standards
-/// apply to whom (ADR 0049).
+/// apply to whom (ADR 0050).
 /// Squad does not invent Factory MCP server names: a name that reaches a droid came from the
 /// squad's own declaration, and a squad that declares none grants none. Only an empty whitelist
 /// records <c>permission-not-expressible</c> saying parent MCP was not inherited; a deliberately
@@ -510,7 +510,7 @@ public sealed class FactoryRenderer : ISquadRenderer
     /// The entitlement is the universal one rather than the orchestrator-excluded rule the other
     /// targets apply to <c>codegraph</c> and <c>context7</c>: the server this whitelist names is
     /// the squad's declared documentation server, and the conductor is entitled to it like every
-    /// other readable profile (ADR 0049).
+    /// other readable profile (ADR 0050).
     /// </remarks>
     private static IReadOnlyList<string> ResolveMcpServers(
         SquadAgent agent,

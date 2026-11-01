@@ -40,7 +40,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>kyber-weave</c> server is granted to every agent whose capability profile resolves and allows
 /// <c>filesystem.read</c> — <c>conductor</c> included, because the server carries
 /// <c>agent_coding_standards</c> and the role that assigns work is the role deciding which standards
-/// apply to whom (ADR 0049). The grant goes through
+/// apply to whom (ADR 0050). The grant goes through
 /// <see cref="CapabilityDegradations.GrantsUniversalMcpServers"/>, the one shared predicate, rather
 /// than a renderer-local copy of the rule. The pure-orchestrator carve-out that survives for
 /// <c>codegraph</c> and <c>context7</c> is not expressed here: this renderer declares neither
@@ -77,7 +77,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// The server every read-entitled agent gets, and the only one this target declares. Named here
     /// because the grant is a property of the squad's own <c>mcp.json</c> entry whose launch
     /// definition is emitted verbatim; a second server would need its own declaration and its own
-    /// probe before it could be rendered (ADR 0049 decision 7).
+    /// probe before it could be rendered (ADR 0050 decision 7).
     /// </summary>
     private const string UniversalMcpServer = "kyber-weave";
 
@@ -318,7 +318,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
 
         // mcpServers: the grant vehicle this harness actually reads. Entitlement is the shared
-        // rule, so the conductor is granted here like any other read-entitled profile (ADR 0049).
+        // rule, so the conductor is granted here like any other read-entitled profile (ADR 0050).
         // The name is deliberately absent from 'tools': Antigravity resolves that list against its
         // executor registry, and an MCP tool name is not a registry component. The server is also
         // not gated by 'enable_mcp_tools', so no key is emitted to switch it on.

@@ -43,7 +43,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to every agent
 /// with <c>filesystem.read: allow</c>, pure orchestrators included, excluding shared identities whose
 /// canonical skill is the only projection emitted. The orchestrator keeps the grant because that server
-/// carries <c>agent_coding_standards</c> (ADR 0049).
+/// carries <c>agent_coding_standards</c> (ADR 0050).
 /// <c>network.publish</c> has no native tool and is withheld, emitting <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
@@ -350,7 +350,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
 
             // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
             // carries agent_coding_standards, which the role that assigns work needs to point its
-            // delegates at the standards they are held to (ADR 0049). A suppressed shared identity
+            // delegates at the standards they are held to (ADR 0050). A suppressed shared identity
             // keeps no grant, because its canonical skill is the only projection emitted.
             if (!suppressedSkillIdentities.Contains(agent.Name) &&
                 CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))

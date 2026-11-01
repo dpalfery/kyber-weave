@@ -34,7 +34,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Base ungoverned tools on every agent: <c>TodoWrite</c>, <c>Skill</c>. MCP server-level
-/// wildcards are granted by two rules, not one (ADR 0049). <c>mcp__kyber-weave__*</c> is
+/// wildcards are granted by two rules, not one (ADR 0050). <c>mcp__kyber-weave__*</c> is
 /// granted whenever <c>filesystem.read</c> is allowed, the pure orchestrator (profile id
 /// <c>orchestrator</c>) included: that server carries <c>agent_coding_standards</c>, and the
 /// role that assigns work is the role deciding which standards apply to whom.
@@ -459,7 +459,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 granted.Add(agentToolEntry);
             }
 
-            // Two rules, not one (ADR 0049): kyber-weave carries agent_coding_standards, so it
+            // Two rules, not one (ADR 0050): kyber-weave carries agent_coding_standards, so it
             // reaches every read-entitled agent — the pure orchestrator included, because the
             // role that assigns work is the role deciding which standards apply to whom. The
             // other two servers keep the orchestrator carve-out.

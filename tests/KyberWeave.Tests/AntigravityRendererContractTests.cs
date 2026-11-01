@@ -1202,7 +1202,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// <see cref="SquadMcpGrantProjection"/>, never from the renderer, so a renderer that re-added
     /// the pure-orchestrator carve-out fails here rather than agreeing with its own copy of the
     /// rule. <c>conductor</c>'s presence is asserted explicitly as well, because that one agent is
-    /// the whole point of ADR 0049: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
+    /// the whole point of ADR 0050: <c>kyber-weave</c> carries <c>agent_coding_standards</c>, and
     /// the role that assigns work is the role that needs it.
     ///
     /// The shape is asserted structurally rather than by string match because it is the contract.
