@@ -82,13 +82,21 @@ public sealed class DoctorCommand : Command<DoctorSettings>
             CodeGraphExecutable,
             McpExecutable ?? DefaultMcpExecutable);
 
+        string root;
+        try
+        {
+            root = Path.GetFullPath(settings.Path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            // The path is client input, and an unusable one is a refusal: exit 2, never an exception. Callers
+            // branch on the 0/1/2/3 contract, so a stack trace would be indistinguishable from a broken doctor.
+            Console.Error.WriteLine($"kyber-weave: error: '{settings.Path}' is not a usable path.");
+            return 2;
+        }
+
         IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(options.IndexTimeout);
-        DoctorReport report = RepositoryDoctor.Run(
-            Path.GetFullPath(settings.Path),
-            mode,
-            options,
-            executor,
-            environment);
+        DoctorReport report = RepositoryDoctor.Run(root, mode, options, executor, environment);
 
         if (hint && !settings.Json)
             Console.Out.WriteLine(NonInteractiveHint);
