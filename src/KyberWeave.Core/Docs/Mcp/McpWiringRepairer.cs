@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
@@ -937,15 +938,46 @@ public static class McpWiringRepairer
         return string.Join("\n\n", snippets);
     }
 
+    /// <summary>
+    /// The table header and body to paste for a harness with no writer, with every key spelled so the
+    /// header cannot be broken by the name inside it.
+    /// </summary>
+    /// <remarks>
+    /// The header is a dotted key path wrapped in brackets, which means the text between them has
+    /// TOML's own syntax: a segment holding a dot would become a nested table, and one holding a
+    /// bracket, a quote or a newline would close the header and inject whatever followed it into the
+    /// file the operator pastes. Every segment is therefore a TOML key rather than raw text, which
+    /// keeps a name like <c>a.b</c> or <c>with space</c> pasteable instead of turning the whole
+    /// snippet into a refusal.
+    /// </remarks>
     internal static string TomlSnippet(IReadOnlyList<string> serverKeyPath, RequiredMcpServer server)
     {
-        string table = string.Join('.', serverKeyPath) + "." + server.Name;
+        string table = string.Join('.', serverKeyPath.Select(TomlKey)) + "." + TomlKey(server.Name);
         string arguments = string.Join(
             ", ",
             server.Command.Skip(1).Select(token => Literal(Substitute(token, AbsoluteRepositoryPath))));
 
         return $"[{table}]\ncommand = {Literal(Executable(server))}\nargs = [{arguments}]";
     }
+
+    /// <summary>
+    /// A TOML key: bare where the name allows it, quoted where it does not.
+    /// </summary>
+    /// <remarks>
+    /// A quoted key is TOML's own form for a name that is not bare, and its basic-string escapes are
+    /// the ones <see cref="JsonSerializer"/> already writes — quotes, backslashes and control
+    /// characters — so the serialized form is a valid TOML basic string and one escaping rule covers
+    /// both formats.
+    /// </remarks>
+    private static string TomlKey(string key) => IsBareTomlKey(key) ? key : Literal(key);
+
+    /// <summary>
+    /// Whether a key may appear unquoted, which is what keeps the snippet reading like the runbook's
+    /// example: ASCII letters and digits, underscores and hyphens.
+    /// </summary>
+    private static bool IsBareTomlKey(string key) =>
+        key.Length > 0
+        && key.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
 
     private static string JsonSnippet(IReadOnlyList<string> serverKeyPath, string serverName)
     {
@@ -964,7 +996,22 @@ public static class McpWiringRepairer
         return JsonServerSplice.RenderDocument(root);
     }
 
-    private static string Literal(string value) => JsonSerializer.Serialize(value);
+    /// <summary>
+    /// Escaping for the text a snippet puts inside TOML, which is JSON's own escaping with the
+    /// HTML-safe substitutions switched off.
+    /// </summary>
+    /// <remarks>
+    /// The default encoder writes a quote as <c>\u0022</c>, which TOML accepts and nobody wants to
+    /// read in the snippet they are pasting into a configuration file. The relaxed encoder writes
+    /// <c>\"</c> — TOML's own spelling of the same character — and still escapes backslashes and
+    /// control characters, so one `Literal` serves both formats.
+    /// </remarks>
+    private static readonly JsonSerializerOptions LiteralOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    private static string Literal(string value) => JsonSerializer.Serialize(value, LiteralOptions);
 
     private static string NotWritableReason(HarnessMcpEntry row) =>
         row.Shape switch

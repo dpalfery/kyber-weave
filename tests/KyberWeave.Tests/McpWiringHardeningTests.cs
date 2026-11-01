@@ -486,16 +486,16 @@ public sealed class McpWiringHardeningTests : IDisposable
     /// bare, so the snippet stays pasteable rather than becoming a refusal.
     /// </remarks>
     [Theory]
-    [InlineData("evil]\n[other")]
-    [InlineData("quo\"te")]
-    [InlineData("with space")]
-    [InlineData("has.dot")]
-    [InlineData("#comment")]
-    public void ATomlTableHeaderQuotesAServerNameThatIsNotABareKey(string name)
+    [InlineData("evil]\n[other", "[mcp_servers.\"evil]\\n[other\"]")]
+    [InlineData("quo\"te", "[mcp_servers.\"quo\\\"te\"]")]
+    [InlineData("with space", "[mcp_servers.\"with space\"]")]
+    [InlineData("has.dot", "[mcp_servers.\"has.dot\"]")]
+    [InlineData("#comment", "[mcp_servers.\"#comment\"]")]
+    public void ATomlTableHeaderQuotesAServerNameThatIsNotABareKey(string name, string expectedHeader)
     {
         string snippet = McpWiringRepairer.TomlSnippet(["mcp_servers"], Server(name));
 
-        Assert.Equal($"[mcp_servers.{JsonSerializer.Serialize(name)}]", snippet.Split('\n')[0]);
+        Assert.Equal(expectedHeader, snippet.Split('\n')[0]);
         Assert.Single(snippet.Split('\n'), line => line.StartsWith('['));
     }
 
@@ -507,7 +507,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     public void ATomlTableHeaderQuotesOnlyTheSegmentsThatAreNotBareKeys()
     {
         Assert.Equal(
-            "[mcp_servers.sub.\"not bare.\"quoted\"\"]",
+            """[mcp_servers.sub."not bare.\"quoted\"".kyber-weave]""",
             McpWiringRepairer.TomlSnippet(["mcp_servers", "sub", "not bare.\"quoted\""], Server(ServerName))
                 .Split('\n')[0]);
     }
