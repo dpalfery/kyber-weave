@@ -1389,6 +1389,45 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// A missing server and a denying profile are two independent reasons one agent has no grant,
+    /// so the one record names both: the renamed-or-dropped declaration and the profile that would
+    /// still withhold the grant after the server came back.
+    /// </summary>
+    /// <remarks>
+    /// Reporting only the declaration would hide the entitlement: an operator who restores the
+    /// server would watch this agent stay grantless with no record saying why. Reporting only the
+    /// entitlement would hide the declaration every other agent's record names. The combined
+    /// sentence is the only outcome that leaves neither gap silent.
+    /// </remarks>
+    [Fact]
+    public async Task AMissingServerAndADenyingProfileAreBothNamedInOneRecord()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
+            "The read-denied fixture still entitles its agent, so the combined branch is not exercised.");
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                      string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
+        Assert.Contains("even with the server declared", record.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A declaration that cannot be resolved to a usable launch definition fails closed: no entitled
     /// agent renders <c>mcpServers</c>, rather than every agent rendering an entry built from a
     /// partial or guessed definition.

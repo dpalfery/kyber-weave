@@ -1512,6 +1512,16 @@ internal sealed class McpDeclarationCorpusFixture : IDisposable
         return fixture;
     }
 
+    internal static McpDeclarationCorpusFixture WithServersAndFileReadDeniedAgent(
+        string agentName,
+        params string[] serverNames)
+    {
+        McpDeclarationCorpusFixture fixture = WithServers(serverNames);
+        fixture.AddReadDeniedVariantOf(ReadOnlyProfile);
+        fixture.RepointAgent(agentName);
+        return fixture;
+    }
+
     /// <summary>
     /// Copies the canonical corpus and denies <c>filesystem.read</c> in the corpus's own
     /// <c>orchestrator</c> profile, leaving every profile name intact.
