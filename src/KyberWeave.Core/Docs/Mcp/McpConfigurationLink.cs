@@ -97,8 +97,10 @@ internal static class McpConfigurationLink
             current = Path.Combine(current, segment);
             traversed = traversed.Length == 0 ? segment : traversed + "/" + segment;
 
-            if (IsLink(current))
-                return new McpLinkProbe(McpLinkObstruction.Link, traversed);
+            McpLinkObstruction found = Inspect(current);
+
+            if (found != McpLinkObstruction.None)
+                return new McpLinkProbe(found, traversed);
         }
 
         return default;
@@ -125,15 +127,38 @@ internal static class McpConfigurationLink
             : $"{relativePath} lies behind the symbolic link '{linkedSegment}'";
 
     /// <summary>
-    /// Whether one path component is a symbolic link or a reparse point. A component that does not
-    /// exist is not a link, so a file the repair is about to create is not refused.
+    /// The clause a refusal opens with for whichever obstruction <see cref="Probe"/> found.
+    /// </summary>
+    /// <param name="relativePath">The configuration file, as the operator's repository names it.</param>
+    /// <param name="probe">What the guard found on the way to the file.</param>
+    /// <remarks>
+    /// A denial and a link are separate sentences because they have separate remedies: one is a
+    /// permission on a real file inside the repository, the other is a file outside it. One message
+    /// for both would leave the operator unable to tell which of the two they are looking at.
+    /// </remarks>
+    public static string Describe(string relativePath, McpLinkProbe probe) =>
+        probe.Obstruction == McpLinkObstruction.Denied
+            ? $"{relativePath} could not be inspected: access to '{probe.Segment}' was denied"
+            : Describe(relativePath, probe.Segment ?? string.Empty);
+
+    /// <summary>
+    /// Which of the three states one path component is in: an ordinary entry, a symbolic link, or one
+    /// this process may not inspect.
     /// </summary>
     /// <remarks>
-    /// A component that cannot be inspected answers "not a link" rather than throwing: one
-    /// permission error in a repository's tree must not abort a <c>docs init</c>, and the read or
-    /// write that follows reports the real problem with the file it names.
+    /// <para>
+    /// A component that does not exist is an ordinary entry, so a file the repair is about to create
+    /// is not refused.
+    /// </para>
+    /// <para>
+    /// <see cref="FileSystemInfo.LinkTarget"/> cannot answer the denial question on its own: it
+    /// returns null both for a real file and for one it failed to read, so a guard built only on it
+    /// reports a file this process may not touch as "not a link" — and the repair, told the file is
+    /// not there, takes the path that creates one over it. <see cref="File.GetAttributes(string)"/> is
+    /// the call that raises the denial, so it is the call that answers this.
+    /// </para>
     /// </remarks>
-    private static bool IsLink(string path)
+    private static McpLinkObstruction Inspect(string path)
     {
         FileSystemInfo entry = Directory.Exists(path)
             ? new DirectoryInfo(path)
@@ -143,12 +168,22 @@ internal static class McpConfigurationLink
         {
             // LinkTarget answers even for a link whose target is gone, which is the one case a
             // File.Exists pre-check would have hidden.
-            return entry.LinkTarget is not null
-                || (entry.Exists && entry.Attributes.HasFlag(FileAttributes.ReparsePoint));
+            if (entry.LinkTarget is not null)
+                return McpLinkObstruction.Link;
+
+            FileAttributes attributes = File.GetAttributes(path);
+
+            return attributes.HasFlag(FileAttributes.ReparsePoint)
+                ? McpLinkObstruction.Link
+                : McpLinkObstruction.None;
         }
-        catch (Exception exception) when (exception is FileNotFoundException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return false;
+            return McpLinkObstruction.None;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return McpLinkObstruction.Denied;
         }
     }
 }

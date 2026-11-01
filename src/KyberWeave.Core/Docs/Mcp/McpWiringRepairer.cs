@@ -235,14 +235,30 @@ public static class McpWiringRepairer
         // digest read, because it is the more specific fact: an operator whose file is a link needs
         // to hear that, not "there is no record" or "restore it from version control" — advice that
         // would have them editing the linked file by hand.
-        if (McpConfigurationLink.LinkedSegment(root, fullPath) is { } linked)
+        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath);
+
+        if (probe.Obstruction == McpLinkObstruction.Denied)
         {
             return (Refused(
                 harness,
                 path,
                 record?.Servers ?? [],
                 McpWiringReceipt.DriftCode,
-                $"{McpConfigurationLink.Describe(path, linked)}, so nothing was removed: restoring the recorded "
+                $"{McpConfigurationLink.Describe(path, probe)}, so nothing was removed: restoring recorded bytes "
+                    + "over a file this process cannot read would be a guess",
+                $"Check the permissions on {path} and on every directory above it, then run the removal again; the "
+                    + "receipt still records the write.").Change,
+                false);
+        }
+
+        if (probe.Obstruction == McpLinkObstruction.Link)
+        {
+            return (Refused(
+                harness,
+                path,
+                record?.Servers ?? [],
+                McpWiringReceipt.DriftCode,
+                $"{McpConfigurationLink.Describe(path, probe)}, so nothing was removed: restoring the recorded "
                     + "bytes through it would write outside the repository",
                 $"Replace {path} with a real file inside the repository — copy its content out of the linked file, "
                     + "delete the link, and leave the copy in place — then run the removal again. Nothing was written.").Change,
@@ -262,23 +278,17 @@ public static class McpWiringRepairer
                 false);
         }
 
-        if (!File.Exists(fullPath))
-        {
-            return (Refused(
-                harness,
-                path,
-                record.Servers,
-                McpWiringReceipt.DriftCode,
-                $"{path} is gone, so the state the receipt recorded cannot be restored",
-                $"Replace {path} from version control and run the removal again; the receipt still records the write.").Change,
-                false);
-        }
-
+        // The read answers for the file's existence as well as its content: File.Exists reports a file
+        // this process may not reach as absent, and "gone" is a different refusal from "unreadable".
         byte[] current;
 
         try
         {
             current = File.ReadAllBytes(fullPath);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return (MissingOnRemoval(harness, path, record), false);
         }
         catch (IOException exception)
         {
@@ -378,51 +388,73 @@ public static class McpWiringRepairer
 
         string fullPath = ContainedPath(root, path)
             ?? throw new InvalidOperationException($"'{path}' does not resolve inside the repository");
-        byte[]? original = null;
 
         // A link in the tree makes this repository-scope path name a file somebody else owns, and
         // reading or writing through it leaves the repository entirely (2.6, 5.2, ADR 0051). The
-        // refusal comes before the read so that not one byte of the target is opened.
-        if (McpConfigurationLink.LinkedSegment(root, fullPath) is { } linked)
+        // refusal comes before the read so that not one byte of the target is opened. The same
+        // position answers the denial case, which is the other way this path can prove nothing about
+        // the file it names.
+        McpLinkProbe probe = McpConfigurationLink.Probe(root, fullPath);
+
+        if (probe.Obstruction == McpLinkObstruction.Denied)
         {
             return Refused(
                 harness,
                 path,
                 [],
                 RefusalCode,
-                $"{McpConfigurationLink.Describe(path, linked)}, so nothing was read or written: a repository-scope "
+                $"{McpConfigurationLink.Describe(path, probe)}, so nothing was read or written: a file this process "
+                    + "cannot inspect cannot be told from one that is absent",
+                $"Check the permissions on {path} and on every directory above it, then run the wire command again. "
+                    + "Kyber-Weave never creates a file over one it could not read.");
+        }
+
+        if (probe.Obstruction == McpLinkObstruction.Link)
+        {
+            return Refused(
+                harness,
+                path,
+                [],
+                RefusalCode,
+                $"{McpConfigurationLink.Describe(path, probe)}, so nothing was read or written: a repository-scope "
                     + "configuration cannot be a link, because the bytes would land in whichever file it names",
                 $"Replace {path} with a real file inside the repository — copy its content out of the linked file, "
                     + "delete the link, and leave the copy in place — then run the wire command again. Kyber-Weave "
                     + "writes repository-scope files only, and a write through a link leaves the repository.");
         }
 
-        if (File.Exists(fullPath))
+        // The read answers for the file's existence as well as its content: a pre-check by
+        // File.Exists cannot tell a denied file from an absent one, and "absent" is what selects the
+        // create path below.
+        byte[]? original;
+
+        try
         {
-            try
-            {
-                original = File.ReadAllBytes(fullPath);
-            }
-            catch (IOException exception)
-            {
-                return Refused(
-                    harness,
-                    path,
-                    [],
-                    RefusalCode,
-                    $"{path} could not be read: {exception.Message}",
-                    $"Check that {path} is a readable file, then run the wire command again.");
-            }
-            catch (UnauthorizedAccessException exception)
-            {
-                return Refused(
-                    harness,
-                    path,
-                    [],
-                    RefusalCode,
-                    $"{path} could not be read: {exception.Message}",
-                    $"Check the permissions on {path}, then run the wire command again.");
-            }
+            original = File.ReadAllBytes(fullPath);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            original = null;
+        }
+        catch (IOException exception)
+        {
+            return Refused(
+                harness,
+                path,
+                [],
+                RefusalCode,
+                $"{path} could not be read: {exception.Message}",
+                $"Check that {path} is a readable file, then run the wire command again.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Refused(
+                harness,
+                path,
+                [],
+                RefusalCode,
+                $"{path} could not be read: {exception.Message}",
+                $"Check the permissions on {path}, then run the wire command again.");
         }
 
         if (original is not null)
@@ -995,6 +1027,19 @@ public static class McpWiringRepairer
             return null;
         }
     }
+
+    /// <summary>The refusal for a record whose file is no longer on disk.</summary>
+    private static McpWiringFileChange MissingOnRemoval(
+        string harness,
+        string path,
+        McpWiringReceiptRecord record) =>
+        Refused(
+            harness,
+            path,
+            record.Servers,
+            McpWiringReceipt.DriftCode,
+            $"{path} is gone, so the state the receipt recorded cannot be restored",
+            $"Replace {path} from version control and run the removal again; the receipt still records the write.").Change;
 
     private static McpWiringFileChange UnreadableOnRemoval(
         string harness,
