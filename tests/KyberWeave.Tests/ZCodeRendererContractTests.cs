@@ -126,32 +126,21 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// The pure-orchestrator profile, excluded from the MCP grant on ZCode exactly as it is on
-    /// Claude: a role that routes work has no use for documentation or code-graph lookups.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
-
-    /// <summary>
     /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
     /// from source rather than from the renderer, in the same server-then-tool order.
     /// </summary>
     private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source)
     {
-        return
-        [
-            .. source.Toolchain.RequiredMcpTools
-                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .SelectMany(entry => entry.Value
-                    .OrderBy(tool => tool, StringComparer.Ordinal)
-                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
-        ];
+        return SquadMcpGrantProjection.QualifiedToolNames(source, _ => true);
     }
 
-    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile)
+    /// <summary>
+    /// The MCP tool names one principal is entitled to: <c>kyber-weave</c> on the file-read
+    /// entitlement alone, <c>codegraph</c> and <c>context7</c> minus the pure orchestrator.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedEntitledMcpToolNames(SquadSource source, SquadAgent agent)
     {
-        return !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-               decision == SquadPermissionDecision.Allow;
+        return SquadMcpGrantProjection.EntitledRosterToolNames(source, agent, SquadTarget.ZCode);
     }
 
     private static IReadOnlyList<string> ComputeExpectedTools(
@@ -175,7 +164,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
         return
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : []
+            .. ExpectedEntitledMcpToolNames(source, agent)
         ];
     }
 
@@ -940,6 +929,11 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// tool, and it is still collected into <c>requiredServerNames</c>, so it imposes a
     /// connected-server requirement while granting nothing. This suite therefore asserts the
     /// qualified form is present and the selector form is absent.
+    ///
+    /// Two entitlements, not one: <c>kyber-weave</c> follows the file-read grant alone and
+    /// reaches the pure orchestrator, while <c>codegraph</c> and <c>context7</c> keep the
+    /// carve-out. Each principal's expectation is computed from
+    /// <see cref="SquadMcpGrantProjection"/>, so a re-added exclusion cannot agree with itself.
     /// </remarks>
     [Fact]
     public async Task RenderAsync_ZCode_GrantsEveryDeclaredMcpToolByQualifiedName()
@@ -947,8 +941,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        IReadOnlyList<string> expected = ExpectedMcpToolNames(source);
-        Assert.NotEmpty(expected);
+        IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
+        Assert.NotEmpty(allTools);
 
         int granted = 0;
         foreach (SquadAgent agent in source.Agents)
@@ -974,16 +968,22 @@ public sealed class ZCodeRendererContractTests : IDisposable
             // naming a server there only adds a second failure mode.
             Assert.DoesNotContain("mcpServers", document, StringComparison.Ordinal);
 
-            if (ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            IReadOnlyList<string> entitled = ExpectedEntitledMcpToolNames(source, agent);
+            IReadOnlyList<string> withheld =
+                [.. allTools.Where(tool => !entitled.Contains(tool, StringComparer.Ordinal))];
+
+            Assert.All(entitled, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
+            Assert.All(withheld, tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
+
+            // The entitled names keep the roster's server-then-tool order, so a rename or a
+            // reordered roster shows up as an ordering failure rather than a silent reflow.
+            Assert.Equal(
+                entitled,
+                tools.Where(entitled.Contains).ToArray());
+
+            if (entitled.Count > 0)
             {
                 granted++;
-                Assert.All(expected, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
-            }
-            else
-            {
-                Assert.All(
-                    expected,
-                    tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
             }
         }
 
@@ -991,42 +991,68 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A principal outside the standard grant records why, so the withholding is visible in
-    /// the receipt rather than looking like an oversight.
+    /// A principal outside an entitlement records why, and the record names exactly the servers
+    /// it is withheld from — no more, and no fewer.
     /// </summary>
+    /// <remarks>
+    /// The orchestrator still loses <c>codegraph</c> and <c>context7</c>, so its receipt has to
+    /// say so. It no longer loses <c>kyber-weave</c>: naming that server as withheld would be the
+    /// one place a review or a <c>squad doctor</c> run reads a claim that contradicts the render.
+    /// </remarks>
     [Fact]
-    public async Task RenderAsync_ZCode_RecordsMcpWithheldFromThePureOrchestrator()
+    public async Task RenderAsync_ZCode_WithholdsOnlyTheOrchestratorExcludedServers()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        List<SquadAgent> withheld = source.Agents
-            .Where(agent => !ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
-            .ToList();
+        IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
 
-        Assert.NotEmpty(withheld);
-
-        foreach (SquadAgent agent in withheld)
+        foreach (SquadAgent agent in source.Agents)
         {
-            SquadDegradationRecord record = Assert.Single(
-                result.Degradations,
-                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
-            Assert.All(
-                source.Toolchain.RequiredMcpTools.Keys,
-                server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
-        }
+            IReadOnlyList<string> entitled = ExpectedEntitledMcpToolNames(source, agent);
+            IReadOnlyList<string> withheldServers =
+                SquadMcpGrantProjection.WithheldServers(source, agent, SquadTarget.ZCode);
+            string[] withheldTools =
+                [.. allTools.Where(tool => !entitled.Contains(tool, StringComparer.Ordinal))];
 
-        // An entitled agent records no MCP gap, because it has none.
-        foreach (SquadAgent agent in source.Agents.Where(a =>
-                     ExpectsMcp(a, source.CapabilityProfiles.Profiles[a.CapabilityProfile])))
-        {
             SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
                 d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
-            if (record is not null)
+
+            if (withheldTools.Length == 0)
             {
-                Assert.DoesNotContain("withheld", record.Details!, StringComparison.Ordinal);
+                // An entitled principal records no MCP gap, because it has none.
+                if (record is not null)
+                {
+                    Assert.DoesNotContain("withheld", record.Details!, StringComparison.Ordinal);
+                }
+
+                continue;
+            }
+
+            Assert.NotNull(record);
+            Assert.All(
+                withheldServers,
+                server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
+            foreach (string grantedServer in SquadMcpGrantProjection.DeclaredServers(source)
+                         .Where(server => !withheldServers.Contains(server, StringComparer.Ordinal)))
+            {
+                Assert.DoesNotContain(grantedServer, record.Details!, StringComparison.Ordinal);
             }
         }
+
+        // The shipped corpus exercises exactly one such principal: the orchestrator, whose
+        // withholding is now the two servers it never used rather than the one it needs.
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            ["codegraph", "context7"],
+            SquadMcpGrantProjection.WithheldServers(source, conductor, SquadTarget.ZCode));
+        Assert.Equal(
+            [conductor.Name],
+            source.Agents
+                .Where(agent => SquadMcpGrantProjection
+                    .WithheldServers(source, agent, SquadTarget.ZCode)
+                    .Count > 0)
+                .Select(agent => agent.Name));
     }
 
     /// <summary>

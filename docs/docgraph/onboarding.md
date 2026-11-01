@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-10-27
+last-reviewed: 2026-10-31
 ---
 
 # Adopting DocGraph in an existing repository
@@ -83,9 +83,10 @@ operator-owned file.
 
 ### APM is an expected dependency
 
-`docs init` also deploys the **`kyber-docs-authoring` skill** through
-[APM](https://microsoft.github.io/apm). APM is a **prerequisite you install yourself** —
-Kyber-Weave never installs it for you, and never installs anything else on your machine.
+`docs init` also deploys the **Kyber-Weave skills** in `.apm/skills/`, among them the
+**`kyber-docs-authoring` skill**, through [APM](https://microsoft.github.io/apm). APM is a
+**prerequisite you install yourself** — Kyber-Weave never installs it for you, and never installs
+anything else on your machine.
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh     # macOS / Linux, once
@@ -98,6 +99,18 @@ Windows PowerShell: `irm https://aka.ms/apm-windows | iex`. Homebrew:
 If APM is absent, `docs init` says so, prints the exact command to run later, and still
 scaffolds the corpus — the skill is an accelerator, not a prerequisite for the corpus
 itself. Use `--no-skill` to skip the attempt entirely.
+
+Where [Kyber-Squad](../kyber-squad/onboarding.md#kyber-weave-skills-in-a-squad-deployment) is
+deployed, the same skills already arrive through `kyber-weave squad install` and
+`kyber-weave squad update`, so run `docs init` with `--no-skill` there:
+
+```bash
+kyber-weave docs init . --no-skill
+```
+
+`docs init` itself does not change: it has no new flag and no new default, and a repository that
+uses Kyber-Docs without Kyber-Squad keeps this APM path. See
+[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
 The default target is `agent-skills`, which installs to `.agents/skills/` and is read by
 every APM-supported client. Choose others with `--target`:
