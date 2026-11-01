@@ -646,6 +646,43 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     }
 
     /// <summary>
+    /// A failed archive write keeps the previous archive and leaves no partial zip. The packer used to delete the previous
+    /// archive before it wrote the new one, so a disk-full or I/O failure part way through left a truncated zip where the
+    /// last good release had been. The failure is injected at the second entry, after the first is written.
+    /// </summary>
+    [Fact]
+    public void FailedArchiveWriteKeepsThePreviousArchiveAndLeavesNoPartialZip()
+    {
+        string outDirectory = Path.Combine(_temp.Path, "write-fault-out");
+        Directory.CreateDirectory(outDirectory);
+        string archivePath = Path.Combine(outDirectory, $"kyber-squad-{PackedVersion}.zip");
+        byte[] previous = Encoding.UTF8.GetBytes("previous archive bytes");
+        File.WriteAllBytes(archivePath, previous);
+        List<(string RelativePath, byte[] Content)> entries =
+        [
+            ("first.md", Encoding.UTF8.GetBytes("first\n")),
+            ("second.md", Encoding.UTF8.GetBytes("second\n"))
+        ];
+
+        IOException failure = Assert.Throws<IOException>(() =>
+            SquadPacker.WriteArchive(archivePath, entries, beforeEntry: name =>
+            {
+                if (name == "second.md")
+                {
+                    throw new IOException("Simulated disk-full write.");
+                }
+            }));
+
+        Assert.Equal("Simulated disk-full write.", failure.Message);
+        Assert.True(File.Exists(archivePath), $"The failed write deleted the previous archive at '{archivePath}'.");
+        Assert.True(
+            previous.SequenceEqual(File.ReadAllBytes(archivePath)),
+            $"The failed write changed the previous archive at '{archivePath}'.");
+        string[] expected = [archivePath];
+        Assert.Equal(expected, Directory.GetFiles(outDirectory));
+    }
+
+    /// <summary>
     /// Characterization, declared: passes on the base by design. It pins the single-source rule: a Kyber-Weave skill is
     /// authored once in <c>.apm/skills</c> and never copied into <c>products/kyber-squad</c>, so no copy can drift from
     /// the APM package. The products-only loader must not list one either.

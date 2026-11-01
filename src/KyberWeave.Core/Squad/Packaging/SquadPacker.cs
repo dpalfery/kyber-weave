@@ -39,12 +39,7 @@ public static class SquadPacker
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         Directory.CreateDirectory(outDirectory);
-        if (File.Exists(archivePath))
-        {
-            File.Delete(archivePath);
-        }
-
-        WriteDeterministicZip(archivePath, entries);
+        WriteArchive(archivePath, entries);
         return archivePath;
     }
 
@@ -70,12 +65,7 @@ public static class SquadPacker
         entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         Directory.CreateDirectory(outDirectory);
-        if (File.Exists(archivePath))
-        {
-            File.Delete(archivePath);
-        }
-
-        WriteDeterministicZip(archivePath, entries);
+        WriteArchive(archivePath, entries);
         return archivePath;
     }
 
@@ -250,13 +240,43 @@ public static class SquadPacker
         return ext is ".md" or ".yml" or ".yaml" or ".json" or ".toml" or ".txt" or ".ps1" or ".sh";
     }
 
-    private static void WriteDeterministicZip(string zipPath, List<(string RelativePath, byte[] Content)> entries)
+    /// <summary>
+    /// Writes one archive at <paramref name="archivePath"/>. The entries go to a temporary file beside the target, which
+    /// replaces the target only once the write is complete. A failed write therefore leaves the previous archive in place
+    /// and no partial zip. <paramref name="beforeEntry"/> runs before each entry is written; it exists so a test can fail
+    /// a write part way through, as a full disk would.
+    /// </summary>
+    internal static void WriteArchive(
+        string archivePath,
+        List<(string RelativePath, byte[] Content)> entries,
+        Action<string>? beforeEntry = null)
+    {
+        string temporaryPath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            WriteDeterministicZip(temporaryPath, entries, beforeEntry);
+            File.Move(temporaryPath, archivePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static void WriteDeterministicZip(
+        string zipPath,
+        List<(string RelativePath, byte[] Content)> entries,
+        Action<string>? beforeEntry)
     {
         using FileStream fileStream = new(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
         using ZipArchive archive = new(fileStream, ZipArchiveMode.Create, leaveOpen: false);
 
         foreach ((string relPath, byte[] content) in entries)
         {
+            beforeEntry?.Invoke(relPath);
             ZipArchiveEntry entry = archive.CreateEntry(relPath, CompressionLevel.Optimal);
             entry.LastWriteTime = FixedTimestamp;
 
