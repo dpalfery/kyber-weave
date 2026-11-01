@@ -1619,6 +1619,45 @@ public sealed class SquadCanonicalContentTests
         Assert.Empty(offenders);
     }
 
+    /// <summary>
+    /// Both run-start surfaces carry the read-only doctor step, gated on the docs-enabled condition, with the
+    /// warn-and-continue rule. A later edit that drops any one of the three silently disables the check.
+    /// </summary>
+    /// <remarks>
+    /// The condition is the D14 predicate: the config file and its docs-root. The rule is D15: a failed doctor
+    /// is recorded and the run continues, so a missing index never blocks a fresh clone.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
+        Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
+        Assert.Contains("docs-root", text, StringComparison.Ordinal);
+        Assert.Contains("warn and continue", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The conductor's run-start step sits in <c>Shared lifecycle invariants</c>, the earliest section that applies to
+    /// every route (D17), so it runs before any routing decision rather than on one branch of it.
+    /// </summary>
+    [Fact]
+    public void ConductorRunStartDoctorStepIsInSharedLifecycleInvariants()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
+        int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
+        int doctor = conductor.IndexOf("kyber-weave doctor --check", StringComparison.Ordinal);
+
+        Assert.True(invariants >= 0, "'agents/conductor.md' must keep its 'Shared lifecycle invariants' section.");
+        Assert.True(
+            doctor > invariants && doctor < handoffs,
+            "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
+    }
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 

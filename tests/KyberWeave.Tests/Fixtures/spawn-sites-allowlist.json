@@ -1056,6 +1056,30 @@
       "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
       "count": 1,
       "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a sleep 7 this test caused, result ignored."
+    },
+    {
+      "file": "src/KyberWeave.Core/Doctor/CodeGraphProvisioner.cs",
+      "text": "ProcessStartInfo startInfo = new(fileName)",
+      "count": 1,
+      "bound": "Builds the codegraph start info only; every run goes through IProcessExecutor, bounded by DoctorOptions.IndexTimeout (ProcessExecutor.WithTimeout kills the tree on expiry)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Doctor/RepositoryDoctor.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds the git rev-parse start info only; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "text": "ProcessStartInfo startInfo = new(fileName)",
+      "count": 1,
+      "bound": "The session's own start info, passed through ProcessRunner.CreateSafeStartInfo; the child is bounded by the session budget and killed in Dispose on every path."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "text": "_process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))",
+      "count": 1,
+      "bound": "The only Process.Start for the stdio session; the child is killed through ProcessRunner.TryKillTree in Dispose on every path, and its reads are bounded by the session budget."
     }
   ]
 }

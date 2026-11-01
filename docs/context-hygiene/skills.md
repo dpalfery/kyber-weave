@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-10-31
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -137,6 +137,19 @@ which is the only honest way to ship a skill from a skill-governance tool.
 
 It is distributed as an [APM](https://microsoft.github.io/apm) package, so the harness
 layout for each runtime is APM's problem rather than a second copy of that mapping here.
+
+### `codegraph`
+
+`codegraph`, at `.apm/skills/codegraph/`, makes the CodeGraph index usable in a repository. It
+is registered here as the second shipped skill.
+
+- **Trigger:** use when the CodeGraph index (`.codegraph/`) is missing or stale, when codegraph
+  tools report a project is not indexed, or when `docs drift` fails `KW-DOC-DRIFT-001`. Ordinary
+  code search is excluded: the skill says to call `codegraph_explore` directly.
+- **Behaviour:** runs `kyber-weave doctor --check`, and branches on the exit code. It never runs
+  `codegraph` itself. See the [`doctor` verb](../cli-command-surface.md#doctor--repository-documentation-tooling).
+- **Gates:** `skill-validate-codegraph`, `skill-lint-codegraph` (`--min-desc-score 70`), and
+  `skill-scan-codegraph` (`--fail-on critical`) in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml).
 
 ## Deployment control plane with Kyber-Squad
 

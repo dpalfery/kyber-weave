@@ -1316,6 +1316,40 @@ files never embed a literal `docs/` path: every documentation location resolves 
 Config Reg properties such as `<docs-root>`, so a host that mounts documentation
 elsewhere keeps working.
 
+### Run-start documentation check
+
+`conductor` (under **Shared lifecycle invariants**) and `bug-crusher` (step 0 of **Workflow**)
+both run a read-only documentation check before they do anything else. The check is an
+invariant of the squad, not a convenience:
+
+- **Predicate.** The step runs only when the repository has governed docs: `.kyber-weave/kyber-weave.yml`
+  exists at the git root, and the docs root it declares exists as a directory. A repository without
+  governed docs skips the step entirely.
+- **Read-only.** It runs `kyber-weave doctor --check`, which never runs `codegraph init` or
+  `codegraph index`. A run never pays for an index build at start.
+- **Warn and continue.** A failed check is one line in the run record and never a stop. The one
+  provisioning action is `kyber-weave doctor --provision`, run once, and only on exit `1` with
+  `codegraph.index` while the binary is present. Repository-local `codegraph init .` is already
+  authorised by the root `AGENTS.md`.
+- **Record line.** The run record carries `run-start doctor: <exit> <check ids>`, for example
+  `run-start doctor: 1 codegraph.index`. The bug-crusher report and the pull request description
+  carry the same line.
+- **Nothing installs.** Exit `3` means the `codegraph` executable is missing. In supervised mode the
+  agent asks the user and quotes the printed fix line. In autonomous mode it records the item as
+  pending human review. Neither mode installs anything.
+
+The check is defined by [`doctor`](../cli-command-surface.md#doctor--repository-documentation-tooling)
+and its [runbook](../docgraph/mcp-runbook.md#the-live-check-doctor---check). The squad step names
+the command and the two path checks only, with no editor- or harness-specific tool names, because
+these instructions ship to every harness.
+
+**Known gap.** The predicate is written as prose in the squad instructions, and the agent evaluates
+it. The core type `DocsEnabled.IsEnabled` implements the same rule, but no CLI verb calls it, and it
+reads a top-level `docs-root` key. The configuration declares the docs root under `ontology:`
+(`ontology.docs-root`), so the type checks the default `docs` in a host that declares another root.
+Until the type reads the declared key and a verb or test uses it, the agent's evaluation is the only
+enforcement.
+
 ---
 
 ## 10. Harness Instances and Filesystem Linking

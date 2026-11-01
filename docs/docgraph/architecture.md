@@ -181,6 +181,30 @@ Because the kind travels on the entry, a mode property is also reserved: a host 
 declare one under `config-reg:`, because that would replace a setting with a path and break
 the promise the registry makes.
 
+## Provisioning the index
+
+The graph lives in `.codegraph/` at the git root, and `docs drift` is the gate that needs it.
+`kyber-weave doctor` owns creating and refreshing it, so the rules live in one place rather
+than in each caller's shell script:
+
+- **Repository-local only.** The root is the git root. Doctor refuses (exit `2`) when the path
+  is not a repository or is the user's home, and it never provisions another checkout.
+- **Init once, index thereafter.** `codegraph init .` runs only when `.codegraph/` is absent;
+  every later provisioning run is `codegraph index .`. Both run with the root as the working
+  directory, under a 600-second bound that kills the process tree on expiry.
+- **Never delete, never install.** A corrupt or unwritable `.codegraph/` is reported with a
+  remedy a human applies; callers of the CLI are told to install CodeGraph rather than it being
+  installed for them. The binary's absence is exit `3`, not a failure to route around.
+- **One writer at a time.** A lock file in the OS temp directory, keyed by a hash of the root,
+  serialises concurrent runs; the second waits up to the index timeout and then reports
+  `codegraph.index busy`. It is deliberately never removed, so a third run cannot slip past a
+  holder that still holds it.
+- **A running daemon is left alone.** `index` coexists with it. Doctor never stops or restarts
+  it, and never touches its files.
+
+Read-only callers use `doctor --check`: it detects the binary and the index and runs the live
+MCP proof, and never writes.
+
 ## Related
 
 - [Retrieval and ranking](retrieval.md) — how a query becomes an answer
