@@ -762,6 +762,40 @@ public sealed class DocsScaffolderTests : IDisposable
             HostConfigYaml.WithDocsRoot(yaml, "new # root"));
     }
 
+    /// <summary>
+    /// A host configuration written with lone CR line endings is read line by line, so the
+    /// existing <c>ontology:</c> block is found and only its <c>docs-root</c> changes. Read as one
+    /// long line, the block is never found and a second <c>ontology:</c> is appended beneath the
+    /// first — a document YAML refuses to load, which leaves the host unable to run any command
+    /// until someone repairs the file by hand.
+    /// </summary>
+    [Fact]
+    public void EditsALoneCrHostConfigInPlaceInsteadOfAppendingASecondOntologyBlock()
+    {
+        WriteHostConfig(
+            "# Ours, not the tool's.\r" +
+            "ontology:\r" +
+            "  docs-root: handbook\r" +
+            "  technologies:\r" +
+            "    - go\r");
+
+        DocsScaffolder.Scaffold(_temp.Path, "docs", reviewGates: false);
+
+        // The load is the assertion that matters: it is what raised a duplicate-key error before
+        // the writer read the file under its own line endings.
+        Assert.Equal("docs", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+
+        string updated = Read(ConfigPath);
+        Assert.Single(updated.Split('\r'), line => string.Equals(line, "ontology:", StringComparison.Ordinal));
+        Assert.Contains("# Ours, not the tool's.", updated, StringComparison.Ordinal);
+        Assert.Contains("  docs-root: 'docs'", updated, StringComparison.Ordinal);
+        Assert.Contains("    - go", updated, StringComparison.Ordinal);
+
+        // No LF anywhere: the operator's line breaks, and the append that follows them, are all
+        // the file's own style.
+        Assert.DoesNotContain("\n", updated, StringComparison.Ordinal);
+    }
+
     /// <summary>The whole point: a freshly initialized repository validates clean.</summary>
     [Theory]
     [InlineData(null)]

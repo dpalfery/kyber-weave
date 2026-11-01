@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using YamlDotNet.RepresentationModel;
 
@@ -17,10 +18,13 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// file is returned verbatim.
 /// </para>
 /// <para>
-/// Line endings are preserved as the dominant style of the input. A file mixing both is
-/// normalized to CRLF, which is the one case where this type touches a line it did not
-/// mean to; no correctness depends on it, and the alternative is carrying per-line endings
-/// through the edit for no reader's benefit.
+/// Line endings are the file's own, line by line. A configuration written with lone CR
+/// endings is a document YAML reads perfectly well, so it has to be a document this type
+/// reads perfectly well too: split on <c>'\n'</c> alone it is one long line, the
+/// <c>ontology:</c> key is not where the block starts, and the append that follows writes a
+/// second <c>ontology</c> key — a file YAML refuses to load at all. Each line therefore
+/// keeps the break that ended it, and only the lines this type adds take a new one, in the
+/// style the file uses most.
 /// </para>
 /// </remarks>
 internal static partial class HostConfigYaml
@@ -39,12 +43,11 @@ internal static partial class HostConfigYaml
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentException.ThrowIfNullOrWhiteSpace(docsRoot);
 
-        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        List<string> lines = yaml.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        HostConfigLines lines = HostConfigLines.Read(yaml);
 
         int ontology = IndexOfOntologyKey(lines);
         if (ontology < 0)
-            return string.Join(newline, AppendOntologyBlock(lines, docsRoot));
+            return AppendOntologyBlock(lines, docsRoot).ToText();
 
         int blockEnd = EndOfBlock(lines, ontology);
         string blockIndent = BlockIndent(lines, ontology, blockEnd);
@@ -71,11 +74,11 @@ internal static partial class HostConfigYaml
             if (prefix.EndsWith(':')) prefix += " ";
 
             lines[i] = prefix + QuoteScalar(docsRoot) + suffix;
-            return string.Join(newline, lines);
+            return lines.ToText();
         }
 
         lines.Insert(ontology + 1, blockIndent + "docs-root: " + QuoteScalar(docsRoot));
-        return string.Join(newline, lines);
+        return lines.ToText();
     }
 
     /// <summary>
@@ -111,7 +114,7 @@ internal static partial class HostConfigYaml
     /// rewrite, which would orphan the continuation lines below a new scalar value.
     /// </remarks>
     private static bool TryReadSequence(
-        List<string> lines,
+        HostConfigLines lines,
         int keyIndex,
         string value,
         string blockIndent,
@@ -165,7 +168,7 @@ internal static partial class HostConfigYaml
     /// Collects a flow sequence that may span several lines, stopping when brackets balance.
     /// </summary>
     private static bool TryCollectFlowSequence(
-        List<string> lines,
+        HostConfigLines lines,
         int keyIndex,
         string value,
         out string flow)
@@ -373,7 +376,7 @@ internal static partial class HostConfigYaml
     }
 
     /// <summary>Index of the top-level <c>ontology:</c> key, or -1.</summary>
-    private static int IndexOfOntologyKey(List<string> lines)
+    private static int IndexOfOntologyKey(HostConfigLines lines)
     {
         for (int i = 0; i < lines.Count; i++)
         {
@@ -389,7 +392,7 @@ internal static partial class HostConfigYaml
     /// line starting in column zero with something other than a comment. Blank lines and
     /// full-line comments belong to the block, so a key sitting below one is still found.
     /// </summary>
-    private static int EndOfBlock(List<string> lines, int blockStart)
+    private static int EndOfBlock(HostConfigLines lines, int blockStart)
     {
         for (int i = blockStart + 1; i < lines.Count; i++)
         {
@@ -404,7 +407,7 @@ internal static partial class HostConfigYaml
     }
 
     /// <summary>The indentation the block's own keys use, falling back to the template's.</summary>
-    private static string BlockIndent(List<string> lines, int blockStart, int blockEnd)
+    private static string BlockIndent(HostConfigLines lines, int blockStart, int blockEnd)
     {
         string? shallowest = null;
         for (int i = blockStart + 1; i < blockEnd; i++)
@@ -421,14 +424,13 @@ internal static partial class HostConfigYaml
         return shallowest ?? DefaultIndent;
     }
 
-    private static List<string> AppendOntologyBlock(List<string> lines, string docsRoot)
+    private static HostConfigLines AppendOntologyBlock(HostConfigLines lines, string docsRoot)
     {
         if (lines.Count > 0 && lines[^1].Trim().Length > 0)
             lines.Add(string.Empty);
 
         lines.Add("ontology:");
         lines.Add(DefaultIndent + "docs-root: " + QuoteScalar(docsRoot));
-        lines.Add(string.Empty);
         return lines;
     }
 
@@ -464,13 +466,12 @@ internal static partial class HostConfigYaml
             }
         }
 
-        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        List<string> lines = yaml.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        HostConfigLines lines = HostConfigLines.Read(yaml);
 
         int ontology = IndexOfOntologyKey(lines);
         if (ontology < 0)
         {
-            return string.Join(newline, AppendOntologyWithTechnologies(lines, technologies));
+            return AppendOntologyWithTechnologies(lines, technologies).ToText();
         }
 
         int blockEnd = EndOfBlock(lines, ontology);
@@ -491,7 +492,7 @@ internal static partial class HostConfigYaml
 
             if (value.StartsWith('['))
             {
-                return MergeFlowSequence(yaml, lines, i, value, technologies, newline);
+                return MergeFlowSequence(yaml, lines, i, value, technologies);
             }
 
             if (value.Length > 0)
@@ -503,19 +504,18 @@ internal static partial class HostConfigYaml
                     "orphaned list items.");
             }
 
-            return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, technologies, newline);
+            return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, technologies);
         }
 
-        return InsertTechnologiesBlock(lines, ontology, blockIndent, blockEnd, technologies, newline);
+        return InsertTechnologiesBlock(lines, ontology, blockIndent, blockEnd, technologies);
     }
 
     private static string MergeFlowSequence(
         string originalYaml,
-        List<string> lines,
+        HostConfigLines lines,
         int keyIndex,
         string value,
-        IReadOnlyList<string> technologies,
-        string newline)
+        IReadOnlyList<string> technologies)
     {
         if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
         {
@@ -576,7 +576,7 @@ internal static partial class HostConfigYaml
             if (string.IsNullOrWhiteSpace(middle))
             {
                 lines[closeLineIndex] = prefix + string.Join(", ", toAdd.Select(QuoteScalar)) + afterBracket;
-                return string.Join(newline, lines);
+                return lines.ToText();
             }
         }
 
@@ -585,17 +585,16 @@ internal static partial class HostConfigYaml
             : string.Join(", ", toAdd.Select(QuoteScalar));
 
         lines[closeLineIndex] = beforeBracket + addition + afterBracket;
-        return string.Join(newline, lines);
+        return lines.ToText();
     }
 
     private static string MergeBlockSequence(
         string originalYaml,
-        List<string> lines,
+        HostConfigLines lines,
         int keyIndex,
         string blockIndent,
         int blockEnd,
-        IReadOnlyList<string> technologies,
-        string newline)
+        IReadOnlyList<string> technologies)
     {
         List<string> existingTechs = new List<string>();
         int lastItemIndex = keyIndex;
@@ -657,16 +656,15 @@ internal static partial class HostConfigYaml
         }
 
         lines.InsertRange(lastItemIndex + 1, newLines);
-        return string.Join(newline, lines);
+        return lines.ToText();
     }
 
     private static string InsertTechnologiesBlock(
-        List<string> lines,
+        HostConfigLines lines,
         int ontologyIndex,
         string blockIndent,
         int blockEnd,
-        IReadOnlyList<string> technologies,
-        string newline)
+        IReadOnlyList<string> technologies)
     {
         int insertIndex = blockEnd;
         while (insertIndex > ontologyIndex + 1 && string.IsNullOrWhiteSpace(lines[insertIndex - 1]))
@@ -686,11 +684,11 @@ internal static partial class HostConfigYaml
         }
 
         lines.InsertRange(insertIndex, toInsert);
-        return string.Join(newline, lines);
+        return lines.ToText();
     }
 
-    private static List<string> AppendOntologyWithTechnologies(
-        List<string> lines,
+    private static HostConfigLines AppendOntologyWithTechnologies(
+        HostConfigLines lines,
         IReadOnlyList<string> technologies)
     {
         if (lines.Count > 0 && lines[^1].Trim().Length > 0)
@@ -705,7 +703,6 @@ internal static partial class HostConfigYaml
             lines.Add(DefaultIndent + DefaultIndent + "- " + QuoteScalar(tech));
         }
 
-        lines.Add(string.Empty);
         return lines;
     }
 
@@ -749,6 +746,89 @@ internal static partial class HostConfigYaml
         }
     }
 
+    /// <summary>
+    /// The line ending the file itself uses: whichever of CRLF, LF or a lone CR it holds most
+    /// of, with the one that appears first settling a tie.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asking whether the file contains a CRLF is not the same question. A file written almost
+    /// entirely with LF but holding one CRLF — a pasted line, an edited hunk — would then be
+    /// edited in CRLF, and a file written with lone CR would get LF and end up mixed. What this
+    /// tool appends is the only part of the file it chooses, so it is the part that has to match
+    /// what the operator's editor will keep writing; a majority settles it, and the tie-break is
+    /// the first ending the file shows, because that is the one its first line already uses.
+    /// </para>
+    /// <para>
+    /// <see cref="McpDeclarationBlockWriter"/> appends its section to the same file and answers
+    /// the same question through this method rather than a copy, so a configuration cannot end
+    /// up carrying two appended sections written in two different styles.
+    /// </para>
+    /// </remarks>
+    internal static string DetectNewline(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        int crlf = 0;
+        int lf = 0;
+        int cr = 0;
+        int firstCrlf = -1;
+        int firstLf = -1;
+        int firstCr = -1;
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            char current = text[index];
+
+            if (current == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+            {
+                crlf++;
+                firstCrlf = firstCrlf < 0 ? index : firstCrlf;
+                index++;
+                continue;
+            }
+
+            if (current == '\n')
+            {
+                lf++;
+                firstLf = firstLf < 0 ? index : firstLf;
+                continue;
+            }
+
+            if (current == '\r')
+            {
+                cr++;
+                firstCr = firstCr < 0 ? index : firstCr;
+            }
+        }
+
+        // A file with no line break at all gets LF, the style this repository writes.
+        int most = Math.Max(crlf, Math.Max(lf, cr));
+        if (most == 0)
+            return "\n";
+
+        int earliest = int.MaxValue;
+        string newline = "\n";
+
+        if (crlf == most && firstCrlf < earliest)
+        {
+            earliest = firstCrlf;
+            newline = "\r\n";
+        }
+
+        if (lf == most && firstLf < earliest)
+        {
+            earliest = firstLf;
+            newline = "\n";
+        }
+
+        if (cr == most && firstCr < earliest)
+            newline = "\r";
+
+        return newline;
+    }
+
+    /// <summary>The top-level <c>ontology:</c> key.</summary>
     [GeneratedRegex(@"^ontology[ \t]*:[ \t]*(#.*)?$")]
     private static partial Regex OntologyKey();
 
@@ -764,4 +844,123 @@ internal static partial class HostConfigYaml
     /// </summary>
     [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)technologies[ \t]*:[ \t]*)(?<rest>.*)$")]
     private static partial Regex TechnologiesKey();
+
+    /// <summary>
+    /// A host configuration read as lines, each carrying the line break that ended it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Split on <c>'\n'</c> alone, a document written with lone CR endings is one long line, and
+    /// every key this type looks for in column zero is looked for where the file does not have
+    /// it: the <c>ontology:</c> block goes unfound, a second one is appended, and YAML refuses to
+    /// load the result at all. A lone CR is a line break to YAML, so it has to be one here too.
+    /// </para>
+    /// <para>
+    /// Each line keeps its own terminator rather than one style for the document, because this
+    /// type edits a line and has no business normalizing the rest of an operator's file — the
+    /// diff would show changes nobody made, on a file that escalates for human review by path
+    /// alone. Only the lines this tool adds take a new terminator, and they take the document's
+    /// dominant style.
+    /// </para>
+    /// </remarks>
+    private sealed class HostConfigLines
+    {
+        private readonly List<string> _content = [];
+        private readonly List<string> _terminators = [];
+        private readonly string _newline;
+
+        private HostConfigLines(string newline) => _newline = newline;
+
+        public int Count => _content.Count;
+
+        public string this[int index]
+        {
+            get => _content[index];
+            set => _content[index] = value;
+        }
+
+        public static HostConfigLines Read(string text)
+        {
+            HostConfigLines lines = new(DetectNewline(text));
+
+            int start = 0;
+            for (int index = 0; index < text.Length; index++)
+            {
+                if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+                {
+                    lines.Append(text[start..index], "\r\n");
+                    index++;
+                    start = index + 1;
+                    continue;
+                }
+
+                if (text[index] is '\r' or '\n')
+                {
+                    lines.Append(text[start..index], text[index].ToString());
+                    start = index + 1;
+                }
+            }
+
+            if (start < text.Length)
+                lines.Append(text[start..], string.Empty);
+
+            return lines;
+        }
+
+        public void Add(string line)
+        {
+            Terminate(_content.Count - 1);
+            Append(line, _newline);
+        }
+
+        public void Insert(int index, string line)
+        {
+            Terminate(index - 1);
+            AppendAt(index, line, _newline);
+        }
+
+        public void InsertRange(int index, IEnumerable<string> items)
+        {
+            Terminate(index - 1);
+            foreach (string item in items)
+            {
+                AppendAt(index, item, _newline);
+                index++;
+            }
+        }
+
+        public string ToText()
+        {
+            StringBuilder text = new();
+            for (int index = 0; index < _content.Count; index++)
+            {
+                text.Append(_content[index]).Append(_terminators[index]);
+            }
+
+            return text.ToString();
+        }
+
+        private void Append(string content, string terminator)
+        {
+            _content.Add(content);
+            _terminators.Add(terminator);
+        }
+
+        private void AppendAt(int index, string content, string terminator)
+        {
+            _content.Insert(index, content);
+            _terminators.Insert(index, terminator);
+        }
+
+        /// <summary>
+        /// Gives the line at <paramref name="index"/> the document's line break when it has none.
+        /// A line added below one that ended the file — no break after it — would otherwise join
+        /// that line rather than follow it.
+        /// </summary>
+        private void Terminate(int index)
+        {
+            if (index >= 0 && index < _terminators.Count && _terminators[index].Length == 0)
+                _terminators[index] = _newline;
+        }
+    }
 }
