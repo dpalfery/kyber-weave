@@ -51,6 +51,30 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// The probe starts the server for the repository it resolved, by passing <c>--repo-root</c>. Without the flag the
+    /// child inherits the doctor's working directory, so a healthy target can fail <c>mcp.root</c> or pass against the
+    /// wrong checkout — the exact confusion the probe exists to prevent.
+    /// </summary>
+    [Fact]
+    public void McpLiveProbe_StartsTheServerWithTheResolvedRoot()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        string argvPath = Path.Combine(_stubs.Path, "argv.txt");
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(0, report.ExitCode);
+        string[] argv = File.ReadAllLines(argvPath);
+        Assert.Contains("--repo-root", argv);
+        Assert.Contains(Root, argv);
+    }
+
+    /// <summary>
     /// A server that starts but never answers the handshake fails <c>mcp.handshake</c> with exit 1, and the budget ends
     /// the wait. The child is killed on that path; the stub's <c>sleep</c> would otherwise outlive the run.
     /// </summary>

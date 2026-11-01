@@ -145,9 +145,10 @@ public static class CodeGraphProvisioner
         if (present && !IsWritable(indexDirectory))
             return Unwritable();
 
-        // Verb choice follows the directory's presence: a missing index is initialised, an existing one is
-        // incrementally indexed. Both run from the root so the index lands in the repository.
-        string verb = present ? "index" : "init";
+        // Verb choice follows the directory's presence as it stands now, not as it stood before the lock:
+        // a concurrent run may have created the index while this one waited, and re-running init over an
+        // existing directory would be the wrong verb. Both run from the root so the index lands there.
+        string verb = Directory.Exists(indexDirectory) ? "index" : "init";
         ProcessStartInfo startInfo = StartInfo(options.CodeGraphExecutable, root, verb, ".");
 
         try
@@ -230,9 +231,15 @@ public static class CodeGraphProvisioner
 
     private static bool IsCorrupt(ProcessResult result)
     {
+        // Only a recognised index-corruption diagnostic prescribes removing .codegraph/. A bare "corrupt"
+        // or "malformed" anywhere in the output is not enough: a healthy index must never be deleted on the
+        // strength of a substring in an unrelated error message.
         string text = result.StandardError + "\n" + result.StandardOutput;
-        return text.Contains("corrupt", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("malformed", StringComparison.OrdinalIgnoreCase);
+        return text.Contains("database disk image is malformed", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("file is not a database", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("malformed database", StringComparison.OrdinalIgnoreCase)
+               || (text.Contains("corrupt", StringComparison.OrdinalIgnoreCase)
+                   && text.Contains("index", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The first non-empty line, trimmed and truncated, so a child's output cannot flood a failure line.</summary>

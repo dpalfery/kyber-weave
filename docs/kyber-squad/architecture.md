@@ -1343,12 +1343,14 @@ and its [runbook](../docgraph/mcp-runbook.md#the-live-check-doctor---check). The
 the command and the two path checks only, with no editor- or harness-specific tool names, because
 these instructions ship to every harness.
 
-**Known gap.** The predicate is written as prose in the squad instructions, and the agent evaluates
-it. The core type `DocsEnabled.IsEnabled` implements the same rule, but no CLI verb calls it, and it
-reads a top-level `docs-root` key. The configuration declares the docs root under `ontology:`
-(`ontology.docs-root`), so the type checks the default `docs` in a host that declares another root.
-Until the type reads the declared key and a verb or test uses it, the agent's evaluation is the only
-enforcement.
+**Where the rule lives.** The squad instructions carry the predicate as prose, so the agent
+evaluates it on any harness, including one with no shell builtins to lean on.
+`DocsEnabled.IsEnabled` implements the same rule in Core: it reads `ontology.docs-root`, falls back
+to a top-level `docs-root` for a config written before the nesting, and then to `docs`, and it
+requires the declared directory to exist. A YAML parse failure falls through to the default rather
+than skipping the step. No CLI verb calls the type today — the two instructions evaluate the
+predicate themselves — so `DocsEnabledTests` is what pins it, and the canonical-content pins keep
+the step in both instructions.
 
 ---
 

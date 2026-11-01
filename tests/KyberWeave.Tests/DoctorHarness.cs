@@ -70,6 +70,18 @@ internal static class DoctorHarness
             cat > /dev/null
             """.Replace("ROOT", root, StringComparison.Ordinal));
 
+    /// <summary>Behaves like a healthy server and records the argv it was started with, one argument per line.</summary>
+    public static string RecordingStub(string directory, string root, string argvPath) =>
+        WriteStub(directory, """
+            printf '%s\n' "$@" > "ARGV"
+            read _initialize
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
+            read _initialized
+            read _call
+            printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=ROOT"}]}}'
+            cat > /dev/null
+            """.Replace("ARGV", argvPath, StringComparison.Ordinal).Replace("ROOT", root, StringComparison.Ordinal));
+
     /// <summary>Answers the handshake, then reports <c>docs_explore</c> as an error result.</summary>
     public static string ErroringDocsExploreStub(string directory, string root) =>
         WriteStub(directory, """

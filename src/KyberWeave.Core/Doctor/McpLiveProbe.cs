@@ -39,7 +39,7 @@ public static class McpLiveProbe
         ArgumentNullException.ThrowIfNull(options);
 
         List<DoctorCheck> checks = [];
-        using StdioSession? session = TryStart(options);
+        using StdioSession? session = TryStart(root, options);
         if (session is null)
         {
             // The reason names the executable only. The start failure's text and the environment are never echoed.
@@ -58,11 +58,18 @@ public static class McpLiveProbe
     }
 
     /// <summary>Starts the session, or returns null when the executable cannot be started. Ownership passes to the caller.</summary>
-    private static StdioSession? TryStart(DoctorOptions options)
+    private static StdioSession? TryStart(string root, DoctorOptions options)
     {
         try
         {
-            return new StdioSession(options.McpExecutable, [], options.McpTimeout);
+            // The server resolves its root from --repo-root first, then KYBER_WEAVE_REPO_ROOT, then the
+            // working directory. Passing the flag is what makes the probe answer for the repository this
+            // run resolved; without it the child inherits doctor's cwd and a healthy target can fail
+            // mcp.root, or pass against the wrong checkout.
+            return new StdioSession(
+                options.McpExecutable,
+                ["--repo-root", root],
+                options.McpTimeout);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {

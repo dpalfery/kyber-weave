@@ -46,8 +46,17 @@ public static class RepositoryDoctor
                 notRepository,
                 "run kyber-weave doctor from inside a git repository"));
 
-        string? home = environment("HOME");
-        if (home is not null && SamePath(repositoryRoot, home))
+        // HOME is the Unix answer; USERPROFILE is the Windows one. A case-differing path is the same
+        // directory on Windows and on a case-insensitive macOS volume, so the comparison follows the platform.
+        StringComparison pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        string? home = environment("HOME") ?? environment("USERPROFILE");
+        if (home is not null
+            && string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(home)),
+                pathComparison))
             return Refused(repositoryRoot, mode, new DoctorCheck(
                 "repository.root",
                 false,
