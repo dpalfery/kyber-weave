@@ -70,12 +70,6 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     private const string SkillsDirectory = ".commandcode/skills";
 
     /// <summary>
-    /// The declared MCP server this target names: the one whose tools every agent needs, granted
-    /// on the file-read entitlement alone, the pure orchestrator included (ADR 0049).
-    /// </summary>
-    private const string UniversalMcpServer = "kyber-weave";
-
-    /// <summary>
     /// Lowers the semantic capability vocabulary onto Command Code's built-in tool names,
     /// verified against the <c>command-code</c> 1.84.0 tool catalog on 2026-10-17.
     /// <c>network.publish</c> is absent: no built-in tool expresses it.
@@ -179,9 +173,12 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
-        // Read from canonical source rather than a renderer-local list, so a tool renamed
-        // upstream is a source edit, and so the doctor check reads the same roster.
-        IReadOnlyList<string> universalMcpToolNames = UniversalMcpToolNames(source);
+        // Read from canonical source through the shared derivation rather than a renderer-local
+        // list, so a tool renamed upstream is a source edit, the doctor check reads the same
+        // roster, and this target cannot disagree with the others about which server is which
+        // entitlement class (ADR 0048 decision 4).
+        IReadOnlyList<string> universalMcpToolNames =
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -450,6 +447,22 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
     /// withhold, which keeps the lowering non-broadening by construction.
     /// </summary>
+    /// <remarks>
+    /// Command Code has no per-server permission key, only the agent's own <c>tools</c> list, so
+    /// the MCP entitlement is written out name by name — which is how the target consumes the
+    /// roster, not how the roster is derived. Which names the roster holds, and which of them a
+    /// profile is entitled to, are the shared
+    /// <see cref="CapabilityDegradations.UniversalMcpToolNames"/> and
+    /// <see cref="CapabilityDegradations.ResolveMcpToolNames"/> derivations — the ones Devin and
+    /// ZCode consume — so an edit to the entitlement partition reaches this target instead of
+    /// leaving it rendering the set the others just changed.
+    /// <para>
+    /// The orchestrator-excluded class is passed in empty rather than filtered out here: this
+    /// target names the universal server alone and has since before the widening, so it grants
+    /// none of that class. Declaring the class empty at the call site keeps the derivation
+    /// shared while stating, in one place a reader can see, that this target has no member of it.
+    /// </para>
+    /// </remarks>
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
@@ -475,47 +488,16 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         }
 
         // MCP names append after the built-ins: they come from source, so they cannot join the
-        // fixed renderer-local order, and the caller already supplies them server-then-tool.
+        // fixed renderer-local order, and the shared derivation already orders them
+        // server-then-tool.
         return
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ResolveMcpToolNames(agent.CapabilityProfile, capabilityProfiles, universalMcpToolNames)
-        ];
-    }
-
-    /// <summary>
-    /// The MCP tool names an agent's entitlement carries, in the roster's server-then-tool order.
-    /// </summary>
-    /// <remarks>
-    /// Command Code has no per-server permission key, only the agent's own <c>tools</c> list, so
-    /// the entitlement is written out name by name. It is the shared
-    /// <see cref="CapabilityDegradations.GrantsUniversalMcpServers"/> rule, not a renderer-local
-    /// copy, so this target cannot drift from the others.
-    /// </remarks>
-    private static IReadOnlyList<string> ResolveMcpToolNames(
-        string profileName,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> universalMcpToolNames)
-    {
-        return CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
-            ? universalMcpToolNames
-            : [];
-    }
-
-    /// <summary>
-    /// The fully qualified <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> names of the declared server
-    /// every read-entitled agent gets, in a stable server-then-tool order.
-    /// </summary>
-    private static IReadOnlyList<string> UniversalMcpToolNames(SquadSource source)
-    {
-        return
-        [
-            .. source.Toolchain.RequiredMcpTools
-                .Where(entry => string.Equals(entry.Key, UniversalMcpServer, StringComparison.Ordinal))
-                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .SelectMany(entry => entry.Value
-                    .OrderBy(tool => tool, StringComparer.Ordinal)
-                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
+            .. CapabilityDegradations.ResolveMcpToolNames(
+                agent.CapabilityProfile,
+                capabilityProfiles,
+                orchestratorExcludedMcpToolNames: [],
+                universalMcpToolNames)
         ];
     }
 

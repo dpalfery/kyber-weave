@@ -1380,7 +1380,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// Each row is one rejection branch of <c>ResolveUniversalMcpServer</c>, driven through a
     /// hand-built <see cref="SquadSource"/>: the missing <c>mcpServers</c> key, a non-object
     /// <c>mcpServers</c>, a non-object entry, a missing, non-string, or blank <c>command</c>, a
-    /// missing or non-array <c>args</c>, and a null element inside <c>args</c>.
+    /// missing or non-array <c>args</c>, and an <c>args</c> element that is null, a number, a
+    /// boolean, an object, or an array.
     ///
     /// The hand-built source is necessary rather than lazy. <see cref="SquadSourceLoader"/> rejects
     /// every one of these states at load time (<c>ParseMcp</c> and <c>ValidateMcpServer</c> demand an
@@ -1394,10 +1395,16 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// resolved declaration still grants. Without it, a renderer that had stopped granting anything
     /// would satisfy every rejection row.
     ///
-    /// A non-string <c>args</c> element is covered by its null spelling only.
-    /// <see cref="JsonElement.GetString"/> throws for an element that is neither a string nor null,
-    /// so a numeric or object element raises rather than reaching the fail-closed return; the loader
-    /// rejects that state first, so no shipped path can produce it.
+    /// The <c>args</c> element rows exist because the renderer asks each element its
+    /// <see cref="JsonElement.ValueKind"/> before reading it, exactly as the sibling <c>command</c>
+    /// branch does, and a non-string element then rejects the whole declaration. Reading the element
+    /// with <see cref="JsonElement.GetString"/> alone answers only for a string or a null and raises
+    /// for every other kind, so the null row would survive that regression while a number, a
+    /// boolean, an object, or an array would escape <c>RenderAsync</c> as a failed render — an
+    /// exception in place of the withheld grant this contract promises. Each kind earns its own row
+    /// for that reason: one representative would pass again the moment the guard was narrowed to the
+    /// kinds it happens to cover. The loader rejects every one of these states first, so the rows
+    /// pin a hand-built or future-loaded source rather than a shipped corpus.
     /// </remarks>
     [Theory]
     [InlineData(
@@ -1418,6 +1425,26 @@ public sealed class AntigravityRendererContractTests : IDisposable
     [InlineData(
         "null args element",
         """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", null]}}}""",
+        false)]
+    [InlineData(
+        "numeric args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", 7]}}}""",
+        false)]
+    [InlineData(
+        "true args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", true]}}}""",
+        false)]
+    [InlineData(
+        "false args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", false]}}}""",
+        false)]
+    [InlineData(
+        "object args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", {}]}}}""",
+        false)]
+    [InlineData(
+        "array args element",
+        """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", []]}}}""",
         false)]
     public async Task ADeclarationThatCannotBeResolvedGrantsNoMcpServerAndRecordsNoWithholding(
         string caseName,
