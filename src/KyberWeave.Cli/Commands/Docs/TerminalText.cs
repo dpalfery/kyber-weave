@@ -138,6 +138,12 @@ internal static class TerminalText
             return Math.Min(cursor, text.Length - 1);
         }
 
+        // A sequence whose second byte is an intermediate — "ESC ( B" for a charset shift is the
+        // one a terminal really sends — carries a final byte after it, and leaving that byte behind
+        // would print a character the operator never wrote.
+        if (kind is >= ' ' and <= '/' && cursor + 1 < text.Length)
+            return cursor + 1;
+
         return Math.Min(cursor, text.Length - 1);
     }
 }

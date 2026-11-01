@@ -598,6 +598,17 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A two-character escape — the charset shift a terminal itself emits — is removed whole. Its
+    /// final byte is not text, so dropping only the introducer would print a character the operator
+    /// never wrote.
+    /// </summary>
+    [Fact]
+    public void ATwoCharacterEscapeIsRemovedRatherThanLeavingItsFinalByte()
+    {
+        Assert.Equal("kept", TerminalText.Line("kept\u001b(B"));
+    }
+
+    /// <summary>
     /// A value long enough to flood the console is cut, and the cut is marked. The length is part of
     /// the same bound as the escape sequences: the operator asked for a finding, not for one
     /// harness entry to push the finding and the remedy above it off the scrollback. The entry comes
