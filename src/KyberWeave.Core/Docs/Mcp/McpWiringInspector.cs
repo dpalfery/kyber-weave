@@ -241,8 +241,17 @@ public static class McpWiringInspector
             return null;
 
         // A configuration this check refused to read is not one the repair may write either — it
-        // refuses a link too — so a link cannot be offered as a fixable gap.
+        // refuses a link too — so a link cannot be offered as a fixable gap. An entry that exists but
+        // names no launch command is refused for the same reason: 5.5 forbids overwriting an entry,
+        // so a repair offered here would come back as KW-MCP-WIRE-005.
         bool linked = detection.LinkedSegment is not null;
+        bool writable = !linked && !detection.EntryUnlaunchable;
+
+        string hint = linked
+            ? LinkedHint(namedPath, detection.LinkedSegment!)
+            : detection.EntryUnlaunchable
+                ? UnlaunchableHint(entry, server, namedPath)
+                : NotWiredHint(entry, server, namedPath);
 
         return new McpWiringFinding(
             McpWiringKind.NotWired,
@@ -252,8 +261,8 @@ public static class McpWiringInspector
             namedPath,
             NotWiredCode,
             NotWiredMessage(server, namedPath, detection),
-            linked ? LinkedHint(namedPath, detection.LinkedSegment!) : NotWiredHint(entry, server, namedPath),
-            linked ? McpWiringFixability.NotFixable : entry.Fixability);
+            hint,
+            writable ? entry.Fixability : McpWiringFixability.NotFixable);
     }
 
     /// <summary>
@@ -302,6 +311,11 @@ public static class McpWiringInspector
     /// Reads one harness's configured files and answers whether the server is wired, and — when
     /// the entry body can be read — with which launch command.
     /// </summary>
+    /// <remarks>
+    /// Every uncertainty resolves toward a gap. A name is not a launch: an entry whose body cannot
+    /// be read, or which names no command at all, is reported as unwired with the reason, because
+    /// that is the only answer that cannot confirm a configuration no harness could start.
+    /// </remarks>
     private static Detection Detect(
         HarnessMcpEntry entry,
         RequiredMcpServer server,
@@ -356,10 +370,7 @@ public static class McpWiringInspector
                         if (!TryFindEntry(document.RootElement, entry.ServerKeyPath, server.Name, out JsonElement wired))
                             continue;
 
-                        return new Detection(
-                            true,
-                            ReadLaunchCommand(wired, entry.CommandShape),
-                            null);
+                        return FromEntryBody(server, ReadEntryBody(wired, entry.CommandShape));
                     }
 
                 default:
@@ -369,6 +380,28 @@ public static class McpWiringInspector
 
         return new Detection(false, null, refusal, linkedSegment);
     }
+
+    /// <summary>
+    /// The detection one entry body yields: a launch to compare, an identity-only match, or the gap
+    /// an entry that names no launch command is.
+    /// </summary>
+    private static Detection FromEntryBody(RequiredMcpServer server, EntryBody body) =>
+        body.Reading switch
+        {
+            McpEntryReading.Readable => new Detection(true, body.Tokens, null),
+            McpEntryReading.Unpinned => new Detection(true, null, null),
+
+            // The entry exists but cannot start anything. It stays a KW-MCP-WIRE-001 gap and not a
+            // difference, because there is no command to compare with the declaration: the entry
+            // names none, which is the whole problem the operator has to fix.
+            _ => new Detection(
+                false,
+                null,
+                body.Reading == McpEntryReading.EmptyCommand
+                    ? $"its '{server.Name}' entry names an empty launch command"
+                    : $"its '{server.Name}' entry names a launch command that could not be read",
+                EntryUnlaunchable: true)
+        };
 
     /// <summary>Reads the servers a JSON document declares at a key path.</summary>
     private static bool TryFindEntry(
@@ -394,16 +427,31 @@ public static class McpWiringInspector
     }
 
     /// <summary>
-    /// The launch command a wired entry names, or null when this catalog row does not pin the
-    /// entry body. Null means "compare by name only", never "no command".
+    /// Reads the launch command a JSON entry body names, or reports why it names none.
     /// </summary>
-    private static IReadOnlyList<string>? ReadLaunchCommand(JsonElement entry, McpEntryCommandShape shape)
+    /// <remarks>
+    /// <para>
+    /// Null used to mean two different things here — "this catalog row does not pin the entry body"
+    /// and "the body is not the shape it should be" — and the caller treated both as "compare by
+    /// name only", so an entry with a body nobody could read was reported as wired on the strength
+    /// of its name. The two are separated because they answer different questions: one is a
+    /// deliberate identity comparison for a body pinned nowhere, the other is a gap.
+    /// </para>
+    /// <para>
+    /// The same rule covers an entry that reads cleanly and still names nothing: <c>command: []</c>
+    /// parses, and a launch of it starts nothing.
+    /// </para>
+    /// </remarks>
+    private static EntryBody ReadEntryBody(JsonElement entry, McpEntryCommandShape shape)
     {
-        if (shape == McpEntryCommandShape.Undetermined || entry.ValueKind != JsonValueKind.Object)
-            return null;
+        if (shape == McpEntryCommandShape.Undetermined)
+            return EntryBody.Unpinned;
 
-        if (!entry.TryGetProperty("command", out JsonElement command))
-            return null;
+        if (shape is not (McpEntryCommandShape.CommandWithArgs or McpEntryCommandShape.SingleArray))
+            return EntryBody.Unreadable;
+
+        if (entry.ValueKind != JsonValueKind.Object || !entry.TryGetProperty("command", out JsonElement command))
+            return EntryBody.Unreadable;
 
         List<string> commandLine = [];
 
@@ -412,43 +460,43 @@ public static class McpWiringInspector
             if (command.ValueKind == JsonValueKind.String)
             {
                 commandLine.Add(command.GetString() ?? string.Empty);
-                return commandLine;
+                return EntryBody.FromCommandLine(commandLine);
             }
 
             if (command.ValueKind != JsonValueKind.Array)
-                return null;
+                return EntryBody.Unreadable;
 
             foreach (JsonElement item in command.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.String)
-                    return null;
+                    return EntryBody.Unreadable;
 
                 commandLine.Add(item.GetString() ?? string.Empty);
             }
 
-            return commandLine;
+            return EntryBody.FromCommandLine(commandLine);
         }
 
         if (command.ValueKind != JsonValueKind.String)
-            return null;
+            return EntryBody.Unreadable;
 
         commandLine.Add(command.GetString() ?? string.Empty);
 
         if (entry.TryGetProperty("args", out JsonElement args))
         {
             if (args.ValueKind != JsonValueKind.Array)
-                return null;
+                return EntryBody.Unreadable;
 
             foreach (JsonElement argument in args.EnumerateArray())
             {
                 if (argument.ValueKind != JsonValueKind.String)
-                    return null;
+                    return EntryBody.Unreadable;
 
                 commandLine.Add(argument.GetString() ?? string.Empty);
             }
         }
 
-        return commandLine;
+        return EntryBody.FromCommandLine(commandLine);
     }
 
     /// <summary>
@@ -654,6 +702,27 @@ public static class McpWiringInspector
             : $"Install it yourself; Kyber-Weave never installs external binaries: {server.Install}";
     }
 
+    /// <summary>
+    /// The remedy for an entry that exists and names no launch command: the entry itself has to be
+    /// corrected, and the wire command cannot do it.
+    /// </summary>
+    /// <remarks>
+    /// This leads with the edit for the same reason a differing command does — the entry already
+    /// exists, and 5.5 forbids the repair from modifying one, so running the wire command as it
+    /// stands would come back as <c>KW-MCP-WIRE-005</c>. Deleting the entry first is named because
+    /// that is the route back to a repair that works.
+    /// </remarks>
+    private static string UnlaunchableHint(
+        HarnessMcpEntry entry,
+        RequiredMcpServer server,
+        string namedPath) =>
+        entry.Fixability == McpWiringFixability.Fixable
+            ? $"Edit the '{server.Name}' entry in {namedPath} so it runs '{Describe(server.Command)}', "
+                + $"or delete the entry and re-add it by hand: {WireCommand} {entry.Harness} refuses "
+                + "an entry that already exists."
+            : $"Edit the '{server.Name}' entry in {namedPath} so it runs '{Describe(server.Command)}'; "
+                + $"Kyber-Weave does not write {entry.Harness} configuration.";
+
     private static Severity SeverityFor(RequiredMcpServer server) =>
         server.Level == McpRequirementLevel.Required ? Severity.Warning : Severity.Info;
 
@@ -710,20 +779,66 @@ public static class McpWiringInspector
     }
 
     /// <summary>What reading one harness's files established about one server.</summary>
-    /// <param name="Wired">Whether the harness configures the server.</param>
+    /// <param name="Wired">Whether the harness configures the server with a launch the check can read.</param>
     /// <param name="LaunchCommand">
     /// The command the wired entry names, or null when the entry body is not pinned or unreadable.
     /// </param>
-    /// <param name="Refusal">Why a document could not be classified, when one could not.</param>
+    /// <param name="Refusal">Why a document or an entry body could not be read, when one could not.</param>
     /// <param name="LinkedSegment">
     /// The repository-relative segment of the configuration that is a symbolic link, when one was
     /// refused rather than followed.
+    /// </param>
+    /// <param name="EntryUnlaunchable">
+    /// Whether an entry exists but names no launch command this check could read. That is a gap, not
+    /// a pass, and it is not one a second entry can repair.
     /// </param>
     private readonly record struct Detection(
         bool Wired,
         IReadOnlyList<string>? LaunchCommand,
         string? Refusal,
-        string? LinkedSegment = null);
+        string? LinkedSegment = null,
+        bool EntryUnlaunchable = false);
+
+    /// <summary>What reading one entry body established about the launch it names.</summary>
+    private enum McpEntryReading
+    {
+        /// <summary>The body names a command a launch could start.</summary>
+        Readable,
+
+        /// <summary>
+        /// The catalog row does not pin the entry body, so only the name can be compared. That is
+        /// not a gap: ZCode's body is pinned nowhere in this repository, and inventing a shape to
+        /// compare would produce a finding about a format nobody verified.
+        /// </summary>
+        Unpinned,
+
+        /// <summary>The body reads, and names no command — <c>command: []</c> starts nothing.</summary>
+        EmptyCommand,
+
+        /// <summary>The body is not a shape this reader understands.</summary>
+        Unreadable
+    }
+
+    /// <summary>The launch command an entry body names, or why it names none.</summary>
+    /// <param name="Reading">What reading the body established.</param>
+    /// <param name="Tokens">The command's argv, empty unless <paramref name="Reading"/> is readable.</param>
+    private readonly record struct EntryBody(McpEntryReading Reading, IReadOnlyList<string> Tokens)
+    {
+        /// <summary>A body the catalog row does not pin, so only its name is compared.</summary>
+        public static EntryBody Unpinned { get; } = new(McpEntryReading.Unpinned, []);
+
+        /// <summary>A body whose shape this reader does not understand.</summary>
+        public static EntryBody Unreadable { get; } = new(McpEntryReading.Unreadable, []);
+
+        /// <summary>
+        /// A body's command, or the empty-command gap it is. A blank program is as unlaunchable as
+        /// an empty list, and a launch of either starts nothing.
+        /// </summary>
+        public static EntryBody FromCommandLine(IReadOnlyList<string> tokens) =>
+            tokens.Count == 0 || string.IsNullOrWhiteSpace(tokens[0])
+                ? new EntryBody(McpEntryReading.EmptyCommand, [])
+                : new EntryBody(McpEntryReading.Readable, tokens);
+    }
 
     /// <summary>
     /// A configuration file that exists: where to read it, how to name it, and the symbolic link it
