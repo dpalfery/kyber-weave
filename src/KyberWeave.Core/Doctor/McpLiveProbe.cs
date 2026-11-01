@@ -71,20 +71,46 @@ public static class McpLiveProbe
                 ["--repo-root", root],
                 options.McpTimeout);
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)
         {
+            // Every one of these means the same thing to the caller: the process did not start. The probe exists to
+            // report that as mcp.start, so it must not surface as an exception that skips the renderer.
             return null;
         }
     }
+
+    /// <summary>Sends one line, turning a closed or broken pipe into <c>false</c> rather than an exception.</summary>
+    private static bool TrySend(StdioSession session, string line)
+    {
+        try
+        {
+            session.SendLine(line);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The remedy a check prints when the server did not answer inside the budget.</summary>
+    private static string TimeoutFix(DoctorOptions options) =>
+        $"kyber-weave doctor --check --mcp-timeout {Math.Max(1, (int)options.McpTimeout.TotalSeconds) * 2}";
 
     private static void Exchange(StdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
     {
         string budget = Seconds(options.McpTimeout);
 
-        session.SendLine(
-            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":" +
-            $"{{\"protocolVersion\":\"{ProtocolVersion}\",\"capabilities\":{{}}," +
-            "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}");
+        if (!TrySend(
+                session,
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":" +
+                $"{{\"protocolVersion\":\"{ProtocolVersion}\",\"capabilities\":{{}}," +
+                "\"clientInfo\":{\"name\":\"kyber-weave-doctor\",\"version\":\"1\"}}}"))
+        {
+            // A server that exited between starting and the first request is a failed handshake, not a crash.
+            checks.Add(Handshake(false, "the server closed its input before the initialize request", session, options));
+            return;
+        }
 
         if (!TryRead(session, out string? initializeReply, out string? handshakeFailure))
         {
@@ -100,19 +126,23 @@ public static class McpLiveProbe
 
         checks.Add(Handshake(true, $"initialize answered within {budget}s", session, options));
 
-        session.SendLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
-
-        session.SendLine(
-            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
-            "{\"name\":\"docs_explore\",\"arguments\":{\"query\":\"README\"}}}");
-
-        if (!TryRead(session, out string? callReply, out string? callFailure))
+        if (!TrySend(session, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
+            || !TrySend(
+                session,
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":" +
+                "{\"name\":\"docs_explore\",\"arguments\":{\"query\":\"README\"}}}"))
         {
             checks.Add(new DoctorCheck(
                 "mcp.docs_explore",
                 false,
-                callFailure!,
-                $"kyber-weave doctor --check --mcp-timeout {Math.Max(1, (int)options.McpTimeout.TotalSeconds) * 2}"));
+                "the server closed its input before docs_explore was requested",
+                "stop the kyber-weave-mcp server and re-run: kyber-weave doctor --check"));
+            return;
+        }
+
+        if (!TryRead(session, out string? callReply, out string? callFailure))
+        {
+            checks.Add(new DoctorCheck("mcp.docs_explore", false, callFailure!, TimeoutFix(options)));
             return;
         }
 
@@ -147,8 +177,7 @@ public static class McpLiveProbe
                 "kyber-weave update");
 
         string served = FirstLine(text[(index + ProvenancePrefix.Length)..]).Trim();
-        bool matches = served.Length > 0
-                       && string.Equals(Normalise(served), Normalise(root), StringComparison.Ordinal);
+        bool matches = served.Length > 0 && SamePath(served, root);
         return matches
             ? new DoctorCheck("mcp.root", true, "server answers for this repository", null)
             : new DoctorCheck(
@@ -200,7 +229,11 @@ public static class McpLiveProbe
         try
         {
             using JsonDocument document = JsonDocument.Parse(line);
-            if (document.RootElement.TryGetProperty("result", out JsonElement value))
+
+            // TryGetProperty throws when the element is not an object, and the reply is the child's data: an array
+            // where an object belongs must read as a non-reply, not as an exception.
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("result", out JsonElement value))
             {
                 result = value.Clone();
                 return true;
@@ -215,16 +248,26 @@ public static class McpLiveProbe
         return false;
     }
 
-    /// <summary>Returns the first text content item of a tool result.</summary>
+    /// <summary>Returns the first text content item of a tool result, or <c>false</c> when the shape is not one.</summary>
     private static bool TryText(JsonElement result, out string text)
     {
         text = string.Empty;
-        if (!result.TryGetProperty("content", out JsonElement content) || content.ValueKind != JsonValueKind.Array)
+
+        // Each of these members is the child's data, and TryGetProperty throws on a non-object. Check the kind
+        // first so a reply like {"content":[42]} fails mcp.docs_explore instead of throwing.
+        if (result.ValueKind != JsonValueKind.Object
+            || !result.TryGetProperty("content", out JsonElement content)
+            || content.ValueKind != JsonValueKind.Array)
+        {
             return false;
+        }
 
         foreach (JsonElement item in content.EnumerateArray())
         {
-            if (item.TryGetProperty("text", out JsonElement value) && value.GetString() is { } found)
+            if (item.ValueKind == JsonValueKind.Object
+                && item.TryGetProperty("text", out JsonElement value)
+                && value.ValueKind == JsonValueKind.String
+                && value.GetString() is { } found)
             {
                 text = found;
                 return true;
@@ -245,6 +288,25 @@ public static class McpLiveProbe
 
     private static string Normalise(string path) =>
         Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>
+    ///     Whether the two paths name the same directory, where either may have come from the child.
+    /// </summary>
+    /// <remarks>
+    ///     The served root is server-controlled text, so a value the platform cannot canonicalise — one holding a
+    ///     NUL, for instance — must fail the check rather than throw out of the probe.
+    /// </remarks>
+    private static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Normalise(left), Normalise(right), StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private static string Seconds(TimeSpan span) => span.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 }

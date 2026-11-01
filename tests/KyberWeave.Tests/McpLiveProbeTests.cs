@@ -142,6 +142,96 @@ public sealed class McpLiveProbeTests : IDisposable
     }
 
     /// <summary>
+    /// A server that answers <c>initialize</c> and then closes its input fails a check with exit 1 instead of throwing
+    /// out of the probe. The child's input is closed before it writes the reply, so the next write reaches a broken
+    /// pipe rather than racing the child.
+    /// </summary>
+    /// <remarks>
+    /// A live server can exit mid-conversation — a crash, a supervisor restart, a killed process. The probe is the
+    /// thing that reports it, so a broken pipe must become a check line and not escape as an <c>IOException</c> that
+    /// skips the renderer and breaks the 0/1/2/3 exit contract.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_ServerClosesInput_ReportsAFailureInsteadOfThrowing()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ClosesInputAfterInitializeStub(_stubs.Path), TimeSpan.FromSeconds(5)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.Contains(report.Checks, check => !check.Passed);
+    }
+
+    /// <summary>
+    /// A reply whose members are not the shapes the probe expects fails a check instead of throwing. The three cases
+    /// are a JSON array in place of the result object, an array in place of the tool result, and a non-object item in
+    /// the content array; each reaches a different <c>TryGetProperty</c>.
+    /// </summary>
+    /// <remarks>
+    /// The reply is the child's data. <see cref="JsonElement.TryGetProperty"/> throws
+    /// <see cref="InvalidOperationException"/> on a non-object, so without a kind check a malformed-but-parseable
+    /// reply crashes the doctor rather than failing <c>mcp.handshake</c> or <c>mcp.docs_explore</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData("initialize-is-an-array")]
+    [InlineData("result-is-an-array")]
+    [InlineData("content-item-is-a-number")]
+    public void McpLiveProbe_NonObjectReply_FailsACheckInsteadOfThrowing(string shape)
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+
+        string initialize = shape == "initialize-is-an-array"
+            ? """[1,2]"""
+            : DoctorHarness.InitializeReply;
+        string call = shape switch
+        {
+            "result-is-an-array" => """{"jsonrpc":"2.0","id":2,"result":[42]}""",
+            "content-item-is-a-number" => """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[42]}}""",
+            _ => """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/elsewhere"}]}}""",
+        };
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, initialize, call)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.Contains(report.Checks, check => !check.Passed);
+    }
+
+    /// <summary>
+    /// A provenance root the platform cannot canonicalise fails <c>mcp.root</c> instead of throwing. The server's
+    /// text is untrusted: a NUL inside it makes <see cref="System.IO.Path.GetFullPath(string)"/> throw.
+    /// </summary>
+    /// <remarks>
+    /// The value is server-controlled, so the probe must survive any string that parses as JSON. The JSON escape
+    /// <c>\u0000</c> decodes to a NUL character, which reaches the path call and throws <c>ArgumentException</c>.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_ProvenanceRootWithNulChar_FailsMcpRootInsteadOfThrowing()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+        const string call = """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/tmp/ev\u0000il"}]}}""";
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "mcp.root").Passed);
+    }
+
+    /// <summary>
     /// A server that cannot start fails <c>mcp.start</c>, and no check reason or fix line echoes the environment. The
     /// secret is injected through the environment delegate, so the test never touches the process environment.
     /// </summary>

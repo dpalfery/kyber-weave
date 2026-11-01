@@ -12,6 +12,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 internal static class DoctorHarness
 {
+    /// <summary>The reply a healthy server gives <c>initialize</c>.</summary>
+    public const string InitializeReply = """{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}""";
+
     /// <summary>A missing binary, as a process start reports it when the file is not on PATH.</summary>
     public static Exception BinaryNotFound() => new System.ComponentModel.Win32Exception(2);
 
@@ -107,6 +110,31 @@ internal static class DoctorHarness
     /// <summary>Starts, then never answers: the handshake waits until its budget expires.</summary>
     public static string SilentStub(string directory) =>
         WriteStub(directory, "sleep 30");
+
+    /// <summary>
+    /// Answers <c>initialize</c> with <paramref name="initializeReply"/> and <c>tools/call</c> with
+    /// <paramref name="callReply"/>, so a test can put arbitrary JSON in front of the probe's parser.
+    /// </summary>
+    public static string ReplyingStub(string directory, string initializeReply, string callReply) =>
+        WriteStub(directory, $$"""
+            read _initialize
+            printf '%s\n' '{{initializeReply}}'
+            read _initialized
+            read _call
+            printf '%s\n' '{{callReply}}'
+            cat > /dev/null
+            """);
+
+    /// <summary>
+    /// Answers <c>initialize</c>, then closes its own standard input. The close happens before the reply is
+    /// written, so the probe's next write is guaranteed to see a broken pipe rather than racing the child.
+    /// </summary>
+    public static string ClosesInputAfterInitializeStub(string directory) =>
+        WriteStub(directory, """
+            exec 0<&-
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"kyber-weave-mcp","version":"0.0.0"}}}'
+            sleep 30
+            """);
 
     public static DoctorCheck CheckNamed(DoctorReport report, string id) =>
         Assert.Single(report.Checks, check => check.Id == id);

@@ -48,6 +48,65 @@ public sealed class StdioSessionTests
         AssertChildGone(processId);
     }
 
+    /// <summary>
+    /// Two lines delivered in one read are returned as two lines. A bounded reader that keeps only the first
+    /// terminator it sees would drop the remainder of the chunk, and the session is the only reader of the stream.
+    /// </summary>
+    [Fact]
+    public void StdioSession_TwoLinesInOneRead_ReturnsBoth()
+    {
+        using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10));
+
+        session.SendLine("first");
+        session.SendLine("second");
+
+        Assert.Equal("first", session.ReadLine());
+        Assert.Equal("second", session.ReadLine());
+    }
+
+    /// <summary>
+    /// A child that writes more than the session's line cap without a terminator fails the read instead of growing
+    /// the buffer until the process runs out of memory. The budget bounds time, not size.
+    /// </summary>
+    /// <remarks>
+    /// The child is a shell that writes two million characters with no newline. A session that only bounded elapsed
+    /// time would wait for a terminator that never comes while the buffer doubled, which is the failure mode this
+    /// pins; the cap turns it into an <see cref="InvalidDataException"/> the caller can classify.
+    /// </remarks>
+    [Fact]
+    public void StdioSession_LineOverCap_ThrowsAndLeavesNoChild()
+    {
+        int processId;
+        using (StdioSession session = new(
+                   "/bin/sh",
+                   ["-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'"],
+                   TimeSpan.FromSeconds(30)))
+        {
+            processId = session.ProcessId;
+            Assert.Throws<InvalidDataException>(() => session.ReadLine());
+        }
+
+        AssertChildGone(processId);
+    }
+
+    /// <summary>
+    /// Reading the first error line after the session was disposed returns null instead of throwing. The stderr drain
+    /// is still pending when <c>Dispose</c> closes the stream under it, so its task can fault.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Task.IsCompleted"/> is true for a faulted task, and <see cref="Task{TResult}.Result"/> rethrows its
+    /// exception, so a completed-with-fault drain would surface as an <c>AggregateException</c> at a caller that only
+    /// wanted a hint for a failure message.
+    /// </remarks>
+    [Fact]
+    public void StdioSession_FirstErrorLineAfterDispose_IsNull()
+    {
+        StdioSession session = new("/bin/sleep", ["30"], TimeSpan.FromSeconds(10));
+        session.Dispose();
+
+        Assert.Null(session.FirstErrorLine);
+    }
+
     /// <summary>Passes when the pid no longer exists, or the process has exited and been reaped.</summary>
     private static void AssertChildGone(int processId)
     {

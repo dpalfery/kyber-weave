@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace KyberWeave.Core.Processes;
 
@@ -28,10 +29,27 @@ public sealed class StdioSession : IDisposable
     /// <summary>The longest Dispose waits for the killed tree to be reaped before it gives up.</summary>
     private static readonly TimeSpan ReapWait = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    ///     The most characters one line may hold before the session refuses to read it.
+    /// </summary>
+    /// <remarks>
+    ///     The budget bounds time, not size. A reader that accumulates until it sees a terminator grows without
+    ///     limit when the child never writes one, so a stuck or hostile server could exhaust memory long before the
+    ///     budget expired. One mebibyte is far above any JSON-RPC reply a first-party server sends.
+    /// </remarks>
+    private const int MaxLineLength = 1024 * 1024;
+
+    /// <summary>The size of one read from the child's standard output.</summary>
+    private const int ReadBufferLength = 4096;
+
     private readonly Process _process;
     private readonly int _processId;
     private readonly DateTime _deadline;
     private readonly Task<string?> _firstErrorLine;
+
+    /// <summary>Characters read from the child but not yet returned, when one read crossed a line end.</summary>
+    private string _unread = string.Empty;
+
     private Task<string?>? _pendingRead;
     private bool _disposed;
 
@@ -73,7 +91,13 @@ public sealed class StdioSession : IDisposable
     ///     The first non-empty line the child wrote to stderr, or <c>null</c> when it has written none yet.
     ///     A caller that shows it must still truncate it.
     /// </summary>
-    public string? FirstErrorLine => _firstErrorLine.IsCompleted ? _firstErrorLine.Result : null;
+    /// <remarks>
+    ///     <see cref="Task.IsCompleted"/> is also true for a faulted task, and reading
+    ///     <see cref="Task{TResult}.Result"/> rethrows its exception. The drain faults whenever the stream is closed
+    ///     under it — which is exactly what <see cref="Dispose"/> does — so this asks for successful completion and
+    ///     treats a faulted drain as "no line to show" rather than raising an exception nobody can act on.
+    /// </remarks>
+    public string? FirstErrorLine => _firstErrorLine.IsCompletedSuccessfully ? _firstErrorLine.Result : null;
 
     /// <summary>Writes one line to the child's standard input and flushes it.</summary>
     /// <param name="line">The line to send, without its terminator.</param>
@@ -91,6 +115,10 @@ public sealed class StdioSession : IDisposable
     ///     The budget ran out before a line arrived. The session is then unusable: dispose it.
     /// </exception>
     /// <exception cref="EndOfStreamException">The child closed its standard output.</exception>
+    /// <exception cref="InvalidDataException">
+    ///     The child wrote more than the session's line cap without a terminator. The session is then unusable:
+    ///     dispose it.
+    /// </exception>
     public string ReadLine()
     {
         ThrowIfDisposed();
@@ -101,8 +129,14 @@ public sealed class StdioSession : IDisposable
         if (remaining <= TimeSpan.Zero)
             throw new TimeoutException("The session budget was exhausted before the child answered.");
 
-        Task<string?> read = _process.StandardOutput.ReadLineAsync();
-        if (!read.Wait(remaining))
+        Task<string?> read = ReadLineBoundedAsync();
+        try
+        {
+            // WaitAsync rather than Wait: Wait wraps a faulted reader in AggregateException, and the caller needs
+            // the reader's own exception — a line over the cap — to classify it.
+            read.WaitAsync(remaining).GetAwaiter().GetResult();
+        }
+        catch (TimeoutException)
         {
             // The read is still outstanding on the stream. Keep it as pending so no second read starts
             // while the first one is in flight.
@@ -110,8 +144,54 @@ public sealed class StdioSession : IDisposable
             throw new TimeoutException("The child did not answer within the session budget.");
         }
 
-        return read.Result ?? throw new EndOfStreamException("The child closed its standard output.");
+        return read.GetAwaiter().GetResult() ?? throw new EndOfStreamException("The child closed its standard output.");
     }
+
+    /// <summary>
+    ///     Reads one line without letting a child that never terminates one grow the buffer past
+    ///     <see cref="MaxLineLength"/>. A read may cross a line end, so the remainder is kept for the next call.
+    /// </summary>
+    private async Task<string?> ReadLineBoundedAsync()
+    {
+        StringBuilder line = new();
+        while (true)
+        {
+            int newline = _unread.IndexOf('\n', StringComparison.Ordinal);
+            if (newline >= 0)
+            {
+                line.Append(_unread, 0, newline);
+                _unread = _unread[(newline + 1)..];
+                return Complete(line);
+            }
+
+            line.Append(_unread);
+            _unread = string.Empty;
+            if (line.Length >= MaxLineLength)
+                throw LineTooLong();
+
+            char[] buffer = new char[ReadBufferLength];
+            int read = await _process.StandardOutput.ReadAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+            if (read == 0)
+                return line.Length == 0 ? null : Complete(line);
+
+            _unread = new string(buffer, 0, read);
+        }
+    }
+
+    /// <summary>Trims the line terminator and enforces the cap on a line assembled from more than one read.</summary>
+    private static string Complete(StringBuilder line)
+    {
+        if (line.Length > 0 && line[^1] == '\r')
+            line.Length--;
+
+        if (line.Length > MaxLineLength)
+            throw LineTooLong();
+
+        return line.ToString();
+    }
+
+    private static InvalidDataException LineTooLong() =>
+        new($"The child wrote more than {MaxLineLength} characters without ending the line.");
 
     /// <summary>Kills the child's process tree, reaps it, and releases the streams. Safe to call more than once.</summary>
     public void Dispose()
@@ -135,10 +215,18 @@ public sealed class StdioSession : IDisposable
     private async Task<string?> DrainFirstErrorLineAsync()
     {
         string? first = null;
-        while (await _process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+        try
         {
-            if (first is null && line.Trim() is { Length: > 0 } trimmed)
-                first = trimmed;
+            while (await _process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+            {
+                if (first is null && line.Trim() is { Length: > 0 } trimmed)
+                    first = trimmed;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            // Dispose closes the stream under this read. A session that is going away has no error line to offer,
+            // and an exception from a background drain has no caller that could handle it.
         }
 
         return first;
