@@ -598,6 +598,40 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A value long enough to flood the console is cut, and the cut is marked. The length is part of
+    /// the same bound as the escape sequences: the operator asked for a finding, not for one
+    /// harness entry to push the finding and the remedy above it off the scrollback. The entry comes
+    /// from the harness's own file, which has no cap of its own — unlike a YAML key, which YAML
+    /// refuses past 1024 characters before this command ever sees it.
+    /// </summary>
+    [Fact]
+    public void AWiredCommandLongEnoughToFloodTheTerminalIsCapped()
+    {
+        WriteDeclaration();
+        string floodedCommand = new('y', 2000);
+        WriteJson(
+            ".mcp.json",
+            new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    [ServerName] = new JsonObject
+                    {
+                        ["type"] = "stdio",
+                        ["command"] = floodedCommand
+                    }
+                }
+            });
+
+        CapturedConsoleExecution<int> execution = Wire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(McpWiringInspector.CommandDiffersCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(floodedCommand, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("…", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Removal restores a file it had inserted into, so the line it prints says the servers are being
     /// put back — not that they are being removed. An operator who asked to undo a change was
     /// otherwise told the opposite of what happened, and the exit code could not correct it.
