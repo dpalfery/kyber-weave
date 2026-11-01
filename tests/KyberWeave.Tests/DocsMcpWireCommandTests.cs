@@ -40,6 +40,11 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 {
     private const string ServerName = "kyber-weave";
 
+    /// <summary>The second server a two-server declaration names, and the file its command names.</summary>
+    private const string SecondServerName = "codegraph";
+
+    private const string SecondBinaryName = "fake-codegraph";
+
     private const string Factory = "factory";
 
     private const string ClaudeCode = "claude-code";
@@ -71,7 +76,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     {
         Directory.CreateDirectory(Repo);
         Directory.CreateDirectory(Bin);
-        WriteBinary();
+        McpWiringFixture.WriteExecutable(Bin, "fake-kyber-weave-mcp");
     }
 
     private string Repo => Path.Combine(_root.Path, "repo");
@@ -84,6 +89,9 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     /// without the test reaching into the process environment.
     /// </summary>
     private string BinaryPath => Path.Combine(Bin, "fake-kyber-weave-mcp");
+
+    /// <summary>The second declared server, and the binary its command names.</summary>
+    private string SecondBinaryPath => Path.Combine(Bin, SecondBinaryName);
 
     /// <summary>The receipt the design fixes at this path (DD13), asserted as a literal.</summary>
     private string ReceiptPath =>
@@ -257,7 +265,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     {
         WriteDeclaration();
         byte[] original = Encoding.UTF8.GetBytes("""{"mcpServers": {"other": {"command": "other-mcp"}}}""");
-        WriteBytes(".factory/mcp.json", original);
+        McpWiringFixture.WriteBytes(Repo, ".factory/mcp.json", original);
 
         CapturedConsoleExecution<int> wire = Wire($"{Factory},{ClaudeCode}");
         Assert.Equal(0, wire.Result);
@@ -431,6 +439,70 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.False(File.Exists(ReceiptPath));
     }
 
+    /// <summary>
+    /// The dry run and the real run both name every server the write touches.
+    /// </summary>
+    /// <remarks>
+    /// R5.10 says the preview prints "the exact per-file change", and the change is which servers the
+    /// file gains: a line naming only the path and the harness asks the operator to consent to a write
+    /// they cannot see, in a file the whole team shares. The real run is asserted too, because a
+    /// preview that describes the change while the write it previews reports only the file is the
+    /// same omission one step later.
+    /// </remarks>
+    [Fact]
+    public void TheDryRunAndTheRealRunNameEveryServerTheWriteAdds()
+    {
+        WriteTwoServerDeclaration();
+
+        CapturedConsoleExecution<int> dryRun = Wire(Factory, dryRun: true);
+
+        Assert.Equal(0, dryRun.Result);
+        Assert.False(File.Exists(InRepo(".factory/mcp.json")), "a dry run writes nothing");
+        Assert.True(
+            dryRun.Output.Contains(ServerName, StringComparison.Ordinal)
+                && dryRun.Output.Contains(SecondServerName, StringComparison.Ordinal),
+            $"The preview named the file but not the servers it would add. Output:{Environment.NewLine}{dryRun.Output}");
+
+        CapturedConsoleExecution<int> real = Wire(Factory);
+
+        Assert.Equal(0, real.Result);
+        Assert.True(
+            real.Output.Contains(ServerName, StringComparison.Ordinal)
+                && real.Output.Contains(SecondServerName, StringComparison.Ordinal),
+            $"The run named the file but not the servers it added. Output:{Environment.NewLine}{real.Output}");
+    }
+
+    /// <summary>
+    /// A second run of the same target exits 0 and writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// This is the second-run contract the corpus documents and the reason the check and the repair
+    /// have to agree: the repair refuses a file that already holds the server's name (5.5), so the
+    /// discriminator between "somebody else owns this entry" and "this is the entry we wrote" is
+    /// whether the file already holds exactly what is declared. VS Code is the case that broke it —
+    /// its entry carries the harness's own <c>${workspaceFolder}</c> substitution, which 5.11 requires
+    /// — so a second run saw a difference, went to the repair, and was refused by the file it had
+    /// written moments earlier.
+    /// </remarks>
+    [Fact]
+    public void ASecondRunOfTheSameTargetWritesNothingAndExitsZero()
+    {
+        WriteDeclaration();
+
+        CapturedConsoleExecution<int> first = Wire(VsCode);
+        Assert.Equal(0, first.Result);
+
+        string path = InRepo(".vscode/mcp.json");
+        Assert.True(File.Exists(path), $"the first run wrote no {path}. Output:{Environment.NewLine}{first.Output}");
+        byte[] written = File.ReadAllBytes(path);
+
+        CapturedConsoleExecution<int> second = Wire(VsCode);
+
+        Assert.Equal(0, second.Result);
+        Assert.DoesNotContain(RefusalCode, second.Output, StringComparison.Ordinal);
+        Assert.Equal(written, File.ReadAllBytes(path));
+    }
+
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
             null!,
@@ -457,37 +529,38 @@ public sealed class DocsMcpWireCommandTests : IDisposable
                   level: required
             """);
 
+    /// <summary>
+    /// The same declaration with two servers, so a case can tell "one line about the file" from "the
+    /// servers that file gains". The second is third-party and recommended, which is the shape a
+    /// repository adopting this feature actually declares: one required first-party server and one
+    /// optional helper.
+    /// </summary>
+    private void WriteTwoServerDeclaration()
+    {
+        McpWiringFixture.WriteExecutable(Bin, SecondBinaryName);
+
+        Write(
+            ".kyber-weave/kyber-weave.yml",
+            $$"""
+            mcp:
+              required-servers:
+                {{ServerName}}:
+                  command: ['{{BinaryPath}}', --repo-root, .]
+                  provenance: first-party
+                  level: required
+                {{SecondServerName}}:
+                  command: ['{{SecondBinaryPath}}', serve, --mcp]
+                  provenance: third-party
+                  level: recommended
+            """);
+    }
+
     private void WriteJson(string relativePath, JsonObject document) =>
         Write(relativePath, document.ToJsonString());
 
     private void Write(string relativePath, string content) =>
-        WriteBytes(relativePath, Encoding.UTF8.GetBytes(content));
+        McpWiringFixture.WriteText(Repo, relativePath, content);
 
-    private void WriteBytes(string relativePath, byte[] content)
-    {
-        string path = InRepo(relativePath);
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllBytes(path, content);
-    }
-
-    /// <summary>
-    /// A file, not a process: the resolver is a file-existence check, so an empty file proves no
-    /// launch happened and is enough for the declaration to resolve.
-    /// </summary>
-    private void WriteBinary()
-    {
-        File.WriteAllText(BinaryPath, string.Empty);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                BinaryPath,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
 
     /// <summary>
     /// The launch executable a wired entry names, whichever shape the harness uses: a

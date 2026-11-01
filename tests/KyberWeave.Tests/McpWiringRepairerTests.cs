@@ -62,7 +62,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         // an unresolvable binary a refusal: without it every case about a write would be asserting
         // a write against a tree the requirements say must be refused. The refusal cases below opt
         // into EmptyBin instead — both halves of that contract are exercised, one per fixture.
-        WriteBinary(BinaryName);
+        McpWiringFixture.WriteExecutable(Bin, BinaryName);
     }
 
     private string Repo => Path.Combine(_root.Path, "repo");
@@ -130,6 +130,22 @@ public sealed class McpWiringRepairerTests : IDisposable
     };
 
     /// <summary>
+    /// The writable harnesses whose configuration sits in a directory of its own, paired with whether
+    /// the case starts from an absent file or an existing document. Claude Code and opencode write at
+    /// the repository root, where the receipt's own directory legitimately appears beside the target,
+    /// so a directory listing is not about the target there.
+    /// </summary>
+    public static TheoryData<string, string, bool> NestedConfigFiles() => new()
+    {
+        { Factory, ".factory/mcp.json", false },
+        { Factory, ".factory/mcp.json", true },
+        { Cursor, ".cursor/mcp.json", false },
+        { Cursor, ".cursor/mcp.json", true },
+        { VsCode, ".vscode/mcp.json", false },
+        { VsCode, ".vscode/mcp.json", true }
+    };
+
+    /// <summary>
     /// Each writable harness gets the entry body its runbook recipe documents, keyed by the
     /// declared server name at the key path that harness actually reads (R5.11). The entry is
     /// composed by the repair, so this pins composition rather than the catalog's template.
@@ -142,9 +158,9 @@ public sealed class McpWiringRepairerTests : IDisposable
         string key,
         string recipeEntry)
     {
-        WriteInRepository(configFile, $$$"""{"{{{key}}}": {}}""");
+        McpWiringFixture.WriteText(Repo, configFile, $$$"""{"{{{key}}}": {}}""");
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), harness);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), harness);
 
         McpWiringFileChange change = SingleChange(report, harness);
         Assert.Equal(McpWiringChangeOutcome.Inserted, change.Outcome);
@@ -172,7 +188,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         PutInPlay(harness);
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), harness);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), harness);
 
         McpWiringFileChange change = SingleChange(report, harness);
         Assert.Equal(McpWiringChangeOutcome.Created, change.Outcome);
@@ -220,9 +236,9 @@ public sealed class McpWiringRepairerTests : IDisposable
                 }
                 """)
         ];
-        WriteBytes(".vscode/mcp.json", original);
+        McpWiringFixture.WriteBytes(Repo, ".vscode/mcp.json", original);
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
         Assert.Equal(McpWiringChangeOutcome.Inserted, SingleChange(report, VsCode).Outcome);
 
@@ -275,11 +291,11 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void TheEntryUsesTheDeclaredNameAndCommand()
     {
-        WriteInRepository(".mcp.json", """{"mcpServers": {}}""");
-        WriteBinary("codegraph");
+        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteExecutable(Bin, "codegraph");
 
         McpWiringRepairReport report = Repair(
-            Declare(ThirdPartyServer()),
+            McpWiringFixture.Declare(ThirdPartyServer()),
             ResolverOver(Bin),
             ClaudeCode);
 
@@ -302,12 +318,12 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void AnExistingServerNameIsRefusedAndTheFileIsLeftByteIdentical()
     {
-        WriteInRepository(
+        McpWiringFixture.WriteText(Repo,
             ".vscode/mcp.json",
             """{"servers": {"kyber-weave": {"command": "kyber-weave-mcp"}}}""");
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
         McpWiringFileChange change = SingleChange(report, VsCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -327,12 +343,12 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void OneAlreadyWiredServerRefusesTheWholeFile()
     {
-        WriteInRepository(".mcp.json", """{"mcpServers": {"codegraph": {"command": "codegraph"}}}""");
+        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {"codegraph": {"command": "codegraph"}}}""");
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
-        WriteBinary("codegraph");
+        McpWiringFixture.WriteExecutable(Bin, "codegraph");
 
         McpWiringRepairReport report = Repair(
-            Declare(FirstPartyServer(), ThirdPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer(), ThirdPartyServer()),
             ResolverOver(Bin),
             ClaudeCode);
 
@@ -354,10 +370,10 @@ public sealed class McpWiringRepairerTests : IDisposable
     [InlineData("[]")]
     public void AMalformedOrForeignFileIsRefusedAndLeftByteIdentical(string content)
     {
-        WriteInRepository(".vscode/mcp.json", content);
+        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", content);
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), VsCode);
 
         McpWiringFileChange change = SingleChange(report, VsCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -373,11 +389,11 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ARefusedTargetDoesNotStopAnotherTarget()
     {
-        WriteInRepository(".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
+        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
         byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
         McpWiringRepairReport report = Repair(
-            Declare(FirstPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer()),
             ResolverOver(Bin),
             VsCode,
             ClaudeCode);
@@ -403,7 +419,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         // In play, so the refusal under test is the writability one and not an undetected harness.
         PutInPlay(harness);
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), harness);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), harness);
 
         McpWiringFileChange change = SingleChange(report, harness);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -421,7 +437,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void TheCodexRefusalCarriesItsRunbookSnippet()
     {
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), Codex);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), Codex);
 
         string snippet = SingleChange(report, Codex).Snippet ?? string.Empty;
 
@@ -437,7 +453,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     public void AHarnessWithNoRepositoryScopeFileIsRefused()
     {
         McpWiringRepairReport report = Repair(
-            Declare(FirstPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer()),
             ResolverOver(Bin),
             "copilot-coding-agent");
 
@@ -457,7 +473,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         PutInPlay(harness);
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(EmptyBin), harness);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(EmptyBin), harness);
 
         McpWiringFileChange change = SingleChange(report, harness);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -474,7 +490,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void AnAbsentThirdPartyBinaryIsRefusedRatherThanWrittenBroken()
     {
-        McpWiringRepairReport report = Repair(Declare(ThirdPartyServer()), ResolverOver(EmptyBin), ClaudeCode);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(ThirdPartyServer()), ResolverOver(EmptyBin), ClaudeCode);
 
         McpWiringFileChange change = SingleChange(report, ClaudeCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -499,12 +515,12 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ADeclarationWithOneUnresolvableServerWritesTheRestAndNamesWhatItOmitted()
     {
-        WriteInRepository(".mcp.json", """{"mcpServers": {}}""");
+        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
 
         // Bin holds the first-party binary and nothing else, so 'kyber-weave-mcp' resolves and
         // 'codegraph' does not: the mixed declaration 6.2 is written for, from one search path.
         McpWiringRepairReport report = Repair(
-            Declare(FirstPartyServer(), ThirdPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer(), ThirdPartyServer()),
             ResolverOver(Bin),
             ClaudeCode);
 
@@ -548,7 +564,7 @@ public sealed class McpWiringRepairerTests : IDisposable
     public void ADeclarationWhereNoServerResolvesIsRefusedOutright()
     {
         McpWiringRepairReport report = Repair(
-            Declare(FirstPartyServer(), ThirdPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer(), ThirdPartyServer()),
             ResolverOver(EmptyBin),
             ClaudeCode);
 
@@ -572,10 +588,10 @@ public sealed class McpWiringRepairerTests : IDisposable
     [Fact]
     public void ADryRunWritesNothingAndReportsWhatTheRealRunWould()
     {
-        WriteInRepository(".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
+        McpWiringFixture.WriteText(Repo, ".vscode/mcp.json", """{"servers": {"kyber-weave": {}}}""");
         byte[] refusedBefore = File.ReadAllBytes(Path.Combine(Repo, ".vscode/mcp.json"));
 
-        McpConfig config = Declare(FirstPartyServer());
+        McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
         LaunchCommandResolver resolver = ResolverOver(Bin);
 
         McpWiringRepairReport dryRun = McpWiringRepairer.Repair(
@@ -622,13 +638,335 @@ public sealed class McpWiringRepairerTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
 
-        McpWiringRepairReport report = Repair(Declare(FirstPartyServer()), ResolverOver(Bin), ClaudeCode);
+        McpWiringRepairReport report = Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), ClaudeCode);
 
         McpWiringFileChange change = SingleChange(report, ClaudeCode);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         Assert.Contains(".mcp.json", DiagnosticText(change), StringComparison.Ordinal);
         Assert.False(File.Exists(ReceiptPath));
+    }
+
+    /// <summary>
+    /// The repair writes the file the check accepts, for every harness it writes at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves of this feature are the writer and the checker, and a repository only gets
+    /// wired if they agree on what a wired entry looks like. They did not: the repair substituted the
+    /// harness's own repository-root token — <c>${workspaceFolder}</c> for VS Code, exactly as 5.11
+    /// requires — and the check then compared that against the declaration's <c>.</c> as raw text and
+    /// reported <c>KW-MCP-WIRE-002</c> on the file the repair had just written. The consequences were
+    /// all downstream of that one comparison: an <c>ok</c> line became a warning on the very next
+    /// <c>docs init</c> (3.5), a second <c>mcp-wire</c> refused its own earlier success with
+    /// <c>KW-MCP-WIRE-005</c>, and the prompt offered a repair that 5.5 guarantees will be refused.
+    /// </para>
+    /// <para>
+    /// The case is asserted per writable harness rather than once, because it is the round trip that
+    /// has to hold, not one harness's spelling: a fix that special-cased VS Code inside the inspector
+    /// would pass a single assertion and leave the next harness with a substitution to do the same.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(WritableConfigFiles))]
+    public void WhatTheRepairWritesIsWhatTheCheckAccepts(string harness, string configFile)
+    {
+        PutInPlay(harness);
+        McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
+        LaunchCommandResolver resolver = ResolverOver(Bin);
+
+        McpWiringRepairReport repair = Repair(config, resolver, harness);
+        McpWiringFileChange change = SingleChange(repair, harness);
+        Assert.Equal(McpWiringChangeOutcome.Created, change.Outcome);
+        Assert.True(File.Exists(Path.Combine(Repo, configFile)), $"{harness}: nothing was written");
+
+        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+
+        string[] found =
+        [
+            .. inspection.Findings
+                .Where(finding => string.Equals(finding.Harness, harness, StringComparison.Ordinal))
+                .Select(finding => $"{finding.Code} {finding.Message}")
+        ];
+        Assert.True(
+            found.Length == 0,
+            $"{harness}: the repair wrote {configFile}, and the check then reported: {string.Join("; ", found)}");
+    }
+
+    /// <summary>
+    /// The round trip holds for the splice path too: an entry inserted into a document that already
+    /// exists is accepted by the check, and a second repair over the result has nothing left to write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="WhatTheRepairWritesIsWhatTheCheckAccepts"/> proves the property for a file the repair
+    /// created. Insertion meets a different comparison inside the repair: a created document is
+    /// composed from the catalog and never read back, while an insertion is planned against the
+    /// operator's bytes and then inspected as they landed. A tolerance that held only on the creation
+    /// path would pass that case and still reject the file written over an existing configuration —
+    /// which is the ordinary state of a repository that already runs another MCP server.
+    /// </para>
+    /// <para>
+    /// VS Code is the harness this case needs, because its recipe writes <c>${workspaceFolder}</c>
+    /// where the declaration says <c>.</c> (5.11). It is the one harness whose written entry is
+    /// textually different from what the host declared, so it is exactly the substitution the
+    /// comparison had to learn to accept.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnInsertRoundTripIsAcceptedByTheCheck()
+    {
+        const string ConfigFile = ".vscode/mcp.json";
+        McpWiringFixture.WriteText(
+            Repo,
+            ConfigFile,
+            """{"servers": {"other": {"command": "other-mcp"}}}""");
+
+        byte[] original = File.ReadAllBytes(Path.Combine(Repo, ConfigFile));
+        McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
+        LaunchCommandResolver resolver = ResolverOver(Bin);
+
+        McpWiringFileChange change = SingleChange(Repair(config, resolver, VsCode), VsCode);
+        Assert.Equal(McpWiringChangeOutcome.Inserted, change.Outcome);
+        Assert.True(change.Written, "the splice must report the write that produced it");
+
+        byte[] after = File.ReadAllBytes(Path.Combine(Repo, ConfigFile));
+
+        // The operator's document survives as one contiguous run with a single insertion in it: drop
+        // the bytes the repair added and the file comes back byte for byte (5.6).
+        Assert.True(after.Length > original.Length, "the repaired file must hold the new entry");
+        int shared = CommonPrefixLength(original, after);
+        Assert.True(shared > 0, "the repair must not rewrite the document from its first byte");
+        int insertedLength = after.Length - original.Length;
+        byte[] aroundTheInsert = [.. after.AsSpan(0, shared), .. after.AsSpan(shared + insertedLength)];
+        Assert.Equal(original, aroundTheInsert);
+
+        using JsonDocument parsed = JsonDocument.Parse(after);
+        JsonElement servers = parsed.RootElement.GetProperty("servers");
+
+        // The operator's entry sits in the same map the repair inserted into, so an insert that rebuilt
+        // the map rather than splicing one entry would have moved or dropped it.
+        Assert.Equal("other-mcp", servers.GetProperty("other").GetProperty("command").GetString());
+
+        // The harness's own root token, not the declaration's '.': the substitution is the thing the
+        // check has to read back as the declared repository.
+        JsonElement entry = servers.GetProperty(ServerName);
+        Assert.Equal("${workspaceFolder}", entry.GetProperty("args")[1].GetString());
+
+        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+
+        string[] found =
+        [
+            .. inspection.Findings
+                .Where(finding => string.Equals(finding.Harness, VsCode, StringComparison.Ordinal))
+                .Select(finding => $"{finding.Code} {finding.Message}")
+        ];
+        Assert.True(
+            found.Length == 0,
+            $"the repair inserted into {ConfigFile}, and the check then reported: {string.Join("; ", found)}");
+
+        // "Nothing left to write" is the same condition as no finding: the check reports nothing for a
+        // server wired with the declared command, and that is the decision mcp-wire reads to skip a
+        // harness. The repair's own vocabulary for it is a change that wrote nothing, and identical
+        // bytes are the proof the second run left the first run's success alone (5.5, 5.12).
+        McpWiringFileChange second = SingleChange(Repair(config, resolver, VsCode), VsCode);
+        Assert.False(
+            second.Written,
+            $"the second repair reported {second.Outcome} over a file that already held the entry");
+        Assert.Equal(after, File.ReadAllBytes(Path.Combine(Repo, ConfigFile)));
+    }
+
+    /// <summary>
+    /// A successful write leaves nothing in the target's directory that was not there before, apart
+    /// from the target itself: the temporary file the atomic write renames into place is gone by the
+    /// time the repair returns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The write is atomic because a harness configuration is a file the whole team inherits: a run
+    /// killed between the truncation and the last byte leaves a document every teammate then commits.
+    /// The rename that makes it atomic goes through a unique temporary sibling, and the observable half
+    /// of that claim is the directory afterwards. A leftover <c>.tmp</c> is litter in a directory the
+    /// operator never asked this tool to touch, and <c>git add .</c> commits it.
+    /// </para>
+    /// <para>
+    /// Both write paths are covered, because a temporary file is written on the way to either — an
+    /// absent file, which is created, and a document already present, which is spliced into.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(NestedConfigFiles))]
+    public void ARepairLeavesNoTemporaryFileInTheTargetsDirectory(
+        string harness,
+        string configFile,
+        bool fileExists)
+    {
+        PutInPlay(harness);
+
+        // An empty document is enough to take the insert path: a missing server key is writable and
+        // the splice inserts the map, so the entry's own shape is not this case's subject.
+        if (fileExists)
+            McpWiringFixture.WriteText(Repo, configFile, "{}");
+
+        string fullPath = Path.Combine(Repo, configFile);
+        string directory = Path.GetDirectoryName(fullPath)!;
+        string[] before = FileNamesIn(directory);
+
+        McpWiringFileChange change = SingleChange(
+            Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), harness),
+            harness);
+        Assert.True(change.Written, $"{harness}: the repair reported {change.Outcome} and wrote nothing");
+
+        string[] expected =
+            [.. before.Append(Path.GetFileName(fullPath)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        string[] after = [.. FileNamesIn(directory).Order(StringComparer.Ordinal)];
+
+        Assert.True(
+            expected.SequenceEqual(after, StringComparer.Ordinal),
+            $"{harness}: {directory} must hold exactly [{string.Join(", ", expected)}] after the repair, "
+                + $"but held [{string.Join(", ", after)}]");
+    }
+
+    /// <summary>
+    /// A refused write leaves no temporary file behind either.
+    /// </summary>
+    /// <remarks>
+    /// A successful write consumes the temporary file by renaming it, so a listing taken afterwards
+    /// cannot tell a cleaned-up write from one that never made a temporary file. The failure path can:
+    /// the target here is a directory, so the temporary file is written and the rename onto it fails —
+    /// the exact window in which only the write's own cleanup removes the file. The refusal is
+    /// asserted alongside so the case says which of the two outcomes it arranged, rather than leaving
+    /// a passing listing to be read as "the write succeeded and tidied up".
+    /// </remarks>
+    [Fact]
+    public void ARefusedWriteLeavesNoTemporaryFileInTheTargetsDirectory()
+    {
+        Directory.CreateDirectory(Path.Combine(Repo, ".mcp.json"));
+        string[] before = FileNamesIn(Repo);
+
+        McpWiringFileChange change = SingleChange(
+            Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), ClaudeCode),
+            ClaudeCode);
+
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.False(change.Written);
+
+        string[] after = [.. FileNamesIn(Repo).Order(StringComparer.Ordinal)];
+
+        Assert.True(
+            before.Order(StringComparer.Ordinal).SequenceEqual(after, StringComparer.Ordinal),
+            $"{Repo} must hold exactly [{string.Join(", ", before)}] after a refused write, "
+                + $"but held [{string.Join(", ", after)}]");
+    }
+
+    /// <summary>
+    /// No remedy is offered for a gap the repair would refuse to close.
+    /// </summary>
+    /// <remarks>
+    /// <c>docs init</c> derives its repair question from the findings, so a finding that carries
+    /// <see cref="McpWiringFixability.Fixable"/> is a file the operator is asked to consent to
+    /// writing. A <c>CommandDiffers</c> finding is by definition about an entry that already exists,
+    /// and 5.5 says the repair never modifies, merges, or overwrites one — so offering it asks the
+    /// operator to approve a write that is guaranteed to come back as <c>KW-MCP-WIRE-005</c>. The
+    /// assertion below is the two halves of that contradiction, in the order the operator meets them.
+    /// </remarks>
+    [Fact]
+    public void ARemedyIsNotOfferedForAGapTheRepairWouldRefuse()
+    {
+        McpWiringFixture.WriteText(
+            Repo,
+            ".mcp.json",
+            """{"mcpServers": {"kyber-weave": {"command": "kyber-weave-mcp", "args": ["--repo-root", "/somewhere/else"]}}}""");
+
+        McpConfig config = McpWiringFixture.Declare(FirstPartyServer());
+        LaunchCommandResolver resolver = ResolverOver(Bin);
+        McpWiringReport inspection = McpWiringInspector.Inspect(Repo, config, resolver);
+
+        McpWiringFinding finding = Assert.Single(inspection.Findings, candidate => candidate.Harness == ClaudeCode);
+        Assert.Equal(McpWiringKind.CommandDiffers, finding.Kind);
+
+        IReadOnlyList<McpWiringFix> offered = McpWiringFixes.Derive(inspection, Repo);
+        Assert.True(
+            offered.Count == 0,
+            "the prompt was offered a write the repair refuses: "
+                + string.Join("; ", offered.Select(fix => $"{fix.Harness} ({fix.Path}) adding {string.Join(", ", fix.Servers)}")));
+
+        McpWiringFileChange refusal = SingleChange(Repair(config, resolver, ClaudeCode), ClaudeCode);
+        Assert.Equal(McpWiringChangeOutcome.Refused, refusal.Outcome);
+        Assert.False(File.Exists(ReceiptPath));
+    }
+
+    /// <summary>
+    /// A configuration file that is a symbolic link is refused, and the file it points at is left
+    /// byte-identical.
+    /// </summary>
+    /// <remarks>
+    /// Requirement 2.6 confines the whole feature to the repository, and 5.2 says a write lands in a
+    /// repository-scope file or nowhere. A link in the tree defeats both without any output saying
+    /// so: the path is inside the repository, and the bytes land wherever the link points. The case
+    /// is a developer sharing one MCP configuration across checkouts — <c>ln -s ~/.mcp.json
+    /// .mcp.json</c> — which is exactly the state that turns a repository-scope write into a write to
+    /// the user scope (ADR 0051).
+    /// </remarks>
+    [Fact]
+    public void ALinkedTargetIsRefusedAndItsTargetIsLeftByteIdentical()
+    {
+        string outside = WriteOutsideRepository(
+            "user-scope/mcp.json",
+            """{"mcpServers": {"other": {"command": "other-mcp"}}}""");
+        byte[] before = File.ReadAllBytes(outside);
+        string link = Path.Combine(Repo, ".mcp.json");
+        McpWiringFixture.CreateSymlink(link, outside);
+
+        McpWiringRepairReport report = Repair(
+            McpWiringFixture.Declare(FirstPartyServer()),
+            ResolverOver(Bin),
+            ClaudeCode);
+
+        McpWiringFileChange change = SingleChange(report, ClaudeCode);
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.False(change.Written);
+        AssertRefusalNamesTheLink(change, ".mcp.json");
+        Assert.Equal(RefusalCode, change.Code);
+        Assert.Equal(before, File.ReadAllBytes(outside));
+        Assert.NotNull(new FileInfo(link).LinkTarget);
+        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt");
+    }
+
+    /// <summary>
+    /// Removal refuses a linked target too, and leaves the file it points at byte-identical.
+    /// </summary>
+    /// <remarks>
+    /// Removal is the other half of the same boundary: it restores the pre-write bytes the receipt
+    /// recorded, and restoring through a link writes those bytes into whichever file the link names.
+    /// The fixture arranges the exact situation that reaches the write — the link's target holds the
+    /// post-write bytes, so the digest matches and nothing but the link stands between the removal
+    /// and a write outside the repository.
+    /// </remarks>
+    [Fact]
+    public void RemovalRefusesALinkedTargetAndLeavesTheLinkedFileByteIdentical()
+    {
+        McpWiringFixture.WriteText(Repo, ".mcp.json", """{"mcpServers": {}}""");
+        Assert.Equal(
+            McpWiringChangeOutcome.Inserted,
+            SingleChange(
+                Repair(McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), ClaudeCode),
+                ClaudeCode).Outcome);
+
+        string link = Path.Combine(Repo, ".mcp.json");
+        string outside = Path.Combine(_root.Path, "user-scope", "mcp.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
+        File.Move(link, outside);
+        McpWiringFixture.CreateSymlink(link, outside);
+        byte[] written = File.ReadAllBytes(outside);
+
+        McpWiringFileChange change = Assert.Single(McpWiringRepairer.Unwire(Repo, [ClaudeCode]).Files);
+
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.False(change.Written);
+        AssertRefusalNamesTheLink(change, ".mcp.json");
+        Assert.Equal(written, File.ReadAllBytes(outside));
+        Assert.NotNull(new FileInfo(link).LinkTarget);
     }
 
     private McpWiringRepairReport Repair(
@@ -638,15 +976,6 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringRepairer.Repair(Repo, config, resolver, targets, dryRun: false);
 
     private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
-
-    private static McpConfig Declare(params RequiredMcpServer[] servers)
-    {
-        Dictionary<string, RequiredMcpServer> declared = new(StringComparer.Ordinal);
-        foreach (RequiredMcpServer server in servers)
-            declared[server.Name] = server;
-
-        return new McpConfig { RequiredServers = declared };
-    }
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
@@ -696,8 +1025,15 @@ public sealed class McpWiringRepairerTests : IDisposable
         return limit;
     }
 
-    private void WriteInRepository(string relativePath, string content) =>
-        WriteBytes(relativePath, Encoding.UTF8.GetBytes(content));
+    /// <summary>
+    /// The file names directly inside <paramref name="directory"/> — one level, so a name is compared
+    /// as the platform stored it and no walk can leave the fixture's own temp tree. An absent
+    /// directory holds nothing, which is the state a created target starts from.
+    /// </summary>
+    private static string[] FileNamesIn(string directory) =>
+        Directory.Exists(directory)
+            ? [.. new DirectoryInfo(directory).EnumerateFiles().Select(file => file.Name)]
+            : [];
 
     /// <summary>
     /// Puts a harness in play through its marker directory, so a case is about what the repair does
@@ -714,31 +1050,30 @@ public sealed class McpWiringRepairerTests : IDisposable
             Directory.CreateDirectory(Path.Combine(Repo, marker));
     }
 
-    private void WriteBytes(string relativePath, byte[] content)
+    /// <summary>
+    /// Writes beside the repository root — where a user-scope file would sit, and where a link in
+    /// the tree would point — and returns its full path.
+    /// </summary>
+    private string WriteOutsideRepository(string relativePath, string content)
     {
-        string path = Path.Combine(Repo, relativePath);
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
+        McpWiringFixture.WriteText(_root.Path, relativePath, content);
 
-        File.WriteAllBytes(path, content);
+        return Path.Combine(_root.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
     }
 
     /// <summary>
-    /// A file, not a process: the resolver is a file-existence check, so an empty file proves no
-    /// launch happened. The execute bit is set where the platform has one so the fixture looks like
-    /// an installed binary; on Windows the extension PATHEXT resolution looks for is used.
+    /// A refusal of a linked target has to say two things: which file, and that it is a link. Without
+    /// the second the operator is told a file inside their repository was refused, which is the
+    /// opposite of what happened.
     /// </summary>
-    private void WriteBinary(string name)
+    private static void AssertRefusalNamesTheLink(McpWiringFileChange change, string path)
     {
-        string path = Path.Combine(Bin, OperatingSystem.IsWindows() ? name + ".exe" : name);
-        File.WriteAllText(path, string.Empty);
+        string text = DiagnosticText(change);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        Assert.Contains(path, text, StringComparison.Ordinal);
+        Assert.True(
+            text.Contains("symbolic link", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("symlink", StringComparison.OrdinalIgnoreCase),
+            $"the refusal must say {path} is a symbolic link, but said: {text}");
     }
 }

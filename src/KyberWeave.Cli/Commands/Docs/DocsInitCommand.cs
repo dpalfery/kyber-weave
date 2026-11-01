@@ -168,7 +168,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private static void PrintReviewGates(ReviewGatesOutcome review)
     {
-        WriteUnfolded(() => PrintReviewGatesUnfolded(review));
+        CommandHelpers.WriteUnfolded(() => PrintReviewGatesUnfolded(review));
     }
 
     private static void PrintReviewGatesUnfolded(ReviewGatesOutcome review)
@@ -318,7 +318,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                     continue;
                 }
 
-                WriteUnfolded(() =>
+                CommandHelpers.WriteUnfolded(() =>
                 {
                     AnsiConsole.MarkupLine(
                         $"  [yellow]warn[/] Retired skill '{Markup.Escape(name)}' still present at [bold]{Markup.Escape(staleDir)}[/]. " +
@@ -403,7 +403,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             .. config.RequiredServers.Values.OrderBy(server => server.Name, StringComparer.Ordinal)
         ];
 
-        WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             AnsiConsole.MarkupLine("[bold]MCP wiring:[/]");
 
@@ -462,10 +462,23 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         // A not-detectable line's hint is a paragraph of advice about a harness nobody claimed to
         // use; every other finding's hint is the command that closes it, and that is printed
-        // verbatim so it can be copied.
-        if (finding.Kind != McpWiringKind.NotDetectable && !string.IsNullOrWhiteSpace(finding.Hint))
+        // verbatim so it can be copied. The Copilot coding agent is the exception the rule has to
+        // make room for: its hint *is* its report, because there is no file in the tree to read or
+        // write (2.5), and suppressing it left the operator told to configure a harness with no
+        // statement of how. The exception is decided by the catalog's shape — repository settings,
+        // not a file — rather than by the harness's name.
+        if (AdviceBelongsToOperator(finding) && !string.IsNullOrWhiteSpace(finding.Hint))
             AnsiConsole.MarkupLine($"        [grey]{Markup.Escape(finding.Hint)}[/]");
     }
+
+    /// <summary>
+    /// Whether a finding's hint is the operator's to act on, rather than advice about a harness this
+    /// repository may not use at all (2.4).
+    /// </summary>
+    private static bool AdviceBelongsToOperator(McpWiringFinding finding) =>
+        finding.Kind != McpWiringKind.NotDetectable
+        || (!string.IsNullOrWhiteSpace(finding.Harness)
+            && HarnessMcpCatalog.Find(finding.Harness)?.Shape == McpConfigurationShape.RepositorySettings);
 
     /// <summary>Whether this run may ask the operator, honouring the seam when a test set it.</summary>
     private static bool CanPrompt() =>
@@ -530,7 +543,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             LaunchCommandResolver.FromEnvironment(),
             McpWiringFixes.Harnesses(fixes));
 
-        WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             bool wrote = false;
 
@@ -568,26 +581,4 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         });
     }
 
-    /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
-    /// </summary>
-    /// <remarks>
-    /// A redirected console folds at 80 columns, splitting a long path across lines and
-    /// corrupting the copy-pastable cleanup command the warning exists for. The same
-    /// unfolded-write pattern lives in <c>SquadCommandComposition</c> for the same reason;
-    /// it is repeated here so the Docs branch does not depend on the Squad branch.
-    /// </remarks>
-    private static void WriteUnfolded(Action write)
-    {
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
-        try
-        {
-            write();
-        }
-        finally
-        {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : 80;
-        }
-    }
 }

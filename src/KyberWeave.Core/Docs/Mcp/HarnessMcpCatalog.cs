@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>How a harness stores the MCP servers it launches.</summary>
@@ -103,6 +106,73 @@ public sealed record HarnessMcpEntry
     /// entry from this rather than by re-serializing the file it is inserting into.
     /// </summary>
     public string? CanonicalEntry { get; init; }
+
+    /// <summary>
+    /// This harness's own documented spelling of "this repository": <c>${workspaceFolder}</c> for
+    /// VS Code, <see cref="JsonServerSplice.RepositoryRootToken"/> for a harness that substitutes
+    /// nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both sides of the round trip read it from here, which is the point. The repair substitutes
+    /// this token when it composes an entry (5.11), and the check has to accept it as the
+    /// declaration's <c>.</c> — otherwise the check rejects the file the repair just wrote, turning
+    /// one <c>ok</c> line into a warning (3.5) and a second run of <c>mcp-wire</c> into
+    /// <c>KW-MCP-WIRE-005</c> against its own success. A tolerance written twice would drift the
+    /// moment a harness is added; one spelling per harness, decided in one place, cannot.
+    /// </para>
+    /// <para>
+    /// It is read from the canonical entry's environment block rather than declared beside it
+    /// because that block <em>is</em> where the runbook's example spells its root; a second literal
+    /// would be a second thing to keep true. A row that carries no entry template substitutes
+    /// nothing, so the declaration's token is what it keeps.
+    /// </para>
+    /// </remarks>
+    public string RepositoryRootToken
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(CanonicalEntry))
+                return JsonServerSplice.RepositoryRootToken;
+
+            JsonObject? template;
+            try
+            {
+                template = JsonNode.Parse(CanonicalEntry) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                return JsonServerSplice.RepositoryRootToken;
+            }
+
+            if (template is null)
+                return JsonServerSplice.RepositoryRootToken;
+
+            foreach (KeyValuePair<string, JsonNode?> property in template)
+            {
+                if (!IsEnvironmentKey(property.Key) || property.Value is not JsonObject environment)
+                    continue;
+
+                foreach (KeyValuePair<string, JsonNode?> setting in environment)
+                {
+                    if (setting.Value is JsonValue value &&
+                        value.TryGetValue(out string? text) &&
+                        !string.IsNullOrEmpty(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+
+            return JsonServerSplice.RepositoryRootToken;
+        }
+    }
+
+    /// <summary>
+    /// Whether a key of an entry body is the block a harness spells its repository root in:
+    /// <c>env</c> for most, <c>environment</c> for opencode.
+    /// </summary>
+    internal static bool IsEnvironmentKey(string key) => key is "env" or "environment";
 }
 
 /// <summary>

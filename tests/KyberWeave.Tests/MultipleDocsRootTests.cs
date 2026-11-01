@@ -395,7 +395,7 @@ public class MultipleDocsRootTests : IDisposable
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
-        Assert.Equal(before.TrimEnd('\r', '\n') + AppendedMcpDeclaration, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     [Fact]
@@ -406,7 +406,7 @@ public class MultipleDocsRootTests : IDisposable
 
         DocsScaffolder.Scaffold(_temp.Path, "automation");
 
-        Assert.Equal(before.TrimEnd('\r', '\n') + AppendedMcpDeclaration, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     /// <summary>
@@ -462,7 +462,7 @@ public class MultipleDocsRootTests : IDisposable
 
         DocsScaffolder.Scaffold(_temp.Path, "docs");
 
-        Assert.Equal(before.TrimEnd('\r', '\n') + AppendedMcpDeclaration, File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
     }
 
     [Fact]
@@ -519,18 +519,6 @@ public class MultipleDocsRootTests : IDisposable
         File.WriteAllText(path, yaml);
         return path;
     }
-
-    /// <summary>
-    /// The <c>mcp:</c> declaration exactly as <c>docs init</c> appends it to an LF file: one
-    /// blank line separating it from the operator's last byte, the block, and a single
-    /// trailing newline.
-    /// </summary>
-    /// <remarks>
-    /// These fixtures use it as the only thing a scaffold may add. Everything ahead of it has
-    /// to be the operator's file unchanged, which is what the exact equality in each of them
-    /// proves; the block's own text belongs to <c>McpDeclarationBlockWriterTests</c>.
-    /// </remarks>
-    private static string AppendedMcpDeclaration => "\n\n" + McpDeclarationBlockWriter.DeclarationYaml + "\n";
 
     private void Write(string relativePath, string content)
     {

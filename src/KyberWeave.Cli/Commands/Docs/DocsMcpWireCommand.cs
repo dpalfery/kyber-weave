@@ -130,31 +130,6 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
-    /// </summary>
-    /// <remarks>
-    /// A redirected console folds at 80 columns, which splits the repository-relative path or the
-    /// remedy command the operator is meant to copy onto a second line. The same unfolded-write
-    /// pattern lives in <c>DocsInitCommand</c> and <c>SquadCommandComposition</c>; it is repeated
-    /// here so the two MCP verbs share one copy and neither depends on another branch.
-    /// </remarks>
-    internal static void Unfolded(Action write)
-    {
-        ArgumentNullException.ThrowIfNull(write);
-
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
-        try
-        {
-            write();
-        }
-        finally
-        {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : 80;
-        }
-    }
-
-    /// <summary>
     /// Prints the diagnostics a configuration or path failure produced, rule id first.
     /// </summary>
     /// <remarks>
@@ -167,7 +142,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        Unfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             foreach (Diagnostic diagnostic in report.Items)
             {
@@ -210,10 +185,31 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             return;
         }
 
-        AnsiConsole.MarkupLine($"  {Verb(change.Outcome, dryRun)} [bold]{file}[/] [grey]({harness})[/]");
+        AnsiConsole.MarkupLine($"  {Verb(change.Outcome, dryRun)} [bold]{file}[/] [grey]({harness})[/]{Servers(change)}");
 
         if (!string.IsNullOrEmpty(change.Message))
             AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(change.Message)}[/]");
+    }
+
+    /// <summary>
+    /// The servers a change names, as the clause that follows the file.
+    /// </summary>
+    /// <remarks>
+    /// The change <em>is</em> which entries the file gains, so a line naming only the path asks the
+    /// operator to consent to a write they cannot see, in a file the whole team shares (5.10). The
+    /// real run names them too: a preview that describes the change, followed by a write that
+    /// reports only the file, is the same omission one step later.
+    /// </remarks>
+    private static string Servers(McpWiringFileChange change)
+    {
+        if (change.Servers.Count == 0)
+            return string.Empty;
+
+        string verb = change.Outcome is McpWiringChangeOutcome.Created or McpWiringChangeOutcome.Inserted
+            ? "adding"
+            : "removing";
+
+        return $" [grey]{verb}[/] {Markup.Escape(string.Join(", ", change.Servers))}";
     }
 
     /// <summary>
@@ -233,7 +229,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
                 row.Fixability == McpWiringFixability.Fixable && !InPlay(root, row))
         ];
 
-        Unfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             AnsiConsole.MarkupLine(
                 $"[bold]MCP wiring preview[/] for {Markup.Escape(root)}: no --target named, so nothing will be written.");
@@ -299,7 +295,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             ? []
             : [.. McpWiringRepairer.Repair(root, config, resolver, toRepair, dryRun).Files];
 
-        Unfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             foreach (McpWiringFileChange change in changes)
                 PrintChange(change, dryRun);

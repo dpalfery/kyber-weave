@@ -439,6 +439,157 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     }
 
     /// <summary>
+    /// R2.5: the Copilot coding agent has no configuration file in the tree, so the only way to wire
+    /// it is by hand. The snippet and the workflow step are the whole of its report, which means the
+    /// operator's console — not the finding object — has to carry them.
+    /// </summary>
+    /// <remarks>
+    /// This is the test the earlier one was not. Asserting the hint on the finding proves the data
+    /// exists and says nothing about the operator ever seeing it, and the section suppressed every
+    /// not-detectable hint: three executed runs reported the harness and then stopped, leaving an
+    /// operator told to configure something with no statement of how.
+    /// </remarks>
+    [Fact]
+    public void TheCopilotCodingAgentsSnippetAndWorkflowStepReachTheConsole()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        Directory.CreateDirectory(Path.Combine(repository, ".factory"));
+        WriteFile(
+            repository,
+            ".factory/mcp.json",
+            """
+            {
+              "mcpServers": {
+                "kyber-weave": {
+                  "command": "kyber-weave-mcp",
+                  "args": ["--repo-root", "."]
+                }
+              }
+            }
+            """);
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+
+        string[] lines = OutputLines(execution.Output);
+        int copilot = Array.FindIndex(
+            lines,
+            line => line.Contains("copilot-coding-agent", StringComparison.Ordinal));
+        Assert.True(
+            copilot >= 0,
+            $"No output line named the Copilot coding agent. Output:{Environment.NewLine}{execution.Output}");
+
+        // The snippet says which key the entry goes under; the workflow step says which file has to
+        // install the server before the agent starts. Both belong to that harness's report, so both
+        // are looked for after its line rather than anywhere in the run.
+        int snippet = Array.FindIndex(
+            lines,
+            line => line.Contains("mcpServers", StringComparison.Ordinal));
+        Assert.True(
+            snippet > copilot,
+            $"The Copilot report never reached the operator: no line after it named the 'mcpServers' "
+                + $"entry it needs. Output:{Environment.NewLine}{execution.Output}");
+
+        int workflowStep = Array.FindIndex(
+            lines,
+            line => line.Contains("copilot-setup-steps.yml", StringComparison.Ordinal));
+        Assert.True(
+            workflowStep > copilot,
+            $"The Copilot report never reached the operator: no line after it named the "
+                + $"copilot-setup-steps.yml workflow step it needs. Output:{Environment.NewLine}{execution.Output}");
+    }
+
+    /// <summary>
+    /// R2.4: a harness with neither a configuration file nor a marker is one <c>info</c> line naming
+    /// what was looked for — one line, whatever the number of declared servers, and with no advice
+    /// attached.
+    /// </summary>
+    /// <remarks>
+    /// This is the constraint the Copilot report must not break. Teaching the section to print a
+    /// not-detectable hint would print one for every harness in the catalog, so a repository that
+    /// uses none of them would be told, at length, to wire six harnesses it does not have. Counting
+    /// the lines that mention the harness is what distinguishes "one report" from "one report and its
+    /// advice".
+    /// </remarks>
+    [Fact]
+    public void AnUndetectableHarnessIsOneInfoLineAndNoAdvice()
+    {
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+
+        // Two declared servers, so a section that printed per server would print twice.
+        DeclareServers(
+            repository,
+            $"""
+            {KyberWeaveServer}:
+              command: [kyber-weave-mcp, --repo-root, .]
+              provenance: first-party
+              level: required
+            {AbsentThirdPartyBinary}:
+              command: [{AbsentThirdPartyBinary}, serve, --mcp]
+              provenance: third-party
+              level: recommended
+            """);
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+
+        string[] factoryLines =
+        [
+            .. OutputLines(execution.Output).Where(line => line.Contains(Factory, StringComparison.Ordinal))
+        ];
+        string line = Assert.Single(factoryLines);
+
+        Assert.Contains(McpWiringInspector.NotDetectableCode, line, StringComparison.Ordinal);
+        Assert.Contains(".factory", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R4.1: the question offers writes the repair will actually perform. A gap the repair refuses —
+    /// here an entry that already exists with a different launch command, which 5.5 forbids the
+    /// repair from modifying — must not be offered, because a question is a request for consent to a
+    /// specific write and consent to a refusal is not consent to anything.
+    /// </summary>
+    [Fact]
+    public void ThePromptIsNotOfferedForAGapTheRepairWouldRefuse()
+    {
+        bool offered = false;
+        DocsInitCommand.InteractiveCheckOverride = static () => true;
+        DocsInitCommand.ConfirmFixOverride = _ =>
+        {
+            offered = true;
+            return true;
+        };
+
+        string repository = NewRepository();
+        PutLaunchBinaryOnPath(McpBinary);
+        WriteFile(
+            repository,
+            CursorConfigRelativePath,
+            """
+            {
+              "mcpServers": {
+                "kyber-weave": {
+                  "command": "kyber-weave-mcp",
+                  "args": ["--repo-root", "/somewhere/else"]
+                }
+              }
+            }
+            """);
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        Assert.Contains(McpWiringInspector.CommandDiffersCode, execution.Output, StringComparison.Ordinal);
+        Assert.False(
+            offered,
+            "docs init offered a repair for a file the repair refuses to modify (5.5).");
+    }
+
+    /// <summary>
     /// An empty repository, git-initialized so the check's worktree walk stops at this root instead
     /// of climbing into the temp directory's ancestors.
     /// </summary>
@@ -463,16 +614,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     /// </remarks>
     private void PutLaunchBinaryOnPath(string binaryName)
     {
-        Directory.CreateDirectory(Bin);
-        string path = Path.Combine(Bin, OperatingSystem.IsWindows() ? binaryName + ".exe" : binaryName);
-        File.WriteAllText(path, string.Empty);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        McpWiringFixture.WriteExecutable(Bin, binaryName);
 
         _pathBeforeFakeBinaries ??= Environment.GetEnvironmentVariable("PATH");
         Environment.SetEnvironmentVariable("PATH", Bin + Path.PathSeparator + _pathBeforeFakeBinaries);

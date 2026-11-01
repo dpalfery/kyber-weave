@@ -45,7 +45,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     {
         Directory.CreateDirectory(Repo);
         Directory.CreateDirectory(Bin);
-        WriteBinary();
+        McpWiringFixture.WriteExecutable(Bin, BinaryName);
     }
 
     private string Repo => Path.Combine(_root.Path, "repo");
@@ -100,7 +100,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void AnInsertedWriteRecordsBothDigestsAndTheMode()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"servers": {}}""");
-        WriteBytes(VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
 
         Repair(VsCode);
 
@@ -204,7 +204,7 @@ public sealed class McpWiringReceiptTests : IDisposable
               "servers": {}
             }
             """);
-        WriteBytes(VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
 
         Repair(VsCode);
         Assert.NotEqual(original, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
@@ -245,7 +245,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void UnwireRefusesWhenTheFileChangedAfterTheRepair()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
-        WriteBytes(".mcp.json", original);
+        McpWiringFixture.WriteBytes(Repo, ".mcp.json", original);
         Repair("claude-code");
 
         File.AppendAllText(Path.Combine(Repo, ".mcp.json"), "\n// a teammate's edit\n");
@@ -274,7 +274,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void UnwireRefusesAReceiptWhoseRecordedContentNoLongerMatchesItsDigest()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"servers": {}}""");
-        WriteBytes(VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
         Repair(VsCode);
 
         byte[] repaired = File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile));
@@ -312,7 +312,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     [Fact]
     public void UnwireRefusesWhenTheReceiptHoldsNoRecord()
     {
-        WriteBytes(".mcp.json", Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""));
+        McpWiringFixture.WriteBytes(Repo, ".mcp.json", Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""));
         byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
 
         McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, ["claude-code"]);
@@ -334,7 +334,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     {
         McpWiringRepairer.Repair(
             Repo,
-            Declare(FirstPartyServer()),
+            McpWiringFixture.Declare(FirstPartyServer()),
             ResolverOver(Bin),
             [VsCode],
             dryRun: true);
@@ -345,18 +345,9 @@ public sealed class McpWiringReceiptTests : IDisposable
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringRepairer.Repair(Repo, Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
+        McpWiringRepairer.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
 
     private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
-
-    private static McpConfig Declare(params RequiredMcpServer[] servers)
-    {
-        Dictionary<string, RequiredMcpServer> declared = new(StringComparer.Ordinal);
-        foreach (RequiredMcpServer server in servers)
-            declared[server.Name] = server;
-
-        return new McpConfig { RequiredServers = declared };
-    }
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
@@ -399,26 +390,4 @@ public sealed class McpWiringReceiptTests : IDisposable
     /// </summary>
     private static string Normalize(string? digest) => (digest ?? string.Empty).ToUpperInvariant();
 
-    private void WriteBytes(string relativePath, byte[] content)
-    {
-        string path = Path.Combine(Repo, relativePath);
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllBytes(path, content);
-    }
-
-    private void WriteBinary()
-    {
-        string path = Path.Combine(Bin, OperatingSystem.IsWindows() ? BinaryName + ".exe" : BinaryName);
-        File.WriteAllText(path, string.Empty);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
 }

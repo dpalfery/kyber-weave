@@ -54,18 +54,6 @@ public sealed class DocsScaffolderTests : IDisposable
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
-    /// <summary>
-    /// The <c>mcp:</c> declaration exactly as <c>docs init</c> appends it: one blank line
-    /// separating it from the operator's last byte, the block, and a single trailing newline.
-    /// </summary>
-    /// <remarks>
-    /// The block's own text is <c>McpDeclarationBlockWriterTests</c>' subject. Referencing the
-    /// same constant here keeps these fixtures focused on what they protect — that the append
-    /// is exactly the declaration and nothing besides it, so every operator byte before it is
-    /// still there in order.
-    /// </remarks>
-    private static string AppendedMcpDeclaration => "\n\n" + McpDeclarationBlockWriter.DeclarationYaml + "\n";
-
     [Theory]
     [InlineData("docs")]
     [InlineData("6-Docs")]
@@ -398,7 +386,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         // The operator's file is an exact prefix of what was written; the declaration is the
         // only thing appended after it.
-        Assert.Equal(HandMaintainedConfig + AppendedMcpDeclaration, Read(ConfigPath));
+        Assert.Equal(HandMaintainedConfig + McpWiringFixture.AppendedDeclaration(), Read(ConfigPath));
 
         ScaffoldedFile entry = result.Files.Single(f => f.RelativePath == ConfigPath);
         Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
@@ -434,7 +422,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.Equal(
             HandMaintainedConfig.Replace(
                 "docs-root: 6-Docs  # moved in 2024", "docs-root: 'handbook'  # moved in 2024",
-                StringComparison.Ordinal) + AppendedMcpDeclaration,
+                StringComparison.Ordinal) + McpWiringFixture.AppendedDeclaration(),
             text);
 
         Assert.Equal(ScaffoldOutcome.Updated, result.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
@@ -453,7 +441,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         ScaffoldResult first = DocsScaffolder.Scaffold(_temp.Path);
 
-        string afterFirst = HandMaintainedConfig + AppendedMcpDeclaration;
+        string afterFirst = HandMaintainedConfig + McpWiringFixture.AppendedDeclaration();
         Assert.Equal(afterFirst, Read(ConfigPath));
         Assert.Equal(ScaffoldOutcome.Updated, first.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
 

@@ -56,7 +56,7 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
 
         McpWiringRepairReport removal = McpWiringRepairer.Unwire(root, targets);
 
-        DocsMcpWireCommand.Unfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             foreach (McpWiringFileChange change in removal.Files)
                 DocsMcpWireCommand.PrintChange(change, dryRun: false);
@@ -77,7 +77,7 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     {
         McpWiringReceipt receipt = McpWiringReceipt.Load(root);
 
-        DocsMcpWireCommand.Unfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             if (receipt.Files.Count == 0)
             {

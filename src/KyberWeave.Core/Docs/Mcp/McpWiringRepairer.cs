@@ -225,6 +225,28 @@ public static class McpWiringRepairer
         McpWiringReceiptRecord? record = records.Find(
             candidate => McpWiringReceipt.SamePath(candidate.Path, path));
 
+        string fullPath = FullPath(root, path);
+
+        // Removal restores the bytes the receipt captured, so through a link it would write those
+        // bytes into whichever file the link names — outside the repository, and over a file this
+        // repository does not own (2.6, 5.2). The guard comes before the record lookup and the
+        // digest read, because it is the more specific fact: an operator whose file is a link needs
+        // to hear that, not "there is no record" or "restore it from version control" — advice that
+        // would have them editing the linked file by hand.
+        if (McpConfigurationLink.LinkedSegment(root, fullPath) is { } linked)
+        {
+            return (Refused(
+                harness,
+                path,
+                record?.Servers ?? [],
+                McpWiringReceipt.DriftCode,
+                $"{McpConfigurationLink.Describe(path, linked)}, so nothing was removed: restoring the recorded "
+                    + "bytes through it would write outside the repository",
+                $"Replace {path} with a real file inside the repository — copy its content out of the linked file, "
+                    + "delete the link, and leave the copy in place — then run the removal again. Nothing was written.").Change,
+                false);
+        }
+
         if (record is null)
         {
             return (Refused(
@@ -237,8 +259,6 @@ public static class McpWiringRepairer
                     + $"{path} by hand, or with git revert, and leave the rest of the file intact.").Change,
                 false);
         }
-
-        string fullPath = FullPath(root, path);
 
         if (!File.Exists(fullPath))
         {
@@ -302,7 +322,7 @@ public static class McpWiringRepairer
             if (preWrite is null)
                 File.Delete(fullPath);
             else
-                File.WriteAllBytes(fullPath, preWrite);
+                WriteAtomically(fullPath, preWrite);
         }
         catch (IOException exception)
         {
@@ -356,6 +376,23 @@ public static class McpWiringRepairer
 
         string fullPath = FullPath(root, path);
         byte[]? original = null;
+
+        // A link in the tree makes this repository-scope path name a file somebody else owns, and
+        // reading or writing through it leaves the repository entirely (2.6, 5.2, ADR 0051). The
+        // refusal comes before the read so that not one byte of the target is opened.
+        if (McpConfigurationLink.LinkedSegment(root, fullPath) is { } linked)
+        {
+            return Refused(
+                harness,
+                path,
+                [],
+                RefusalCode,
+                $"{McpConfigurationLink.Describe(path, linked)}, so nothing was read or written: a repository-scope "
+                    + "configuration cannot be a link, because the bytes would land in whichever file it names",
+                $"Replace {path} with a real file inside the repository — copy its content out of the linked file, "
+                    + "delete the link, and leave the copy in place — then run the wire command again. Kyber-Weave "
+                    + "writes repository-scope files only, and a write through a link leaves the repository.");
+        }
 
         if (File.Exists(fullPath))
         {
@@ -470,11 +507,7 @@ public static class McpWiringRepairer
 
         try
         {
-            string? directory = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllBytes(fullPath, planned);
+            WriteAtomically(fullPath, planned);
         }
         catch (IOException exception)
         {
@@ -744,7 +777,7 @@ public static class McpWiringRepairer
     private static JsonObject ComposeEntry(HarnessMcpEntry row, RequiredMcpServer server)
     {
         JsonObject template = TemplateEntry(row);
-        string pathToken = PathToken(template);
+        string pathToken = row.RepositoryRootToken;
         JsonObject entry = new();
 
         foreach (KeyValuePair<string, JsonNode?> property in template)
@@ -753,7 +786,7 @@ public static class McpWiringRepairer
             {
                 "command" => Command(row, server, pathToken),
                 "args" => Arguments(server.Command.Skip(1), pathToken),
-                _ when IsEnvironmentKey(property.Key) && property.Value is JsonObject environment
+                _ when HarnessMcpEntry.IsEnvironmentKey(property.Key) && property.Value is JsonObject environment
                     => Environment(environment, pathToken),
                 _ => property.Value?.DeepClone()
             };
@@ -792,32 +825,6 @@ public static class McpWiringRepairer
     }
 
     /// <summary>
-    /// The harness's documented spelling of "this repository", read from the environment value its
-    /// entry template carries: <c>${workspaceFolder}</c> for VS Code, <c>.</c> for the harnesses that
-    /// keep the declaration's own token.
-    /// </summary>
-    private static string PathToken(JsonObject template)
-    {
-        foreach (KeyValuePair<string, JsonNode?> property in template)
-        {
-            if (!IsEnvironmentKey(property.Key) || property.Value is not JsonObject environment)
-                continue;
-
-            foreach (KeyValuePair<string, JsonNode?> setting in environment)
-            {
-                if (setting.Value is JsonValue value &&
-                    value.TryGetValue(out string? text) &&
-                    !string.IsNullOrEmpty(text))
-                {
-                    return text;
-                }
-            }
-        }
-
-        return JsonServerSplice.RepositoryRootToken;
-    }
-
-    /// <summary>
     /// Rewrites a repository-root token into the harness's own spelling. The declaration writes the
     /// root as <c>.</c>, which every harness that substitutes nothing keeps and the ones that
     /// substitute a workspace variable replace; an absolute path is left alone, because substituting
@@ -827,8 +834,6 @@ public static class McpWiringRepairer
         string.Equals(token, JsonServerSplice.RepositoryRootToken, StringComparison.Ordinal)
             ? pathToken
             : token;
-
-    private static bool IsEnvironmentKey(string key) => key is "env" or "environment";
 
     private static JsonObject TemplateEntry(HarnessMcpEntry row)
     {
@@ -1024,6 +1029,44 @@ public static class McpWiringRepairer
         server.Command.Count > 0 ? server.Command[0] : "(nothing)";
 
     private static string Digest(byte[] content) => Convert.ToHexString(SHA256.HashData(content));
+
+    /// <summary>
+    /// Writes <paramref name="content"/> to <paramref name="path"/> by renaming a sibling temporary
+    /// file over it, so the target is never observable half-written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A harness configuration is a file the whole team inherits, and <see cref="File.WriteAllBytes(string, byte[])"/>
+    /// truncates in place: a run killed between the truncation and the last byte leaves a zero-length
+    /// or partial document that every teammate then commits, and the removal path refuses it — there
+    /// is no receipt yet, and the digest no longer matches one. The receipt is recorded only after
+    /// the write returns, so the window is real rather than theoretical.
+    /// </para>
+    /// <para>
+    /// The temporary file is a unique sibling in the same directory, because a rename is atomic only
+    /// within a volume. This is the idiom <c>ManagedGlossaryService.AtomicWrite</c> and
+    /// <c>StatusLineReceiptStore.Write</c> already use.
+    /// </para>
+    /// </remarks>
+    private static void WriteAtomically(string path, byte[] content)
+    {
+        string directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"The configuration path '{path}' has no parent directory.");
+
+        Directory.CreateDirectory(directory);
+        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            File.WriteAllBytes(temporaryPath, content);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
 
     private static string FullPath(string root, string relativePath) =>
         Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
