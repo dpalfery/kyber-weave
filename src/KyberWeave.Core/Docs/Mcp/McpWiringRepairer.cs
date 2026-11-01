@@ -1263,11 +1263,15 @@ public static class McpWiringRepairer
     /// constant and a receipt's paths are validated where the receipt is read, so this is a last line
     /// rather than a first: it is the one place where a defect in either would reach the filesystem,
     /// and the one place the containment claim is made.
+    /// <para>
+    /// The rule itself is <see cref="McpRepositoryPath"/>'s, and this is a name for it here rather
+    /// than a copy of it: the check resolves a repository-scope file by the same rule, and two
+    /// answers to "is this path inside the repository" is how a read and a write come to disagree
+    /// about one file.
+    /// </para>
     /// </remarks>
     internal static string? ContainedPath(string root, string relativePath) =>
-        McpWiringReceipt.RepositoryRelative(relativePath)
-            ? Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar))
-            : null;
+        McpRepositoryPath.Contained(root, relativePath);
 
     /// <summary>
     /// Keeps a removal's audit note visible when the receipt could not be rewritten after it. The

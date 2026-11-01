@@ -179,7 +179,7 @@ public static class McpWiringInspector
             return;
         }
 
-        string namedPath = NamedPath(entry, files);
+        string namedPath = NamedPath(root, entry, files);
 
         foreach (RequiredMcpServer server in declared)
         {
@@ -764,6 +764,14 @@ public static class McpWiringInspector
     /// repair refuses, when what the operator needs to hear is that a link stands between this
     /// repository and a file outside it.
     /// </para>
+    /// <para>
+    /// Nothing here reads a path the catalog names without asking <see cref="McpRepositoryPath"/>
+    /// whether this repository owns it, because the read and the write have to agree about which file
+    /// they are talking about: a row naming an absolute path would otherwise be read from wherever it
+    /// pointed while the repair refused to write it. The ZCode walk is exempt on purpose — it is the
+    /// one place a directory above the root is read deliberately, and it reports what it finds rather
+    /// than writing there.
+    /// </para>
     /// </remarks>
     private static IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry entry)
     {
@@ -775,6 +783,9 @@ public static class McpWiringInspector
             {
                 foreach (string relativePath in entry.Paths)
                 {
+                    if (!McpWiringReceipt.RepositoryRelative(relativePath))
+                        continue;
+
                     string path = Path.Combine(directory, relativePath.Replace('/', Path.DirectorySeparatorChar));
                     McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
                     if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
@@ -787,7 +798,8 @@ public static class McpWiringInspector
 
         foreach (string relativePath in entry.Paths)
         {
-            string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (McpRepositoryPath.Contained(root, relativePath) is not { } path)
+                continue;
 
             // The guard is asked before the existence check, which follows it, and it answers three
             // states where File.Exists answers two: a link whose target is gone is still a link, and a
@@ -828,19 +840,23 @@ public static class McpWiringInspector
     }
 
     /// <summary>
-    /// The file a finding names: the first that exists, else the harness's canonical one. A marker
-    /// alone still puts a harness in play with the server unwired, so the report has to name the
-    /// file the operator would write even when it is not there yet.
+    /// The file a finding names: the first that this repository owns, else the harness's canonical
+    /// one. A marker alone still puts a harness in play with the server unwired, so the report has to
+    /// name the file the operator would write even when it is not there yet.
     /// </summary>
-    private static string NamedPath(HarnessMcpEntry entry, IReadOnlyList<ConfiguredFile> files)
+    /// <remarks>
+    /// "This repository owns it" is <see cref="McpRepositoryPath"/>'s question rather than a prefix
+    /// test kept here. A ZCode row walks to the worktree root, so a file it found can sit above the
+    /// repository and be named with a parent reference — and the prefix test refused every name
+    /// beginning with those two characters, including the ordinary <c>..foo/mcp.json</c> a real
+    /// directory inside the tree produces.
+    /// </remarks>
+    private static string NamedPath(string root, HarnessMcpEntry entry, IReadOnlyList<ConfiguredFile> files)
     {
         foreach (ConfiguredFile file in files)
         {
-            if (!Path.IsPathRooted(file.RelativePath) &&
-                !file.RelativePath.StartsWith("..", StringComparison.Ordinal))
-            {
+            if (McpRepositoryPath.Contained(root, file.RelativePath) is not null)
                 return file.RelativePath;
-            }
         }
 
         return entry.Paths.Count > 0 ? entry.Paths[0] : entry.InPlaySignal;
