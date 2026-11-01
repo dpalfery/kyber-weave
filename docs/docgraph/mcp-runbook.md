@@ -11,6 +11,11 @@ code-refs:
   - DocsTools
   - DrainingStreamServerTransport
   - HarnessMcpCatalog
+  - HarnessMcpEntry
+  - JsonServerSplice
+  - McpConfigurationLink
+  - McpWiringFix
+  - McpWiringFixes
   - McpWiringInspector
   - McpWiringRepairer
 ---
