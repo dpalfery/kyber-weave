@@ -258,7 +258,22 @@ body; the two root wrappers `product-owner` and `bug-crusher` reuse their canoni
 ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). Invoke a primary agent
 through its skill; the droid at `.factory/droids/<name>.md` is kept for
 Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
-allow-list and `mcpServers: []` do not apply to it.
+allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to it.
+
+**MCP servers:** a Task-dispatched droid sees MCP servers only through the `mcpServers`
+whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
+names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
+`kyber-weave`, launched as `kyber-weave-mcp --repo-root .` — and grants it to a droid whose
+capability profile allows `filesystem.read` and whose profile id is not the pure orchestrator;
+every other droid keeps `mcpServers: []`. The key is never omitted, because Factory reads an
+omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
+list exists to prevent. App-level configuration is the other half of the same wiring and it is
+yours, not Squad's: Squad writes no Factory settings file, does not create, adopt, or check
+`.factory/mcp.json` or `~/.factory/mcp.json`, and `squad doctor` verifies neither. A droid needs
+both halves — Squad's whitelist names a server, and your file launches it — so wire the file
+first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
+carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
+tools.
 
 **Override:** when a project droid or skill shares a name with a personal one, the project
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment

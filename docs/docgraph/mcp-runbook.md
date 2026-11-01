@@ -48,6 +48,7 @@ keys differ, and they differ more than you would expect:
 | Client | File | Server key | Notes |
 |---|---|---|---|
 | [Claude Code](#claude-code) | `.mcp.json` (repo root) | `mcpServers` | Committed servers need approval on first run |
+| [Factory](#factory) | `.factory/mcp.json` (repo root) or `~/.factory/mcp.json` | `mcpServers` | Same shape as Claude Code, but a Task-dispatched droid sees only the servers its own droid file whitelists |
 | [Cursor](#cursor) | `.cursor/mcp.json` | `mcpServers` | Same shape as Claude Code |
 | [VS Code / Copilot in the editor](#vs-code-and-github-copilot-in-the-editor) | `.vscode/mcp.json` | `servers` | Not `.mcp.json`, and not `mcpServers` |
 | [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
@@ -83,6 +84,81 @@ claude mcp add --scope project kyber-weave -- kyber-weave-mcp --repo-root .
 Servers from a committed `.mcp.json` are **not trusted automatically** — a checkout cannot
 approve its own servers. Each user approves once on first run, and the server sits at
 `⏸ Pending approval` in `/mcp` until then.
+
+### Factory
+
+`.factory/mcp.json` in the repository root, or `~/.factory/mcp.json` to get it in every
+project. The entry is the same shape as the Claude Code row:
+
+```json
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "."]
+    }
+  }
+}
+```
+
+**This file configures the session, and a Task-dispatched droid is not the session.** Factory
+gives every droid its own `mcpServers` key in its droid file under `.factory/droids/`, and that
+key — not the app-level file — decides which servers the droid may call. The two directions are
+documented and opposite: an **omitted** key inherits the parent session's servers, and an
+explicit `[]` excludes every one of them, unconditionally. A droid whose own list is empty is
+MCP-blind however well the rest of the client is configured.
+
+So there are two grants, made by two owners, and only one of them is your configuration file:
+
+- **The droid-level whitelist** is written by Kyber-Squad's `FactoryRenderer`, into the droid
+  file it owns. It is derived from the server names the squad itself declares in the `mcp.json`
+  beside its canonical source — today exactly `kyber-weave`, launched as
+  `kyber-weave-mcp --repo-root .` — and it is granted only to a droid whose capability profile
+  allows `filesystem.read` and whose profile id is not the pure orchestrator `orchestrator`.
+  Every other droid keeps `mcpServers: []`, and no droid ever omits the key: omission would
+  inherit the session's servers, which is silent widening. The contract is stated in
+  [Kyber-Squad architecture §4](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
+  and pinned under the Factory row of the
+  [capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix).
+- **The app-level file above** decides only whether the server the whitelist names actually
+  exists. It is yours; Squad writes no Factory settings file and does not invent server names.
+
+Both have to hold for a dispatched droid to reach the corpus. Wire the file first, then confirm
+the droid names the server — and compare the provenance line rather than trusting the answer, as
+with every other client: call `docs_status`, which takes no arguments, and check that its
+`root=` equals `git rev-parse --show-toplevel`.
+
+**CodeGraph, and the boundary that follows from it.** The same file can launch the CodeGraph
+server:
+
+```json
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "."]
+    },
+    "codegraph": {
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```
+
+Wiring it is not the same as reaching it from a droid, and this is the boundary worth stating
+plainly rather than implying: a dispatched droid sees **only** the servers its rendered whitelist
+names, and the squad declares only `kyber-weave`. `codegraph_explore` is therefore session-level
+on Factory today — available to you in the main conversation and not claimed as droid-visible.
+A role that needs it, such as `architect` or `research-agent`, gets it by dispatch from a
+session that has it, not by holding the tool itself. Leave the entry in place for your own use
+and do not read a green droid file as evidence that a droid can resolve symbols.
+
+`docs drift` reads a `.codegraph/` index and reports a missing or unreadable one as critical
+rather than passing, so `docs_drift` called from any client needs that index to exist. In this
+repository, `codegraph init .` at the repository root is pre-authorized by the root
+[`AGENTS.md`](../../AGENTS.md); record `git status --short` before and after, because
+initialization can rewrite the marked CodeGraph block there.
 
 ### Cursor
 
@@ -581,6 +657,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
+| A Factory Task-dispatched droid lists no MCP tools | Check the droid's own `mcpServers` whitelist in `.factory/droids/<name>.md` **and** the server entry in `.factory/mcp.json` or `~/.factory/mcp.json`. The app-level file alone is not enough: an empty or `[]` list in the droid file excludes every server regardless of what the session has, and an omitted key would inherit rather than exclude. Droid-level visibility is Squad's whitelist, not your client config — see [Factory](#factory) |
 | Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
