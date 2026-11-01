@@ -361,19 +361,6 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// The launch definition the squad's own <c>mcp.json</c> declares for
-    /// <see cref="UniversalMcpServer"/>, or <see langword="null"/> when it declares none.
-    /// </summary>
-    /// <remarks>
-    /// The declaration is the source rather than a literal in this file, so the rendered command
-    /// line is the one the operator's MCP configuration is written to launch. A missing, malformed,
-    /// or renamed entry yields <see langword="null"/> — the fail-closed answer — because emitting a
-    /// guessed command would point the agent at a server nothing is configured to start. The
-    /// canonical source loader has already validated the shape (<c>command</c> a non-empty string,
-    /// <c>args</c> a string array), so the checks here guard a hand-built
-    /// <see cref="SquadSource"/> rather than the shipped JSON.
-    /// </remarks>
-    /// <summary>
     ///     The shape of the raw MCP declaration: whether <c>mcpServers</c> is a well-formed object, and whether it
     ///     carries the <c>kyber-weave</c> key.
     /// </summary>
@@ -401,6 +388,19 @@ public sealed class AntigravityRenderer : ISquadRenderer
             servers.TryGetProperty(CapabilityDegradations.UniversalMcpServer, out _));
     }
 
+    /// <summary>
+    /// The launch definition the squad's own <c>mcp.json</c> declares for
+    /// <see cref="UniversalMcpServer"/>, or <see langword="null"/> when it declares none.
+    /// </summary>
+    /// <remarks>
+    /// The declaration is the source rather than a literal in this file, so the rendered command
+    /// line is the one the operator's MCP configuration is written to launch. A missing, malformed,
+    /// or renamed entry yields <see langword="null"/> — the fail-closed answer — because emitting a
+    /// guessed command would point the agent at a server nothing is configured to start. The
+    /// canonical source loader has already validated the shape (<c>command</c> a non-empty string,
+    /// <c>args</c> a string array), so the checks here guard a hand-built
+    /// <see cref="SquadSource"/> rather than the shipped JSON.
+    /// </remarks>
     private static McpServerDeclaration? ResolveUniversalMcpServer(SquadSource source)
     {
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
@@ -638,7 +638,20 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         if (notIsolable is not null)
         {
-            return notIsolable;
+            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
+            if (missingServer is null)
+            {
+                return notIsolable;
+            }
+
+            // A shell-escape agent in a squad that dropped the server would otherwise lose the
+            // grant with only the shell-escape record to show for it. The grant gap is a separate
+            // condition from the shell gap, so it rides along in the same per-agent record rather
+            // than being skipped by this early return.
+            return notIsolable with
+            {
+                Details = JoinSentences(notIsolable.Details, missingServer),
+            };
         }
 
         // If process.execute is not the gap, check for other capability constraints
@@ -700,6 +713,37 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// capability the entitlement rests on, so a reader does not have to re-derive which of several
     /// conditions removed the grant.
     /// </remarks>
+    /// <summary>
+    ///     The sentence for a squad whose declaration is missing the server while the roster still
+    ///     declares its tools, or <see langword="null"/> when there is nothing to report.
+    /// </summary>
+    /// <remarks>
+    ///     Only a well-formed <c>mcpServers</c> object without the key is an operator-visible
+    ///     misconfiguration. A source that declares no <c>mcpServers</c> object at all, or one whose
+    ///     entry the loader rejects, has nothing to report: the loader rejects those states before a
+    ///     real source reaches this renderer, so a record there would report a degradation the render
+    ///     does not have.
+    /// </remarks>
+    private static string? MissingServerSentence(McpDeclarationShape mcpShape, bool universalToolsDeclared)
+    {
+        // The roster declares the tools, so the grant is intended; the squad's mcp.json simply has
+        // no server under that name. Nothing was withheld — there was nothing to withhold — so this
+        // is a configuration record, not a withholding claim, and it is the only signal an operator
+        // gets for a renamed or dropped declaration.
+        return universalToolsDeclared && mcpShape.IsObject && !mcpShape.DeclaresUniversalServer
+            ? "The toolchain roster declares the kyber-weave MCP tools, but the squad's mcp.json " +
+              "declares no 'kyber-weave' server, so no per-agent grant could be emitted. Add the " +
+              "server back under that exact name."
+            : null;
+    }
+
+    /// <summary>
+    /// Joins two single-line detail sentences, tolerating a missing first half.</summary>
+    private static string JoinSentences(string? first, string second)
+    {
+        return string.IsNullOrWhiteSpace(first) ? second : first + " " + second;
+    }
+
     private static string? DescribeWithheldMcp(
         string profileName,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
@@ -709,15 +753,23 @@ public sealed class AntigravityRenderer : ISquadRenderer
     {
         if (kyberWeaveServer is null)
         {
-            // The roster declares the tools, so the grant is intended; the squad's mcp.json simply has
-            // no server under that name. Nothing was withheld — there was nothing to withhold — so this
-            // is a configuration record, not a withholding claim, and it is the only signal an operator
-            // gets for a renamed or dropped declaration.
-            return universalToolsDeclared && mcpShape.IsObject && !mcpShape.DeclaresUniversalServer
-                ? "The toolchain roster declares the kyber-weave MCP tools, but the squad's mcp.json " +
-                  "declares no 'kyber-weave' server, so no per-agent grant could be emitted. Add the " +
-                  "server back under that exact name."
-                : null;
+            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
+            if (missingServer is null)
+            {
+                return null;
+            }
+
+            // A missing declaration and a denying profile are two independent reasons the agent has
+            // no grant. Reporting only the first would hide the second: an operator who restores the
+            // server would watch this agent stay grantless with no record saying why.
+            if (!CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+            {
+                return missingServer + " Capability profile '" + profileName + "' also does not allow '" +
+                    CapabilityDegradations.FileReadCapability + "', so this agent would not receive the " +
+                    "grant even with the server declared.";
+            }
+
+            return missingServer;
         }
 
         if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))

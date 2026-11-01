@@ -1372,11 +1372,20 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 record.Details ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase));
 
-        Assert.Contains(
-            result.Degradations,
-            record => record.Details is not null
-                      && record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal)
-                      && record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
+        // One record per agent names the missing server: the grant gap is per-agent state, so an
+        // existence-only assertion would let a partial render pass — most agents reported, one
+        // silently skipped.
+        foreach (SquadAgent agent in source.Agents)
+        {
+            Assert.Contains(
+                result.Degradations.Where(record => string.Equals(
+                    record.CanonicalIdentity,
+                    agent.Name,
+                    StringComparison.Ordinal)),
+                record => record.Details is not null
+                          && record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal)
+                          && record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
+        }
     }
 
     /// <summary>
