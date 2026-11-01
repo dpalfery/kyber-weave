@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -159,12 +159,15 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
   skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
   Squad skills.
 - **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
-  `agents/<name>.md` file is refused, and the error names both paths. A symbolic link at a companion
-  skill's directory or at its `SKILL.md` is refused, and the error names the link. `squad pack` exits 1
-  and writes no archive. The checkout release source extracts nothing.
+  `agents/<name>.md` file, ignoring letter case, is refused, and the error names both paths. A symbolic
+  link at `.apm`, `.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder
+  inside a companion skill is refused, and the error names the link. `squad pack` exits 1 and writes no
+  archive. The checkout release source throws before it writes anything; a copy failure after that can
+  leave partial files, which the Squad installer removes along with the destination.
 - **Pack validation**: `squad pack` loads the real Squad tree, then packs the composed tree into a
   scratch folder, extracts it, and loads it. The scratch folder is removed on every path. A refused pack
-  leaves the previous archive at the output path.
+  leaves the previous archive at the output path, and so does a failed write: each archive goes to a
+  temporary file beside its target and replaces it only when complete.
 - **Known limitation**: A symbolic link inside `products/kyber-squad/` that points outside the repository
   is still packed when no loaded file references it. The pack walk follows links, and the loader checks
   only the files it reads. The gap predates the composed tree. Closing it is a separate follow-up, not

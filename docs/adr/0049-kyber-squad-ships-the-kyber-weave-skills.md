@@ -4,7 +4,7 @@ title: Kyber-Squad Ships the Kyber-Weave Skills Beside Its Own Skills
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 component: KyberSquad
 code-refs:
   - SquadCompanionSkills
@@ -60,14 +60,18 @@ Four facts constrain the choice:
    skills (28 Squad, 6 Kyber-Weave) and 125 skill-tree files (34 `SKILL.md` and 91 resources).
    `bundles/full.yml` still lists only the 28 Squad skills.
 5. **A name clash fails closed.** A companion skill whose name equals a Squad skill directory or
-   a Squad agent file (`agents/<name>.md`) makes `squad pack` exit 1 and write no archive. The
-   message names both paths. The checkout release source fails the same way and extracts nothing.
-   Neither side silently wins.
-6. **A symbolic link fails closed.** A link at a companion skill's directory, or at its
-   `SKILL.md`, is refused with an error that names the link. Pack exits 1 and writes no archive.
+   a Squad agent file (`agents/<name>.md`), ignoring letter case, makes `squad pack` exit 1 and write
+   no archive. The message names both paths. The checkout release source throws before it writes
+   anything. Neither side silently wins.
+6. **A symbolic link fails closed.** A link at `.apm` or `.apm/skills`, at a companion skill's
+   directory, at its `SKILL.md`, or at any file or folder inside a companion skill is refused with an
+   error that names the link. Pack exits 1 and writes no archive. The checkout release source throws
+   before it writes anything.
 7. **Pack validates the composed tree.** `squad pack` loads the real Squad tree first. It then
    packs the composed tree into a scratch folder, extracts it, loads it, and removes the scratch
-   folder on every path. A refused pack leaves the previous archive in place.
+   folder on every path. A refused pack leaves the previous archive in place. A failed write does
+   too: each archive is written to a temporary file beside its target and replaces the target only
+   when complete.
 8. **Where Squad is deployed, skip the docs-init skill.** A project that has Squad deployed and
    also runs `kyber-weave docs init` should pass `--no-skill`, because Squad already delivers the
    same skills.
@@ -114,3 +118,6 @@ Four facts constrain the choice:
   points outside the repository is still packed when nothing loaded references it. The pack walk
   follows links, and the loader checks only the files it reads. The gap predates this decision and
   is out of scope for it. A follow-up is proposed, and no todo is filed yet.
+- **Known gap, introduced here (case).** Two companion skill folders whose names differ only by
+  case, such as `Foo` and `foo` on a case-sensitive checkout, are both packed and would collide on a
+  case-insensitive install; the fix is deferred as a follow-up.

@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -1149,9 +1149,11 @@ Running `squad pack` outside the repository root fails immediately with a diagno
 Squad skills. Before it writes anything, it loads the real Squad tree and then the composed tree: it
 packs the APM archive into a scratch folder, extracts it, and loads it. The scratch folder is removed
 on every path. Pack exits 1 and writes no archive when a companion skill's name equals a Squad skill
-or agent (the message names both paths), or when a symbolic link sits at a companion skill's directory
-or its `SKILL.md`. A refused pack leaves the archive from the last successful pack in place. Known gap,
-not introduced here: a symbolic link inside `products/kyber-squad/` that points outside the repository
+or agent, ignoring letter case (the message names both paths), or when a symbolic link sits at `.apm`,
+`.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder inside that skill.
+A refused pack leaves the archive from the last successful pack in place, and so does a failed write:
+each archive is written to a temporary file beside its target and replaces it only when complete. Known
+gap, not introduced here: a symbolic link inside `products/kyber-squad/` that points outside the repository
 is still packed when no loaded file references it. See the
 [architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
 

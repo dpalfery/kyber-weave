@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 ---
 
 # Distribution and release flow
@@ -122,8 +122,10 @@ kyber-weave squad pack --format all --out ./artifacts
 `squad pack` also adds the six Kyber-Weave skills from `.apm/skills/` beside the Squad skills, so the
 release carries the same skills that `squad install` deploys to each user-level folder. It loads the
 real Squad tree and the composed tree before it writes an archive, and it exits 1 with no archive
-when a companion skill clashes with a Squad skill or agent name, or when a symbolic link sits at a
-companion skill's directory or `SKILL.md`. A refused pack leaves the previous archive in place. See
+when a companion skill clashes with a Squad skill or agent name, ignoring letter case, or when a
+symbolic link sits at `.apm`, `.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file
+or folder inside that skill. A refused pack leaves the previous archive in place, and so does a failed
+write: each archive is written to a temporary file beside its target and replaces it only when complete. See
 [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
 Both formats package `skills/` recursively: 34 `SKILL.md` files (28 Squad and 6 Kyber-Weave) plus 91
