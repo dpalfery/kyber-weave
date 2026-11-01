@@ -2,7 +2,7 @@
 id: plans/2026-10-31-universal-kyber-weave-mcp-grant
 title: "Every agent on every harness, conductor included, sees the kyber-weave MCP server"
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-31
@@ -14,7 +14,7 @@ impact-components: [KyberSquad, DocGraph]
 
 # Every agent on every harness, conductor included, sees the kyber-weave MCP server
 
-**Status: Ready — approved for execution 2026-10-31 (AP1, `AUTONOMOUS_APPROVAL: AP1`, provenance `autonomous: recommendation accepted`).** Every decision row below is answered. Both documentation checks passed against this checkout in the conductor's run (2026-10-31): `docs validate .` (no `--merge-ready`, plan still in the active folder) — `result: pass`, 0 errors, 0 warnings — and `docs drift .` — `result: pass`, 0 errors, 0 warnings — each reporting `provenance: root=/Users/dave/git/personal/factory/kyber-weave rev=8943b6a dirty=yes documents=144`, a root identical to the conductor's `git rev-parse --show-toplevel` for this checkout (branch `feat/squad-response-format`, HEAD `8943b6a`); G4 and G5 are closed with that evidence below. G1, G2, and G3 stay open and gate only their own tasks — T4 (Pi ext-name live probe), T6 (Kilo loader re-verification), T7 (Antigravity live validation) — they are not execution blockers for the core rule (T1–T3, T5, T8). Frontmatter `status` stays `current` because the frontmatter vocabulary has no `ready` value; the lifecycle Ready is this body status line and the plan index. **Development mode:** `test-first` (packet default; no user opt-out). **Autonomy:** `autonomous` (packet value and repository Config Reg `<autonomy>`). **Scale:** `extends-component`, components `KyberSquad` and `DocGraph`.
+**Status: Archived — complete 2026-10-31.** The grant rule and its per-target emission shipped, the harvest landed in ADR 0048 with ADRs 0019 and 0034 amended in place, and the closeout mapping below records every decision and every harvest item. T4, T6 and T7 closed as G1, G2 and G3; G6 remains an open question nothing rests on. **Development mode:** `test-first`. **Autonomy:** `autonomous`. **Scale:** `extends-component`, components `KyberSquad` and `DocGraph`.
 
 **Recommendation.** Reverse the pure-orchestrator MCP carve-out **for the `kyber-weave` server only**, keep it for `codegraph` and `context7`, and express the grant as one shared rule applied by every target that can express a per-agent MCP grant: *the `kyber-weave` server is granted to every agent whose capability profile resolves and allows `filesystem.read` — the pure orchestrator included.* Consolidate the triplicated entitlement predicate into `CapabilityDegradations` (the actual shared home, singular), wire the three harnesses that support MCP but render nothing today (Command Code, Kilo, Antigravity — the last two evidence-gated), make the Pi grant renderer-derived instead of a 24-body canonical overlay, give `conductor` its Copilot entry through a one-line canonical frontmatter edit, and record the targets that structurally cannot carry a per-agent grant (Cursor, Codex, Warp) with vendor citations rather than guesses. A new ADR records the reversal; ADRs 0034 and 0019 are amended in place. No capability-lattice change, no schema change, no roster change, no `KW-*` id, no new dependency, and `squad install` still writes no harness settings file.
 
@@ -283,7 +283,54 @@ The conductor runs `code-reviewer` over the whole change after the code tasks se
 
 ## Closeout mapping
 
-_To be completed at T9: every decision id (D1–D16, AM1–AM2, AP1), every harvest item (H1–H7), every gated branch outcome (T4/T6/T7), and the ADR disposition mapped to its destination, with both merge-ready documentation checks recorded._
+**Completed 2026-10-31.** Archived under `docs/archive/plans/`. Every decision is answered;
+AM1 and AM2 correct the id and the member names in place, and neither changes a decision.
+Nothing is deferred except G6, which no branch of the work rests on.
+
+### Verification evidence
+
+| Check | Result |
+|---|---|
+| `docs validate . --merge-ready` | 0 critical, 0 error, 0 warning, 0 info, run against this branch's tree after the archive (`docs validate <tree> --merge-ready --format json`). Before the archive the same command failed with the single finding `KW-DOC-LIFECYCLE-003` on this plan; the archive clears it. |
+| `docs drift .` | Not verifiable in the archive worktree, which carries no CodeGraph index (`KW-DOC-DRIFT-001`, environmental). The pull request's `Skill and docs gate` runs it against the indexed checkout, where it passed before this closeout. |
+| `dotnet test` | 4560 tests, 0 failed, 27 skipped, as recorded on the pull request. Not re-run during closeout, because closeout touches documentation only. |
+| Gated branches T4 / T6 / T7 | Closed 2026-10-31 as G1, G2 and G3 below, each with its live evidence: `pi-mcp-adapter` 7.0.0 naming over the roster plus a live `tools/list`; `@kilocode/cli` 7.8.18 loader against the documented `permission` map; `agy` 1.4.12 live validation of the `mcpServers` shape. |
+
+### Mapping
+
+Documentation-impact is `extends-component` for every row; impact components are `KyberSquad` and `DocGraph`; `last-reviewed` is 2026-10-31.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D1 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) records the owner directive and the reversal it forced. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D2 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) records the outcome-pattern reading and why a literal `mcp.json` mirror was rejected. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D3 | [architecture §8](../../kyber-squad/architecture.md#8-rendering) carries the one grant rule, the narrowed carve-out and the shared predicate. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D4 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) states the read-only documentation query surface as an accepted widening. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D5 | Documentation waiver: no lattice change shipped — `profiles/capabilities.yml` is untouched, and the surviving invariant (renderer-derived reach stays the model) is stated in [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md). | extends-component | KyberSquad | 2026-10-31 | archived |
+| D6 | [architecture §8](../../kyber-squad/architecture.md#8-rendering) names `CapabilityDegradations` as the single home for the predicate and the cross-renderer parity guard that pins it. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D7 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) records Copilot's source-declared membership. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D8 | [ADR 0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) and [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) record the renderer-derived Pi overlay and its live-verified spelling. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D9 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) and [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) state the session-inherited boundary for Cursor, Codex and Warp with vendor citations. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D10 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) and [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) record Kilo's permission-map grant and the loader evidence behind it. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D11 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) and [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) record Antigravity's per-agent `mcpServers` grant and the live validation. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D12 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) and [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) record Command Code's enumerated names and its conditional degradation sentence. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D13 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) with its row in the [ADR index](../../adr/README.md) is the new record; the amendments to 0019 and 0034 are rows H6 and H7. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D14 | Documentation waiver: `conductor`'s canonical body is unchanged, so there is no artifact to link; the access-versus-use boundary is stated in [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md). | extends-component | KyberSquad | 2026-10-31 | archived |
+| D15 | Documentation waiver: the untouched-surface list is a scope statement with no surviving invariant of its own; the surfaces it names are documented where they live. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D16 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix) records Devin's per-agent grant surface as subagent-only, and [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) records the class. | extends-component | KyberSquad | 2026-10-31 | archived |
+| AP1 | Documentation waiver: an approval gate leaves provenance, not an invariant — it is recorded in this row's own status cell and in the plan's body status. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| AM1 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md) and the [ADR index](../../adr/README.md) carry the corrected id. | extends-component | KyberSquad | 2026-10-31 | archived |
+| AM2 | Documentation waiver: the landed member names are an implementation detail pinned by the parity guard and the renderer contract tests, not by prose. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H1 | [architecture §8](../../kyber-squad/architecture.md#8-rendering): the universal grant rule and the surviving carve-out. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H2 | [requirements, target capability and degradation matrix](../../kyber-squad/requirements.md#target-capability-and-degradation-matrix): the expressibility classes and emitted forms. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H3 | [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up): the wiring recipes and per-client reach notes. | extends-component | DocGraph | 2026-10-31 | archived |
+| H4 | [onboarding, MCP access across harnesses](../../kyber-squad/onboarding.md#mcp-access-across-harnesses): what Squad owns and what the operator owns. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H5 | [ADR 0048](../../adr/0048-universal-kyber-weave-mcp-grant.md): the reversal, its reason and its exclusions. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H6 | [ADR 0034](../../adr/0034-factory-droid-entry-point-skill.md): the Factory whitelist amendment. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H7 | [ADR 0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md): the Pi overlay scope amendment. | extends-component | KyberSquad | 2026-10-31 | archived |
+| T4 | [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) carries the verified Pi spelling and server configuration; the branch outcome is G1 below. | extends-component | DocGraph | 2026-10-31 | archived |
+| T6 | [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) carries Kilo's permission keys; the loader evidence is G2 below. | extends-component | DocGraph | 2026-10-31 | archived |
+| T7 | [the MCP runbook](../../docgraph/mcp-runbook.md#wiring-it-up) carries Antigravity's `mcpServers` shape; the live validation is G3 below. | extends-component | DocGraph | 2026-10-31 | archived |
 
 ## GAPS
 
