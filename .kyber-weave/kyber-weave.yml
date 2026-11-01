@@ -399,3 +399,21 @@ autonomy: autonomous
 # Paths agents resolve by property name instead of a relative link.
 config-reg:
   review-guidance: REVIEW.md
+
+mcp:
+  # The MCP servers this repository's agent instructions rely on. `docs init` wires these
+  # into the harnesses it detects; the declaration is host-owned from the moment it exists
+  # and docs init never edits it again. This file is on the review.policy.always-human
+  # list in this repository, so every change here escalates for human review by path alone.
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
+    # A third-party server is declared the same way; its binary is never installed by
+    # Kyber-Weave. Uncomment when the repository's instructions require it:
+    # codegraph:
+    #   command: [codegraph, serve, --mcp]
+    #   provenance: third-party
+    #   level: recommended
+    #   install: codegraph init .   # printed verbatim when the binary is absent
