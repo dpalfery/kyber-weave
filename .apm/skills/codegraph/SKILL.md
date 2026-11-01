@@ -46,8 +46,12 @@ so every harness gets the same behaviour and the rules stay in one place.
 
 5. **Any other exit** — report the `FAIL <check-id> <reason>` and `fix:` lines verbatim.
    That covers `mcp.start`, `mcp.handshake`, `mcp.docs_explore` and `mcp.root`: the
-   Kyber-Weave MCP server is the other half of the check, and `kyber-weave update` is the
-   usual remedy for a server that cannot answer.
+   Kyber-Weave MCP server is the other half of the check. **Each check prints its own
+   remedy, and it is not the same one every time**: `kyber-weave update` when the server
+   will not start or answers in a shape that is not a tool result, a larger `--mcp-timeout`
+   when it did not answer inside the budget, and a restart of the stale server when
+   `mcp.root` names another checkout. Quote the printed line; do not substitute `update`
+   for a timeout bump.
 
 ## Rules this skill keeps
 
