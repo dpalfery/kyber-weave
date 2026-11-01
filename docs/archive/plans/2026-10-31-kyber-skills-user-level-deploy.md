@@ -2,7 +2,7 @@
 id: plans/2026-10-31-kyber-skills-user-level-deploy
 title: Kyber-Squad ships the Kyber-Weave skills, so they deploy at the same level as the Squad skills
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-31
@@ -14,7 +14,7 @@ impact-components: [KyberSquad, Distribution, DocGraph, ContextHygiene]
 
 # Kyber-Squad ships the Kyber-Weave skills, so they deploy at the same level as the Squad skills
 
-**Status:** Ready, executing (revision 1, 2026-10-31). Approve-and-execute recorded as D15; the human's request ("kyber skills should be deployed at the same level as the squad") is the scope.
+**Status: Archived 2026-10-31; closeout not complete until `docs drift .` is verified (no CodeGraph index in this worktree).** Revision 1 executed (T0 to T2, then closeout) on branch `fix/kyber-skills-ship-with-squad`, draft pull request #494. Approve-and-execute recorded as D15; the human's request ("kyber skills should be deployed at the same level as the squad") is the scope. Closeout and mapping are in the Closeout section at the end.
 
 **Branch:** a **new feature branch cut from `origin/main`** (`b25cb70` at planning time), suggested name `fix/kyber-skills-ship-with-squad`. The checkout this plan was written from (`fix/opencode-v2-capture`) is unrelated OpenCode work and must not carry this change.
 
@@ -55,6 +55,8 @@ Every `kyber-weave squad` deployment — install, update, status, doctor, uninst
 | D13 | When does the human actually get the skills? | **After a release that contains this change, followed by `kyber-weave update` or `kyber-weave squad update --global`.** Installed CLIs fetch the version-locked Squad archive from GitHub Releases. A CLI run from a checkout gets them through the checkout source as soon as T2 lands. | KS-005 version lockstep. Stated so nobody expects the fix from a merge alone. The human's global receipt covers all 13 targets, so the six land in all 13 user-level roots. No target writes `~/.agents/skills` globally, so the stale hand-installed copies there (retired names) do not collide. | autonomous: recommendation accepted (architect, 2026-10-31; source: `SquadCommandComposition.ResolveDefaultReleaseSource`, `SquadGlobalRoots.cs`, `~/.kyber-weave/squad/global/squad.receipt.json`) |
 | D14 | Development mode and autonomy | `development-mode: test-first`; `autonomy: autonomous`, both from the conductor's packet; they match the Config Reg default `<autonomy>: autonomous`. | — | autonomous: recommendation accepted (packet, 2026-10-31) |
 | D15 | Approve and execute this plan? | **Yes.** Execute T0 → T1 → T2 → gates → whole-change review → T3 on a new branch cut from `origin/main`; deliver as a draft pull request; never merge. | The human reported the gap as a bug and named the target ("kyber skills should be deployed at the same level as the squad"); D0–D14 are decided and no open question or hard block remains. The change reverses a recorded product boundary (D8), so the ADR and the in-place README amendment are part of the delivery. | autonomous: recommendation accepted (conductor, 2026-10-31) |
+| D16 | What happens when a companion skill's directory, or its `SKILL.md`, is a symbolic link? | **Fail closed.** A link at either path makes `squad pack` exit 1 with a `SquadSourceValidationException` that names the link, and writes no archive. The checkout release source throws the same way. | A skipped skill would ship a release without a skill the operator authored, with no signal. A linked skill could pull content in from outside the tree. This is the D5 rule applied to links: refuse, do not guess. | autonomous: recommendation accepted (conductor, 2026-10-31; source: whole-change review finding 3) |
+| D17 | Must an unreferenced symbolic link inside `products/kyber-squad/` that points outside the repository be closed in this change? | **No. Known gap, out of scope.** The pack walk follows links, and the loader checks only the files it reads, so such a link is still packed. The gap predates this change and is not introduced by it. A follow-up is proposed to the conductor; no todo is filed here. | Closing it changes the Squad source walk and loader, which this plan does not touch. Recorded as a known limitation in the Squad architecture (section 1), the Squad onboarding Packaging section, and ADR 0049. | autonomous: low-confidence, no authoritative source (conductor, 2026-10-31) |
 
 No open questions remain. No hard block.
 
@@ -207,3 +209,82 @@ Every row in Design harvest, plus:
 ## docs-dev closeout
 
 T3 runs after the review. Closeout migrates H1–H9, maps D0–D14 to their destinations, creates the ADR (no ADR waiver: D8), runs `docs validate . --merge-ready` and `docs drift .`, archives this plan to `docs/archive/plans/` with `git mv`, moves its index row to **Archived Plans**, and ends in `STATUS: CLOSEOUT_COMPLETE`.
+
+## Closeout
+
+Closed 2026-10-31 by docs-dev on branch `fix/kyber-skills-ship-with-squad` (draft pull request #494, head `90167b6`). The documentation changes are left uncommitted for the conductor.
+
+### Acceptance check (T3)
+
+- Every Design-harvest row H1 to H9 is mapped below. Each row names its destination, documentation-impact, impact components, last-reviewed date, and status.
+- Decisions D0 to D17 are mapped below. D12, D14 and D15 carry documentation waivers, each for a transient or test-seam reason with no surviving invariant. No ADR waiver is used anywhere in this plan (D8).
+- ADR 0049 was created at the next free number. On `origin/main` (`f5322ff`), ADR 0048 was the last record and 0049 was free. Its row is in the ADR index.
+- `products/kyber-squad/README.md` lines 163 to 165 are amended in place.
+- Counts were fixed in the sections this change edits (D9), after counting files on disk. The canonical Squad tree holds 28 `SKILL.md` files and 88 resources (116 files). The `.apm/skills/` tree holds 6 `SKILL.md` files and 3 resources (9 files). Each release archive therefore holds 34 skills and 125 skill-tree files (34 `SKILL.md` and 91 resources).
+- Behaviour was checked against the code as built, not the planned text: `SquadCompanionSkills.cs`, `SquadPacker.cs`, `SquadPackCommand.cs` and `LocalCheckoutSquadReleaseSource.cs`. Differences from the plan text are recorded: the fail-closed rule covers symbolic links (D16), pack validates both the Squad tree and the composed tree, and a refused pack keeps the previous archive.
+- Code and test gates (G1, G2, G4, G5) were not re-run by this closeout. The conductor's gate evidence on the pull request applies to them.
+
+### Verification
+
+Run from the worktree root after the archive move.
+
+```text
+$ dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready --base origin/main --format table
+No findings.
+
+0 critical, 0 error, 0 warning, 0 info.
+
+$ dotnet run --project src/KyberWeave.Cli -- docs drift .
+1 critical, 0 error, 0 warning, 0 info.
+KW-DOC-DRIFT-001: Drift cannot be verified: No CodeGraph index at <worktree>/.codegraph/codegraph.db.
+```
+
+`docs drift .` is not verified in this worktree. The worktree has no CodeGraph index, and the closeout did not build one. The drift check, including the `code-refs` added to ADR 0049 and the architecture and onboarding documents, must be run where an index exists before the closeout counts as complete.
+
+### Documentation review
+
+```text
+DOCS_REVIEW: update
+RECOMMENDATIONS: updated in this change: docs/adr/0049-kyber-squad-ships-the-kyber-weave-skills.md (new), docs/adr/README.md, products/kyber-squad/README.md, docs/kyber-squad/architecture.md, docs/kyber-squad/onboarding.md, docs/kyber-squad/requirements.md, docs/distribution.md, docs/docgraph/onboarding.md, docs/context-hygiene/skills.md, docs/install.md. Not written, outside the D9 scope, for the conductor to route: docs/README.md line 120 ("29 skills"); docs/kyber-squad/README.md lines 28, 42, 56, 72 and 73 (Squad skill and resource counts, and a Copilot render of 149 files); docs/context-hygiene/agents.md line 58 ("29-skill namespace"); docs/kyber-squad/architecture.md line 909 and docs/kyber-squad/onboarding.md line 1164 (a Copilot render of 149 files, built on the 29-skill count, not re-measured).
+```
+
+### Follow-ups
+
+- D17 (known gap, out of scope): a symbolic link inside `products/kyber-squad/` that points outside the repository is still packed. A follow-up is proposed to the conductor. No todo or issue was filed by this closeout.
+- The release loop and the human's own `~/.claude/skills` are verified after the next release, as D13 states.
+
+## Closeout mapping
+
+Each decision and Design-harvest item maps to its destination. Documentation-impact is `extends-component` for every row, and last-reviewed is 2026-10-31 for every row. Status is archived for every row.
+
+| ID | Destination | Documentation-impact | Impact components | Last reviewed | Status |
+|---|---|---|---|---|---|
+| D0 | [ADR 0049, Decision 1](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (Squad deploys the six at its own level); [architecture §1, composed Squad tree](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D1 | [ADR 0049, Decision 2](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (`.apm/skills/` stays the only source); [architecture §1](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D2 | [ADR 0049, Decision 3](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (discovery, not a list); [onboarding, Kyber-Weave skills in a Squad deployment](../../kyber-squad/onboarding.md#kyber-weave-skills-in-a-squad-deployment) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D3 | [ADR 0049, Decision 1](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (`docs init` unchanged); [DocGraph onboarding, APM is an expected dependency](../../docgraph/onboarding.md#apm-is-an-expected-dependency); [install, APM](../../install.md#apm) | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D4 | [ADR 0049, Decision 4](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (bundle stays the 28 Squad skills); [architecture §1, composed Squad tree](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D5 | [ADR 0049, Decision 5](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision); [architecture §1, fail-closed names and links](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction); [onboarding, Packaging](../../kyber-squad/onboarding.md#packaging-squad-pack) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D6 | [ADR 0049, Decision 4](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision); [distribution, Squad release assets and packaging](../../distribution.md#squad-release-assets-and-packaging); [requirements KS-006](../../kyber-squad/requirements.md) | extends-component | KyberSquad, Distribution | 2026-10-31 | archived |
+| D7 | [ADR 0049, Decision 2](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) (the single-source rule behind the guard); the corrected XML comment on `NoKyberDocsSkillLivesInSquad` in `tests/KyberWeave.Tests/KyberDocsSkillSetTests.cs` (assertions unchanged; test-dev owns the file) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D8 | [ADR 0049, Status and Decision 2](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#status); [products/kyber-squad/README.md, lines 163 to 165, amended in place](../../../products/kyber-squad/README.md) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D9 | Counts in [architecture §1](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction), [onboarding intro and Packaging](../../kyber-squad/onboarding.md#packaging-squad-pack), [distribution table](../../distribution.md#squad-release-assets-and-packaging) and [context-hygiene, deployment control plane](../../context-hygiene/skills.md#deployment-control-plane-with-kyber-squad). Verified on disk: 28 skills, 88 resources, 116 files canonical; 34 skills, 125 files per archive. | extends-component | KyberSquad, Distribution, ContextHygiene | 2026-10-31 | archived |
+| D10 | [onboarding, Where Kyber-Squad is deployed, skip the docs-init skill](../../kyber-squad/onboarding.md#where-kyber-squad-is-deployed-skip-the-docs-init-skill); [DocGraph onboarding](../../docgraph/onboarding.md#apm-is-an-expected-dependency); [install, APM](../../install.md#apm); [ADR 0049, Consequences](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#consequences). No code change; no todo filed. | extends-component | KyberSquad, DocGraph | 2026-10-31 | archived |
+| D11 | [architecture §1, composed Squad tree](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction) (`SquadCompanionSkills` is the one type both callers use); [ADR 0049, Decision 2](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D12 | Documentation waiver: a visibility change on one nested class (`private` to `internal`), with no behaviour change and a test-seam purpose. The surviving invariant, that checkout and pack share one type, is recorded at D11's destination. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D13 | [onboarding, Kyber-Weave skills in a Squad deployment](../../kyber-squad/onboarding.md#kyber-weave-skills-in-a-squad-deployment) ("They arrive with a release that carries them"); [ADR 0049, Consequences](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#consequences) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D14 | Documentation waiver: development-mode and autonomy metadata of this plan. Process only and transient. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D15 | Documentation waiver: approval to execute and the delivery rules (draft pull request, never merged by this plan). A transient process decision. | extends-component | KyberSquad | 2026-10-31 | archived |
+| D16 | [ADR 0049, Decisions 6 and 7](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#decision); [architecture §1, fail-closed names and links, and pack validation](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction); [onboarding, Packaging](../../kyber-squad/onboarding.md#packaging-squad-pack) | extends-component | KyberSquad | 2026-10-31 | archived |
+| D17 | [architecture §1, known limitation](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction); [onboarding, Packaging, known gap](../../kyber-squad/onboarding.md#packaging-squad-pack); [ADR 0049, Consequences](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#consequences). Out of scope; follow-up proposed to the conductor; no todo filed. | extends-component | KyberSquad | 2026-10-31 | archived |
+| H1 | [architecture §1, Canonical Source Normalization and IR Construction](../../kyber-squad/architecture.md#1-canonical-source-normalization-and-ir-construction) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H2 | [onboarding, Kyber-Weave skills in a Squad deployment](../../kyber-squad/onboarding.md#kyber-weave-skills-in-a-squad-deployment), intro, and [Packaging](../../kyber-squad/onboarding.md#packaging-squad-pack) (includes R1, the unmanaged-copy remedy, and R2 and R5, the overlap) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H3 | [requirements, KS-006](../../kyber-squad/requirements.md) (KS-001 unchanged) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H4 | [ADR 0049, Status and Decision 2](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md#status) (the replaced split and the new rule); [products/kyber-squad/README.md, lines 163 to 165, amended in place](../../../products/kyber-squad/README.md) | extends-component | KyberSquad | 2026-10-31 | archived |
+| H5 | [distribution, Squad release assets and packaging](../../distribution.md#squad-release-assets-and-packaging) | extends-component | Distribution | 2026-10-31 | archived |
+| H6 | [DocGraph onboarding, APM is an expected dependency](../../docgraph/onboarding.md#apm-is-an-expected-dependency) | extends-component | DocGraph | 2026-10-31 | archived |
+| H7 | [context-hygiene skills, Kyber-Weave ships a skill of its own](../../context-hygiene/skills.md#kyber-weave-ships-a-skill-of-its-own) and [deployment control plane](../../context-hygiene/skills.md#deployment-control-plane-with-kyber-squad) | extends-component | ContextHygiene | 2026-10-31 | archived |
+| H8 | [install, Retired skills](../../install.md#retired-skills) and [install, APM](../../install.md#apm) | extends-component | Distribution | 2026-10-31 | archived |
+| H9 | [ADR 0049](../../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) and its [ADR index row](../../adr/README.md); decided-by added in [architecture](../../kyber-squad/architecture.md) and [onboarding](../../kyber-squad/onboarding.md) | extends-component | KyberSquad | 2026-10-31 | archived |
+
+ADR position: ADR 0049 (decision recorded in full; no ADR waiver, D8).

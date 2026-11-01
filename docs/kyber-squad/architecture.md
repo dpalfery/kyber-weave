@@ -19,6 +19,7 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
 sections:
   "#":
     keywords:
@@ -70,6 +71,8 @@ code-refs:
   - SquadInstanceLinkPlanner
   - SquadInstanceLinkSync
   - ISquadLinkFileSystem
+  - SquadCompanionSkills
+  - SquadPacker
 ---
 
 # Kyber-Squad architecture
@@ -88,7 +91,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["24 Canonical Agents\n(agents/*.md)"]
-        Skills["29 Canonical Skills\n(skills/*)"]
+        Skills["28 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
     end
 
@@ -144,9 +147,28 @@ Kyber-Squad treats `products/kyber-squad/` as the immutable, canonical source of
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 29 top-level `SKILL.md`
-  identities. The canonical tree separately retains 87 supplemental files, giving 116 recursive
-  skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 28 top-level `SKILL.md`
+  identities under `products/kyber-squad/skills/`. The canonical tree separately retains 88
+  supplemental files, giving 116 recursive skill-tree files; `SquadPacker` carries that complete
+  recursive tree into both package formats.
+- **Composed Squad tree**: Pack and the checkout release source add the Kyber-Weave skills authored
+  in `.apm/skills/` to the Squad tree as `skills/<name>/**`. Each release archive therefore holds 34
+  skills, 91 supplemental resources, and 125 skill-tree files. `SquadCompanionSkills` is the one type
+  both callers use. It resolves `<repo>/.apm/skills` from a Squad root shaped
+  `<repo>/products/kyber-squad`, and it takes every directory there that holds a `SKILL.md`. The six
+  skills are never copied into `products/kyber-squad/`, and `bundles/full.yml` still lists only the 28
+  Squad skills.
+- **Fail-closed names and links**: A companion skill whose name equals a Squad skill directory or an
+  `agents/<name>.md` file is refused, and the error names both paths. A symbolic link at a companion
+  skill's directory or at its `SKILL.md` is refused, and the error names the link. `squad pack` exits 1
+  and writes no archive. The checkout release source extracts nothing.
+- **Pack validation**: `squad pack` loads the real Squad tree, then packs the composed tree into a
+  scratch folder, extracts it, and loads it. The scratch folder is removed on every path. A refused pack
+  leaves the previous archive at the output path.
+- **Known limitation**: A symbolic link inside `products/kyber-squad/` that points outside the repository
+  is still packed when no loaded file references it. The pack walk follows links, and the loader checks
+  only the files it reads. The gap predates the composed tree. Closing it is a separate follow-up, not
+  part of this design.
 - **Domain Models and IR Construction**: Markdown files parse into `SquadAgent` and `SquadSkill`
   domain models; frontmatter fields validate against strict schemas (e.g. `model-profile`,
   `capability-profile`, `tools`, `delegates-to`); concrete `AgentIR` / `SkillIR` representations

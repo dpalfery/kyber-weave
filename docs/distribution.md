@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-31
 ---
 
 # Distribution and release flow
@@ -99,8 +99,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 29 skills with 87 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 29 portable skills, their 87 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 24 canonical agents with their 10 owned references, 34 skills (the 28 Squad skills and the 6 Kyber-Weave skills from `.apm/skills/`) with 91 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 34 portable skills (the same 28 Squad and 6 Kyber-Weave skills), their 91 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -119,13 +119,20 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 29 `SKILL.md` files plus 87 retained resources, for
-116 skill-tree files. Every retained resource has a reviewed disposition in the
+`squad pack` also adds the six Kyber-Weave skills from `.apm/skills/` beside the Squad skills, so the
+release carries the same skills that `squad install` deploys to each user-level folder. It loads the
+real Squad tree and the composed tree before it writes an archive, and it exits 1 with no archive
+when a companion skill clashes with a Squad skill or agent name, or when a symbolic link sits at a
+companion skill's directory or `SKILL.md`. A refused pack leaves the previous archive in place. See
+[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
+
+Both formats package `skills/` recursively: 34 `SKILL.md` files (28 Squad and 6 Kyber-Weave) plus 91
+retained resources, for 125 skill-tree files. Every one of the 88 retained Squad resources has a
+reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted; their omission from a
-fixed 29-file Copilot skill surface is not a package
-contract.
+fixed Copilot skill surface is not a package contract.
 
 `products/kyber-squad/` is canonical and package authority. The repository no longer carries a
 project-level self-deployment: the root `.github/agents/`, `.github/skills/`,

@@ -16,6 +16,7 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
   - adr/0045-conductor-operator-channel-opt-in
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -28,8 +29,9 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**29 canonical skills**, with transactional recovery and state governance. Thirteen harness targets
-are declared; all thirteen are currently implemented and registered.
+**28 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
+implemented and registered.
 
 ---
 
@@ -638,6 +640,52 @@ It reports these:
 
 ---
 
+## Kyber-Weave skills in a Squad deployment
+
+Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
+`kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
+Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
+release. The six follow the Squad lifecycle at the same scope and on the same targets as the Squad
+skills:
+
+- **Global scope.** `kyber-weave squad install --global` writes them into each selected harness's
+  user-level skills folder. For Claude Code that is `~/.claude/skills/kyber-docs-authoring/SKILL.md`,
+  beside `~/.claude/skills/task-gate/SKILL.md`.
+- **Project scope.** `kyber-weave squad install` writes them into the project's harness folders the same way.
+- **Receipt.** They are recorded in the Squad receipt. `squad status`, `squad update`, and
+  `squad uninstall` treat them as Squad files.
+
+They arrive with a release that carries them. Run `kyber-weave update`, or
+`kyber-weave squad update --global` for a global deployment, to move to that release. A
+`kyber-weave` run from a repository checkout gets them from the checkout at once.
+
+### Where Kyber-Squad is deployed, skip the docs-init skill
+
+`kyber-weave docs init` also deploys the Kyber-Weave skills, through APM, into the project. Where
+Kyber-Squad is already deployed, those skills would arrive twice, so run `docs init` with `--no-skill`:
+
+```bash
+kyber-weave docs init . --no-skill
+```
+
+A project that uses Squad at project scope and also runs `docs init` shares some folders. For the
+Antigravity target, both write `.agents/skills/<name>`. Neither writer refuses the other's file by
+design. If `docs init` writes a path that Squad owns, `kyber-weave squad status` reports the file as
+modified. If Squad meets a file that `docs init` wrote and Squad does not own, `squad install` or
+`squad update` refuses and writes nothing. A harness that reads both user and project folders may
+list a skill name twice when Squad is global and `docs init` targets that harness in the project. The
+impact of that is low.
+
+### An unmanaged copy blocks the update
+
+If you copied a Kyber-Weave skill by hand to a path that Squad now deploys to, for example
+`~/.claude/skills/kyber-docs-authoring`, `kyber-weave squad update --global` refuses with
+`UnmanagedCollision` and writes nothing. Remove the copy and run the update again. If the copy's
+bytes match the release, `kyber-weave squad install --global --adopt` claims it instead.
+
+---
+
 ## Common Workflows
 
 ### First-Time Installation
@@ -1097,9 +1145,20 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 29 canonical
-`SKILL.md` files plus the 87 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 24 canonical
+`squad pack` also composes the Kyber-Weave skills from `.apm/skills/` into both archives, beside the
+Squad skills. Before it writes anything, it loads the real Squad tree and then the composed tree: it
+packs the APM archive into a scratch folder, extracts it, and loads it. The scratch folder is removed
+on every path. Pack exits 1 and writes no archive when a companion skill's name equals a Squad skill
+or agent (the message names both paths), or when a symbolic link sits at a companion skill's directory
+or its `SKILL.md`. A refused pack leaves the archive from the last successful pack in place. Known gap,
+not introduced here: a symbolic link inside `products/kyber-squad/` that points outside the repository
+is still packed when no loaded file references it. See the
+[architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
+
+Both archive formats recurse through each skill directory. They contain all 28 canonical `SKILL.md`
+files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
+`.apm/skills/` and their three resource files: 34 skills and 125 skill-tree files in each archive.
+Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
 beside its principal — 149 files on Copilot today — with authored relative links resolving inside
@@ -1135,6 +1194,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification
