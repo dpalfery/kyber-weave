@@ -621,14 +621,26 @@ public static class McpWiringInspector
             + $"{namedPath} by hand.";
     }
 
+    /// <summary>
+    /// The remedy for a wired entry whose launch command differs from the declaration: edit the
+    /// named file so the entry runs the declared command.
+    /// </summary>
+    /// <remarks>
+    /// The hand edit leads even on a harness the repair may write, because this finding is never
+    /// offered as a repair — the difference is an entry that already exists, and 5.5 forbids the
+    /// repair from modifying one. A hint that opened with the wire command would open with a
+    /// command guaranteed to come back as <c>KW-MCP-WIRE-005</c>, so the wire command appears only
+    /// as the caveat explaining why the operator has to make the edit themselves.
+    /// </remarks>
     private static string CommandDiffersHint(
         HarnessMcpEntry entry,
         RequiredMcpServer server,
         string namedPath,
         IReadOnlyList<string> wiredCommand) =>
         entry.Fixability == McpWiringFixability.Fixable
-            ? $"Fix: {WireCommand} {entry.Harness} (it refuses an entry that already exists; "
-                + $"remove the existing one or edit {namedPath} to '{Describe(server.Command)}')"
+            ? $"Edit {namedPath} so the entry runs '{Describe(server.Command)}' rather than "
+                + $"'{Describe(wiredCommand)}', or delete the entry and re-add it by hand: "
+                + $"{WireCommand} {entry.Harness} refuses an entry that already exists."
             : $"Edit {namedPath} so the entry runs '{Describe(server.Command)}' rather than "
                 + $"'{Describe(wiredCommand)}'; Kyber-Weave does not write {entry.Harness} configuration.";
 
