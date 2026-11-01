@@ -55,6 +55,13 @@ public sealed class SquadPerformanceContractTests
     private const string DigestTestCountersRegex =
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
 
+    // Why this exists: when "task end" counted as a full-suite moment, every worker that finished
+    // ran the whole suite, and harnesses finish workers together, so several full runs landed on
+    // one machine at once. The span stops at a full stop so a task-end clause in the next
+    // sentence ("At task end a worker runs only ...") is not mistaken for the reservation.
+    private const string TaskEndFullSuiteReservationRegex =
+        @"(?i)\b(?:reserve|reserved|reserving)\b[^.\r\n]*\bfull\b[^.\r\n]*\btask (?:end|exit gates?)\b";
+
     private const string ContiguousSixFieldDigestRegex =
         @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha\s*\|\s*NONE>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
 
@@ -416,6 +423,21 @@ public sealed class SquadPerformanceContractTests
         Assert.True(
             HasBuildOnceReservationClause(content),
             $"{TestCodingStandardPath} must specify reserving full test suite execution for task end or council.");
+    }
+
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    [InlineData(TestCodingStandardPath)]
+    [InlineData(OnboardingDocPath)]
+    [InlineData(RequirementsDocPath)]
+    public void TaskEndRunsTouchedTestClassesAndLeavesTheFullSuiteToTheCouncil(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
+        Assert.DoesNotMatch(TaskEndFullSuiteReservationRegex, content);
     }
 
     [Theory]

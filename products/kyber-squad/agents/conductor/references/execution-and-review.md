@@ -32,7 +32,7 @@ Discover continuation support from the current harness's exposed tools; do not a
 
 Follow the build once, test many pattern for rapid iteration: build or compile once, then execute targeted tests using the pre-computed direct assembly test runner:
 `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClass>" -reporter quiet`
-or `dotnet test --no-build` for fast loops. Reserve full test suite execution for task end or the final review council.
+or `dotnet test --no-build` for fast loops. Reserve full test suite execution for the final review council, which runs it once on the integrated head. A worker's task end runs only the test classes its task touched, because workers finish together and concurrent full runs overload the machine. Name those classes in the task packet's runner command.
 
 If changing requirements would require weakening or replacing the approved Test contract, return the artifact to its author and reopen approval for that contract.
 

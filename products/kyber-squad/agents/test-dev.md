@@ -54,7 +54,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
    - **Build once, test many with direct assembly runner:** Do not trigger full solution builds or recompile during test iterations. When validating targeted tests, pass `--no-build` (for example, `dotnet test --no-build`) or execute the compiled test assembly directly with quiet output:
      `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<TestClassName>" -reporter quiet`
-     Reserve full-suite runs for final task gate verification.
+     At task end run only the test classes your task touched, never the full suite: workers finish together and concurrent full runs overload the machine. The final review council runs the full suite once on the integrated head.
    - **Zero-stash RED proof rule:** Forbid `git stash` for RED proofs; never run `git stash` to simulate clean state. To establish an untainted zero-stash RED proof, execute tests against a clean base checkout, throwaway copy, or isolated worktree before implementation edits exist.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
    - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If tests do not pass after 3 iterations, halt immediately and trip the circuit breaker.
