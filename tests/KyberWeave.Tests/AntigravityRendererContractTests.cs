@@ -1327,9 +1327,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// assertion in this file, and on this harness an explicit empty list reads as "exclude every
     /// MCP server" rather than as an absent key.
     ///
-    /// The withheld-server sentence is asserted absent as well as the grant: nothing was withheld,
-    /// because nothing was there to withhold, and a record saying otherwise would report a
-    /// degradation the render does not have.
+    /// Nothing is reported as withheld, because nothing was there to withhold: the profiles entitled
+    /// every agent and only the declaration was short. What is reported is the configuration gap
+    /// itself, in one record per agent, naming the missing server. Without that sentence a renamed or
+    /// dropped `mcp.json` entry would cost every agent the grant in silence.
     /// </remarks>
     [Fact]
     public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsItToNobodyAndClaimsNoWithholding()
@@ -1364,11 +1365,18 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 + "an explicit empty list excludes every server rather than inheriting nothing.");
         }
 
-        foreach (SquadDegradationRecord record in result.Degradations)
-        {
-            Assert.DoesNotContain("withheld", record.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("kyber-weave", record.Details ?? string.Empty, StringComparison.Ordinal);
-        }
+        Assert.All(
+            result.Degradations,
+            record => Assert.DoesNotContain(
+                "withheld",
+                record.Details ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase));
+
+        Assert.Contains(
+            result.Degradations,
+            record => record.Details is not null
+                      && record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal)
+                      && record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
     }
 
     /// <summary>

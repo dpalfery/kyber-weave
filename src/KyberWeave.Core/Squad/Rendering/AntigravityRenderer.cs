@@ -141,6 +141,14 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // holds a second copy of the command line that could drift from mcp.json.
         McpServerDeclaration? kyberWeaveServer = ResolveUniversalMcpServer(source);
 
+        // A null server has two causes that must not be conflated: the squad never declared the key,
+        // or it declared it in a form the loader rejects. The roster names the tools either way, so
+        // the first case is a squad whose mcp.json has been renamed or truncated, and every agent
+        // silently loses the grant. The second is rejected at load time and is not reported here.
+        McpDeclarationShape mcpShape = ReadMcpShape(source.McpConfiguration);
+        bool universalToolsDeclared =
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools).Count > 0;
+
         // Emit canonical skills first, preserving the established ordering.
         foreach (SquadSkill skill in source.Skills)
         {
@@ -169,7 +177,9 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 agent,
                 source.CapabilityProfiles.Profiles,
                 capabilityVocabulary,
-                kyberWeaveServer);
+                kyberWeaveServer,
+                mcpShape,
+                universalToolsDeclared);
             if (permission is not null)
             {
                 degradations.Add(permission);
@@ -363,6 +373,34 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// <c>args</c> a string array), so the checks here guard a hand-built
     /// <see cref="SquadSource"/> rather than the shipped JSON.
     /// </remarks>
+    /// <summary>
+    ///     The shape of the raw MCP declaration: whether <c>mcpServers</c> is a well-formed object, and whether it
+    ///     carries the <c>kyber-weave</c> key.
+    /// </summary>
+    /// <param name="IsObject">Whether <c>mcpServers</c> exists and is a JSON object.</param>
+    /// <param name="DeclaresUniversalServer">Whether that object carries the <c>kyber-weave</c> key.</param>
+    /// <remarks>
+    ///     <see cref="ResolveUniversalMcpServer"/> answers null for a missing key, a missing <c>mcpServers</c>
+    ///     object, and an unusable entry alike. Only the first is an operator-visible misconfiguration: a source
+    ///     that declares no <c>mcpServers</c> object at all, or one whose entry the loader rejects, has nothing to
+    ///     report to the agent, because the loader rejects those states before a real source reaches this renderer.
+    /// </remarks>
+    private readonly record struct McpDeclarationShape(bool IsObject, bool DeclaresUniversalServer);
+
+    private static McpDeclarationShape ReadMcpShape(JsonElement mcpConfiguration)
+    {
+        if (mcpConfiguration.ValueKind != JsonValueKind.Object
+            || !mcpConfiguration.TryGetProperty("mcpServers", out JsonElement servers)
+            || servers.ValueKind != JsonValueKind.Object)
+        {
+            return new McpDeclarationShape(false, false);
+        }
+
+        return new McpDeclarationShape(
+            true,
+            servers.TryGetProperty(CapabilityDegradations.UniversalMcpServer, out _));
+    }
+
     private static McpServerDeclaration? ResolveUniversalMcpServer(SquadSource source)
     {
         if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
@@ -563,7 +601,9 @@ public sealed class AntigravityRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary,
-        McpServerDeclaration? kyberWeaveServer)
+        McpServerDeclaration? kyberWeaveServer,
+        McpDeclarationShape mcpShape,
+        bool universalToolsDeclared)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -626,7 +666,9 @@ public sealed class AntigravityRenderer : ISquadRenderer
         string? withheldMcp = DescribeWithheldMcp(
             agent.CapabilityProfile,
             capabilityProfiles,
-            kyberWeaveServer);
+            kyberWeaveServer,
+            mcpShape,
+            universalToolsDeclared);
         if (withheldMcp is not null)
         {
             details.Add(withheldMcp);
@@ -661,10 +703,24 @@ public sealed class AntigravityRenderer : ISquadRenderer
     private static string? DescribeWithheldMcp(
         string profileName,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        McpServerDeclaration? kyberWeaveServer)
+        McpServerDeclaration? kyberWeaveServer,
+        McpDeclarationShape mcpShape,
+        bool universalToolsDeclared)
     {
-        if (kyberWeaveServer is null ||
-            CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+        if (kyberWeaveServer is null)
+        {
+            // The roster declares the tools, so the grant is intended; the squad's mcp.json simply has
+            // no server under that name. Nothing was withheld — there was nothing to withhold — so this
+            // is a configuration record, not a withholding claim, and it is the only signal an operator
+            // gets for a renamed or dropped declaration.
+            return universalToolsDeclared && mcpShape.IsObject && !mcpShape.DeclaresUniversalServer
+                ? "The toolchain roster declares the kyber-weave MCP tools, but the squad's mcp.json " +
+                  "declares no 'kyber-weave' server, so no per-agent grant could be emitted. Add the " +
+                  "server back under that exact name."
+                : null;
+        }
+
+        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
         {
             return null;
         }
