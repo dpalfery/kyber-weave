@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
 using Xunit;
 
@@ -40,6 +41,9 @@ public sealed class McpWiringHardeningTests : IDisposable
     private const string VsCode = "vscode";
 
     private const string RefusalCode = "KW-MCP-WIRE-005";
+
+    /// <summary>The wiring check's "not wired" id, on the findings the fix list is derived from.</summary>
+    private const string NotWiredCode = "KW-MCP-WIRE-001";
 
     private readonly TempDirectory _root = new();
 
@@ -120,6 +124,130 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, "../outside/mcp.json"));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, ".vscode/../../outside/mcp.json"));
         Assert.Null(McpWiringRepairer.ContainedPath(Repo, Path.Combine(_root.Path, "outside", "mcp.json")));
+    }
+
+    // ---- One answer to "is this path inside the repository", asked by every caller.
+
+    /// <summary>
+    /// The names a repository owns resolve to the file they name, and the check, the repair and the
+    /// fix list all resolve them to the same file.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// These are the repository-scope files the catalog declares, so they are the names every caller
+    /// meets in a real tree. Asserting all three callers rather than the shared rule alone is what
+    /// pins the claim the type exists for: a caller that grew its own answer is how a read and a
+    /// write came to disagree about one file (ADR 0051).
+    /// </para>
+    /// <para>
+    /// <c>..foo/mcp.json</c> is in the list on purpose: it is an ordinary directory inside the tree
+    /// whose name merely begins with the characters that spell a parent reference, and a rule that
+    /// tested for those two characters refused a file the repository really has.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(".vscode/mcp.json")]
+    [InlineData(".factory/mcp.json")]
+    [InlineData(".mcp.json")]
+    [InlineData(".cursor/mcp.json")]
+    [InlineData(".codex/config.toml")]
+    [InlineData("opencode.json")]
+    [InlineData("..foo/mcp.json")]
+    public void ANameInsideTheRepositoryResolvesToTheSameFileForEveryCaller(string name)
+    {
+        string expected = Path.Combine(Repo, name.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.Equal(expected, McpRepositoryPath.Contained(Repo, name));
+        Assert.Equal(expected, McpWiringRepairer.ContainedPath(Repo, name));
+
+        McpWiringFix fix = Assert.Single(McpWiringFixes.Derive(ReportOffering(name), Repo));
+        Assert.Equal(name, fix.Path);
+        Assert.True(fix.Create);
+    }
+
+    /// <summary>
+    /// A name that escapes the repository is refused by every caller, so no step of the check, the
+    /// repair or the fix list can act on a file the repository does not own.
+    /// </summary>
+    /// <remarks>
+    /// A name is refused twice over: once for its spelling, which needs no filesystem access at all,
+    /// and once for where it resolves. These two are the spelling refusals — a bare parent reference
+    /// and one that climbs out after descending — and they are the shapes a catalog row, a receipt
+    /// record, or a hand-edited fix list can carry. Asserting all three callers is the point: the
+    /// check deciding which file to read and the repair deciding which file to write must not answer
+    /// differently about the same name.
+    /// </remarks>
+    [Theory]
+    [InlineData("../x")]
+    [InlineData(".vscode/../../x")]
+    public void ANameOutsideTheRepositoryIsRefusedByEveryCaller(string name)
+    {
+        Assert.Null(McpRepositoryPath.Contained(Repo, name));
+        Assert.Null(McpWiringRepairer.ContainedPath(Repo, name));
+        Assert.Empty(McpWiringFixes.Derive(ReportOffering(name), Repo));
+    }
+
+    /// <summary>
+    /// An absolute path is refused by every caller: it names a root of its own, so combining it with
+    /// the repository would discard the repository.
+    /// </summary>
+    [Fact]
+    public void AnAbsoluteNameIsRefusedByEveryCaller()
+    {
+        string absolute = Path.Combine(_root.Path, "outside", "mcp.json");
+
+        Assert.Null(McpRepositoryPath.Contained(Repo, absolute));
+        Assert.Null(McpWiringRepairer.ContainedPath(Repo, absolute));
+        Assert.Empty(McpWiringFixes.Derive(ReportOffering(absolute), Repo));
+    }
+
+    /// <summary>
+    /// A sibling directory whose name merely begins with the repository's is not inside it.
+    /// </summary>
+    /// <remarks>
+    /// <c>…/repo-other</c> beside <c>…/repo</c> is the case a prefix test without a trailing separator
+    /// reads as being inside the tree, and it is not hypothetical: a checkout and its worktrees sit
+    /// beside each other under names like that. The name rule refuses this path for being absolute
+    /// before any prefix is compared, so the case states the guarantee rather than the branch that
+    /// enforces it — a later relaxation of the name rule must not let a sibling through.
+    /// </remarks>
+    [Fact]
+    public void ASiblingDirectorySharingTheRepositorysNamePrefixIsRefused()
+    {
+        string sibling = Path.Combine(_root.Path, "repo-other", "mcp.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sibling)!);
+        File.WriteAllText(sibling, """{"mcpServers": {}}""");
+
+        Assert.Null(McpRepositoryPath.Contained(Repo, sibling));
+        Assert.Null(McpWiringRepairer.ContainedPath(Repo, sibling));
+        Assert.Empty(McpWiringFixes.Derive(ReportOffering(sibling), Repo));
+    }
+
+    /// <summary>
+    /// A name that spells a parent reference is refused for its spelling, before it is resolved —
+    /// including one that would resolve back inside the tree — and the fix list refuses it too.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>.vscode/../.mcp.json</c> resolves to a file the repository owns, so a rule that compared
+    /// only resolved paths would accept it. The shared rule refuses it earlier, on the name: a
+    /// configuration path this code writes is one it composes from a catalog row it controls, and a
+    /// catalog row or a receipt record that spells a parent reference is not one it can prove stays
+    /// inside the tree. The refusal costs nothing an operator wants — the same file is reachable as
+    /// <c>.mcp.json</c>, the spelling every catalog row already uses.
+    /// </para>
+    /// <para>
+    /// This case asserts the two callers <em>agree</em>, which is the property that matters: the file
+    /// the fix list offers is the file the check read. It does not assert that the name resolves to a
+    /// path, because it does not.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ANameSpellingAParentReferenceIsRefusedBeforeItIsResolvedAndTheFixListAgrees()
+    {
+        Assert.Null(McpRepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
+        Assert.Null(McpWiringRepairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
+        Assert.Empty(McpWiringFixes.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
     }
 
     // ---- The link guard must test for a parent-reference segment, not for the two characters.
@@ -253,6 +381,62 @@ public sealed class McpWiringHardeningTests : IDisposable
         }
 
         Assert.Equal(before, File.ReadAllBytes(target));
+    }
+
+    /// <summary>
+    /// A configuration this process may not inspect is reported as a gap that names the permission
+    /// and offers no wire command, because the repair refuses the same file for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The check reports the file it could not read rather than treating it as absent, and the two
+    /// facts lead to opposite decisions: "absent" is a harness the repair may create a file for, and
+    /// "denied" is one it may not touch. Reporting the denial at <c>info</c>-as-absent would have
+    /// offered a write over a file nobody read.
+    /// </para>
+    /// <para>
+    /// The hint names the permission and nothing else. A wire command here would be a command
+    /// guaranteed to come back as <c>KW-MCP-WIRE-005</c>, so its absence is the assertion that the
+    /// report does not send the operator on that errand.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AConfigurationTheProcessMayNotInspectIsReportedAsNotFixableAndOffersNoWireCommand()
+    {
+        string directory = Path.Combine(Repo, ".vscode");
+        string target = Path.Combine(directory, "mcp.json");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(target, """{"servers": {}}""");
+
+        try
+        {
+            DenyTraversal(directory, target);
+
+            McpWiringReport report = McpWiringInspector.Inspect(
+                Repo,
+                McpWiringFixture.Declare(FirstPartyServer()),
+                new LaunchCommandResolver([Bin]));
+
+            McpWiringFinding finding = Assert.Single(report.Findings, candidate => candidate.Harness == VsCode);
+
+            Assert.Equal(McpWiringKind.NotWired, finding.Kind);
+            Assert.Equal(NotWiredCode, finding.Code);
+            Assert.Equal(McpWiringFixability.NotFixable, finding.Fixable);
+            Assert.Contains("could not be inspected: access to '", finding.Message, StringComparison.Ordinal);
+            Assert.Contains(
+                "a file this process cannot inspect cannot be told from one that is absent",
+                finding.Message,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("mcp-wire", finding.Hint, StringComparison.Ordinal);
+
+            // The fix list is derived from the findings, and this finding is never offered as a
+            // write: the repair would refuse it, so the operator is never asked to consent to it.
+            Assert.Empty(McpWiringFixes.Derive(report, Repo));
+        }
+        finally
+        {
+            AllowTraversal(directory);
+        }
     }
 
     // ---- The receipt is a schema, and a document that does not match it proves nothing.
@@ -523,6 +707,25 @@ public sealed class McpWiringHardeningTests : IDisposable
 
     private static McpWiringFileChange SingleChange(McpWiringRepairReport report, string harness) =>
         Assert.Single(report.Files, change => change.Harness == harness);
+
+    /// <summary>
+    /// A report holding one fixable finding for <paramref name="path"/>, which is what the fix list
+    /// is derived from — and the only thing it consults, so a case can hand it a path no catalog row
+    /// produces.
+    /// </summary>
+    private static McpWiringReport ReportOffering(string path) =>
+        new([
+            new McpWiringFinding(
+                McpWiringKind.NotWired,
+                Severity.Warning,
+                VsCode,
+                ServerName,
+                path,
+                NotWiredCode,
+                $"server '{ServerName}' is not wired ({path})",
+                "Fix: kyber-weave docs mcp-wire --target vscode",
+                McpWiringFixability.Fixable)
+        ]);
 
     /// <summary>Separators are normalized so a diagnostic is asserted by the path's value.</summary>
     private static string DiagnosticText(McpWiringFileChange change) =>

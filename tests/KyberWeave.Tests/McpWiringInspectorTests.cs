@@ -173,6 +173,60 @@ public sealed class McpWiringInspectorTests : IDisposable
         Assert.StartsWith(Bin, resolved, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A declared launch command spelled as a repository-relative path resolves against the
+    /// repository under inspection, so the tree that launches from the repository root is never
+    /// reported as one whose binary is missing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>./tools/kyber-weave-mcp</c> is how a repository points at the binary it builds, and it is not
+    /// something <c>PATH</c> answers: the resolver takes it as a path and resolves it against the
+    /// root it was handed. Resolving it against the process's working directory instead made the
+    /// same tree wired from the repository root and unwired from anywhere else — the check and the
+    /// launch that followed it disagreed about one entry, and the operator was told to install a
+    /// binary that was sitting in their checkout.
+    /// </para>
+    /// <para>
+    /// The compiled <see cref="McpWiringInspector.Inspect(string, McpConfig)"/> overload is driven
+    /// rather than an injected resolver, because the root it passes down is the whole behaviour
+    /// under test. It reads nothing of the machine: a path-shaped command is resolved against the
+    /// root and never searched for on <c>PATH</c>.
+    /// </para>
+    /// <para>
+    /// The rootless contrast is asserted for the same command so the case has teeth: reverting the
+    /// overload to <see cref="LaunchCommandResolver.FromEnvironment()"/> restores
+    /// <c>KW-MCP-WIRE-003</c> here, and the resolver-level assertion names what the revert broke
+    /// even if the inspector's wording moves.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARepositoryRelativeLaunchCommandIsResolvedAgainstTheRepositoryRoot()
+    {
+        string relativeCommand = "./tools/kyber-weave-mcp";
+        McpWiringFixture.WriteExecutable(Path.Combine(Repo, "tools"), BinaryName);
+        McpWiringFixture.WriteText(Repo, ".mcp.json", McpServersDocument(".", relativeCommand));
+
+        // The fixture is a temp directory, so the process cannot be standing in it. Without this
+        // the contrast below would prove nothing on a machine that happened to be rooted there.
+        Assert.NotEqual(Repo, Directory.GetCurrentDirectory());
+        Assert.Null(LaunchCommandResolver.FromEnvironment().Resolve(relativeCommand));
+
+        McpConfig declared = McpWiringFixture.Declare(RepositoryRelativeServer(relativeCommand));
+
+        McpWiringReport rootless = McpWiringInspector.Inspect(
+            Repo,
+            declared,
+            LaunchCommandResolver.FromEnvironment());
+        Assert.Contains(
+            FindingsFor(rootless, ClaudeCode),
+            finding => finding.Code == BinaryAbsentCode);
+
+        McpWiringReport report = McpWiringInspector.Inspect(Repo, declared);
+
+        AssertNoFindingFor(report, ClaudeCode);
+    }
+
     [Theory]
     [MemberData(nameof(WiredShapes))]
     public void AServerWiredInEachHarnessShapeReportsNoGap(string harness, string path, string document)
@@ -714,6 +768,14 @@ public sealed class McpWiringInspectorTests : IDisposable
             [BinaryName, "--repo-root", repoRootArgument],
             McpProvenance.FirstParty,
             level);
+
+    /// <summary>
+    /// The declared server whose launch command is a repository-relative path rather than a name.
+    /// Its argument list matches <see cref="McpServersDocument"/>, so a case built from both compares
+    /// the wired entry against the declaration and finds no difference to report.
+    /// </summary>
+    private static RequiredMcpServer RepositoryRelativeServer(string command) =>
+        new(ServerName, [command, "--repo-root", "."], McpProvenance.FirstParty);
 
     private static string McpServersDocument(string repoRootArgument, string command = BinaryName) => $$"""
         {
