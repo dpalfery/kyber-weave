@@ -164,6 +164,30 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     }
 
     /// <summary>
+    ///     A byte-order mark is a character, not a line break, so one written ahead of the first
+    ///     line must not hide the declaration that starts immediately after it. Read as "start of
+    ///     document" alone, the anchor lands on the mark and misses the key; the append that
+    ///     follows then writes a second <c>mcp:</c>, which YAML refuses to load.
+    /// </summary>
+    [Fact]
+    public void AByteOrderMarkBeforeTheFirstLineDoesNotHideTheDeclaration()
+    {
+        const string handOwned =
+            "\uFEFF" +
+            "mcp:\n" +
+            "  required-servers:\n" +
+            "    codegraph:\n" +
+            "      command: [codegraph, serve, --mcp]\n" +
+            "      provenance: third-party\n" +
+            "      level: recommended\n";
+
+        Assert.True(
+            McpDeclarationBlockWriter.HasMcpSection(handOwned),
+            "A byte-order mark ahead of the first line hid the declaration; the append would "
+            + "write a second 'mcp:' key and leave the configuration unloadable.");
+    }
+
+    /// <summary>
     ///     The scaffold's own ignore file covers both local-state directories it owns: the
     ///     analysis cache beside it, and the receipts the wiring writes. A receipt that reached
     ///     version control would be a machine-local record committed as if it were a decision.

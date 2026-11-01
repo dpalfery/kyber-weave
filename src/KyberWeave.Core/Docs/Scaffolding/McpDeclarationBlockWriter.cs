@@ -62,9 +62,9 @@ public static partial class McpDeclarationBlockWriter
 
     /// <summary>
     /// True when <paramref name="configText"/> already carries a top-level <c>mcp:</c> key. The
-    /// key must start in column zero, so a commented <c># mcp:</c> does not count, and a line
-    /// break is any of CRLF, LF or a lone CR, so a file written with any of them is read the
-    /// same way.
+    /// key must start in column zero, so a commented <c># mcp:</c> does not count; a line break is
+    /// any of CRLF, LF or a lone CR, so a file written with any of them is read the same way; and
+    /// a byte-order mark ahead of the first line does not hide the key that follows it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -161,6 +161,13 @@ public static partial class McpDeclarationBlockWriter
     /// would then never be recognised, and the append that follows would write a second
     /// <c>mcp:</c> into it. Any of CRLF, LF or CR is a line start this matches.
     /// </summary>
-    [GeneratedRegex(@"(?:\A|[\r\n])mcp[ \t]*:")]
+    /// <remarks>
+    /// A byte-order mark ahead of the first line is tolerated, because it is a character and not
+    /// a line break: without the allowance the anchor lands on the mark, the declaration that
+    /// starts on the very next character reads as absent, and the append writes a second
+    /// <c>mcp:</c> — a document YAML refuses to load. <see cref="HostConfigYaml"/> tolerates the
+    /// same character on the <c>ontology:</c> key it edits in the same file.
+    /// </remarks>
+    [GeneratedRegex(@"(?:\A\uFEFF?|[\r\n])mcp[ \t]*:")]
     private static partial Regex McpKey();
 }
