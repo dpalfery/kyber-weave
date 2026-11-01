@@ -90,6 +90,38 @@ public sealed class StdioSessionTests
     }
 
     /// <summary>
+    /// A child whose stderr line exceeds the session's cap is drained without keeping that line, and the next
+    /// complete line still becomes the first error line.
+    /// </summary>
+    /// <remarks>
+    /// The stderr drain exists so a child that writes to stderr never blocks on a full pipe. Draining it with an
+    /// unbounded line reader defeats that purpose: a child that never writes a terminator grows the reader's buffer
+    /// until the process runs out of memory, which is exactly what the stdout path already refuses to do. The
+    /// over-cap line is discarded rather than truncated — it is not a diagnosis — and the drain continues so the
+    /// child keeps flowing and a later real line is still reported. The hostile line is terminated here so the
+    /// following line is a line of its own; an unterminated one never becomes a line at all.
+    /// </remarks>
+    [Fact]
+    public void StdioSession_StderrLineOverCap_IsDiscardedAndTheNextLineIsReported()
+    {
+        using StdioSession session = new(
+            "/bin/sh",
+            ["-c", "head -c 2000000 /dev/zero | tr '\\0' 'a' >&2; printf '\\nboom\\n' >&2"],
+            TimeSpan.FromSeconds(30));
+
+        string? firstErrorLine = null;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        while (firstErrorLine is null && stopwatch.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            firstErrorLine = session.FirstErrorLine;
+            if (firstErrorLine is null)
+                Thread.Sleep(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.Equal("boom", firstErrorLine);
+    }
+
+    /// <summary>
     /// Reading the first error line after the session was disposed returns null instead of throwing. The stderr drain
     /// is still pending when <c>Dispose</c> closes the stream under it, so its task can fault.
     /// </summary>

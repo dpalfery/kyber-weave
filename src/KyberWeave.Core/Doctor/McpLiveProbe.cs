@@ -94,8 +94,17 @@ public static class McpLiveProbe
     }
 
     /// <summary>The remedy a check prints when the server did not answer inside the budget.</summary>
-    private static string TimeoutFix(DoctorOptions options) =>
-        $"kyber-weave doctor --check --mcp-timeout {Math.Max(1, (int)options.McpTimeout.TotalSeconds) * 2}";
+    /// <remarks>
+    ///     The suggestion is computed in <see cref="long"/> and capped at <see cref="int.MaxValue"/> seconds, the
+    ///     largest value <c>--mcp-timeout</c> parses. Doubling a budget near that limit inside an <see cref="int"/>
+    ///     wraps negative, and the remedy would then tell a human to run a command the option refuses.
+    /// </remarks>
+    private static string TimeoutFix(DoctorOptions options)
+    {
+        long seconds = Math.Max(1L, (long)Math.Ceiling(options.McpTimeout.TotalSeconds));
+        long suggested = Math.Min(seconds * 2L, int.MaxValue);
+        return $"kyber-weave doctor --check --mcp-timeout {suggested}";
+    }
 
     private static void Exchange(StdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
     {
@@ -193,14 +202,13 @@ public static class McpLiveProbe
             return new DoctorCheck("mcp.handshake", true, reason, null);
 
         string detail = session.FirstErrorLine is { } line ? $" ({Truncate(line)})" : string.Empty;
-        return new DoctorCheck(
-            "mcp.handshake",
-            false,
-            reason + detail,
-            $"kyber-weave doctor --check --mcp-timeout {Math.Max(1, (int)options.McpTimeout.TotalSeconds) * 2}");
+        return new DoctorCheck("mcp.handshake", false, reason + detail, TimeoutFix(options));
     }
 
-    /// <summary>Reads one reply line, turning a timeout or a closed stream into a reason rather than an exception.</summary>
+    /// <summary>
+    ///     Reads one reply line, turning a timeout, a closed stream, or a line past the session's cap into a reason
+    ///     rather than an exception.
+    /// </summary>
     private static bool TryRead(StdioSession session, out string? line, out string? failure)
     {
         try
@@ -219,6 +227,15 @@ public static class McpLiveProbe
         {
             line = null;
             failure = "the server closed its output before answering";
+            return false;
+        }
+        catch (InvalidDataException)
+        {
+            // The session's line cap is how a child that never ends a line gets stopped. The reply is the child's
+            // data, so an over-long one is a failed check, not an exception that skips the renderer. The session is
+            // unusable afterwards, and the caller's `using` disposes it.
+            line = null;
+            failure = "the server wrote past the session's line cap without ending the reply";
             return false;
         }
     }

@@ -256,4 +256,70 @@ public sealed class McpLiveProbeTests : IDisposable
             Assert.DoesNotContain(Secret, check.Fix ?? string.Empty, StringComparison.Ordinal);
         }
     }
+
+    /// <summary>
+    /// A server whose reply exceeds the session's line cap fails <c>mcp.handshake</c> instead of throwing.
+    /// </summary>
+    /// <remarks>
+    /// The cap is the session's own classification of a child it must stop reading, and the session reports it as
+    /// <see cref="InvalidDataException"/>. A reply is the child's data, so an unterminated one must reach the same
+    /// check line as any other bad reply. Escaping <see cref="RepositoryDoctor.Run"/> would skip the renderer and
+    /// break the documented 0/1/2/3 exit contract, which is the whole point of the probe.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_ReplyOverTheLineCap_FailsMcpHandshakeInsteadOfThrowing()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+
+        string stub = DoctorHarness.WriteStub(
+            _stubs.Path,
+            """
+            read _initialize
+            head -c 2000000 /dev/zero | tr '\0' 'a'
+            sleep 30
+            """);
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(stub, TimeSpan.FromSeconds(30)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "mcp.handshake").Passed);
+    }
+
+    /// <summary>
+    /// A budget too large to double inside an <see cref="int"/> still prints a positive timeout in the remedy.
+    /// </summary>
+    /// <remarks>
+    /// The remedy is a command a human copies and runs, so it must be one the option accepts. <c>--mcp-timeout</c>
+    /// takes any positive int, and doubling one of those in int wraps negative: the fix line would then instruct the
+    /// reader to pass a timeout the parser refuses. The hint is capped where the parser's own limit is.
+    /// </remarks>
+    [Fact]
+    public void McpLiveProbe_HugeBudget_PrintsAPositiveTimeoutInTheRemedy()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options(
+                DoctorHarness.WriteStub(_stubs.Path, "exit 0"),
+                TimeSpan.FromSeconds(2_000_000_000)),
+            DoctorHarness.Executor(Root),
+            _ => null);
+
+        DoctorCheck handshake = DoctorHarness.CheckNamed(report, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        string fix = handshake.Fix ?? string.Empty;
+        int marker = fix.IndexOf("--mcp-timeout ", StringComparison.Ordinal);
+        Assert.True(marker >= 0, $"The remedy '{fix}' does not name a timeout to raise.");
+        string suggested = fix[(marker + "--mcp-timeout ".Length)..].Trim();
+        Assert.True(
+            int.TryParse(suggested, out int seconds) && seconds > 0,
+            $"The remedy suggested '{suggested}', which is not a timeout --mcp-timeout accepts.");
+    }
 }

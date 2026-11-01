@@ -42,6 +42,12 @@ public sealed class StdioSession : IDisposable
     /// <summary>The size of one read from the child's standard output.</summary>
     private const int ReadBufferLength = 4096;
 
+    /// <summary>
+    ///     The longest wait <c>Task.WaitAsync</c> accepts. The budget is a caller's value with no upper bound of its
+    ///     own, and passing one past this limit throws instead of waiting.
+    /// </summary>
+    private static readonly TimeSpan MaxWait = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     private readonly Process _process;
     private readonly int _processId;
     private readonly DateTime _deadline;
@@ -133,8 +139,11 @@ public sealed class StdioSession : IDisposable
         try
         {
             // WaitAsync rather than Wait: Wait wraps a faulted reader in AggregateException, and the caller needs
-            // the reader's own exception — a line over the cap — to classify it.
-            read.WaitAsync(remaining).GetAwaiter().GetResult();
+            // the reader's own exception — a line over the cap — to classify it. The wait is clamped because
+            // WaitAsync rejects a timeout past the runtime's maximum timer duration, and the budget is a caller's
+            // value with no upper bound of its own.
+            TimeSpan wait = remaining > MaxWait ? MaxWait : remaining;
+            read.WaitAsync(wait).GetAwaiter().GetResult();
         }
         catch (TimeoutException)
         {
@@ -214,14 +223,49 @@ public sealed class StdioSession : IDisposable
 
     private async Task<string?> DrainFirstErrorLineAsync()
     {
+        // Bounded exactly like the stdout reader. An unbounded ReadLineAsync here would let a child that never
+        // writes a terminator grow the reader's buffer until the process runs out of memory, which is the failure
+        // the cap exists to prevent on stdout. The over-cap line is dropped rather than truncated — it is not a
+        // diagnosis — and the drain keeps reading so the child never blocks on a full stderr pipe.
         string? first = null;
+        StringBuilder line = new();
+        bool overCap = false;
+        char[] buffer = new char[ReadBufferLength];
         try
         {
-            while (await _process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+            while (true)
             {
-                if (first is null && line.Trim() is { Length: > 0 } trimmed)
-                    first = trimmed;
+                int read = await _process.StandardError.ReadAsync(buffer.AsMemory(), CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                    break;
+
+                for (int index = 0; index < read; index++)
+                {
+                    char current = buffer[index];
+                    if (current == '\n')
+                    {
+                        first ??= CompleteErrorLine(line, overCap);
+                        line.Clear();
+                        overCap = false;
+                        continue;
+                    }
+
+                    if (overCap)
+                        continue;
+
+                    if (line.Length >= MaxLineLength)
+                    {
+                        line.Clear();
+                        overCap = true;
+                        continue;
+                    }
+
+                    line.Append(current);
+                }
             }
+
+            first ??= CompleteErrorLine(line, overCap);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
@@ -230,5 +274,15 @@ public sealed class StdioSession : IDisposable
         }
 
         return first;
+    }
+
+    /// <summary>The first non-blank stderr line, or null when the line was blank or discarded for exceeding the cap.</summary>
+    private static string? CompleteErrorLine(StringBuilder line, bool overCap)
+    {
+        if (overCap)
+            return null;
+
+        string trimmed = line.ToString().Trim();
+        return trimmed.Length > 0 ? trimmed : null;
     }
 }
