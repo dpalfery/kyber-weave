@@ -73,6 +73,12 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     /// Lists the files the receipt records, so an operator without a target learns which harness
     /// slugs are removable before naming one.
     /// </summary>
+    /// <remarks>
+    /// The paths and the server names come out of the receipt file, so they are somebody else's text
+    /// by the time they are printed: the receipt is local state that a teammate, a bad merge or an
+    /// earlier tool can have written. They go through <see cref="TerminalText"/> for the same reason
+    /// a finding's hint does — one sanitiser for everything this branch writes to a terminal.
+    /// </remarks>
     private static void PrintRecord(string root)
     {
         McpWiringReceipt receipt = McpWiringReceipt.Load(root);
@@ -92,8 +98,10 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
 
                 foreach (McpWiringReceiptRecord record in receipt.Files)
                 {
-                    AnsiConsole.MarkupLine(
-                        $"  [bold]{Markup.Escape(record.Path)}[/] [grey]({Markup.Escape(string.Join(", ", record.Servers))})[/]");
+                    string path = Markup.Escape(TerminalText.Line(record.Path));
+                    string servers = Markup.Escape(TerminalText.Line(string.Join(", ", record.Servers)));
+
+                    AnsiConsole.MarkupLine($"  [bold]{path}[/] [grey]({servers})[/]");
                 }
             }
 

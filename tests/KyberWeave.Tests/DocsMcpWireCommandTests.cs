@@ -664,6 +664,47 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// The names the receipt records reach the terminal sanitised, on the one path that lists them
+    /// without reading a declaration.
+    /// </summary>
+    /// <remarks>
+    /// The recording verb lists what it can remove before any server is named, and every string it
+    /// lists comes out of the receipt — a file on disk that a teammate, a bad merge or an earlier
+    /// tool can have written. A name carrying an escape sequence would otherwise colour, move or
+    /// clear the operator's terminal here as readily as in a finding.
+    /// </remarks>
+    [Fact]
+    public void AReceiptNameCarryingAnEscapeSequenceIsRemovedFromTheRecordListing()
+    {
+        WriteJson(
+            McpWiringReceipt.RelativePath,
+            new JsonObject
+            {
+                ["version"] = McpWiringReceipt.SchemaVersion,
+                ["files"] = new JsonArray(
+                    new JsonObject
+                    {
+                        ["path"] = "evil" + EscapeSequence + "mcp.json",
+                        ["mode"] = "created",
+                        ["servers"] = new JsonArray("evil" + EscapeSequence + "server"),
+                        ["postSha256"] = "00",
+                        ["writtenAtUtc"] = "2026-01-01T00:00:00+00:00"
+                    })
+            });
+
+        CapturedConsoleExecution<int> execution = Unwire(NoTarget);
+
+        Assert.Equal(0, execution.Result);
+        Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
+
+        // The sequence and its bracketed parameters go together — SGR is `ESC [ 31 m` — so what
+        // remains is the name with that run cut out of it rather than a stray `[31m` fragment.
+        Assert.Contains("evilserver", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("evilmcp.json", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("31m", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A value long enough to flood the console is cut, and the cut is marked. The length is part of
     /// the same bound as the escape sequences: the operator asked for a finding, not for one
     /// harness entry to push the finding and the remedy above it off the scrollback. The entry comes
