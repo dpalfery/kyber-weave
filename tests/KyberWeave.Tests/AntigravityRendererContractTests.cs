@@ -1372,12 +1372,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 record.Details ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase));
 
-        // One record per agent names the missing server: the grant gap is per-agent state, so an
-        // existence-only assertion would let a partial render pass — most agents reported, one
-        // silently skipped.
+        // Exactly one record per agent names the missing server: the grant gap is per-agent
+        // state, so an existence-only assertion — or a split shell/missing pair across two
+        // records — would let a partial render pass. One record carries every gap that agent has.
         foreach (SquadAgent agent in source.Agents)
         {
-            Assert.Contains(
+            Assert.Single(
                 result.Degradations.Where(record => string.Equals(
                     record.CanonicalIdentity,
                     agent.Name,
@@ -1425,6 +1425,61 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
         Assert.Contains("even with the server declared", record.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A shell gap, a missing server, and a denying profile are three independent reasons one
+    /// agent has no grant, so the one record names all three.
+    /// </summary>
+    /// <remarks>
+    /// The D10 early return carries the shell-escape record past the grant checks. Without the
+    /// merge, a triple-gap agent's record would name the shell gap and the missing server while
+    /// hiding the denying profile — the same silent loss the missing-server sentence was added
+    /// to prevent, one path earlier.
+    /// </remarks>
+    [Fact]
+    public async Task AShellGapAndAMissingServerAndADenyingProfileAreAllNamedInOneRecord()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+
+        // Promote the read-denied profile to a shell gap as well: execute allowed while write
+        // stays denied. The hand edit lands after load, so no source validation stands between
+        // the profile and the renderer.
+        Dictionary<string, SquadCapabilityProfile> profiles = new(
+            source.CapabilityProfiles.Profiles,
+            StringComparer.Ordinal);
+        SquadCapabilityProfile baseProfile = profiles[denied.CapabilityProfile];
+        Dictionary<string, SquadPermissionDecision> permissions = new(
+            baseProfile.Permissions,
+            StringComparer.Ordinal)
+        {
+            ["process.execute"] = SquadPermissionDecision.Allow,
+            ["filesystem.write"] = SquadPermissionDecision.Deny,
+        };
+        profiles[denied.CapabilityProfile] = baseProfile with { Permissions = permissions };
+        source = source with
+        {
+            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles },
+        };
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                      string.Equals(record.Code, "capability-not-isolable", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
+        Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+        Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
     }
 
     /// <summary>

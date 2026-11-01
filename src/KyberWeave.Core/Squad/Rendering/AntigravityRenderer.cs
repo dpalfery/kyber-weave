@@ -647,10 +647,14 @@ public sealed class AntigravityRenderer : ISquadRenderer
             // A shell-escape agent in a squad that dropped the server would otherwise lose the
             // grant with only the shell-escape record to show for it. The grant gap is a separate
             // condition from the shell gap, so it rides along in the same per-agent record rather
-            // than being skipped by this early return.
+            // than being skipped by this early return. The entitlement check rides along too: a
+            // profile that also denies filesystem.read stays grantless after the server comes
+            // back, and only this record can say so.
             return notIsolable with
             {
-                Details = JoinSentences(notIsolable.Details, missingServer),
+                Details = JoinSentences(
+                    notIsolable.Details,
+                    WithEntitlementGap(missingServer, agent.CapabilityProfile, capabilityProfiles)),
             };
         }
 
@@ -713,6 +717,37 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// capability the entitlement rests on, so a reader does not have to re-derive which of several
     /// conditions removed the grant.
     /// </remarks>
+    private static string? DescribeWithheldMcp(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        McpServerDeclaration? kyberWeaveServer,
+        McpDeclarationShape mcpShape,
+        bool universalToolsDeclared)
+    {
+        if (kyberWeaveServer is null)
+        {
+            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
+            if (missingServer is null)
+            {
+                return null;
+            }
+
+            // A missing declaration and a denying profile are two independent reasons the agent has
+            // no grant. Reporting only the first would hide the second: an operator who restores the
+            // server would watch this agent stay grantless with no record saying why.
+            return WithEntitlementGap(missingServer, profileName, capabilityProfiles);
+        }
+
+        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+        {
+            return null;
+        }
+
+        return $"Declared MCP server '{kyberWeaveServer.Name}' is withheld from this agent: capability " +
+            $"profile '{profileName}' does not allow '{CapabilityDegradations.FileReadCapability}', " +
+            "which is the entitlement the kyber-weave grant rests on.";
+    }
+
     /// <summary>
     ///     The sentence for a squad whose declaration is missing the server while the roster still
     ///     declares its tools, or <see langword="null"/> when there is nothing to report.
@@ -738,48 +773,33 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     /// <summary>
+    /// Appends the denied-entitlement clause to a missing-server sentence when the profile would
+    /// stay grantless even with the server declared, and returns the sentence unchanged otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Both call sites — the D10 early return and the null-server branch — go through this one
+    /// helper so a triple-gap agent is reported the same way on either path.
+    /// </remarks>
+    private static string WithEntitlementGap(
+        string missingServer,
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
+        {
+            return missingServer;
+        }
+
+        return missingServer + " Capability profile '" + profileName + "' also does not allow '" +
+            CapabilityDegradations.FileReadCapability + "', so this agent would not receive the " +
+            "grant even with the server declared.";
+    }
+
+    /// <summary>
     /// Joins two single-line detail sentences, tolerating a missing first half.</summary>
     private static string JoinSentences(string? first, string second)
     {
         return string.IsNullOrWhiteSpace(first) ? second : first + " " + second;
-    }
-
-    private static string? DescribeWithheldMcp(
-        string profileName,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        McpServerDeclaration? kyberWeaveServer,
-        McpDeclarationShape mcpShape,
-        bool universalToolsDeclared)
-    {
-        if (kyberWeaveServer is null)
-        {
-            string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
-            if (missingServer is null)
-            {
-                return null;
-            }
-
-            // A missing declaration and a denying profile are two independent reasons the agent has
-            // no grant. Reporting only the first would hide the second: an operator who restores the
-            // server would watch this agent stay grantless with no record saying why.
-            if (!CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
-            {
-                return missingServer + " Capability profile '" + profileName + "' also does not allow '" +
-                    CapabilityDegradations.FileReadCapability + "', so this agent would not receive the " +
-                    "grant even with the server declared.";
-            }
-
-            return missingServer;
-        }
-
-        if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
-        {
-            return null;
-        }
-
-        return $"Declared MCP server '{kyberWeaveServer.Name}' is withheld from this agent: capability " +
-            $"profile '{profileName}' does not allow '{CapabilityDegradations.FileReadCapability}', " +
-            "which is the entitlement the kyber-weave grant rests on.";
     }
 
     /// <summary>
