@@ -108,7 +108,7 @@ public static partial class McpDeclarationBlockWriter
     {
         ArgumentNullException.ThrowIfNull(configText);
 
-        string newline = configText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        string newline = DetectNewline(configText);
         string block = newline == "\n"
             ? DeclarationYaml
             : DeclarationYaml.Replace("\n", newline, StringComparison.Ordinal);
@@ -117,6 +117,79 @@ public static partial class McpDeclarationBlockWriter
         return prefix.Length == 0
             ? block + newline
             : prefix + newline + newline + block + newline;
+    }
+
+    /// <summary>
+    /// The line ending the file itself uses: whichever of CRLF, LF or a lone CR it holds most of,
+    /// with the one that appears first settling a tie.
+    /// </summary>
+    /// <remarks>
+    /// Asking whether the file contains a CRLF is not the same question. A file written almost
+    /// entirely with LF but holding one CRLF — a pasted line, an edited hunk — would then be
+    /// appended to in CRLF, and a file written with lone CR would get LF and end up mixed. The
+    /// append is the only part of the file this tool chooses, so it is the part that has to match
+    /// what the operator's editor will keep writing; a majority settles it, and the tie-break is
+    /// the first ending the file shows, because that is the one its first line already uses.
+    /// </remarks>
+    private static string DetectNewline(string configText)
+    {
+        int crlf = 0;
+        int lf = 0;
+        int cr = 0;
+        int firstCrlf = -1;
+        int firstLf = -1;
+        int firstCr = -1;
+
+        for (int index = 0; index < configText.Length; index++)
+        {
+            char current = configText[index];
+
+            if (current == '\r' && index + 1 < configText.Length && configText[index + 1] == '\n')
+            {
+                crlf++;
+                firstCrlf = firstCrlf < 0 ? index : firstCrlf;
+                index++;
+                continue;
+            }
+
+            if (current == '\n')
+            {
+                lf++;
+                firstLf = firstLf < 0 ? index : firstLf;
+                continue;
+            }
+
+            if (current == '\r')
+            {
+                cr++;
+                firstCr = firstCr < 0 ? index : firstCr;
+            }
+        }
+
+        // A file with no line break at all gets LF, the style this repository writes.
+        int most = Math.Max(crlf, Math.Max(lf, cr));
+        if (most == 0)
+            return "\n";
+
+        int earliest = int.MaxValue;
+        string newline = "\n";
+
+        if (crlf == most && firstCrlf < earliest)
+        {
+            earliest = firstCrlf;
+            newline = "\r\n";
+        }
+
+        if (lf == most && firstLf < earliest)
+        {
+            earliest = firstLf;
+            newline = "\n";
+        }
+
+        if (cr == most && firstCr < earliest)
+            newline = "\r";
+
+        return newline;
     }
 
     /// <summary>
