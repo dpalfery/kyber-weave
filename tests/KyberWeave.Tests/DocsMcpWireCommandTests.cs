@@ -529,13 +529,20 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
-    /// The manual snippet is written as-is, because Spectre markup would eat its brackets — so the
-    /// server name inside it reaches the terminal untouched unless the rendering path removes the
-    /// control characters first. A name carrying an escape sequence would otherwise colour, move or
-    /// clear the operator's terminal, and the name comes from <c>kyber-weave.yml</c>.
+    /// A server name carrying an escape sequence reaches the operator as the escaped TOML key the
+    /// declaration spells, and never as a control character the terminal would act on.
     /// </summary>
+    /// <remarks>
+    /// The two halves of this are one guarantee each, and neither may drift into the other. The
+    /// snippet is written raw because Spectre markup would eat its brackets, so the rendering path
+    /// is what stops a control character reaching the terminal. The key, though, is the declared
+    /// name — control character and all — escaped for TOML rather than stripped: the operator
+    /// pastes this snippet into a configuration file, and a name that had been stripped would not
+    /// match the declaration, so the check would go on reporting the server as unwired against the
+    /// entry the operator had just made by hand.
+    /// </remarks>
     [Fact]
-    public void AServerNameCarryingAnEscapeSequenceIsRemovedFromTheSnippet()
+    public void AServerNameCarryingAnEscapeSequenceReachesTheSnippetEscapedRatherThanRaw()
     {
         // The YAML carries the escape as its own \x1b escape, so the declaration on disk is
         // printable and the loader is what turns it into the control character.
@@ -552,7 +559,10 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.Equal(1, execution.Result);
         Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("[mcp_servers.evilserver]", execution.Output, StringComparison.Ordinal);
+        Assert.Contains(
+            "[mcp_servers.\"evil\\u001B[31mserver\"]",
+            execution.Output,
+            StringComparison.Ordinal);
     }
 
     /// <summary>
