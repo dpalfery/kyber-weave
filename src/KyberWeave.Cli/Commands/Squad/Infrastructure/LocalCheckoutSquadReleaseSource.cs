@@ -18,8 +18,10 @@ internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
     }
 
     /// <remarks>
-    /// The companion skills are resolved before the destination is created. A name clash throws from here, so a
-    /// failed extraction leaves nothing behind and reports nothing as extracted.
+    /// The companion skills are resolved before the destination is created. A refused companion (a name clash or a
+    /// symbolic link) throws before anything is written, so it leaves nothing behind and reports nothing as extracted.
+    /// A copy failure after that point can leave partial files in the destination. The caller owns that folder and
+    /// removes it on every path: <c>SquadLifecycleService</c> does.
     /// </remarks>
     public Task<SquadReleaseResult> DownloadAndExtractAsync(SquadReleaseRequest request,
         CancellationToken cancellationToken = default)
