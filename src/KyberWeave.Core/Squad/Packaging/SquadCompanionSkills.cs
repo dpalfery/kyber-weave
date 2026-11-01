@@ -39,7 +39,8 @@ public static class SquadCompanionSkills
     /// <remarks>
     /// A companion name that equals a Squad skill or a Squad agent throws <see cref="SquadSourceValidationException"/>.
     /// Failing closed keeps either side from silently shadowing the other: one skill would otherwise vanish from every
-    /// harness with no signal. The exception carries no partial list, so no caller can report a partial tree.
+    /// harness with no signal. A symbolic link at a companion skill's directory or <c>SKILL.md</c> throws for the same
+    /// reason. The exception carries no partial list, so no caller can report a partial tree.
     /// </remarks>
     public static IReadOnlyList<(string RelativePath, string SourcePath)> Collect(
         string squadSourceRoot,
@@ -77,15 +78,25 @@ public static class SquadCompanionSkills
     }
 
     /// <remarks>
-    /// Symbolic links are refused at both the directory and the <c>SKILL.md</c>, as the contained-file walk refuses
-    /// them, so a link cannot pull a skill in from outside the tree.
+    /// A symbolic link at the directory or at its <c>SKILL.md</c> throws rather than skipping the skill. A skipped skill
+    /// would release a tree without a skill the operator authored, and nothing would say so. A linked skill could also
+    /// pull content in from outside the tree.
     /// </remarks>
     private static bool IsSkillDirectory(string directory)
     {
+        string name = Path.GetFileName(directory);
+        if (new DirectoryInfo(directory).LinkTarget is not null)
+        {
+            throw SymbolicLink($".apm/skills/{name}");
+        }
+
         string skillFile = Path.Combine(directory, "SKILL.md");
-        return new DirectoryInfo(directory).LinkTarget is null
-               && new FileInfo(skillFile).LinkTarget is null
-               && File.Exists(skillFile);
+        if (new FileInfo(skillFile).LinkTarget is not null)
+        {
+            throw SymbolicLink($".apm/skills/{name}/SKILL.md");
+        }
+
+        return File.Exists(skillFile);
     }
 
     private static void RejectClash(string squadSourceRoot, string name)
@@ -106,5 +117,12 @@ public static class SquadCompanionSkills
         return new SquadSourceValidationException(
             $"The Kyber-Weave skill '{name}' at .apm/skills/{name} clashes with the {kind} at {squadPath}. " +
             $"Rename the .apm/skills/{name} directory; neither side may silently shadow the other.");
+    }
+
+    private static SquadSourceValidationException SymbolicLink(string path)
+    {
+        return new SquadSourceValidationException(
+            $"The Kyber-Weave skill path {path} is a symbolic link. Replace the link with a real copy of the file or " +
+            "folder; a link is refused rather than skipped, so no skill ships without its content.");
     }
 }

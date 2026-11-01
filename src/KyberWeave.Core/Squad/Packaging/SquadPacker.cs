@@ -31,17 +31,18 @@ public static class SquadPacker
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        Directory.CreateDirectory(outDirectory);
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-{version}.zip");
 
+        // Collect before touching the output folder, so a refused pack keeps the last good archive at this path.
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectApmEntries(sourcePath, companionSkillsRoot));
+        entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
+
+        Directory.CreateDirectory(outDirectory);
         if (File.Exists(archivePath))
         {
             File.Delete(archivePath);
         }
-
-        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectApmEntries(sourcePath, companionSkillsRoot));
-        entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
         return archivePath;
@@ -61,17 +62,18 @@ public static class SquadPacker
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        Directory.CreateDirectory(outDirectory);
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-plugin-{version}.zip");
 
+        // Collect before touching the output folder, so a refused pack keeps the last good archive at this path.
+        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
+            CollectPluginsEntries(sourcePath, version, companionSkillsRoot));
+        entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
+
+        Directory.CreateDirectory(outDirectory);
         if (File.Exists(archivePath))
         {
             File.Delete(archivePath);
         }
-
-        List<(string RelativePath, byte[] Content)> entries = FillResponsePreferences(
-            CollectPluginsEntries(sourcePath, version, companionSkillsRoot));
-        entries.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));
 
         WriteDeterministicZip(archivePath, entries);
         return archivePath;

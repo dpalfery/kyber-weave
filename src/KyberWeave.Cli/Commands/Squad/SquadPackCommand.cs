@@ -63,6 +63,10 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
 
         try
         {
+            // The real Squad tree is loaded before anything is composed or written. The loader's symbolic-link guards
+            // run only on the files it reads, so loading the staged copy alone would never see a link out of the source.
+            _ = SquadSourceLoader.Load(sourcePath);
+
             // The archives carry products/kyber-squad plus .apm/skills, so the composed tree is what gets loaded.
             // Loading only the Squad tree would let a bad companion skill through to install time.
             ValidateComposedTree(sourcePath, companionSkillsRoot, version);
@@ -113,10 +117,26 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
         }
         finally
         {
+            RemoveScratch(scratch);
+        }
+    }
+
+    /// <summary>
+    /// Removes the scratch folder without letting a cleanup failure replace the pack's own result or error. A folder
+    /// that could not be removed is reported as a warning, so it is not silently left behind.
+    /// </summary>
+    private static void RemoveScratch(string scratch)
+    {
+        try
+        {
             if (Directory.Exists(scratch))
             {
                 Directory.Delete(scratch, recursive: true);
             }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AnsiConsole.MarkupLine($"[yellow]kyber-weave squad: warning: could not remove scratch folder {Markup.Escape(scratch)}: {Markup.Escape(ex.Message)}[/]");
         }
     }
 
