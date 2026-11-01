@@ -70,18 +70,24 @@ internal static class McpConfigurationLink
     /// </summary>
     /// <param name="repositoryRoot">The repository whose boundary the path must stay inside.</param>
     /// <param name="absolutePath">The configuration file's absolute path.</param>
+    /// <remarks>
+    /// The parent reference is recognised as a whole path segment, never as a leading pair of
+    /// characters: <c>..foo</c> is the name of a file beside the repository's own, and treating it as
+    /// "outside the root" answered "no link" for a path that was one — the check, the repair and the
+    /// removal would all then read and write through it.
+    /// </remarks>
     public static McpLinkProbe Probe(string repositoryRoot, string absolutePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(absolutePath);
 
         string relative = Path.GetRelativePath(repositoryRoot, absolutePath);
-        if (Path.IsPathRooted(relative) || relative.StartsWith("..", StringComparison.Ordinal))
-            return default;
-
         string[] segments = relative.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
             StringSplitOptions.RemoveEmptyEntries);
+
+        if (Path.IsPathRooted(relative) || segments.Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)))
+            return default;
 
         string current = repositoryRoot;
         string traversed = string.Empty;
