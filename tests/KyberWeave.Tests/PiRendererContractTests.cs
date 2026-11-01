@@ -86,7 +86,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// <summary>The adapter's proxy tool, which reaches any configured MCP server by name.</summary>
     private const string PiMcpProxyToolEntry = "ext:pi-mcp-adapter/mcp";
 
-    /// <summary>The server ADR 0048 widens to every read-entitled agent.</summary>
+    /// <summary>The server ADR 0049 widens to every read-entitled agent.</summary>
     private const string KyberWeaveServer = "kyber-weave";
 
     /// <summary>
@@ -556,7 +556,7 @@ public sealed class PiRendererContractTests : IDisposable
 
     /// <summary>
     /// Every agent whose capability profile resolves and allows <c>filesystem.read</c> carries
-    /// the derived <c>kyber-weave</c> overlay, whichever agent declares it — ADR 0048's decision,
+    /// the derived <c>kyber-weave</c> overlay, whichever agent declares it — ADR 0049's decision,
     /// and the reason <c>conductor</c>'s position in the roster changes nothing about its
     /// entitlement. The hyphenated namespace spelling fails here deliberately: the adapter's
     /// deferred surface maps <c>kyber-weave</c> to <c>kyber_weave</c>, so an entry spelled
@@ -656,7 +656,7 @@ public sealed class PiRendererContractTests : IDisposable
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.True(
             SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Pi),
-            "ADR 0048 entitles the pure orchestrator to 'kyber-weave'.");
+            "ADR 0049 entitles the pure orchestrator to 'kyber-weave'.");
         Assert.DoesNotContain(result.Files, f => f.RelativePath == $".pi/agents/{conductor.Name}.md");
 
         SquadDeploymentFile skill = Assert.Single(
@@ -684,7 +684,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// the overlay is appended after the (here empty) capability-derived CSV rather than
     /// collapsing to <c>none</c> or leaking a built-in. The profile also denies
     /// <c>filesystem.read</c>, so this is the declared-overlay case for an agent outside the
-    /// ADR 0048 grant: what renders is what the canonical body declared, and nothing derived.
+    /// ADR 0049 grant: what renders is what the canonical body declared, and nothing derived.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools()
@@ -1540,7 +1540,7 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
 /// every built-in, and repoints one delegate-free agent at it with a <c>pi-tools</c>
 /// overlay, so <see cref="PiRendererContractTests.RenderAsync_Pi_OverlayOnlyAgentRendersOnlyOverlayTools"/>
 /// can observe an overlay-only <c>tools</c> CSV. The profile denies <c>filesystem.read</c> as
-/// well, which makes the agent a declared-overlay case outside the ADR 0048 grant. The agent
+/// well, which makes the agent a declared-overlay case outside the ADR 0049 grant. The agent
 /// keeps only capability-free Copilot tools (<c>vscode/toolSearch</c>,
 /// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
 /// cross-check.
@@ -1608,7 +1608,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
 /// Copies the real <c>products/kyber-squad</c> corpus, adds a capability profile denying
 /// every capability, and repoints one agent with no declared Pi overlay at it, so
 /// <see cref="PiRendererContractTests.RenderAsync_Pi_AgentsOutsideTheFileReadEntitlementRenderNoOverlay"/>
-/// can observe the <c>extensions: false</c> default for an agent outside the ADR 0048 grant.
+/// can observe the <c>extensions: false</c> default for an agent outside the ADR 0049 grant.
 /// The agent keeps only capability-free Copilot tools (<c>vscode/toolSearch</c>,
 /// <c>vscode/askQuestions</c>, <c>todo</c>) so the repointed profile still passes the Copilot
 /// cross-check, exactly as <see cref="PiOverlayOnlyFixture"/> does.

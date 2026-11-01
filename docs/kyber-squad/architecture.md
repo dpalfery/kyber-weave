@@ -19,7 +19,7 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0040-flat-agent-dir-discovery-guarded-resources
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
-  - adr/0048-universal-kyber-weave-mcp-grant
+  - adr/0049-universal-kyber-weave-mcp-grant
 sections:
   "#":
     keywords:
@@ -805,7 +805,7 @@ and validates.
   entitlement on every target that can express a per-agent grant: the `kyber-weave` server is
   granted to every agent whose capability profile resolves and allows `filesystem.read` — the
   pure orchestrator included — while `codegraph` and `context7` keep the original
-  non-orchestrator-only rule ([ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md)). The
+  non-orchestrator-only rule ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). The
   surviving carve-out is narrow on purpose: the orchestrator's work depends on
   `agent_coding_standards`, and does not depend on symbol lookup or third-party documentation
   lookup. `ClaudeRenderer` therefore grants `mcp__kyber-weave__*` to every read-entitled agent and
@@ -819,7 +819,7 @@ and validates.
   that profile withholds. It is accepted rather than denied for three reasons: every tool on that
   server is declared `ReadOnly`, the alternative is an orchestrator that cannot read the standard
   it is asked to enforce, and `process.execute: deny` and every other profile decision are
-  untouched. [ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md) records it in those
+  untouched. [ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md) records it in those
   terms, so a later reader does not have to rediscover that it is one. ZCode
   registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
@@ -868,7 +868,7 @@ and validates.
   server name's hyphen to an underscore, so the tool entries are `mcp__kyber_weave__…`; the
   hyphenated `mcp__kyber-weave__…` spelling registers against no Pi tool and is wrong, even though
   the same hyphen is correct on Claude, ZCode, Devin, and Command Code
-  ([ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md)). That form belongs to
+  ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). That form belongs to
   `pi-mcp-adapter` **6.0.0**, the release whose deferred-tool surface first registered tools as
   `mcp__<server>__<tool>`; **7.0.0** is the supported target, and an operator still on 5.x keeps
   the `mcp` proxy entry working while the enumerable per-tool names resolve to nothing. A primary
@@ -1486,7 +1486,7 @@ It emits a deterministic plan consisting of `Add`, `Remove`, and `Keep` actions:
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — Lock and receipt state in the user home, the project registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
-- [ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md) — the widened `kyber-weave` MCP grant, the narrowed carve-out, and the per-target grant forms
+- [ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md) — the widened `kyber-weave` MCP grant, the narrowed carve-out, and the per-target grant forms
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

@@ -28,7 +28,7 @@ whitelist. This remains the record for the entry-point decision; the whitelist c
 stated in [Kyber-Squad architecture §4](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
 and the [capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix).
 
-Amended again 2026-10-31, in place ([ADR 0048](0048-universal-kyber-weave-mcp-grant.md)): **the
+Amended again 2026-10-31, in place ([ADR 0049](0049-universal-kyber-weave-mcp-grant.md)): **the
 whitelist is no longer withheld from the pure orchestrator.** By owner directive the `kyber-weave`
 server is granted to every droid whose capability profile resolves and allows `filesystem.read`,
 `conductor` included, because `agent_coding_standards` is critical to quality for every agent. The
@@ -107,7 +107,7 @@ native droid primitive works for delegation, and only the user-facing selection 
 ## Related
 
 - [ADR 0019: Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering](0019-pi-native-subagents-and-primary-lowering.md)
-- [ADR 0048: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0048-universal-kyber-weave-mcp-grant.md)
+- [ADR 0049: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0049-universal-kyber-weave-mcp-grant.md)
 - [ADR 0025: Native Devin Agents, Pinned Models, and In-Process Delegation](0025-devin-native-agents-and-skill-lowering.md)
 - [Kyber-Squad requirements: degradation matrix](../kyber-squad/requirements.md)
 - [Kyber-Squad onboarding: Factory notes](../kyber-squad/onboarding.md)

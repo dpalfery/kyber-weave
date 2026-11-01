@@ -23,7 +23,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// (<see cref="GrantsUniversalMcpServers"/> and <see cref="GrantsOrchestratorExcludedMcpServers"/>).
 /// The rule answers a per-agent capability question the same way the record builders beside it
 /// do, and it was previously copied into each renderer byte-for-byte; one copy per target is
-/// what lets a target silently drift from the others. See ADR 0048.
+/// what lets a target silently drift from the others. See ADR 0049.
 /// </para>
 /// </remarks>
 internal static class CapabilityDegradations
@@ -51,7 +51,7 @@ internal static class CapabilityDegradations
     /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to,
     /// and the role that assigns work is the role deciding which standards apply to whom — so
     /// withholding it from the orchestrator withheld it from the one agent whose job depends on
-    /// it (ADR 0048). Every tool on that server is read-only, so the grant adds no write, no
+    /// it (ADR 0049). Every tool on that server is read-only, so the grant adds no write, no
     /// execution, and no network reach.
     /// <para>
     /// The profile is named rather than read off <see cref="SquadAgent.CapabilityProfile"/> because
@@ -66,7 +66,15 @@ internal static class CapabilityDegradations
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
         // An unresolvable profile allows nothing. Reading a missing profile as permission would
-        // turn a source error into silent widening, so the rule stays fail-closed.
+        // turn a source error into silent widening, so the rule stays fail-closed. The name can be
+        // absent rather than merely unknown — a hand-built or partially deserialised agent carries
+        // no profile id — and a dictionary lookup rejects a null key by throwing, which would turn
+        // the documented fail-closed answer into an exception on the caller's render path.
+        if (string.IsNullOrWhiteSpace(profileName))
+        {
+            return false;
+        }
+
         return capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile) &&
                profile.Permissions.TryGetValue(FileReadCapability, out SquadPermissionDecision decision) &&
                decision == SquadPermissionDecision.Allow;
@@ -80,7 +88,7 @@ internal static class CapabilityDegradations
     /// <remarks>
     /// <c>codegraph</c> and <c>context7</c> are the servers this predicate exists for. A role that
     /// only routes work has no use for code-graph or library lookups, and granting them would hand
-    /// it a research surface its own profile is not written for (ADR 0048 decision 2).
+    /// it a research surface its own profile is not written for (ADR 0049 decision 2).
     /// <para>
     /// The two rules differ only by the orchestrator clause, so they are two named predicates
     /// rather than one predicate with a boolean parameter: a call site then states which class of

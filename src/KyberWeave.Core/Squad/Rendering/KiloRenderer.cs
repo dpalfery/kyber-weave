@@ -43,7 +43,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// agent the universal MCP predicate entitles to this server emits that wildcard with
 /// <c>allow</c>, the pure orchestrator included, because the server carries
 /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
-/// (ADR 0048). An agent the predicate does not entitle emits no entry at all: for a headless
+/// (ADR 0049). An agent the predicate does not entitle emits no entry at all: for a headless
 /// subagent, absence of <c>allow</c> is the withholding, and a <c>deny</c> on a server the operator
 /// may never have configured would assert more than canonical source does — the capability lattice
 /// declares no MCP capability to derive one from.
@@ -163,7 +163,7 @@ public sealed class KiloRenderer : ISquadRenderer
         {
             // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
             // carries agent_coding_standards, and the role that assigns work is the role telling
-            // its delegates which standards they are held to (ADR 0048). The predicate is shared so
+            // its delegates which standards they are held to (ADR 0049). The predicate is shared so
             // this target cannot drift from the others' answer.
             bool grantsKyberWeaveMcp = CapabilityDegradations.GrantsUniversalMcpServers(
                 agent.CapabilityProfile,

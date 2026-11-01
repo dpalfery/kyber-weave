@@ -113,7 +113,7 @@ unverified and is not assumed.
 The overlay mechanism above is unchanged. What changes is who writes it for one server.
 `context7` stays exactly as the 2026-10-24 amendment records it: a hand-authored per-agent
 declaration in the canonical agent file, because a server whose use is a specific agent's research
-work is a decision that belongs to that agent's author ([ADR 0048](0048-universal-kyber-weave-mcp-grant.md)
+work is a decision that belongs to that agent's author ([ADR 0049](0049-universal-kyber-weave-mcp-grant.md)
 grants `kyber-weave` to every entitled agent and leaves this one agent-scoped). `kyber-weave` no
 longer needs that declaration: the renderer derives its overlay for every agent the shared
 entitlement predicate grants, so `research-agent` stops being the only Pi agent that reaches the
@@ -153,5 +153,5 @@ derives.
 
 - [Kyber-Squad architecture](../kyber-squad/architecture.md)
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md)
-- [ADR 0048: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0048-universal-kyber-weave-mcp-grant.md)
+- [ADR 0049: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0049-universal-kyber-weave-mcp-grant.md)
 - [Plan: Add Pi as a Kyber-Squad harness target](../archive/plans/2026-09-14-pi-harness-target.md) (archived)

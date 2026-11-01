@@ -16,7 +16,7 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
   - adr/0045-conductor-operator-channel-opt-in
-  - adr/0048-universal-kyber-weave-mcp-grant
+  - adr/0049-universal-kyber-weave-mcp-grant
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -276,7 +276,7 @@ allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to 
 whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
 names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
 `kyber-weave`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
-capability profile allows `filesystem.read`, `conductor` included ([ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md));
+capability profile allows `filesystem.read`, `conductor` included ([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md));
 `mcpServers: []` remains the fail-closed value for a droid whose profile grants no read
 entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
 omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
@@ -432,7 +432,7 @@ frontmatter, and `devin skills list` lists discovered skills. Confirm names ther
 Squad renders a per-agent MCP grant on every target whose harness accepts one, from a single rule:
 **the `kyber-weave` server is granted to every agent whose capability profile resolves and allows
 `filesystem.read`, the pure orchestrator `conductor` included**
-([ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md)). The `codegraph` and `context7`
+([ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). The `codegraph` and `context7`
 servers keep the original non-orchestrator rule. The predicate itself lives once, on
 `CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
 agreeing with the others.
@@ -492,7 +492,7 @@ targets an unwired server is simply an inert grant.
 subagents inherit every tool from the parent, including MCP tools, with no `tools` allow-list key;
 Codex custom agents inherit the parent's MCP servers and a custom agent file cannot override those
 settings; Warp supports MCP but Squad's Warp surface is role skills, which carry no tool scoping
-(citations in [ADR 0048](../adr/0048-universal-kyber-weave-mcp-grant.md)). The goal is met on all
+(citations in [ADR 0049](../adr/0049-universal-kyber-weave-mcp-grant.md)). The goal is met on all
 three the moment the server is wired, and a per-agent key written for them would be a claim the
 harness does not honour. Kilo, Antigravity, and Pi do have a per-agent surface, and all three
 wiring forms above were established against a pinned build — `@kilocode/cli` 7.8.18 for Kilo,
