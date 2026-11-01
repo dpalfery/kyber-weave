@@ -113,9 +113,14 @@ internal static class McpConfigurationLink
     /// Shared so the check, the repair and the removal tell the operator the same thing about the
     /// same file. A diagnostic that says only "inside your repository" is worse than none: what
     /// happened is that a file outside it was in reach.
+    /// <para>
+    /// The two names are compared ordinally. Case is part of a path on a case-sensitive filesystem,
+    /// where <c>Config.json</c> and <c>config.json</c> are two files, and an ignore-case comparison
+    /// would describe one while naming the other.
+    /// </para>
     /// </remarks>
     public static string Describe(string relativePath, string linkedSegment) =>
-        string.Equals(linkedSegment, relativePath, StringComparison.OrdinalIgnoreCase)
+        string.Equals(linkedSegment, relativePath, StringComparison.Ordinal)
             ? $"{relativePath} is a symbolic link"
             : $"{relativePath} lies behind the symbolic link '{linkedSegment}'";
 
