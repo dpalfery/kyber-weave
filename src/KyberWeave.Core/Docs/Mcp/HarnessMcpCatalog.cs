@@ -124,8 +124,12 @@ public sealed record HarnessMcpEntry
     /// <para>
     /// It is read from the canonical entry's environment block rather than declared beside it
     /// because that block <em>is</em> where the runbook's example spells its root; a second literal
-    /// would be a second thing to keep true. A row that carries no entry template substitutes
-    /// nothing, so the declaration's token is what it keeps.
+    /// would be a second thing to keep true. The value is the one held by the entry the registry
+    /// names for the repository root — not whichever value comes first: key order is the template
+    /// author's choice, and a block that lists another variable first would have made that
+    /// variable's value the spelling the writer substitutes and the check accepts. A harness whose
+    /// template carries no such entry substitutes nothing, so the declaration's own token is what it
+    /// keeps.
     /// </para>
     /// </remarks>
     public string RepositoryRootToken
@@ -153,20 +157,28 @@ public sealed record HarnessMcpEntry
                 if (!IsEnvironmentKey(property.Key) || property.Value is not JsonObject environment)
                     continue;
 
-                foreach (KeyValuePair<string, JsonNode?> setting in environment)
+                if (environment[RepositoryRootEnvironmentKey] is JsonValue value
+                    && value.TryGetValue(out string? text)
+                    && !string.IsNullOrEmpty(text))
                 {
-                    if (setting.Value is JsonValue value &&
-                        value.TryGetValue(out string? text) &&
-                        !string.IsNullOrEmpty(text))
-                    {
-                        return text;
-                    }
+                    return text;
                 }
             }
 
             return JsonServerSplice.RepositoryRootToken;
         }
     }
+
+    /// <summary>
+    /// The environment key the repository-root spelling travels in: the registry's own name for the
+    /// repository root, and the key every catalog template holds its root under.
+    /// </summary>
+    /// <remarks>
+    /// Spelled here rather than referenced from <c>KyberWeave.Mcp.RepositoryRootResolver</c> because
+    /// Core does not reference the host that resolves a root from it; the variable's name is the
+    /// shared contract, and both sides spell it.
+    /// </remarks>
+    private const string RepositoryRootEnvironmentKey = "KYBER_WEAVE_REPO_ROOT";
 
     /// <summary>
     /// Whether a key of an entry body is the block a harness spells its repository root in:
