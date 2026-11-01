@@ -247,6 +247,203 @@ public sealed class RepositoryDoctorTests : IDisposable
     }
 
     /// <summary>
+    /// A home directory variable set to the empty string does not crash the run: it simply cannot match the
+    /// repository root, so the home refusal does not apply and the run proceeds to the checks.
+    /// </summary>
+    /// <remarks>
+    /// <c>HOME</c> can be set to an empty value in CI and sandboxed shells, and <c>Path.GetFullPath("")</c> throws.
+    /// A blank value is not a home directory, so the refusal must be skipped rather than raised as an exception that
+    /// escapes before any check runs.
+    /// </remarks>
+    [Fact]
+    public void Doctor_BlankHome_DoesNotCrashAndDoesNotRefuse()
+    {
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root,
+            DoctorMode.Check,
+            DoctorHarness.Options("kyber-weave-mcp-absent"),
+            executor,
+            _ => string.Empty);
+
+        Assert.NotEqual(2, report.ExitCode);
+        Assert.NotEmpty(report.Checks);
+    }
+
+    /// <summary>
+    /// A <c>git</c> child that exceeds its budget is a refusal with exit 2, not an exception out of the doctor. The
+    /// executor surfaces a timeout as <see cref="TimeoutException"/>, the production contract of <c>ProcessExecutor</c>.
+    /// </summary>
+    [Fact]
+    public void Doctor_GitTimesOut_Exits2WithReason()
+    {
+        ScriptedProcessExecutor executor = new(startInfo =>
+            startInfo.FileName == "git"
+                ? throw new TimeoutException("git exceeded its timeout.")
+                : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root, DoctorMode.Check, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
+
+        Assert.Equal(2, report.ExitCode);
+        DoctorCheck root = DoctorHarness.CheckNamed(report, "repository.root");
+        Assert.False(root.Passed);
+        Assert.Contains("git", root.Reason!, StringComparison.Ordinal);
+        Assert.DoesNotContain(executor.Calls, call => call.FileName == "codegraph");
+    }
+
+    /// <summary>
+    /// A binary that exists but exits non-zero for <c>--version</c> is a broken binary, not a healthy one and not a
+    /// missing one: the check fails, the run exits 1, and nothing is provisioned. Only exit 3 asks the user to install.
+    /// </summary>
+    [Fact]
+    public void Doctor_CodegraphVersionExitsNonZero_FailsBinaryCheck()
+    {
+        Directory.CreateDirectory(IndexDirectory);
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("--version", StringComparer.Ordinal)
+                ? new ProcessResult(2, string.Empty, "error: unknown option '--version'")
+                : DoctorHarness.Ok());
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root, DoctorMode.Provision, DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)), executor, _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "codegraph.binary").Passed);
+        DoctorHarness.AssertNoCall(executor, "index");
+    }
+
+    /// <summary>
+    /// A process start that fails with an I/O error while probing the binary fails the binary check rather than
+    /// escaping. The start can fail for reasons other than "not found", which is the only case that needs approval.
+    /// </summary>
+    [Fact]
+    public void Doctor_CodegraphVersionThrowsIo_FailsBinaryCheck()
+    {
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            _ => throw new IOException("The pipe has been ended."));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        Assert.False(DoctorHarness.CheckNamed(report, "codegraph.binary").Passed);
+    }
+
+    /// <summary>
+    /// A child that cannot start between the probe and the provisioning run fails <c>codegraph.index</c> with exit 1.
+    /// The binary was on PATH a moment ago, so this is a broken environment, not a missing prerequisite.
+    /// </summary>
+    [Fact]
+    public void Doctor_ProvisionChildFailsToStart_Exits1WithCheck()
+    {
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(
+            Root,
+            arguments => arguments.Contains("--version", StringComparer.Ordinal)
+                ? DoctorHarness.Ok()
+                : throw new IOException("The child process could not be started."));
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
+
+        Assert.Equal(1, report.ExitCode);
+        DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
+        Assert.False(index.Passed);
+        Assert.False(string.IsNullOrWhiteSpace(index.Fix));
+    }
+
+    /// <summary>
+    /// A lock file that cannot be opened for a reason other than contention fails <c>codegraph.index</c> with exit 1
+    /// and a reason naming the lock, rather than escaping as an access error.
+    /// </summary>
+    /// <remarks>
+    /// The lock directory is made read-only, so creating the lock file is denied. The test skips when the process can
+    /// still write there — a root user ignores the mode — and restores the mode before the temp directory is removed.
+    /// </remarks>
+    [Fact]
+    public void Doctor_LockFileUnopenable_Exits1WithReason()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("POSIX directory modes decide this case; Windows has no equivalent read-only directory bit.");
+        }
+
+        Directory.CreateDirectory(IndexDirectory);
+        TempDirectory lockDirectory = new();
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(lockDirectory.Path, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            }
+            string probe = Path.Combine(lockDirectory.Path, "probe");
+            try
+            {
+                File.Create(probe).Dispose();
+                File.Delete(probe);
+                Assert.Skip("This process can write to a read-only directory (running as root), so the lock cannot fail.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Expected: the directory denies creation, which is the case under test.
+            }
+
+            ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
+            DoctorReport report = RepositoryDoctor.Run(
+                Root,
+                DoctorMode.Provision,
+                DoctorHarness.Options("kyber-weave-mcp-absent"),
+                executor,
+                _ => null,
+                lockDirectory.Path);
+
+            Assert.Equal(1, report.ExitCode);
+            DoctorCheck index = DoctorHarness.CheckNamed(report, "codegraph.index");
+            Assert.False(index.Passed);
+            Assert.Contains("lock", index.Reason!, StringComparison.OrdinalIgnoreCase);
+            DoctorHarness.AssertNoCall(executor, "index");
+            DoctorHarness.AssertNoCall(executor, "init");
+        }
+        finally
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    lockDirectory.Path,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            lockDirectory.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A path argument that is not a usable path is a client-input refusal with exit 2, not an exception. The
+    /// 0/1/2/3 exit contract is what callers branch on, so an unusable argument must stay inside it.
+    /// </summary>
+    [Fact]
+    public void Doctor_BlankPath_Exits2()
+    {
+        ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
+        DoctorCommand command = new()
+        {
+            Executor = executor,
+            IsTerminal = () => false,
+            ReadEnvironment = _ => null,
+            McpExecutable = "kyber-weave-mcp-absent",
+        };
+
+        int exitCode = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, new DoctorSettings { Path = string.Empty }, CancellationToken.None)).Result;
+
+        Assert.Equal(2, exitCode);
+        Assert.Empty(executor.Calls);
+    }
+
+    /// <summary>
     /// An unwritable <c>.codegraph/</c> fails with exit 1 and a remedy, and is never deleted. The directory is made
     /// read-only, so the test restores its mode before the temp directory is removed.
     /// </summary>

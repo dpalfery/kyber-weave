@@ -1,3 +1,4 @@
+using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
@@ -28,7 +29,34 @@ public static class DocsEnabled
             return false;
 
         string docsRoot = DeclaredDocsRoot(config) ?? DefaultDocsRoot;
-        return Directory.Exists(Path.Combine(root, docsRoot));
+        return TryResolveContained(root, docsRoot, out string directory) && Directory.Exists(directory);
+    }
+
+    /// <summary>
+    ///     Resolves the declared root against the repository, refusing one that leaves it.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="Path.Combine(string, string)"/> returns its second argument outright when that argument is
+    ///     rooted, and <c>..</c> walks upward, so an unchecked declaration makes this predicate answer "enabled" for
+    ///     a directory the repository does not govern. The corpus loader already refuses those values through
+    ///     <see cref="DocsRootPath.Normalize"/>; this reads the same key, so it applies the same rule. A declaration
+    ///     that cannot be a repository-relative path is not governed docs.
+    /// </remarks>
+    private static bool TryResolveContained(string root, string docsRoot, out string directory)
+    {
+        directory = string.Empty;
+        string relative;
+        try
+        {
+            relative = DocsRootPath.Normalize(docsRoot, "ontology.docs-root");
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        directory = relative.Length == 0 ? root : Path.Combine(root, relative);
+        return true;
     }
 
     /// <summary>

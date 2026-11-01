@@ -95,8 +95,15 @@ public static class CodeGraphProvisioner
         reason = null;
         try
         {
-            executor.Run(StartInfo(options.CodeGraphExecutable, null, "--version"), string.Empty);
-            return true;
+            ProcessResult result = executor.Run(StartInfo(options.CodeGraphExecutable, null, "--version"), string.Empty);
+            if (result.ExitCode == 0)
+                return true;
+
+            // The file exists and runs, but cannot report its version. That is a broken binary, not an absent one:
+            // installing it is not the remedy, so this is an ordinary failure and not the exit-3 approval path.
+            string detail = FirstLine(result.StandardError) ?? FirstLine(result.StandardOutput) ?? "no output";
+            reason = $"'{options.CodeGraphExecutable} --version' exited {result.ExitCode}: {detail}";
+            return false;
         }
         catch (Win32Exception)
         {
@@ -107,6 +114,13 @@ public static class CodeGraphProvisioner
         catch (TimeoutException)
         {
             reason = $"'{options.CodeGraphExecutable} --version' did not finish";
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            // Starting a process can fail for reasons other than "not found", and the doctor reports rather than
+            // throws. Only the Win32Exception above means the user has to decide whether to install it.
+            reason = $"'{options.CodeGraphExecutable}' could not be run to report its version";
             return false;
         }
     }
@@ -134,13 +148,20 @@ public static class CodeGraphProvisioner
         IProcessExecutor executor,
         string lockDirectory)
     {
-        using FileStream? lockFile = AcquireLock(LockPathFor(root, lockDirectory), options.IndexTimeout);
+        using FileStream? lockFile = AcquireLock(
+            LockPathFor(root, lockDirectory), options.IndexTimeout, out string? lockFailure);
         if (lockFile is null)
-            return new DoctorCheck(
-                "codegraph.index",
-                false,
-                "codegraph.index busy: another doctor is provisioning this repository",
-                "wait for the other kyber-weave doctor run to finish, then re-run: kyber-weave doctor --provision");
+        {
+            // Contention and an unusable lock path are different problems with different remedies: one is a wait,
+            // the other is a filesystem the user has to look at. Neither may escape as an access exception.
+            return lockFailure is { } failure
+                ? new DoctorCheck("codegraph.index", false, failure, "kyber-weave doctor --provision")
+                : new DoctorCheck(
+                    "codegraph.index",
+                    false,
+                    "codegraph.index busy: another doctor is provisioning this repository",
+                    "wait for the other kyber-weave doctor run to finish, then re-run: kyber-weave doctor --provision");
+        }
 
         if (present && !IsWritable(indexDirectory))
             return Unwritable();
@@ -178,6 +199,16 @@ public static class CodeGraphProvisioner
                 $"codegraph {verb} exceeded its {options.IndexTimeout.TotalSeconds:0} second limit and was stopped",
                 $"kyber-weave doctor --provision --index-timeout {Math.Max(1, (int)options.IndexTimeout.TotalSeconds) * 2}");
         }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            // The binary resolved a moment ago in DetectBinary, so a start failure here is a race with the
+            // environment rather than a missing prerequisite. Report it as a failed check.
+            return new DoctorCheck(
+                "codegraph.index",
+                false,
+                $"codegraph {verb} could not be run",
+                $"codegraph {verb} .");
+        }
     }
 
     private static DoctorCheck Unwritable() => new(
@@ -190,8 +221,13 @@ public static class CodeGraphProvisioner
     ///     Takes the lock by opening the file with no sharing, retrying until the deadline. The file is never
     ///     removed here: removing a lock another run holds would let a third run in beside it.
     /// </summary>
-    private static FileStream? AcquireLock(string path, TimeSpan wait)
+    /// <returns>
+    ///     The held stream, or <c>null</c>. <paramref name="failure"/> is null when another run holds the lock, and
+    ///     names the reason when the lock path itself cannot be used.
+    /// </returns>
+    private static FileStream? AcquireLock(string path, TimeSpan wait, out string? failure)
     {
+        failure = null;
         DateTime deadline = DateTime.UtcNow + wait;
         while (true)
         {
@@ -199,12 +235,24 @@ public static class CodeGraphProvisioner
             {
                 return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
+            catch (DirectoryNotFoundException)
+            {
+                // A missing lock directory is not contention, and retrying it until the deadline would only delay
+                // the same answer.
+                failure = $"the index lock directory for '{path}' does not exist";
+                return null;
+            }
             catch (IOException) when (DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(LockPollInterval);
             }
             catch (IOException)
             {
+                return null;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException or ArgumentException)
+            {
+                failure = $"the index lock '{path}' could not be opened";
                 return null;
             }
         }

@@ -57,6 +57,36 @@ public sealed class DocsEnabledTests : IDisposable
         Assert.True(enabled);
     }
 
+    /// <summary>
+    /// A docs root that walks upwards out of the repository is not governed docs. <c>..</c> resolves to the parent
+    /// directory, which exists, so an unchecked predicate answers "enabled" for a directory this repository does not
+    /// govern — the same escape <c>DocsRootPath.Normalize</c> already refuses when the config is loaded.
+    /// </summary>
+    [Fact]
+    public void DocsEnabled_DocsRootEscapesRepository_IsFalse()
+    {
+        Assert.True(Directory.Exists(Path.Combine(Root, "..")), "The parent directory must exist for this test to mean anything.");
+
+        bool enabled = DocsEnabled.IsEnabled(
+            Root,
+            ConfigReader("ontology:\n  docs-root: ..\n"));
+
+        Assert.False(enabled);
+    }
+
+    /// <summary>An absolute docs root is refused for the same reason: <c>Path.Combine</c> would return it outright.</summary>
+    [Fact]
+    public void DocsEnabled_AbsoluteDocsRoot_IsFalse()
+    {
+        string absolute = Path.GetFullPath(Root);
+
+        bool enabled = DocsEnabled.IsEnabled(
+            Root,
+            ConfigReader($"ontology:\n  docs-root: '{absolute}'\n"));
+
+        Assert.False(enabled);
+    }
+
     /// <summary>A non-default root that does not exist is not governed docs, even when <c>docs/</c> exists.</summary>
     [Fact]
     public void DocsEnabled_OntologyDocsRootMissing_FallsBackToNothing()

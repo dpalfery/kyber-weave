@@ -46,17 +46,10 @@ public static class RepositoryDoctor
                 notRepository,
                 "run kyber-weave doctor from inside a git repository"));
 
-        // HOME is the Unix answer; USERPROFILE is the Windows one. A case-differing path is the same
-        // directory on Windows and on a case-insensitive macOS volume, so the comparison follows the platform.
-        StringComparison pathComparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        // HOME is the Unix answer; USERPROFILE is the Windows one. An environment variable can also be set to an
+        // empty value, and an empty path makes GetFullPath throw; a blank home simply cannot be the repository.
         string? home = environment("HOME") ?? environment("USERPROFILE");
-        if (home is not null
-            && string.Equals(
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot)),
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(home)),
-                pathComparison))
+        if (!string.IsNullOrWhiteSpace(home) && SamePath(repositoryRoot, home))
             return Refused(repositoryRoot, mode, new DoctorCheck(
                 "repository.root",
                 false,
@@ -105,6 +98,11 @@ public static class RepositoryDoctor
             string top = result.StandardOutput.Trim();
             return top.Length == 0 ? (null, $"'{root}' is not inside a git repository") : (top, null);
         }
+        catch (TimeoutException)
+        {
+            // The executor bounds every child, so a hung git is an ordinary outcome the doctor reports.
+            return (null, "git did not finish while finding the repository root");
+        }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
         {
             return (null, "git could not be run to find the repository root");
@@ -114,9 +112,26 @@ public static class RepositoryDoctor
     private static DoctorReport Refused(string root, DoctorMode mode, DoctorCheck refusal) =>
         new(root, mode, 2, [refusal]);
 
-    private static bool SamePath(string left, string right) =>
-        string.Equals(
-            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-            StringComparison.Ordinal);
+    /// <summary>
+    ///     Whether two paths name the same directory. A value that cannot be canonicalised is not that directory.
+    /// </summary>
+    /// <remarks>
+    ///     One side is an environment variable, which is arbitrary text, and <c>Path.GetFullPath</c> throws on an
+    ///     empty string, a NUL, or a too-long path. A home directory that is not a path is not the repository root.
+    ///     Path identity follows the platform: Windows and a case-insensitive macOS volume fold case.
+    /// </remarks>
+    private static bool SamePath(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 }
