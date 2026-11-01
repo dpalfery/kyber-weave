@@ -958,7 +958,26 @@ public static class McpWiringInspector
     private static Severity SeverityFor(RequiredMcpServer server) =>
         server.Level == McpRequirementLevel.Required ? Severity.Warning : Severity.Info;
 
-    private static string Describe(IReadOnlyList<string> command) => string.Join(' ', command);
+    /// <summary>
+    /// A launch command as the report shows it: one token per word, quoted where a bare join would
+    /// make two tokens read as one.
+    /// </summary>
+    /// <remarks>
+    /// A bare space join renders <c>["my-tool", "a b"]</c> and <c>["my-tool", "a", "b"]</c> the same,
+    /// and those two launch differently: an operator copying the hint into a command/args split
+    /// would get the launch the report could not distinguish from the other one. A token needs no
+    /// quoting unless it is empty or holds whitespace, which leaves the common case —
+    /// <c>kyber-weave-mcp --repo-root .</c> — exactly as readable as it was.
+    /// </remarks>
+    private static string Describe(IReadOnlyList<string> command) => string.Join(' ', command.Select(Quote));
+
+    /// <summary>One token of a command, quoted when a space would split it into two.</summary>
+    private static string Quote(string token) =>
+        token.Length > 0 && !token.Any(char.IsWhiteSpace)
+            ? token
+            : "\"" + token
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
     private static string RelativeTo(string root, string path) =>
         Path.GetRelativePath(root, path).Replace('\\', '/');
