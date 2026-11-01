@@ -175,8 +175,7 @@ public sealed class DevinRendererContractTests : IDisposable
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        IReadOnlyList<string> mcpTools = QualifiedMcpTools(source);
-        Assert.NotEmpty(mcpTools);
+        Assert.NotEmpty(SquadMcpGrantProjection.DeclaredServers(source));
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
@@ -204,10 +203,11 @@ public sealed class DevinRendererContractTests : IDisposable
 
             SquadCapabilityProfile profile =
                 source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
+            IReadOnlyList<string> expectedMcpTools = QualifiedMcpTools(source, agent);
             IReadOnlyList<string> expectedTools =
             [
                 .. ComputeExpectedBuiltInTools(profile),
-                .. ExpectsMcp(agent, profile) ? mcpTools : []
+                .. expectedMcpTools
             ];
             Assert.Equal(expectedTools, RequireSequence(frontmatter, "allowed-tools", agent.Name));
 
@@ -430,7 +430,7 @@ public sealed class DevinRendererContractTests : IDisposable
 
                 if (IsAllowed(profile, "network.publish") ||
                     IsAllowed(profile, "delegate") ||
-                    !ExpectsMcp(agent, profile))
+                    SquadMcpGrantProjection.WithheldServers(source, agent, SquadTarget.Devin).Count > 0)
                 {
                     expectedCodes.Add("permission-not-expressible");
                 }
@@ -676,26 +676,17 @@ public sealed class DevinRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Mirrors the rule every MCP-granting renderer shares: any role allowed to read the
-    /// filesystem receives the declared servers' tools, except the pure orchestrator.
+    /// The MCP tool names a rendered subagent is entitled to: <c>kyber-weave</c> on the file-read
+    /// grant alone, <c>codegraph</c> and <c>context7</c> minus the pure orchestrator.
     /// </summary>
-    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile)
+    /// <remarks>
+    /// Read from <see cref="SquadMcpGrantProjection"/> rather than restated here, so the Devin
+    /// suite, the other renderer suites, and the cross-target parity guard all compare against one
+    /// statement of the rule instead of six copies that can drift.
+    /// </remarks>
+    private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source, SquadAgent agent)
     {
-        return !string.Equals(agent.DevinCapabilityProfile ?? agent.CapabilityProfile, "orchestrator",
-                   StringComparison.Ordinal) &&
-               IsAllowed(profile, "filesystem.read");
-    }
-
-    private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source)
-    {
-        return
-        [
-            .. source.Toolchain.RequiredMcpTools
-                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .SelectMany(entry => entry.Value
-                    .OrderBy(tool => tool, StringComparer.Ordinal)
-                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
-        ];
+        return SquadMcpGrantProjection.EntitledRosterToolNames(source, agent, SquadTarget.Devin);
     }
 
     private static bool IsAllowed(SquadCapabilityProfile profile, string capability)

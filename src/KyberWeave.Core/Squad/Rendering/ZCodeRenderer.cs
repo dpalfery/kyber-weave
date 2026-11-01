@@ -123,10 +123,28 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// and naming a server there adds a second, redundant failure mode.
 /// </para>
 /// <para>
-/// A pure orchestrator gets no MCP, matching <see cref="ClaudeRenderer"/>'s carve-out: a role
-/// that only routes work has no use for documentation or code-graph lookups, and granting
-/// them would hand it a research surface its own capability profile denies. It records
-/// <c>permission-not-expressible</c> for the withheld servers so the omission is visible.
+/// <b>Two MCP entitlements, not one.</b> <c>kyber-weave</c> is granted on the file-read grant
+/// alone — every profile that resolves and allows <c>filesystem.read</c>, the pure orchestrator
+/// included. That server carries <c>agent_coding_standards</c>, the tool that hands an agent the
+/// standards it is held to, and the role that assigns work is the role deciding which standards
+/// apply to whom; withholding it withheld it from the one agent whose job depends on it
+/// (ADR 0050). <c>codegraph</c> and <c>context7</c> keep the carve-out the other targets apply:
+/// a role that only routes work has no use for code-graph or library lookups, and granting them
+/// would hand it a research surface its own profile denies.
+/// </para>
+/// <para>
+/// A principal outside an entitlement records <c>permission-not-expressible</c> naming exactly
+/// the servers it is withheld from, so the omission is visible and matches the render. For the
+/// orchestrator that is the two kept-excluded servers, not all three.
+/// </para>
+/// <para>
+/// <b>The widened grant is a hard connected-server requirement.</b>
+/// <c>validateSubagentMcpRequirements</c> treats every enumerated name as a requirement, so
+/// <c>kyber-weave</c> becomes one for every ZCode principal, the orchestrator included:
+/// <c>squad doctor</c> fails an install without that server connected instead of it degrading to
+/// a missing tool. That is intended — the grant is only useful if the server is there — and it is
+/// recorded in ADR 0050 and the requirements row that names it. Every tool on the server is
+/// read-only, so nothing about <c>process.execute: deny</c> or any other profile decision moves.
 /// </para>
 /// <para>
 /// <b>Delegation cannot be scoped.</b> <c>toolNameFromSpec</c> truncates every specifier at
@@ -176,12 +194,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private const string AgentsDirectory = ".zcode/agents";
     private const string SkillsDirectory = ".zcode/skills";
     private const string CommandsDirectory = ".zcode/commands";
-
-    /// <summary>
-    /// The capability profile whose holder routes work rather than researching it, and which
-    /// <see cref="ClaudeRenderer"/> also excludes from the standard MCP grant.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
 
     /// <summary>
     /// ZCode drops a skill whose description exceeds this length outright rather than
@@ -272,9 +284,15 @@ public sealed class ZCodeRenderer : ISquadRenderer
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
         // Read from canonical source rather than a renderer-local list, so a tool renamed
-        // upstream is a source edit, and so the doctor check reads the same roster.
-        IReadOnlyList<string> qualifiedMcpToolNames = QualifiedMcpToolNames(source);
-        IReadOnlyList<string> mcpServerNames = DeclaredMcpServerNames(source);
+        // upstream is a source edit, and so the doctor check reads the same roster. The split
+        // into entitlement classes, and the order each class is emitted in, live in
+        // CapabilityDegradations: the partition is the one thing two targets must not each decide.
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames =
+            CapabilityDegradations.OrchestratorExcludedMcpToolNames(source.Toolchain.RequiredMcpTools);
+        IReadOnlyList<string> universalMcpToolNames =
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
+        IReadOnlyList<string> mcpServerNames =
+            CapabilityDegradations.DeclaredMcpServerNames(source.Toolchain.RequiredMcpTools);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -288,7 +306,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
                     source,
                     request.Scope,
                     skillIdentities,
-                    qualifiedMcpToolNames,
+                    orchestratorExcludedMcpToolNames,
+                    universalMcpToolNames,
                     mcpServerNames,
                     files,
                     degradations);
@@ -301,7 +320,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 request.Scope,
                 skillIdentities,
                 capabilityVocabulary,
-                qualifiedMcpToolNames,
+                orchestratorExcludedMcpToolNames,
+                universalMcpToolNames,
                 mcpServerNames,
                 files,
                 degradations);
@@ -339,7 +359,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadSource source,
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
-        IReadOnlyList<string> qualifiedMcpToolNames,
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -359,7 +380,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         IReadOnlyList<string> tools = ResolveTools(
-            agent, source.CapabilityProfiles.Profiles, qualifiedMcpToolNames);
+            agent,
+            source.CapabilityProfiles.Profiles,
+            orchestratorExcludedMcpToolNames,
+            universalMcpToolNames);
 
         string agentsDirectory = ResolvePrefixedDirectory(AgentsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -380,7 +404,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
         IReadOnlyList<string> capabilityVocabulary,
-        IReadOnlyList<string> qualifiedMcpToolNames,
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -448,7 +473,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         IReadOnlyList<string> tools = ResolveTools(
-            agent, source.CapabilityProfiles.Profiles, qualifiedMcpToolNames);
+            agent,
+            source.CapabilityProfiles.Profiles,
+            orchestratorExcludedMcpToolNames,
+            universalMcpToolNames);
 
         string commandsDirectory = ResolvePrefixedDirectory(CommandsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -771,7 +799,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> qualifiedMcpToolNames)
+        IReadOnlyList<string> orchestratorExcludedMcpToolNames,
+        IReadOnlyList<string> universalMcpToolNames)
     {
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
 
@@ -791,12 +820,16 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         // MCP names append after the built-ins rather than joining ToolOrder: they come from
-        // source, so they cannot be part of a fixed renderer-local order, and they are already
-        // emitted in a stable server-then-tool order by the caller.
+        // source, so they cannot be part of a fixed renderer-local order, and each group is
+        // already emitted in a stable server-then-tool order by CapabilityDegradations.
         IReadOnlyList<string> resolved =
         [
             .. ToolOrder.Where(granted.Contains),
-            .. GrantsMcp(agent, capabilityProfiles) ? qualifiedMcpToolNames : []
+            .. CapabilityDegradations.ResolveMcpToolNames(
+                agent.CapabilityProfile,
+                capabilityProfiles,
+                orchestratorExcludedMcpToolNames,
+                universalMcpToolNames)
         ];
         if (resolved.Count == 0)
         {
@@ -847,9 +880,13 @@ public sealed class ZCodeRenderer : ISquadRenderer
 
         List<string> notExpressible = [];
 
-        if (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles))
+        IReadOnlyList<string> withheldServerNames =
+            CapabilityDegradations.WithheldMcpServerNames(
+                agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
+        if (withheldServerNames.Count > 0)
         {
-            notExpressible.Add(DescribeWithheldMcp(agent, mcpServerNames));
+            notExpressible.Add(CapabilityDegradations.DescribeWithheldMcp(
+                agent.CapabilityProfile, withheldServerNames, capabilityProfiles));
         }
 
         if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publish) &&
@@ -940,6 +977,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
 
+        IReadOnlyList<string> withheldServerNames =
+            CapabilityDegradations.WithheldMcpServerNames(
+                agent.CapabilityProfile, capabilityProfiles, mcpServerNames);
+
         yield return new SquadDegradationRecord(
             TargetToken,
             agent.Name,
@@ -952,61 +993,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
             "flat allow-list evaluated against the session the command runs in, not a " +
             $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
             "instruction-only." +
-            (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles)
-                ? " " + DescribeWithheldMcp(agent, mcpServerNames)
+            (withheldServerNames.Count > 0
+                ? " " + CapabilityDegradations.DescribeWithheldMcp(
+                    agent.CapabilityProfile, withheldServerNames, capabilityProfiles)
                 : string.Empty));
-    }
-
-    /// <summary>
-    /// The fully qualified MCP tool names declared by <c>toolchain.yml</c>, in a stable order,
-    /// ready to append to a tool allow-list ZCode matches by exact name.
-    /// </summary>
-    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source)
-    {
-        return
-        [
-            .. source.Toolchain.RequiredMcpTools
-                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                .SelectMany(entry => entry.Value
-                    .OrderBy(tool => tool, StringComparer.Ordinal)
-                    .Select(tool => $"mcp__{entry.Key}__{tool}"))
-        ];
-    }
-
-    /// <summary>
-    /// Why a principal did not receive the declared MCP tools. Only a profile outside the
-    /// standard grant reaches this: everything else is granted by concrete tool name.
-    /// </summary>
-    private static string DescribeWithheldMcp(
-        SquadAgent agent,
-        IReadOnlyList<string> mcpServerNames)
-    {
-        return $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
-               $"profile '{agent.CapabilityProfile}' does not allow 'filesystem.read', or is the pure " +
-               "orchestrator profile that routes work rather than researching it. A role that only " +
-               "routes has no use for documentation or code-graph lookups, and granting them would " +
-               "hand it a research surface its own profile denies.";
-    }
-
-    /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
-    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
-    {
-        return [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
-    }
-
-    /// <summary>
-    /// Whether a principal is entitled to the declared MCP tools, mirroring
-    /// <see cref="ClaudeRenderer"/>'s rule: any agent allowed to read the filesystem, except a
-    /// pure orchestrator, which routes work rather than researching it.
-    /// </summary>
-    private static bool GrantsMcp(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        return !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-               capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
-               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-               decision == SquadPermissionDecision.Allow;
     }
 
     private static string CollapseToSingleLine(string value)

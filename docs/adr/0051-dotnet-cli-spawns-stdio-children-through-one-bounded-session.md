@@ -1,5 +1,5 @@
 ---
-id: adr/0049-dotnet-cli-spawns-stdio-children-through-one-bounded-session
+id: adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
 title: "The .NET CLI Spawns Long-Lived Stdio Children Only Through One Bounded Session"
 doc-type: adr
 status: current
@@ -13,7 +13,7 @@ code-refs:
   - CodeGraphProvisioner
 ---
 
-# ADR 0049: The .NET CLI Spawns Long-Lived Stdio Children Only Through One Bounded Session
+# ADR 0051: The .NET CLI Spawns Long-Lived Stdio Children Only Through One Bounded Session
 
 ## Status
 

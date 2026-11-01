@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -16,6 +16,8 @@ decided-by:
   - adr/0037-squad-state-in-user-home
   - adr/0044-squad-lock-v2-and-instance-deployment-scope
   - adr/0045-conductor-operator-channel-opt-in
+  - adr/0049-kyber-squad-ships-the-kyber-weave-skills
+  - adr/0050-universal-kyber-weave-mcp-grant
 code-refs:
   - SquadDeploymentPlan
   - SquadStateMigration
@@ -28,8 +30,9 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
-**29 canonical skills**, with transactional recovery and state governance. Thirteen harness targets
-are declared; all thirteen are currently implemented and registered.
+**28 canonical skills**, plus the six Kyber-Weave skills it ships beside them, with transactional
+recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
+implemented and registered.
 
 ---
 
@@ -230,6 +233,17 @@ the verified `pi-tools` `ext:` entries, which render as `extensions: [pi-mcp-ada
 those `ext:` tool names appended to its capability-derived `tools` CSV. That agent requires
 the `pi-mcp-adapter` extension in the deployment harness. `network.publish` still has no
 built-in Pi tool and still records `permission-not-expressible`.
+
+**`kyber-weave` needs no such declaration.** The renderer derives that half of the overlay for
+every agent entitled to `kyber-weave`, so the emitted file carries `extensions: [pi-mcp-adapter]`,
+the proxy entry `ext:pi-mcp-adapter/mcp`, and one
+`ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool, merged with whatever the
+agent declares. The namespace maps the server's hyphen to an underscore — that is
+`pi-mcp-adapter`'s rule, and it is why the entries are `mcp__kyber_weave__…` and not
+`mcp__kyber-weave__…`. It arrived in adapter 6.0.0 and 7.0.0 is the supported target; on 5.x the
+proxy entry still reaches the server and only the per-tool names resolve to nothing. A primary
+agent lowered to a skill carries neither key, so `conductor` reaches the server through its
+session rather than through the file.
 The next `squad update` / `squad install --target pi` re-renders receipt-managed agent files
 with the overlay wiring and overwrites them, superseding any manual patch of those files.
 
@@ -258,7 +272,24 @@ body; the two root wrappers `product-owner` and `bug-crusher` reuse their canoni
 ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). Invoke a primary agent
 through its skill; the droid at `.factory/droids/<name>.md` is kept for
 Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
-allow-list and `mcpServers: []` do not apply to it.
+allow-list, its `mcpServers` whitelist, and the `ask` narrowing do not apply to it.
+
+**MCP servers:** a Task-dispatched droid sees MCP servers only through the `mcpServers`
+whitelist carried in its own droid file. `FactoryRenderer` derives that list from the server
+names the squad itself declares in the `mcp.json` beside its canonical source — today exactly
+`kyber-weave`, launched as `kyber-weave-mcp --repo-root .` — and grants it to every droid whose
+capability profile allows `filesystem.read`, `conductor` included ([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md));
+`mcpServers: []` remains the fail-closed value for a droid whose profile grants no read
+entitlement and for a squad that declares no servers. The key is never omitted, because Factory reads an
+omitted `mcpServers` as "inherit the session-parent's servers", which is the widening the empty
+list exists to prevent. App-level configuration is the other half of the same wiring and it is
+yours, not Squad's: Squad writes no Factory settings file, does not create, adopt, or check
+`.factory/mcp.json` or `~/.factory/mcp.json`, and `squad doctor` verifies neither. A droid needs
+both halves — Squad's whitelist names a server, and your file launches it — so wire the file
+first, then confirm the droid names the server. The [MCP runbook](../docgraph/mcp-runbook.md#factory)
+carries the exact entry, and its troubleshooting row covers a dispatched droid that lists no MCP
+tools. [MCP access across harnesses](#mcp-access-across-harnesses) carries the rule and the other
+targets' forms.
 
 **Override:** when a project droid or skill shares a name with a personal one, the project
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
@@ -397,6 +428,99 @@ every skill appears under two names.
 
 **Inspect:** `devin doctor` reports which custom profiles loaded and flags malformed
 frontmatter, and `devin skills list` lists discovered skills. Confirm names there after install.
+
+## MCP access across harnesses
+
+Squad renders a per-agent MCP grant on every target whose harness accepts one, from a single rule:
+**the `kyber-weave` server is granted to every agent whose capability profile resolves and allows
+`filesystem.read`, the pure orchestrator `conductor` included**
+([ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The `codegraph` and `context7`
+servers keep the original non-orchestrator rule. The predicate itself lives once, on
+`CapabilityDegradations`, and a cross-renderer parity guard fails when one target's grant stops
+agreeing with the others.
+
+**Two targets cannot express it for the `conductor` at all.** On Devin and Pi the conductor is a
+lowered skill, and a skill on either harness carries no grant vehicle — Devin's skills take no
+rendered `allowed-tools`, Pi's take no `tools` or `extensions`. So the orchestrator's reach there is
+whatever its session already has, and that is a structural boundary rather than a narrower grant.
+The parity guard pins both targets by name, so a change to either shows up as a failing assertion
+instead of a quiet discrepancy.
+
+**Why the orchestrator is included.** One `kyber-weave` tool is `agent_coding_standards`, which
+hands an agent the coding standard it must follow. The conductor writes no code but dispatches,
+reviews digests, and answers owner questions about what a specialist was required to do, and the
+standard settles those questions. The earlier carve-out excluded the orchestrator from every
+server on the reasoning that a routing role has no use for lookups; that reasoning still holds for
+a symbol lookup and a third-party documentation lookup, and the owner overturned it for the
+standards tool.
+
+**The orchestrator's reach is a recorded widening, not an oversight.** `conductor`'s profile denies
+`filesystem.search`, so the eight documentation tools reach text that decision withholds. It is
+accepted because every tool on that server is read-only, and `process.execute: deny` and every
+other profile decision are untouched. Do not "fix" it back: change the ADR first.
+
+| Harness | How the grant is expressed | `conductor` |
+|---|---|---|
+| Claude | Tool-level wildcards in the agent's `tools` allow-list | `mcp__kyber-weave__*`, and neither `mcp__codegraph__*` nor `mcp__context7__*` |
+| ZCode | Enumerated `mcp__<server>__<tool>` names; no wildcard is expanded | The eight `kyber-weave` names, and neither of the other two servers |
+| Devin | The same enumerated names in `allowed-tools`, on the **subagent path only** | **Nothing — structurally inexpressible.** `conductor` lowers to a skill, and a Devin skill carries no rendered `allowed-tools`, so it reaches `kyber-weave` only through the session it runs in |
+| OpenCode | The server-scoped permission key `kyber-weave_*` | Granted |
+| Command Code | Enumerated `mcp__` names in the agent's `tools`; the parent-MCP withholding sentence appears only when nothing is granted | The eight `kyber-weave` names |
+| Factory | Per-droid server-level `mcpServers` whitelist; the key is never omitted | `mcpServers: [kyber-weave]` |
+| Copilot | The agent's own `copilot-tools` frontmatter entry `kyber-weave/*` — canonical source, not renderer output | That one entry |
+| Pi | Renderer-derived overlay on every entitled **subagent**: `extensions: [pi-mcp-adapter]`, the proxy entry `ext:pi-mcp-adapter/mcp`, then one `ext:pi-mcp-adapter/mcp__kyber_weave__<tool>` entry per roster tool | Granted on the agent file. `conductor` lowers to a skill, and a skill's frontmatter carries no `tools` or `extensions`, so it reaches the server only if its session has it configured — its degradation record says so |
+| Kilo | The agent frontmatter `permission` map entry `kyber-weave_*: allow`; an agent outside the entitlement emits no `permission` key at all | Granted: `permission: {kyber-weave_*: allow}`. This is an approval, not isolation: `allow` removes the ask prompt, and a headless subagent's ask would fail closed |
+| Antigravity | The agent frontmatter `mcpServers` array entry `{name, command, args}`, with `command`/`args` read from the squad's own `mcp.json`; no entry when the squad declares none | Granted: `mcpServers: [{name: kyber-weave, command: kyber-weave-mcp, args: [--repo-root, .]}]` |
+| Cursor, Codex, Warp | No per-agent key: MCP reach is inherited from the session | Reaches `kyber-weave` as soon as you wire the server |
+
+**Wiring, not granting, is your half.** Every row above decides whether an agent is *allowed* to
+call a server. Nothing in Squad launches one: the operator declares the server in the client's own
+configuration file, and the [MCP runbook](../docgraph/mcp-runbook.md#wiring-it-up) carries the
+exact entry for each client — including the ones whose key is not `mcpServers` and whose file is
+not `.mcp.json`. Wire the file first, then confirm the agent's rendered grant; a grant with no
+server to launch resolves to nothing.
+
+**What Kilo, Antigravity, and Pi each need from you beyond the rendered grant.** **Kilo** takes the
+server in `kilo.jsonc`'s `mcp` key — an agent file cannot add one. **Antigravity** takes the
+workspace `.agents/mcp_config.json`, and additionally its own `mcp(server/*)` policy patterns
+decide whether a call is approved, since MCP tools default to Ask there; keep the same
+`--repo-root` in that entry as the rendered one, because a same-named global server definition can
+take precedence over the per-agent declaration. **Pi** takes a project `.mcp.json` (or
+`~/.config/mcp/mcp.json`, `~/.agents/mcp.json`, or the adapter's own agent-directory `mcp.json`),
+and a project-scoped server needs a trust approval on first use. On Pi, the overlay also needs
+`pi-mcp-adapter` **6.0.0** or later: the `mcp__<server>__<tool>` naming the entries use arrived in
+that release, 7.0.0 is the supported target, and on 5.x the `mcp` proxy entry still works while the
+enumerable per-tool names do not.
+
+**ZCode is the one hard prerequisite.** ZCode treats every name in `toolchain.yml`'s
+`required-mcp-tools` as a required connected server, so a ZCode install that does not declare
+`kyber-weave` is a `squad doctor` failure for every agent, `conductor` included. On the other
+targets an unwired server is simply an inert grant.
+
+**Three harnesses have no per-agent surface, and that is the finding rather than a gap.** Cursor
+subagents inherit every tool from the parent, including MCP tools, with no `tools` allow-list key;
+Codex custom agents inherit the parent's MCP servers and a custom agent file cannot override those
+settings; Warp supports MCP but Squad's Warp surface is role skills, which carry no tool scoping
+(citations in [ADR 0050](../adr/0050-universal-kyber-weave-mcp-grant.md)). The goal is met on all
+three the moment the server is wired, and a per-agent key written for them would be a claim the
+harness does not honour. Kilo, Antigravity, and Pi do have a per-agent surface, and all three
+wiring forms above were established against a pinned build — `@kilocode/cli` 7.8.18 for Kilo,
+`agy` 1.4.12 for Antigravity, and `pi-mcp-adapter` 7.0.0 for Pi's tool naming — rather than
+assumed. On Pi the naming is the one place the spelling differs per harness: the namespace maps the
+server's hyphen to an underscore, so the entries read `mcp__kyber_weave__…`, and a
+`mcp__kyber-weave__…` entry on Pi names no registered tool.
+
+**If you author an agent,** do not add a per-agent MCP declaration for `kyber-weave`: the rule
+derives it from the capability profile, and a hand-written copy is a second source that will go
+stale. Two edits do exist, and both are declared rather than derived:
+
+- **Factory's server list** comes from `products/kyber-squad/mcp.json`, and naming a server there
+  is not enough — `SquadToolchainRosterGuardTests` fails until the same name is a
+  `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun the squad's own
+  roster contract.
+- **Copilot's per-agent entry** lives in the agent's own `copilot-tools` list. That is where
+  `conductor` gains `kyber-weave/*`, and the visible review diff for that grant is a frontmatter
+  line on the primary agent, not a renderer change.
 
 ---
 
@@ -635,6 +759,52 @@ It reports these:
 - **Retained in-repo state**: a registered project, still live, that holds `.kyber-weave/squad.lock.yml` or
   `.kyber-weave/squad.receipt.json` from an earlier release. Squad retained these files, and they should be
   removed from version control. A stale project is not warned about this way.
+
+---
+
+## Kyber-Weave skills in a Squad deployment
+
+Kyber-Squad deploys six Kyber-Weave skills beside its 28 Squad skills: `kyber-docs-authoring`,
+`kyber-docs-integrity-review`, `kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`,
+`kyber-weave-model-profile`, and `spec-conductor`. They come from `.apm/skills/` in the repository.
+Every directory there that holds a `SKILL.md` ships, so a skill added later ships with the next
+release. The six follow the Squad lifecycle at the same scope and on the same targets as the Squad
+skills:
+
+- **Global scope.** `kyber-weave squad install --global` writes them into each selected harness's
+  user-level skills folder. For Claude Code that is `~/.claude/skills/kyber-docs-authoring/SKILL.md`,
+  beside `~/.claude/skills/task-gate/SKILL.md`.
+- **Project scope.** `kyber-weave squad install` writes them into the project's harness folders the same way.
+- **Receipt.** They are recorded in the Squad receipt. `squad status`, `squad update`, and
+  `squad uninstall` treat them as Squad files.
+
+They arrive with a release that carries them. Run `kyber-weave update`, or
+`kyber-weave squad update --global` for a global deployment, to move to that release. A
+`kyber-weave` run from a repository checkout gets them from the checkout at once.
+
+### Where Kyber-Squad is deployed, skip the docs-init skill
+
+`kyber-weave docs init` also deploys the Kyber-Weave skills, through APM, into the project. Where
+Kyber-Squad is already deployed, those skills would arrive twice, so run `docs init` with `--no-skill`:
+
+```bash
+kyber-weave docs init . --no-skill
+```
+
+A project that uses Squad at project scope and also runs `docs init` shares some folders. For the
+Antigravity target, both write `.agents/skills/<name>`. Neither writer refuses the other's file by
+design. If `docs init` writes a path that Squad owns, `kyber-weave squad status` reports the file as
+modified. If Squad meets a file that `docs init` wrote and Squad does not own, `squad install` or
+`squad update` refuses and writes nothing. A harness that reads both user and project folders may
+list a skill name twice when Squad is global and `docs init` targets that harness in the project. The
+impact of that is low.
+
+### An unmanaged copy blocks the update
+
+If you copied a Kyber-Weave skill by hand to a path that Squad now deploys to, for example
+`~/.claude/skills/kyber-docs-authoring`, `kyber-weave squad update --global` refuses with
+`UnmanagedCollision` and writes nothing. Remove the copy and run the update again. If the copy's
+bytes match the release, `kyber-weave squad install --global --adopt` claims it instead.
 
 ---
 
@@ -1097,9 +1267,22 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 29 canonical
-`SKILL.md` files plus the 87 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 24 canonical
+`squad pack` also composes the Kyber-Weave skills from `.apm/skills/` into both archives, beside the
+Squad skills. Before it writes anything, it loads the real Squad tree and then the composed tree: it
+packs the APM archive into a scratch folder, extracts it, and loads it. The scratch folder is removed
+on every path. Pack exits 1 and writes no archive when a companion skill's name equals a Squad skill
+or agent, ignoring letter case (the message names both paths), or when a symbolic link sits at `.apm`,
+`.apm/skills`, a companion skill's directory, its `SKILL.md`, or any file or folder inside that skill.
+A refused pack leaves the archive from the last successful pack in place, and so does a failed write:
+each archive is written to a temporary file beside its target and replaces it only when complete. Known
+gap, not introduced here: a symbolic link inside `products/kyber-squad/` that points outside the repository
+is still packed when no loaded file references it. See the
+[architecture section on canonical source](architecture.md#1-canonical-source-normalization-and-ir-construction).
+
+Both archive formats recurse through each skill directory. They contain all 28 canonical `SKILL.md`
+files plus the 88 retained supplemental resources, together with the six Kyber-Weave skills from
+`.apm/skills/` and their three resource files: 34 skills and 125 skill-tree files in each archive.
+Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
 beside its principal — 149 files on Copilot today — with authored relative links resolving inside
@@ -1135,6 +1318,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
+- [ADR 0050](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

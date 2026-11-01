@@ -4,7 +4,7 @@ title: Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-31
 ---
 
 # ADR 0019: Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering
@@ -108,8 +108,50 @@ always emitted; and `process.execute: deny` stays withheld for read-only roles. 
 loader behaviour for a missing `pi-mcp-adapter` extension on a deployment machine is
 unverified and is not assumed.
 
+## Amendment 2026-10-31: the `kyber-weave` overlay is renderer-derived
+
+The overlay mechanism above is unchanged. What changes is who writes it for one server.
+`context7` stays exactly as the 2026-10-24 amendment records it: a hand-authored per-agent
+declaration in the canonical agent file, because a server whose use is a specific agent's research
+work is a decision that belongs to that agent's author ([ADR 0050](0050-universal-kyber-weave-mcp-grant.md)
+grants `kyber-weave` to every entitled agent and leaves this one agent-scoped). `kyber-weave` no
+longer needs that declaration: the renderer derives its overlay for every agent the shared
+entitlement predicate grants, so `research-agent` stops being the only Pi agent that reaches the
+documentation server and no canonical body has to carry an entry that the rule already supplies.
+
+The spelling the earlier draft left open is settled: the derived entries are
+`ext:pi-mcp-adapter/mcp__kyber_weave__<tool>`. `pi-mcp-adapter` names a deferred tool
+`mcp__<namespace>__<tool>`, mapping the hyphen in the server name to an underscore before any
+other character is mapped, so `kyber-weave` is reached as `kyber_weave`; the
+`mcp__kyber-weave__<tool>` form this amendment's first draft recorded names no registered tool and
+is wrong. The 2026-10-24 entries could not have revealed the mapping, because `context7` carries no
+hyphen. The naming was established by executing the adapter's published naming code over the
+squad's roster and corroborated by a live MCP `tools/list`, where the adapter's own `doctor`
+reported `kyber-weave: ok, 8 tools`. It arrived in `pi-mcp-adapter` **6.0.0** — the release whose
+changelog first records tools becoming a deferred tool named `mcp__<server>__<tool>` — and
+**7.0.0** is the supported target. An operator on 5.x has no deferred surface at all and would name
+these tools `kyber-weave_<tool>`, so there the `mcp` proxy entry carries the server and only the
+enumerable per-tool names are lost.
+
+What remains an owner probe is the **in-session listing**: that a live subagent session shows these
+names and answers a call is not something a renderer test establishes. The spelling itself is no
+longer inferred, and the 2026-10-24 caution still governs the rest of the overlay — a `tools:`
+entry the Pi loader refuses is a `tools-error`, which is why every derived entry keeps the `ext:`
+form and no MCP tool name is ever written bare.
+
+A primary agent lowered to `.pi/skills/<name>/SKILL.md` carries no `tools` or `extensions` key, so
+the derived grant is structurally inexpressible on that form. Its degradation record names
+`kyber-weave` and says the entry point reaches the server only through the session it runs in —
+the same class of exception as Devin's lowered primary agent.
+
+The renderer's own vocabulary is untouched: `tools` is still always emitted, `extensions: false`
+is still emitted unconditionally for an agent without an overlay, and the bare-name rejection that
+keeps the overlay from smuggling a built-in past the lattice still applies to whatever the renderer
+derives.
+
 ## Related
 
 - [Kyber-Squad architecture](../kyber-squad/architecture.md)
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md)
+- [ADR 0050: The kyber-weave MCP Server Reaches Every Entitled Agent, the Conductor Included](0050-universal-kyber-weave-mcp-grant.md)
 - [Plan: Add Pi as a Kyber-Squad harness target](../archive/plans/2026-09-14-pi-harness-target.md) (archived)

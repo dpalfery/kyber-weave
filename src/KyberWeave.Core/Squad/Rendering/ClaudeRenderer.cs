@@ -34,9 +34,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Base ungoverned tools on every agent: <c>TodoWrite</c>, <c>Skill</c>. MCP server-level
-/// wildcards (<c>mcp__codegraph__*</c>, <c>mcp__kyber-weave__*</c>, <c>mcp__context7__*</c>)
-/// are granted when <c>filesystem.read</c> is allowed unless the agent is a pure
-/// orchestrator (profile id <c>orchestrator</c>). When <c>delegate: allow</c> and
+/// wildcards are granted by two rules, not one (ADR 0050). <c>mcp__kyber-weave__*</c> is
+/// granted whenever <c>filesystem.read</c> is allowed, the pure orchestrator (profile id
+/// <c>orchestrator</c>) included: that server carries <c>agent_coding_standards</c>, and the
+/// role that assigns work is the role deciding which standards apply to whom.
+/// <c>mcp__codegraph__*</c> and <c>mcp__context7__*</c> keep the orchestrator carve-out,
+/// because a role that only routes work has no use for code-graph or library lookups. When
+/// <c>delegate: allow</c> and
 /// <see cref="SquadAgent.DelegatesTo"/> is non-empty, the allow-list emits
 /// <c>Agent(name1, name2, …)</c>; official docs state the parentheses roster is ignored
 /// when the definition runs as a nested subagent, so that limitation is recorded as
@@ -75,10 +79,18 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
     private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
-    private static readonly string[] StandardMcpTools =
+    /// <summary>
+    /// The MCP wildcard every read-entitled subagent carries, the pure orchestrator included.
+    /// </summary>
+    private const string UniversalMcpTool = "mcp__kyber-weave__*";
+
+    /// <summary>
+    /// The MCP wildcards that keep the pure-orchestrator carve-out: a role that only routes work
+    /// has no use for code-graph or library lookups.
+    /// </summary>
+    private static readonly string[] OrchestratorExcludedMcpTools =
     [
         "mcp__codegraph__*",
-        "mcp__kyber-weave__*",
         "mcp__context7__*"
     ];
 
@@ -447,16 +459,20 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 granted.Add(agentToolEntry);
             }
 
-            bool isPureOrchestrator = string.Equals(
-                agent.CapabilityProfile,
-                "orchestrator",
-                StringComparison.Ordinal);
-
-            if (!isPureOrchestrator &&
-                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow)
+            // Two rules, not one (ADR 0050): kyber-weave carries agent_coding_standards, so it
+            // reaches every read-entitled agent — the pure orchestrator included, because the
+            // role that assigns work is the role deciding which standards apply to whom. The
+            // other two servers keep the orchestrator carve-out.
+            if (CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))
             {
-                foreach (string mcpTool in StandardMcpTools)
+                granted.Add(UniversalMcpTool);
+            }
+
+            if (CapabilityDegradations.GrantsOrchestratorExcludedMcpServers(
+                    agent.CapabilityProfile,
+                    capabilityProfiles))
+            {
+                foreach (string mcpTool in OrchestratorExcludedMcpTools)
                 {
                     granted.Add(mcpTool);
                 }
@@ -555,17 +571,31 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 string.Join(", ", agent.DelegatesTo) + ".");
         }
 
-        bool isPureOrchestrator = string.Equals(
-            agent.CapabilityProfile,
-            "orchestrator",
-            StringComparison.Ordinal);
-        if (isPureOrchestrator && isSkillMode)
+        if (string.Equals(
+                agent.CapabilityProfile,
+                CapabilityDegradations.PureOrchestratorProfile,
+                StringComparison.Ordinal) &&
+            isSkillMode)
         {
-            // The MCP withholding in ResolveTools is only applied to the subagent allow-list;
-            // the entry-point skill inherits session MCP servers, which may differ.
+            // Name the set the subagent file actually withholds. kyber-weave follows the same
+            // read entitlement as the other two, so an orchestrator whose profile denies
+            // filesystem.read (or resolves to no profile) loses it as well; a note that always
+            // carried the two carve-out servers would describe a grant the subagent file does not
+            // make. The narrowing applies to the allow-list only — the entry-point skill inherits
+            // session MCP servers, which may differ.
+            bool grantsKyberWeave = CapabilityDegradations.GrantsUniversalMcpServers(
+                agent.CapabilityProfile,
+                capabilityProfiles);
+            string withheld = grantsKyberWeave
+                ? "no mcp__codegraph__*, mcp__context7__*"
+                : "no mcp__codegraph__*, mcp__context7__*, mcp__kyber-weave__*";
+            string reason = grantsKyberWeave
+                ? "because a role that only routes work has no use for code-graph or library lookups"
+                : "because this agent's capability profile does not allow filesystem.read";
+
             notExpressibleDetails.Add(
-                "The pure-orchestrator MCP withholding (no mcp__codegraph__*, mcp__kyber-weave__*, " +
-                "mcp__context7__*) applies to the subagent file only, not the entry-point skill.");
+                $"The pure-orchestrator MCP withholding ({withheld}, {reason}) applies to the " +
+                "subagent file only, not the entry-point skill.");
         }
 
         if (isSkillMode)

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-31
 ---
 
 # Installing Kyber-Weave
@@ -497,7 +497,7 @@ argument so the two do not collide.
 Two renames ship in this release: `kyber-weave-docs` is now `kyber-docs-authoring`,
 `doc-corpus-integrity-review` is now `kyber-docs-integrity-review`, and the Squad
 `second-brain` skill moved to Kyber-Docs as `kyber-docs-onboarding-and-assessment`
-(deployed by `docs init`). The old copies keep working, so the upgrade is cleanup,
+(deployed by `docs init`, and by `kyber-weave squad install` and `squad update`). The old copies keep working, so the upgrade is cleanup,
 not repair — but remove them so the stale copy is not the one an agent finds.
 
 APM prunes a retired skill only when a lockfile records the install. That
@@ -573,8 +573,9 @@ installed on your machine behind your back.
 
 ### APM
 
-The Agent Package Manager distributes the `kyber-docs-authoring` authoring skill, resolves
-the harness layout for each runtime, and powers target compilation for `kyber-weave squad`.
+The Agent Package Manager distributes the Kyber-Weave skills in `.apm/skills/` (among them the
+`kyber-docs-authoring` authoring skill), resolves the harness layout for each runtime, and powers
+target compilation for `kyber-weave squad`.
 Install it once:
 
 ```bash
@@ -585,7 +586,9 @@ Windows PowerShell: `irm https://aka.ms/apm-windows | iex`. Homebrew:
 `brew install microsoft/apm/apm`. Verify with `apm --version`.
 
 If you would rather not install it for docs, run `kyber-weave docs init . --no-skill` — the
-scaffolding is the part that matters, and the skill can be added at any time.
+scaffolding is the part that matters, and the skill can be added at any time. Where Kyber-Squad is
+deployed, use `--no-skill` as well: `kyber-weave squad install` and `squad update` already deploy the
+same skills.
 
 ### CodeGraph
 

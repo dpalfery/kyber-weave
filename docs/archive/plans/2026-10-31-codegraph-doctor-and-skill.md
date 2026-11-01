@@ -198,7 +198,7 @@ Documentation-impact is `extends-component`; impact components are `DocGraph` an
 | D4 | [skills](../../context-hygiene/skills.md#codegraph) registers the shipped location. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D5 | [command surface](../../cli-command-surface.md#doctor--repository-documentation-tooling) records why `doctor` is a top-level verb beside `squad doctor`. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D6 | [command surface, exit codes](../../cli-command-surface.md#exit-codes) carries the `0/1/2/3` contract. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
-| D7 | [ADR 0049](../../adr/0049-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) records the bounded-session rule. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
+| D7 | [ADR 0051](../../adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) records the bounded-session rule. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D8 | [the MCP runbook](../../docgraph/mcp-runbook.md#the-live-check-doctor---check) names the call and the root match. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D9 | [the MCP runbook](../../docgraph/mcp-runbook.md#the-live-check-doctor---check) records the `FAIL`/`fix:` output contract and the check ids. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D10 | [docgraph architecture](../../docgraph/architecture.md#provisioning-the-index) records root resolution, the lock, and never-delete. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
@@ -210,7 +210,7 @@ Documentation-impact is `extends-component`; impact components are `DocGraph` an
 | D16 | [kyber-squad architecture](../../kyber-squad/architecture.md#run-start-documentation-check) records the `run-start doctor:` line. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D17 | Documentation waiver: the step lives in two instruction surfaces outside the governed docs tree (`products/kyber-squad/agents/conductor.md` and `products/kyber-squad/skills/bug-crusher/SKILL.md`), and `SquadCanonicalContentTests` pins it there. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D18 | Documentation waiver: the pins are executable assertions in `SquadCanonicalContentTests`, which is the durable record for a content invariant. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
-| D19 | [ADR 0049](../../adr/0049-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) is the record. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
+| D19 | [ADR 0051](../../adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md) is the record. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D20 | Documentation waiver: the review verdict is provenance, not an invariant; it is reported on the pull request. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D21 | [the MCP runbook](../../docgraph/mcp-runbook.md#the-live-check-doctor---check) states that no install command is named, and why. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | D22 | Documentation waiver: the config key is pinned by `DocsEnabledTests` and recorded in this row; no prose artefact repeats it. | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
@@ -219,7 +219,7 @@ Documentation-impact is `extends-component`; impact components are `DocGraph` an
 | H2 | [command surface, `docs init` row](../../cli-command-surface.md#command-reference) and [the MCP runbook](../../docgraph/mcp-runbook.md#the-live-check-doctor---check). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | H3 | [the MCP runbook](../../docgraph/mcp-runbook.md#the-live-check-doctor---check). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | H4 | [docgraph architecture](../../docgraph/architecture.md#provisioning-the-index). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
-| H5 | [ADR 0049](../../adr/0049-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
+| H5 | [ADR 0051](../../adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | H6 | [kyber-squad architecture](../../kyber-squad/architecture.md#run-start-documentation-check). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 | H7 | [skills](../../context-hygiene/skills.md#codegraph). | extends-component | DocGraph, KyberSquad | 2026-10-31 | archived |
 
