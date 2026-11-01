@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-10-30
+last-reviewed: 2026-11-01
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -563,10 +563,17 @@ processes for this user: `node`, `nodejs`, `bun`, `deno`, `tsx`), and it fails t
 watchdog trip is a failed gate: the gate's exit code is the watchdog's 86 (cap) or 87 (leftover),
 or 124 when a `--timeout` is set. The council reports it as any other non-zero exit.
 
+The `test` gate also takes the machine-wide `dotnet-test` slot (`--slot dotnet-test --slot-wait 900`). Each
+conductor's final council runs one full `dotnet test`, and several councils on one machine used to overlap; with the
+slot they queue, and the queued gate prints who holds it. The gate's `timeout-seconds` is 1800, the 900-second wait plus
+the 900 seconds the run had before, because the runner starts that clock when it starts the gate and cannot tell a queued
+gate from a hung one. A wait that runs out is a failed gate with exit 88. No other gate takes a slot, so builds and
+format checks never queue.
+
 `ReviewGateProcGuardWiringTests` pins both declarations, so a change to the argv has to change the test with it. The
 exit-code meanings and the local commands are in the
-[KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`
-and `--timeout`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep
+[KyberDash runbook](../dash/runbook.md#running-tests-safely). The guard's flags are `--max-node`, `--max-tree`,
+`--timeout` and, for the slot, `--slot`, `--slot-count`, `--slot-wait` and `--task`; the runbook also covers `--tty`, the standard-input behaviour, and the rule to keep
 `--timeout` at or below 540 when a run comes from an agent tool. Changing a `review.gates` entry in
 `.kyber-weave/kyber-weave.yml` is a reserved-path change; it is reviewed as one.
 

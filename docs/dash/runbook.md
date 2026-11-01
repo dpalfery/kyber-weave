@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-31
+last-reviewed: 2026-11-01
 decided-by:
   - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
   - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
@@ -1373,6 +1373,10 @@ layers now guard against a repeat:
 - **Isolated e2e boots.** The self-booting Playwright specs use `dash/e2e/boot-dashboard.ts`, which
   injects inert spawners and keeps state under the test's temp root.
 
+A fourth, separate concern is load rather than runaway processes: several harnesses on one machine
+can each start a full `dotnet test` run at the same moment. Full suite runs take turns through a
+machine-wide test slot ([Taking turns: the test slot](#taking-turns-the-test-slot)).
+
 **Rule: every local test, gate and e2e command runs through the watchdog, from the repository root.**
 Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
 
@@ -1393,6 +1397,10 @@ the safety limit.
 | `--max-tree M` | 64 | Descendants of the wrapped command reach M |
 | `--timeout S` | none | S seconds of wall clock pass |
 | `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
+| `--slot NAME` | none | Takes a machine-wide slot before the command starts and queues while it is held. For full test suites only. |
+| `--slot-count N` | 1 | How many runs may hold the slot at once. Needs `--slot`. |
+| `--slot-wait S` | 540 | Queues at most S seconds, then exits 88. 0 means do not queue. Needs `--slot`. |
+| `--task LABEL` | checkout name and command | What other callers see while this run holds the slot. Needs `--slot`. |
 
 The watchdog refuses to run with an empty root, a root that is not a directory, or `/` (exit 2).
 
@@ -1416,11 +1424,58 @@ Exit codes:
 |---|---|---|
 | 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test`, and say in the PR why the default was too low. |
 | 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
+| 88 | `--slot-wait` elapsed and every slot stayed held. The command never started. | The message names the holder (pid, task, how long it has held the slot). Wait and rerun. Do not delete the lock by hand: a lock whose process is gone is recovered by the next caller. |
 | 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
 | any other | The wrapped command's own exit code. | Normal failure. |
 
 The watchdog (`scripts/proc-guard.sh`) is POSIX-only and runs on macOS and Linux. Windows has no
 watchdog cap; the ledger's Windows mode is described under the process ledger below.
+
+#### Taking turns: the test slot
+
+One full `dotnet test` run (about 2655 cases) saturates every core of an 18-core Mac. Three or four
+agent harnesses on one machine, each with a few worker threads, can start several at once. The runs
+then slow each other down, the classes that are bound by the file system slow further as a shared
+`$TMPDIR` fills, and `SquadDeploymentStateTests`, whose lease test has a fixed 5-second wait, flakes
+on the loaded machine; the rerun adds the load again. A full run therefore takes a slot first:
+
+```bash
+scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
+```
+
+- **Opt-in, and for full suites only.** A run without `--slot` never queues. Builds, format checks,
+  the dash tests and partial runs (`-class`, `-method`, the fast tier) go through the watchdog
+  without one. The declared `test` gate in `.kyber-weave/kyber-weave.yml` and the
+  `scripts/fast-loop.sh --regenerate` timing run pass it; `scripts/fast-loop.sh --full` reaches it
+  through the `test` gate.
+- **One slot by default.** One run already uses every core, so a second one concurrently only
+  makes both slower. `--slot-count N` raises it for a machine that has cores to spare. The count is
+  a flag only, like the caps.
+- **The slot is a lock directory.** `~/.cache/kyber-weave/test-slots/<name>.<n>.lock`, created with
+  an atomic `mkdir` because macOS has no `flock`. Its `holder` file records the guard's pid and
+  process start time, the task label, the checkout and the command. The directory is per user.
+- **A queued caller says who holds the slot.** It prints the holder's pid, task and how long the
+  holder has had the slot, repeats that every 30 seconds, and polls every half second. It is not
+  first in, first out: the first caller to retry after a release gets the slot.
+- **The queue wait is its own bound.** `--slot-wait` (default 540 seconds, the limit for a
+  command run from an agent tool) ends the wait with exit 88 and runs nothing. Time spent queued
+  does not count against `--timeout`, which starts when the command does. A caller with its own
+  deadline has to cover both: the review runner kills a gate at its `timeout-seconds` and cannot
+  tell a queued gate from a hung one, so the `test` gate sets `--slot-wait 900` and
+  `timeout-seconds: 1800`, the wait plus the 900 seconds the run always had.
+- **A lock with no live holder is recovered.** The next caller removes a lock when the holder pid no
+  longer exists, when that pid now belongs to a process with a different start time (the pid was
+  reused), or when the lock directory has had no holder file for 30 seconds (its creator died
+  between the `mkdir` and the write). It prints `recovered stale slot lock` when it does. Callers
+  that find the same lock stale are serialised by a second `mkdir` mutex, so two of them cannot both
+  clear it and then delete the lock the first one took.
+- **Every normal exit releases it.** An `EXIT` trap covers a pass, a failure, a cap trip, a timeout
+  and `SIGTERM`/`SIGINT`. `SIGKILL` of the guard cannot be trapped; the lock is then recovered as
+  stale. Its wrapped command can outlive the guard in that case and run without holding the slot
+  until it ends.
+
+Do not set `KW_PROC_GUARD_SLOT_DIR` outside a test: it replaces the slot directory, so a private
+directory defeats the machine-wide queue. It exists so the guard's own tests never touch the real one.
 
 **Playwright runs only with the isolated config.** Give `--config dash/playwright.isolated.config.ts`
 on every invocation, from the repository root, through the watchdog:
