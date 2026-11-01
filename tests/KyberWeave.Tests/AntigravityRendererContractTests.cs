@@ -1372,12 +1372,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 record.Details ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase));
 
-        // One record per agent carries the missing server: asserting exactly one carrier
-        // (rather than exactly one record total) is deliberate. An agent with a delegates-to
-        // roster legitimately carries a second, unrelated record, so pinning the total would
-        // couple this test to that roster. A split shell/missing pair across two records would
-        // still fail: only one carrier may exist. Co-occurrence of shell and grant sentences
-        // in the D10 case is pinned separately by the triple-gap test below.
+        // One carrier of the missing-server sentence per agent, and exactly the total the record
+        // set should hold: the grant record plus, only for an agent that declares a delegates-to
+        // roster, its unrelated roster record. Asserting the total too stops a duplicate
+        // non-carrier record from passing unnoticed, while still not coupling the assertion to
+        // whether a given agent declares delegates.
         foreach (SquadAgent agent in source.Agents)
         {
             List<SquadDegradationRecord> mine = result.Degradations
@@ -1386,6 +1385,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
                     agent.Name,
                     StringComparison.Ordinal))
                 .ToList();
+            int expected = agent.DelegatesTo.Count > 0 ? 2 : 1;
+            Assert.Equal(expected, mine.Count);
             SquadDegradationRecord record = Assert.Single(
                 mine,
                 record => record.Details is not null &&
@@ -1424,10 +1425,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
             PreloadedSource: source));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        // review-lens declares no delegates-to roster, so its record set must hold exactly one
+        // record. Asserting the total, not only the matching code, stops a duplicate same-agent
+        // record with a different code from slipping through.
         SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
-                      string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
+            result.Degradations.Where(entry => string.Equals(
+                entry.CanonicalIdentity,
+                denied.Name,
+                StringComparison.Ordinal)).ToList());
+        Assert.Equal("permission-not-expressible", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
@@ -1479,14 +1485,20 @@ public sealed class AntigravityRendererContractTests : IDisposable
             PreloadedSource: source));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        // review-lens declares no delegates-to roster, so this agent's record set must hold exactly
+        // one record. Asserting the total, not only the matching code, stops a duplicate record
+        // from slipping through.
         SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
-                      string.Equals(record.Code, "capability-not-isolable", StringComparison.Ordinal));
+            result.Degradations.Where(entry => string.Equals(
+                entry.CanonicalIdentity,
+                denied.Name,
+                StringComparison.Ordinal)).ToList());
+        Assert.Equal("capability-not-isolable", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
         Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
+        Assert.Contains("even with the server declared", record.Details, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1565,10 +1577,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
             PreloadedSource: source));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        // review-lens declares no delegates-to roster, so its record set must hold exactly one
+        // record: the shell-gap record that also carries the denial.
         SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
-                      string.Equals(record.Code, "capability-not-isolable", StringComparison.Ordinal));
+            result.Degradations.Where(entry => string.Equals(
+                entry.CanonicalIdentity,
+                denied.Name,
+                StringComparison.Ordinal)).ToList());
+        Assert.Equal("capability-not-isolable", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
