@@ -430,6 +430,50 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     }
 
     /// <summary>
+    /// Decision D16, fail closed, at the companion root: an <c>.apm</c> or <c>.apm/skills</c> that is a symbolic link would
+    /// pack whatever it points at with no diagnostic, because the per-skill link checks never see the root. Pack refuses
+    /// it, and the message names the linked path.
+    /// </summary>
+    [Theory]
+    [InlineData(true, ".apm")]
+    [InlineData(false, ".apm/skills")]
+    public void PackFailsClosedWhenTheCompanionSkillsRootIsASymbolicLink(bool linkWholeApmFolder, string linkedPath)
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string outside = Path.Combine(_temp.Path, "outside");
+        string outsideSkillDirectory = Path.Combine(outside, "skills", ParitySkillName);
+        Directory.CreateDirectory(outsideSkillDirectory);
+        File.WriteAllText(
+            Path.Combine(outsideSkillDirectory, "SKILL.md"),
+            $"""
+             ---
+             name: {ParitySkillName}
+             description: Outside-tree fixture for the companion root symbolic-link refusal.
+             ---
+
+             # {ParitySkillName}
+
+             Fixture body.
+
+             """);
+        string link = Path.Combine(repository, linkedPath.Replace('/', Path.DirectorySeparatorChar));
+        string linkTarget = linkWholeApmFolder ? outside : Path.Combine(outside, "skills");
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        Directory.CreateSymbolicLink(link, linkTarget);
+        string outDirectory = Path.Combine(_temp.Path, "root-link-out");
+
+        SquadPackRun run = PackInto(repository, "all", outDirectory);
+
+        AssertExit(run.ExitCode, run.Output, 1);
+        Assert.Empty(ArchivesIn(outDirectory));
+        Assert.Contains(Compact(linkedPath), Compact(run.Output), StringComparison.Ordinal);
+        Assert.Contains(Compact("symbolic link"), Compact(run.Output), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Decision D5, fail closed, for the checkout release source: a symbolic-link companion throws before the destination is
     /// created, so a refused checkout leaves nothing behind and reports nothing as extracted.
     /// </summary>

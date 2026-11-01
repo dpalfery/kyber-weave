@@ -18,6 +18,11 @@ public static class SquadCompanionSkills
     /// Resolves the <c>.apm/skills</c> directory of the repository that holds a Squad source root shaped
     /// <c>&lt;repo&gt;/products/kyber-squad</c>, or null when the root has no such shape or the directory is absent.
     /// </summary>
+    /// <remarks>
+    /// A symbolic link at <c>.apm</c> or <c>.apm/skills</c> throws, for the same reason a linked skill does: the packer
+    /// would read whatever the link points at, and the per-skill checks never see the root.
+    /// </remarks>
+    /// <exception cref="SquadSourceValidationException">Thrown when <c>.apm</c> or <c>.apm/skills</c> is a symbolic link.</exception>
     public static string? ResolveRoot(string squadSourceRoot)
     {
         DirectoryInfo root = new(Path.GetFullPath(squadSourceRoot));
@@ -28,7 +33,18 @@ public static class SquadCompanionSkills
             return null;
         }
 
-        string skillsRoot = Path.Combine(repository.FullName, ".apm", "skills");
+        string apmRoot = Path.Combine(repository.FullName, ".apm");
+        if (new DirectoryInfo(apmRoot).LinkTarget is not null)
+        {
+            throw SymbolicLink(".apm");
+        }
+
+        string skillsRoot = Path.Combine(apmRoot, "skills");
+        if (new DirectoryInfo(skillsRoot).LinkTarget is not null)
+        {
+            throw SymbolicLink(".apm/skills");
+        }
+
         return Directory.Exists(skillsRoot) ? skillsRoot : null;
     }
 

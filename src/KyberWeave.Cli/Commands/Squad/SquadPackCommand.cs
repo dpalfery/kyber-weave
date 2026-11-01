@@ -52,8 +52,6 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
 
-        string? companionSkillsRoot = SquadCompanionSkills.ResolveRoot(sourcePath);
-
         string version = !string.IsNullOrWhiteSpace(settings.Version)
             ? ReleaseVersion.Normalize(settings.Version)
             : ResolveVersion();
@@ -68,7 +66,9 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             _ = SquadSourceLoader.Load(sourcePath);
 
             // The archives carry products/kyber-squad plus .apm/skills, so the composed tree is what gets loaded.
-            // Loading only the Squad tree would let a bad companion skill through to install time.
+            // Loading only the Squad tree would let a bad companion skill through to install time. The root is
+            // resolved inside the try, so a refused symbolic link exits 1 with its message, as the other refusals do.
+            string? companionSkillsRoot = SquadCompanionSkills.ResolveRoot(sourcePath);
             ValidateComposedTree(sourcePath, companionSkillsRoot, version);
 
             if (string.Equals(settings.Format, "apm", StringComparison.OrdinalIgnoreCase))
