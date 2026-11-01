@@ -50,8 +50,16 @@ and 11 still export, and `ts-lint` over the whole dash tree is the behaviour che
    - **Full trigger — both parents admit `>= 11.0.1`.** Delete the `overrides` entry from
      `dash/package.json`.
    - **Partial trigger — only one parent has moved.** Keep the entry and narrow it to the
-     parent that has not, for example `"overrides": { "eslint": { "minimatch": "^11.0.1" } }`.
-     Deleting it outright lets the lagging parent's own range resolve, restoring 3.1.5 or
+     parent that has not, whichever direction that is:
+     - `eslint` still below 11: `"overrides": { "eslint": { "minimatch": "^11.0.1" } }`
+     - `@typescript-eslint/typescript-estree` still below 11:
+       `"overrides": { "@typescript-eslint/typescript-estree": { "minimatch": "^11.0.1" } }`
+
+     A parent-scoped key covers that parent's subtree, so `eslint` also carries
+     `@eslint/config-array` and `@eslint/eslintrc`. Do not copy the wrong direction's
+     example: narrowing to a parent that already admits 11 leaves the lagging one on its
+     own range.
+     Deleting the entry outright lets the lagging parent's own range resolve, restoring 3.1.5 or
      10.2.6 and reopening the finding.
 2. `npm install --prefix dash`.
 3. Confirm one deduped `minimatch` at 11.0.1 or later under every consumer: `npm ls --prefix dash minimatch`.
