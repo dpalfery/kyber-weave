@@ -1372,19 +1372,26 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 record.Details ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase));
 
-        // Exactly one record per agent names the missing server: the grant gap is per-agent
-        // state, so an existence-only assertion — or a split shell/missing pair across two
-        // records — would let a partial render pass. One record carries every gap that agent has.
+        // One record per agent carries the missing server: asserting exactly one carrier
+        // (rather than exactly one record total) is deliberate. An agent with a delegates-to
+        // roster legitimately carries a second, unrelated record, so pinning the total would
+        // couple this test to that roster. A split shell/missing pair across two records would
+        // still fail: only one carrier may exist. Co-occurrence of shell and grant sentences
+        // in the D10 case is pinned separately by the triple-gap test below.
         foreach (SquadAgent agent in source.Agents)
         {
-            Assert.Single(
-                result.Degradations.Where(record => string.Equals(
+            List<SquadDegradationRecord> mine = result.Degradations
+                .Where(record => string.Equals(
                     record.CanonicalIdentity,
                     agent.Name,
-                    StringComparison.Ordinal)),
-                record => record.Details is not null
-                          && record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal)
-                          && record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
+                    StringComparison.Ordinal))
+                .ToList();
+            SquadDegradationRecord record = Assert.Single(
+                mine,
+                record => record.Details is not null &&
+                          record.Details.Contains("declares no 'kyber-weave' server", StringComparison.Ordinal) &&
+                          record.Details.Contains("no per-agent grant could be emitted", StringComparison.Ordinal));
+            Assert.NotNull(record.Details);
         }
     }
 
@@ -1480,6 +1487,92 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
         Assert.Contains("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A malformed declaration and a denying profile are two independent reasons one agent has no
+    /// grant, so the one record names the denial even though there is no server to name.
+    /// </summary>
+    /// <remarks>
+    /// The declaration half contributes nothing here: with no well-formed <c>mcpServers</c> object
+    /// there is no missing-key sentence to write. The entitlement half still holds — the profile
+    /// denies the read the grant rests on — so the record carries it alone. Entitled profiles stay
+    /// silent on this path, exactly as the rejection-branch theory below pins.
+    /// </remarks>
+    [Fact]
+    public async Task AMalformedDeclarationAndADenyingProfileNameTheDenialAlone()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+
+        using JsonDocument declaration = JsonDocument.Parse("{}");
+        source = source with { McpConfiguration = declaration.RootElement.Clone() };
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                      string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A shell gap, an unusable declaration, and a denying profile are three independent reasons
+    /// one agent has no grant, so the one record names the shell gap and the denial.
+    /// </summary>
+    [Fact]
+    public async Task AShellGapAndAMalformedDeclarationAndADenyingProfileAreAllNamedInOneRecord()
+    {
+        using McpDeclarationCorpusFixture fixture =
+            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
+
+        Dictionary<string, SquadCapabilityProfile> profiles = new(
+            source.CapabilityProfiles.Profiles,
+            StringComparer.Ordinal);
+        SquadCapabilityProfile baseProfile = profiles[denied.CapabilityProfile];
+        Dictionary<string, SquadPermissionDecision> permissions = new(
+            baseProfile.Permissions,
+            StringComparer.Ordinal)
+        {
+            ["process.execute"] = SquadPermissionDecision.Allow,
+            ["filesystem.write"] = SquadPermissionDecision.Deny,
+        };
+        profiles[denied.CapabilityProfile] = baseProfile with { Permissions = permissions };
+
+        using JsonDocument declaration = JsonDocument.Parse("{}");
+        source = source with
+        {
+            McpConfiguration = declaration.RootElement.Clone(),
+            CapabilityProfiles = source.CapabilityProfiles with { Profiles = profiles },
+        };
+
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.Antigravity],
+            SquadDeploymentScope.Project,
+            PreloadedSource: source));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
+                      string.Equals(record.Code, "capability-not-isolable", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("shell redirection", record.Details, StringComparison.Ordinal);
+        Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
     }
 
     /// <summary>

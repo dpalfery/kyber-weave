@@ -639,23 +639,30 @@ public sealed class AntigravityRenderer : ISquadRenderer
         if (notIsolable is not null)
         {
             string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
-            if (missingServer is null)
+            if (missingServer is not null)
             {
-                return notIsolable;
+                // A shell-escape agent in a squad that dropped the server would otherwise lose the
+                // grant with only the shell-escape record to show for it. The grant gap is a separate
+                // condition from the shell gap, so it rides along in the same per-agent record rather
+                // than being skipped by this early return. The entitlement check rides along too: a
+                // profile that also denies filesystem.read stays grantless after the server comes
+                // back, and only this record can say so.
+                return notIsolable with
+                {
+                    Details = JoinSentences(
+                        notIsolable.Details,
+                        WithEntitlementGap(missingServer, agent.CapabilityProfile, capabilityProfiles)),
+                };
             }
 
-            // A shell-escape agent in a squad that dropped the server would otherwise lose the
-            // grant with only the shell-escape record to show for it. The grant gap is a separate
-            // condition from the shell gap, so it rides along in the same per-agent record rather
-            // than being skipped by this early return. The entitlement check rides along too: a
-            // profile that also denies filesystem.read stays grantless after the server comes
-            // back, and only this record can say so.
-            return notIsolable with
-            {
-                Details = JoinSentences(
-                    notIsolable.Details,
-                    WithEntitlementGap(missingServer, agent.CapabilityProfile, capabilityProfiles)),
-            };
+            // No usable declaration at all: the shell gap is still reported, and a denying profile
+            // is still worth naming, because the grant would be withheld even with a declaration.
+            // The sentence names only the entitlement, never a server, so the pinned silence for
+            // malformed declarations stands for entitled profiles.
+            string? entitlementGap = EntitlementGapSentence(agent.CapabilityProfile, capabilityProfiles);
+            return entitlementGap is null
+                ? notIsolable
+                : notIsolable with { Details = JoinSentences(notIsolable.Details, entitlementGap) };
         }
 
         // If process.execute is not the gap, check for other capability constraints
@@ -727,15 +734,18 @@ public sealed class AntigravityRenderer : ISquadRenderer
         if (kyberWeaveServer is null)
         {
             string? missingServer = MissingServerSentence(mcpShape, universalToolsDeclared);
-            if (missingServer is null)
+            if (missingServer is not null)
             {
-                return null;
+                // A missing declaration and a denying profile are two independent reasons the agent has
+                // no grant. Reporting only the first would hide the second: an operator who restores the
+                // server would watch this agent stay grantless with no record saying why.
+                return WithEntitlementGap(missingServer, profileName, capabilityProfiles);
             }
 
-            // A missing declaration and a denying profile are two independent reasons the agent has
-            // no grant. Reporting only the first would hide the second: an operator who restores the
-            // server would watch this agent stay grantless with no record saying why.
-            return WithEntitlementGap(missingServer, profileName, capabilityProfiles);
+            // No usable declaration at all. Entitled profiles stay silent here — the loader rejects
+            // these states before a real source reaches this renderer — but a denying profile is still
+            // worth naming, since the grant would be withheld even with a declaration.
+            return EntitlementGapSentence(profileName, capabilityProfiles);
         }
 
         if (CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles))
@@ -793,6 +803,22 @@ public sealed class AntigravityRenderer : ISquadRenderer
         return missingServer + " Capability profile '" + profileName + "' also does not allow '" +
             CapabilityDegradations.FileReadCapability + "', so this agent would not receive the " +
             "grant even with the server declared.";
+    }
+
+    /// <summary>
+    /// The entitlement-only sentence for a squad whose declaration cannot be resolved at all:
+    /// no <c>mcpServers</c> object, or an entry the loader rejects. Names only the denying profile,
+    /// never a server, so the pinned silence for malformed declarations stands for entitled profiles.
+    /// </summary>
+    private static string? EntitlementGapSentence(
+        string profileName,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        return CapabilityDegradations.GrantsUniversalMcpServers(profileName, capabilityProfiles)
+            ? null
+            : $"Capability profile '{profileName}' does not allow " +
+              $"'{CapabilityDegradations.FileReadCapability}', so no per-agent grant could be emitted " +
+              "for this agent.";
     }
 
     /// <summary>
