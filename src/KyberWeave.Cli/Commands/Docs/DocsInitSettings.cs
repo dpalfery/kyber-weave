@@ -35,6 +35,10 @@ public sealed class DocsInitSettings : CommandSettings
     [Description("Scaffolds the full suite of rich Kyber Squad coding standards templates into the standards folder.")]
     public bool KyberStandards { get; set; }
 
+    [CommandOption("--provision")]
+    [Description("After scaffolding succeeds, provision the repository's CodeGraph index and prove the docs MCP server (kyber-weave doctor --provision). Off by default: scaffolding alone starts no process.")]
+    public bool Provision { get; set; }
+
     [CommandOption("--no-review-gates")]
     [Description("Do not write the catalogue review gates into .kyber-weave/kyber-weave.yml.")]
     public bool NoReviewGates { get; set; }

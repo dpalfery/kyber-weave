@@ -4,7 +4,7 @@ title: CLI command surface
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-29
+last-reviewed: 2026-10-31
 ---
 
 # CLI command surface
@@ -231,7 +231,7 @@ Owned by [Documentation governance gates](docgraph/governance.md), with analysis
 
 | Verb | Flags (beyond `[path]` and `--docs-root`) | What it does |
 |---|---|---|
-| [`docs init`](docgraph/onboarding.md#1-initialize) | `--owner <OWNER>` (default `unassigned`), `-t\|--target <TARGETS>` (default `agent-skills`), `--no-skill`, `--force`, `--kyber-standards`, `--no-review-gates` | Scaffold host config, the catalog, and the ontology reference; append the catalogue `review:` gates for the declared technologies when none exist (`--no-review-gates` skips this); deploy the authoring skill via APM. |
+| [`docs init`](docgraph/onboarding.md#1-initialize) | `--owner <OWNER>` (default `unassigned`), `-t\|--target <TARGETS>` (default `agent-skills`), `--no-skill`, `--force`, `--kyber-standards`, `--no-review-gates`, `--provision` | Scaffold host config, the catalog, and the ontology reference; append the catalogue `review:` gates for the declared technologies when none exist (`--no-review-gates` skips this); deploy the authoring skill via APM. `--provision` runs [`doctor --provision`](#doctor--repository-documentation-tooling) against the git root of the scaffolded path after scaffolding succeeds. `--target` names APM harnesses, not a path, so provisioning always goes to the scaffolded repository. Off by default: scaffolding alone starts no process. |
 | [`docs validate`](docgraph/governance.md#schema-conformance--docs-validate) | validate flags + `--docs-root`, `--merge-ready`, `--base <REF>` (default `origin/HEAD`) | Check frontmatter against the ontology schema (`KW-DOC-SPEC-*`); with `--merge-ready` also fail on open work (`KW-DOC-LIFECYCLE-003`) and missing archive closeout (`KW-DOC-LIFECYCLE-004`, scoped to the diff against `--base`). |
 | [`docs drift`](docgraph/governance.md#entity-drift--docs-drift) | validate flags + `--docs-root` | Resolve documented symbols against the CodeGraph index (`KW-DOC-DRIFT-*`). |
 | [`docs export-graph`](docgraph/architecture.md) | validate flags + `--docs-root`, `-o\|--out <DIR>` (default `./build/doc-graph`) | Export the documentation graph as `nodes.jsonl` and `edges.jsonl`. |
@@ -318,6 +318,40 @@ Owned by [Updating](install.md#updating).
 |---|---|---|
 | [`update`](install.md#updating) | `[version]`, `--release-candidate`, `--no-mcp`, `--no-kyberdash`, `--no-menubar`, `--no-restart` | Replace the installed CLI and MCP binaries (and KyberDash and tray) from a GitHub Release, then restart the KyberDash engine and tray and upgrade an installed OpenCode capture plugin. `--no-restart` skips the engine and tray restart. |
 
+### `doctor` — repository documentation tooling
+
+A top-level verb scoped to one repository. It checks the CodeGraph index that `docs drift`
+needs, and it proves that the Kyber-Weave docs MCP server answers for that checkout. It does
+not diagnose a squad deployment; use [`squad doctor`](kyber-squad/onboarding.md#command-reference)
+for that. The `kyberdash` binary has its own `doctor` verb, which reports provider detection
+and is unrelated.
+
+| Verb | Flags (beyond `[path]`) | What it does |
+|---|---|---|
+| [`doctor`](docgraph/mcp-runbook.md#the-live-check-doctor---check) | `[path]`, `--check`, `--provision`, `--index-timeout <SECONDS>` (default `600`), `--mcp-timeout <SECONDS>` (default `20`), `--json` | Check CodeGraph and the docs MCP server for the git repository that holds `[path]`, and provision the CodeGraph index when asked. `--check` and `--provision` are mutually exclusive (exit `2`). |
+
+Mode rule:
+
+- `--check` is always read-only. It detects the `codegraph` binary and the index and runs the
+  MCP proof. It never runs `codegraph init` or `codegraph index`.
+- `--provision` always provisions: `codegraph init .` when `.codegraph/` is absent,
+  `codegraph index .` otherwise, both at the git root.
+- A bare run provisions only when stdin is a terminal and `CI` is unset. Otherwise it behaves
+  as `--check` and prints `provisioning skipped: non-interactive; rerun with --provision`. The
+  hint is suppressed with `--json`, so stdout stays valid JSON.
+
+Exit codes for `doctor` (the `kyber-weave` binary):
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every check passed. |
+| `1` | A check failed: the index failed or timed out, the index lock is busy, `.codegraph/` is damaged or not writable, `--check` found no index, or the MCP server did not start, handshake, answer `docs_explore`, or answer for this repository. |
+| `2` | A client-input error: `--check` with `--provision`, a non-positive timeout, a path that is not inside a git repository, or a root that is the home directory. |
+| `3` | A prerequisite is missing and installing it needs the user's approval: the `codegraph` executable is not on `PATH`. Nothing is installed. |
+
+The failure output contract, the check ids, and the provisioning rules are in the
+[MCP runbook](docgraph/mcp-runbook.md#the-live-check-doctor---check).
+
 ## `kyberdash` reference
 
 KyberDash's CLI is the shared engine behind its three surfaces. The KyberDash binary is a
@@ -397,6 +431,7 @@ risk. The three rules below mirror the contract in
 | `squad install` | `2` for a non-interactive confirmation failure, `1` for other failures |
 | `squad preset use`, `squad preset clear` | `2` for a client-input error (unknown preset name, missing `--target` with no receipt roster, undeployed global target); `1` when canonical profiles cannot be resolved (checkout, version snapshot, then newest snapshot all missed) or preset validation fails (unknown category/harness key, reported with file path and line) — before any file or state change in dry-run and apply |
 | `squad preset show` | `2` for a client-input error (unknown preset name, missing or invalid `--target`); `1` when canonical profiles cannot be resolved or preset validation fails |
+| `doctor` | `0` all checks pass; `1` a check failed; `2` a client-input error or a refused root; `3` the `codegraph` prerequisite is missing and installing it needs user approval. Exit `3` is checked before `1`. See [`doctor`](#doctor--repository-documentation-tooling). |
 | any command with a config failure | `KW-CONFIG-001`, never an unhandled exception |
 
 ### `kyberdash`

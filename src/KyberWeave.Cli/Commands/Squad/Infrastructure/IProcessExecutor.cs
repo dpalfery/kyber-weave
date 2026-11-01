@@ -3,13 +3,6 @@ using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 
-/// <summary>Injectable boundary over the repository's deadlock-safe process runner.</summary>
-public interface IProcessExecutor
-{
-    /// <summary>Runs the configured process with the complete standard input.</summary>
-    ProcessResult Run(ProcessStartInfo startInfo, string standardInput);
-}
-
 /// <summary>
 ///     Production process executor backed by <see cref="ProcessRunner"/>. Every run is bounded: a child that
 ///     does not finish in time is killed with its process tree and surfaces as a <see cref="TimeoutException"/>.

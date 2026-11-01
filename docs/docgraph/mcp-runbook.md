@@ -7,6 +7,8 @@ component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
 last-reviewed: 2026-10-31
+decided-by:
+  - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
@@ -858,6 +860,108 @@ Two annotations mean the resolver had to guess and you should verify:
 The index reloads on demand. Document mtimes and file count drive a corpus rebuild;
 `.codegraph/codegraph.db` mtime and length drive a joins-only rebuild. No restart is needed
 after editing documentation or after the CodeGraph daemon rewrites its index.
+
+## The live check: `doctor --check`
+
+`kyber-weave doctor` checks the two pieces a repository needs before its agents can use docs
+tooling: a CodeGraph index, which [`docs drift`](governance.md) needs, and a docs MCP server that
+answers for this checkout. It is the same core that `docs init --provision` calls, and that the
+conductor and bug-crusher run-start step invoke through the CLI. The verb's flags and exit codes are in the
+[command surface](../cli-command-surface.md#doctor--repository-documentation-tooling).
+
+### What the check proves
+
+`--check` is read-only. It runs these steps, and each one has its own check id:
+
+1. **`codegraph.binary`**: a `codegraph --version` probe runs from `PATH`. A start failure means the
+   executable is missing, which is exit `3`. Any other failure, including a probe that does not
+   finish, is a broken binary, which is exit `1`.
+2. **`codegraph.index`**: `.codegraph/` exists and is writable. A missing directory is a failure here
+   in `--check`, because `--check` never creates one.
+3. **`mcp.start`**: `kyber-weave-mcp` starts. The check resolves the bare `PATH` name with no
+   repository-build fallback, so it proves what an agent will launch.
+4. **`mcp.handshake`**: the server answers `initialize` within the MCP budget. The probe then sends
+   `notifications/initialized`.
+5. **`mcp.docs_explore`**: a `tools/call` to `docs_explore` with the query `README` returns a
+   non-error result. `docs_status` would prove only that the process is alive. `docs_explore`
+   also proves that the index loaded.
+6. **`mcp.root`**: the `provenance: root=` line in that result names the git root. This catches a
+   server that answers from another checkout.
+
+`repository.root` is the refusal case. It runs before any other check, and it fails when the path is
+not inside a git repository or when the repository root is the home directory. The exit is `2`, and
+no check after it runs.
+
+The MCP session has a total budget of 20 seconds (`--mcp-timeout`). The session is always disposed,
+so a server that stops answering is killed rather than left behind. The rule and its rationale are in
+[ADR 0051](../adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session.md).
+
+### Check ids
+
+| Check id | Fails when | Fix line |
+|---|---|---|
+| `repository.root` | The path is not in a git repository, git cannot run, or the root is `$HOME` | `run kyber-weave doctor from inside a git repository`, or `cd into a repository and run kyber-weave doctor` |
+| `codegraph.binary` | `codegraph` is not on `PATH`, or `codegraph --version` does not finish | `install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check` |
+| `codegraph.index` | No `.codegraph/` in `--check`, the directory is not writable, the index is damaged, `init` or `index` fails, the index lock is busy, or the run exceeds `--index-timeout` | Depends on the cause; see [Provisioning rules](#provisioning-rules) |
+| `mcp.start` | `kyber-weave-mcp` cannot be started | `kyber-weave update` |
+| `mcp.handshake` | The server did not answer `initialize` within the MCP budget, or closed its output first | `kyber-weave doctor --check --mcp-timeout <2 x current>` |
+| `mcp.docs_explore` | `docs_explore` returned an error, did not answer, or its reply was not a tool result | `kyber-weave update`, or a retry with a larger `--mcp-timeout` |
+| `mcp.root` | The server answers from a different checkout, or its reply names no provenance root | `stop the stale kyber-weave-mcp server and re-run: kyber-weave doctor --check`, or `kyber-weave update` |
+
+### Output contract
+
+Each check prints one line. A passing check prints `PASS <check-id> <reason>`. A failing check
+prints `FAIL <check-id> <reason>`, then an indented fix line:
+
+```text
+PASS codegraph.binary found on PATH
+FAIL codegraph.index no CodeGraph index at .codegraph/
+  fix: kyber-weave doctor --provision
+```
+
+The reason is short and never carries the child's environment. A child's stderr appears only as
+its first non-empty line, truncated to 160 characters. A fix line is a command an agent can run as
+written, except `codegraph.binary`, which asks the user to act first (see the next section).
+
+`--json` writes one object instead, with `root`, `mode` (`check` or `provision`), `exitCode`, and a
+`checks` array of `{ id, passed, reason, fix }`. The non-interactive hint is suppressed in that mode, so
+stdout stays valid JSON.
+
+### Nothing installs CodeGraph
+
+`doctor` never installs CodeGraph, and it never fetches an installer. When `codegraph` is not on
+`PATH`, the `codegraph.binary` fix line asks you to install the CodeGraph CLI so that `codegraph` is
+on `PATH`, then to re-run `kyber-weave doctor --check`. This repository has no authoritative install
+command or package source, so the fix line names none, and this runbook gives none. Exit `3` means
+the decision to install belongs to a person.
+
+### Provisioning rules
+
+Provisioning is the `--provision` mode. A bare run provisions only in an interactive terminal with
+`CI` unset (see the [command surface](../cli-command-surface.md#doctor--repository-documentation-tooling)).
+
+- **Repository-local only.** The root is `git rev-parse --show-toplevel` of the given path. A run
+  never provisions `$HOME`, and it never provisions another checkout.
+- **Init when absent, index otherwise.** When `.codegraph/` is absent, the run executes
+  `codegraph init .`. When it exists, the run executes `codegraph index .`. Both run with the root as
+  the working directory.
+- **Bounded.** Each child is bounded by `--index-timeout` (default 600 seconds). When the bound is
+  reached, the child's process tree is killed and the check fails as `codegraph.index`.
+- **Never delete.** Doctor never removes `.codegraph/`. The only file it creates and removes is a
+  write-probe inside that directory, used to test writability. A directory that is corrupt, not
+  writable, or owned by another user fails with `remove .codegraph and run kyber-weave doctor`. A
+  person makes the removal.
+- **Never install the binary.** See [Nothing installs CodeGraph](#nothing-installs-codegraph).
+- **Lock file in the OS temp directory.** Concurrent provisioning runs for one repository are
+  serialised by a lock file named `kyber-weave-codegraph-<hash>.lock` in the OS temporary directory,
+  where the hash is a prefix of the SHA-256 of the root path. A second run waits up to
+  `--index-timeout` for the lock. If it still cannot take the lock, it fails as `codegraph.index busy`.
+  The lock file is not removed after a run, so a later run finds it unlocked.
+- **Daemon left alone.** Doctor does not stop or restart a running CodeGraph daemon. `index` runs
+  alongside it.
+
+`docs init --provision` runs the same provisioning against the git root of the scaffolded path. It
+does not change the default: without the flag, `docs init` starts no process.
 
 ## Troubleshooting
 
