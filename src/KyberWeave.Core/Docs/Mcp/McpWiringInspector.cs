@@ -249,17 +249,21 @@ public static class McpWiringInspector
             return null;
 
         // A configuration this check refused to read is not one the repair may write either — it
-        // refuses a link too — so a link cannot be offered as a fixable gap. An entry that exists but
-        // names no launch command is refused for the same reason: 5.5 forbids overwriting an entry,
-        // so a repair offered here would come back as KW-MCP-WIRE-005.
-        bool linked = detection.LinkedSegment is not null;
-        bool writable = !linked && !detection.EntryUnlaunchable;
+        // refuses a link, and a file it may not inspect, for the same reason — so neither can be
+        // offered as a fixable gap. An entry that exists but names no launch command is refused for
+        // the same reason: 5.5 forbids overwriting an entry, so a repair offered here would come back
+        // as KW-MCP-WIRE-005.
+        McpLinkObstruction obstruction = detection.Obstruction.Obstruction;
+        bool writable = obstruction == McpLinkObstruction.None && !detection.EntryUnlaunchable;
 
-        string hint = linked
-            ? LinkedHint(namedPath, detection.LinkedSegment!)
-            : detection.EntryUnlaunchable
+        string hint = obstruction switch
+        {
+            McpLinkObstruction.Link => LinkedHint(namedPath, detection.Obstruction.Segment!),
+            McpLinkObstruction.Denied => DeniedHint(namedPath),
+            _ => detection.EntryUnlaunchable
                 ? UnlaunchableHint(entry, server, namedPath)
-                : NotWiredHint(entry, server, namedPath);
+                : NotWiredHint(entry, server, namedPath)
+        };
 
         return new McpWiringFinding(
             McpWiringKind.NotWired,
@@ -337,17 +341,27 @@ public static class McpWiringInspector
         IReadOnlyList<ConfiguredFile> files)
     {
         List<string> refusals = [];
-        string? linkedSegment = null;
+        McpLinkProbe obstruction = default;
 
         foreach (ConfiguredFile file in files)
         {
-            // A linked configuration is not read through: requirement 2.6 confines the check to the
-            // repository, and reading one would report a teammate's own user-scope file as this
-            // repository's wiring — a confirming pass for a configuration a fresh checkout lacks.
-            if (file.LinkedSegment is not null)
+            // A configuration the guard stopped at is not read through: requirement 2.6 confines the
+            // check to the repository, and reading one would report a teammate's own user-scope file
+            // as this repository's wiring — a confirming pass for a configuration a fresh checkout
+            // lacks. A file this process may not inspect is refused for the second half of the same
+            // reason: "denied" and "absent" are opposite answers, and only one of them may be read as
+            // "this harness has nothing to say".
+            if (file.Obstruction.Obstruction != McpLinkObstruction.None)
             {
-                refusals.Add($"{McpConfigurationLink.Describe(file.RelativePath, file.LinkedSegment)}, so it was not read");
-                linkedSegment ??= file.LinkedSegment;
+                refusals.Add(
+                    $"{McpConfigurationLink.Describe(file.RelativePath, file.Obstruction)}, so it was not read"
+                        + (file.Obstruction.Obstruction == McpLinkObstruction.Denied
+                            ? ": a file this process cannot inspect cannot be told from one that is absent"
+                            : string.Empty));
+
+                if (obstruction.Obstruction == McpLinkObstruction.None)
+                    obstruction = file.Obstruction;
+
                 continue;
             }
 
@@ -405,7 +419,7 @@ public static class McpWiringInspector
             false,
             null,
             refusals.Count == 0 ? null : string.Join("; ", refusals),
-            linkedSegment);
+            obstruction);
     }
 
     /// <summary>
@@ -744,10 +758,12 @@ public static class McpWiringInspector
     /// to the git worktree root, and no further, with the user tier never touched.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A file reached through a symbolic link is listed with the linked segment it was found behind
     /// rather than dropped: dropping it would report the harness as unwired and offer a write the
     /// repair refuses, when what the operator needs to hear is that a link stands between this
     /// repository and a file outside it.
+    /// </para>
     /// </remarks>
     private static IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry entry)
     {
@@ -760,9 +776,9 @@ public static class McpWiringInspector
                 foreach (string relativePath in entry.Paths)
                 {
                     string path = Path.Combine(directory, relativePath.Replace('/', Path.DirectorySeparatorChar));
-                    string? linked = McpConfigurationLink.LinkedSegment(root, path);
-                    if (linked is not null || File.Exists(path))
-                        files.Add(new ConfiguredFile(path, RelativeTo(root, path), linked));
+                    McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
+                    if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
+                        files.Add(new ConfiguredFile(path, RelativeTo(root, path), probe));
                 }
             }
 
@@ -773,11 +789,13 @@ public static class McpWiringInspector
         {
             string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-            // The link is tested before the existence check, which follows it: a link whose target
-            // is gone is still a link, and still not something this check may read through.
-            string? linked = McpConfigurationLink.LinkedSegment(root, path);
-            if (linked is not null || File.Exists(path))
-                files.Add(new ConfiguredFile(path, relativePath, linked));
+            // The guard is asked before the existence check, which follows it, and it answers three
+            // states where File.Exists answers two: a link whose target is gone is still a link, and a
+            // file this process may not reach still exists — File.Exists reports it as absent, and
+            // "absent" is the answer that lets the repair create a file over one it never read.
+            McpLinkProbe probe = McpConfigurationLink.Probe(root, path);
+            if (probe.Obstruction != McpLinkObstruction.None || File.Exists(path))
+                files.Add(new ConfiguredFile(path, relativePath, probe));
         }
 
         return files;
@@ -891,6 +909,22 @@ public static class McpWiringInspector
             : $"Replace the symbolic link '{linkedSegment}' on the path to {namedPath} with a real directory inside "
                 + "the repository: Kyber-Weave reads and writes repository-scope files only, because anything else "
                 + "is a configuration a fresh checkout does not have.";
+
+    /// <summary>
+    /// The remedy for a configuration this process may not inspect: a permission, on the file or on a
+    /// directory above it, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// It names no wire command, for the reason <see cref="LinkedHint"/> names none: the repair
+    /// refuses the same file for the same reason, so sending the operator to a command that will
+    /// refuse again is worse than silence. The two remedies stay separate sentences because they are
+    /// separate problems — a link is a file outside the repository, a denial is one inside it — and a
+    /// single "cannot read this" would leave the operator to guess which they have.
+    /// </remarks>
+    private static string DeniedHint(string namedPath) =>
+        $"Check the permissions on {namedPath} and on every directory above it, then run the check again. "
+            + "A file this process may not inspect cannot be told from one that is absent, so the check reports "
+            + "it as a gap rather than as a configuration this repository does not have.";
 
     private static string NotWiredHint(
         HarnessMcpEntry entry,
@@ -1045,9 +1079,12 @@ public static class McpWiringInspector
     /// Why a document or an entry body could not be read — every reason, when more than one file
     /// could not be.
     /// </param>
-    /// <param name="LinkedSegment">
-    /// The repository-relative segment of the configuration that is a symbolic link, when one was
-    /// refused rather than followed.
+    /// <param name="Obstruction">
+    /// The first file the link guard would not read through, and why — a link, or a denial. It is
+    /// carried rather than folded into <paramref name="Refusal"/> because it decides two further
+    /// things the message cannot: whether a repair may be offered, and which remedy the hint names.
+    /// Being unable to inspect a file and being unable to traverse to it have different fixes, and the
+    /// repair names the same distinction for the same file.
     /// </param>
     /// <param name="Executable">
     /// The program a launch of the wired entry would run, when the check could read it. Kept apart
@@ -1062,7 +1099,7 @@ public static class McpWiringInspector
         bool Wired,
         IReadOnlyList<string>? LaunchCommand,
         string? Refusal,
-        string? LinkedSegment = null,
+        McpLinkProbe Obstruction = default,
         string? Executable = null,
         bool EntryUnlaunchable = false);
 
@@ -1108,11 +1145,18 @@ public static class McpWiringInspector
     }
 
     /// <summary>
-    /// A configuration file that exists: where to read it, how to name it, and the symbolic link it
-    /// sits behind when it does.
+    /// A configuration file that is in play: where to read it, how to name it, and what the link
+    /// guard found on the way to it when it found anything.
     /// </summary>
+    /// <param name="AbsolutePath">Where the file would be read from.</param>
+    /// <param name="RelativePath">The file as an operator's repository names it.</param>
+    /// <param name="Obstruction">
+    /// The symbolic link or denial that stopped the guard, or the default when the whole path is made
+    /// of real entries. A denied file is kept rather than dropped, because the two states have
+    /// different meanings and only one of them is a harness with nothing to say.
+    /// </param>
     private readonly record struct ConfiguredFile(
         string AbsolutePath,
         string RelativePath,
-        string? LinkedSegment = null);
+        McpLinkProbe Obstruction = default);
 }
