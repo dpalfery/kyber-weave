@@ -511,6 +511,24 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A host configuration that says nothing about MCP is a repository declaring no server, so the
+    /// command reports that and exits 0. It is not a configuration failure — the file loads, it just
+    /// has no <c>mcp:</c> section — and it is not a dereference of a section that is not there.
+    /// </summary>
+    [Fact]
+    public void AConfigurationWithNoMcpSectionReportsNothingToWireAndExitsZero()
+    {
+        Write(".kyber-weave/kyber-weave.yml", "ontology:\n  docs-root: docs\n");
+
+        CapturedConsoleExecution<int> execution = Wire(Factory);
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains("nothing to wire", execution.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(Repo, ".factory", "mcp.json")));
+        Assert.False(File.Exists(ReceiptPath));
+    }
+
+    /// <summary>
     /// The manual snippet is written as-is, because Spectre markup would eat its brackets — so the
     /// server name inside it reaches the terminal untouched unless the rendering path removes the
     /// control characters first. A name carrying an escape sequence would otherwise colour, move or

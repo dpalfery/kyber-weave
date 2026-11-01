@@ -590,6 +590,28 @@ public sealed class DocsInitMcpCheckTests : IDisposable
     }
 
     /// <summary>
+    /// R3.4: a declaration that names no server has nothing to check, so no wiring finding is printed
+    /// and the run that scaffolded the corpus still exits 0. A <c>mcp:</c> key with nothing under it is
+    /// the state a repository reaches by editing the scaffolded servers out, and the one that says
+    /// "this file declares no dependency" while still loading.
+    /// </summary>
+    [Fact]
+    public void ADeclarationNamingNoServerPrintsNoWiringFindingAndStaysAtExitZero()
+    {
+        string repository = NewRepository();
+        WriteFile(
+            repository,
+            ".kyber-weave/kyber-weave.yml",
+            "ontology:\n  docs-root: docs\nmcp:\n");
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+        Assert.DoesNotContain(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An empty repository, git-initialized so the check's worktree walk stops at this root instead
     /// of climbing into the temp directory's ancestors.
     /// </summary>

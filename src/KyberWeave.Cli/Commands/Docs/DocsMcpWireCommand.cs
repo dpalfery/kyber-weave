@@ -55,7 +55,11 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             return 1;
         }
 
-        if (config.Mcp.RequiredServers.Count == 0)
+        // Read as one condition across the whole chain: a repository that declares no servers is the
+        // same case whether the section is empty, absent from the file, or missing from the
+        // configuration object the loader returned. Each of them is a report at exit zero, and none
+        // of them is the dereference this command would otherwise throw before it printed anything.
+        if (config.Mcp?.RequiredServers is not { Count: > 0 })
         {
             AnsiConsole.MarkupLine("[yellow]No MCP servers are declared[/], so there is nothing to wire.");
             AnsiConsole.MarkupLine(

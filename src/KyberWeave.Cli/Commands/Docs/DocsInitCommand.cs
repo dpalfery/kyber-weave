@@ -368,20 +368,24 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         }
 
         // A repository that declares no servers has nothing to check, and printing one
-        // not-detectable line per harness for it would be pure noise (R1.4).
-        if (loaded.Config is null || loaded.Config.Mcp.RequiredServers.Count == 0)
+        // not-detectable line per harness for it would be pure noise (R1.4). The section is read as
+        // one condition across the whole chain, because "declares no servers" is the same case
+        // whether the section is empty, absent, or missing from the configuration object the loader
+        // returned — and R3.4 keeps every one of them at exit zero, never at the one dereference
+        // this command would otherwise throw after the corpus was already scaffolded.
+        if (loaded.Config is not { Mcp.RequiredServers.Count: > 0 } config)
             return 0;
 
-        McpConfig config = loaded.Config.Mcp;
-        McpWiringReport report = McpWiringInspector.Inspect(root, config);
+        McpConfig mcp = config.Mcp;
+        McpWiringReport report = McpWiringInspector.Inspect(root, mcp);
 
         AnsiConsole.WriteLine();
-        PrintWiringSection(report, config);
+        PrintWiringSection(report, mcp);
         AnsiConsole.WriteLine();
 
         IReadOnlyList<McpWiringFix> fixes = McpWiringFixes.Derive(report, root);
         if (fixes.Count > 0 && CanPrompt())
-            OfferRepair(root, config, fixes);
+            OfferRepair(root, mcp, fixes);
 
         return 0;
     }
