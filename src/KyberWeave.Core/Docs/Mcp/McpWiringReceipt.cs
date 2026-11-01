@@ -183,11 +183,16 @@ public sealed class McpWiringReceipt
     /// Whether two repository-relative paths name the same file. Separators differ between the
     /// platform that wrote a receipt and the one reading it, and the path's value is the file.
     /// </summary>
+    /// <remarks>
+    /// Case is part of that value: on a case-sensitive filesystem <c>.mcp.json</c> and
+    /// <c>.MCP.json</c> are two files, so an ignore-case match would let the drift check and the
+    /// removal act on a file the record does not describe.
+    /// </remarks>
     internal static bool SamePath(string left, string right) =>
         string.Equals(
             left.Replace('\\', '/'),
             right.Replace('\\', '/'),
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.Ordinal);
 
     /// <summary>
     /// Writes the receipt, and reports why it could not be written instead of failing the run: the
