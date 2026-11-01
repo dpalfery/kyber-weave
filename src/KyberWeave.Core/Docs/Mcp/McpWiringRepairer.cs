@@ -116,8 +116,15 @@ public static class McpWiringRepairer
     /// written — not even the receipt (5.10).
     /// </param>
     /// <remarks>
+    /// <para>
     /// A refused target does not stop another: the design's error table has "other targets proceed",
     /// and one unlucky file in a repository is no reason to leave the rest unwired.
+    /// </para>
+    /// <para>
+    /// Each accepted target records what it is about to write before it writes it, so a run that is
+    /// killed mid-write leaves the previous bytes recoverable rather than a mutated file with no
+    /// account of what it held.
+    /// </para>
     /// </remarks>
     public static McpWiringRepairReport Repair(
         string repositoryRoot,
@@ -139,25 +146,11 @@ public static class McpWiringRepairer
             return new McpWiringRepairReport([], dryRun);
 
         string root = Path.GetFullPath(repositoryRoot);
-        List<McpWiringReceiptRecord> records = [.. McpWiringReceipt.Load(root).Files];
+        ReceiptJournal journal = new(root, [.. McpWiringReceipt.Load(root).Files]);
         List<McpWiringFileChange> changes = [];
-        bool recorded = false;
 
         foreach (string target in targets)
-        {
-            TargetResult result = RepairTarget(root, declared, resolver, target, dryRun);
-            changes.Add(result.Change);
-
-            if (result.Record is null)
-                continue;
-
-            records.RemoveAll(record => McpWiringReceipt.SamePath(record.Path, result.Record.Path));
-            records.Add(result.Record);
-            recorded = true;
-        }
-
-        if (!dryRun && recorded)
-            changes = ReportReceiptFailure(changes, McpWiringReceipt.Save(root, records));
+            changes.Add(RepairTarget(root, declared, resolver, target, dryRun ? null : journal));
 
         return new McpWiringRepairReport(changes, dryRun);
     }
@@ -171,8 +164,10 @@ public static class McpWiringRepairer
     /// <remarks>
     /// Removal proves its case before it touches anything: no record, a file that is gone, or a
     /// current digest that differs from the recorded post-write digest is drift, and drift is
-    /// refused rather than restored over (5.9). There is no dry run here — the operation either
-    /// restores bytes it can prove, or it does nothing.
+    /// refused rather than restored over (5.9). The one digest that is not drift is the one the
+    /// receipt recorded <em>before</em> the write: the file then holds the state the removal was
+    /// asked for, so the write never landed and its record is dropped instead. There is no dry run
+    /// here — the operation either restores bytes it can prove, or it does nothing.
     /// </remarks>
     public static McpWiringRepairReport Unwire(string repositoryRoot, IReadOnlyList<string> targets)
     {
@@ -237,7 +232,7 @@ public static class McpWiringRepairer
                 $"{path} does not resolve inside the repository, so nothing was removed: a record has to name a file "
                     + "in the tree this command was given",
                 $"Report this: {McpWiringReceipt.RelativePath} names '{record?.Path ?? path}', and a path that leaves "
-                    + "the repository cannot be restored from.").Change,
+                    + "the repository cannot be restored from."),
                 false);
         }
 
@@ -259,7 +254,7 @@ public static class McpWiringRepairer
                 $"{McpConfigurationLink.Describe(path, probe)}, so nothing was removed: restoring recorded bytes "
                     + "over a file this process cannot read would be a guess",
                 $"Check the permissions on {path} and on every directory above it, then run the removal again; the "
-                    + "receipt still records the write.").Change,
+                    + "receipt still records the write."),
                 false);
         }
 
@@ -273,7 +268,7 @@ public static class McpWiringRepairer
                 $"{McpConfigurationLink.Describe(path, probe)}, so nothing was removed: restoring the recorded "
                     + "bytes through it would write outside the repository",
                 $"Replace {path} with a real file inside the repository — copy its content out of the linked file, "
-                    + "delete the link, and leave the copy in place — then run the removal again. Nothing was written.").Change,
+                    + "delete the link, and leave the copy in place — then run the removal again. Nothing was written."),
                 false);
         }
 
@@ -286,7 +281,7 @@ public static class McpWiringRepairer
                 McpWiringReceipt.DriftCode,
                 $"no receipt record for {path}: Kyber-Weave cannot prove it wrote there, so nothing was removed",
                 $"The receipt at {McpWiringReceipt.RelativePath} records what the repair wrote. Remove the entry from "
-                    + $"{path} by hand, or with git revert, and leave the rest of the file intact.").Change,
+                    + $"{path} by hand, or with git revert, and leave the rest of the file intact."),
                 false);
         }
 
@@ -300,6 +295,16 @@ public static class McpWiringRepairer
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
+            // A record for a file the repair never created is the other half of the interrupted-write
+            // window: the record is persisted first, so a run killed before the rename leaves it
+            // behind with nothing on disk.
+            if (record.Mode == McpWiringWriteMode.Created)
+            {
+                records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
+
+                return (NeverWritten(harness, path, record), true);
+            }
+
             return (MissingOnRemoval(harness, path, record), false);
         }
         catch (IOException exception)
@@ -315,6 +320,16 @@ public static class McpWiringRepairer
 
         if (!string.Equals(digest, record.PostSha256, StringComparison.OrdinalIgnoreCase))
         {
+            // The bytes on disk are the bytes the receipt captured before the write, so the write
+            // never landed: the state the removal was asked for is already there.
+            if (record.Mode == McpWiringWriteMode.Inserted
+                && string.Equals(digest, record.PreSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, path));
+
+                return (NeverWritten(harness, path, record), true);
+            }
+
             return (Refused(
                 harness,
                 path,
@@ -322,7 +337,7 @@ public static class McpWiringRepairer
                 McpWiringReceipt.DriftCode,
                 $"{path} changed after the repair, so restoring over the change would discard someone else's edit",
                 $"The receipt recorded {record.PostSha256} and the file now digests {digest}. Decide which version to "
-                    + "keep by hand; the receipt still records what was written.").Change,
+                    + "keep by hand; the receipt still records what was written."),
                 false);
         }
 
@@ -337,7 +352,7 @@ public static class McpWiringRepairer
                 record.Servers,
                 McpWiringReceipt.DriftCode,
                 $"the receipt records no usable pre-write content for {path}, so the file cannot be restored",
-                $"Remove the entry from {path} by hand, or restore the file with git revert.").Change,
+                $"Remove the entry from {path} by hand, or restore the file with git revert."),
                 false);
         }
 
@@ -371,20 +386,32 @@ public static class McpWiringRepairer
             true);
     }
 
-    private static TargetResult RepairTarget(
+    /// <summary>
+    /// Writes one target, recording the undo before the bytes land.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="declared">The servers the repository declares.</param>
+    /// <param name="resolver">Resolves a launch command to a file.</param>
+    /// <param name="harness">The harness slug to write.</param>
+    /// <param name="journal">
+    /// Where the undo record is persisted, or null for a dry run — a preview computes the same change
+    /// and writes neither the file nor its record (5.10). The journal is what says a write may happen
+    /// at all: a write this tool cannot record is a write it cannot undo.
+    /// </param>
+    private static McpWiringFileChange RepairTarget(
         string root,
         IReadOnlyList<RequiredMcpServer> declared,
         LaunchCommandResolver resolver,
         string harness,
-        bool dryRun)
+        ReceiptJournal? journal)
     {
         (HarnessMcpEntry? row, string? path, McpWiringFileChange? refusal) = Resolve(harness);
 
         if (refusal is not null)
-            return new TargetResult(refusal, null);
+            return refusal;
 
         if (row is null || path is null)
-            return new TargetResult(NoTargetRefusal(harness), null);
+            return NoTargetRefusal(harness);
 
         if (row.Fixability != McpWiringFixability.Fixable)
         {
@@ -550,42 +577,15 @@ public static class McpWiringRepairer
                     + $"{harness} is not the shape this writer needs.");
         }
 
-        if (dryRun)
+        // A dry run computes the same change and stops here (5.10).
+        if (journal is null)
         {
-            return new TargetResult(
-                new McpWiringFileChange(
-                    harness,
-                    path,
-                    created ? McpWiringChangeOutcome.Created : McpWiringChangeOutcome.Inserted,
-                    written,
-                    Message: SkippedNote(unresolvable, path)),
-                null);
-        }
-
-        try
-        {
-            AtomicFile.WriteAllBytes(fullPath, planned);
-        }
-        catch (IOException exception)
-        {
-            return Refused(
+            return new McpWiringFileChange(
                 harness,
                 path,
+                created ? McpWiringChangeOutcome.Created : McpWiringChangeOutcome.Inserted,
                 written,
-                RefusalCode,
-                $"{path} could not be written: {exception.Message}",
-                $"Kyber-Weave writes repository-scope files only; check that {path} is a writable file path rather "
-                    + "than a directory, then run the wire command again.");
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return Refused(
-                harness,
-                path,
-                written,
-                RefusalCode,
-                $"{path} could not be written: {exception.Message}",
-                $"Check the permissions on {path} and its directory, then run the wire command again.");
+                Message: SkippedNote(unresolvable, path));
         }
 
         byte[] preWrite = original ?? [];
@@ -598,15 +598,62 @@ public static class McpWiringRepairer
             DateTimeOffset.UtcNow,
             created ? null : Convert.ToBase64String(preWrite));
 
-        return new TargetResult(
-            new McpWiringFileChange(
+        // The record lands before the file does. Written after, a run killed in between leaves a
+        // mutated harness configuration with no persisted account of its previous bytes: the removal
+        // refuses it as drift and the undo is unreachable outside version control. Written first, the
+        // same kill leaves a record for a write that never happened, which the removal recognises by
+        // the bytes still on disk.
+        if (journal.Record(record) is { } recordFailure)
+        {
+            return Refused(
                 harness,
                 path,
-                created ? McpWiringChangeOutcome.Created : McpWiringChangeOutcome.Inserted,
                 written,
-                Message: SkippedNote(unresolvable, path),
-                Written: true),
-            record);
+                RefusalCode,
+                $"{path} was not written: the record that would make the change undoable could not be persisted "
+                    + $"({recordFailure})",
+                $"Check that {McpWiringReceipt.RelativePath} is writable, then run the wire command again. Kyber-Weave "
+                    + "records what it is about to write before it writes it, so a change it cannot record is a change "
+                    + "it does not make.");
+        }
+
+        try
+        {
+            AtomicFile.WriteAllBytes(fullPath, planned);
+        }
+        catch (IOException exception)
+        {
+            journal.Discard(path);
+
+            return Refused(
+                harness,
+                path,
+                written,
+                RefusalCode,
+                $"{path} could not be written: {exception.Message}",
+                $"Kyber-Weave writes repository-scope files only; check that {path} is a writable file path rather "
+                    + "than a directory, then run the wire command again.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            journal.Discard(path);
+
+            return Refused(
+                harness,
+                path,
+                written,
+                RefusalCode,
+                $"{path} could not be written: {exception.Message}",
+                $"Check the permissions on {path} and its directory, then run the wire command again.");
+        }
+
+        return new McpWiringFileChange(
+            harness,
+            path,
+            created ? McpWiringChangeOutcome.Created : McpWiringChangeOutcome.Inserted,
+            written,
+            Message: SkippedNote(unresolvable, path),
+            Written: true);
     }
 
     /// <summary>
@@ -633,7 +680,7 @@ public static class McpWiringRepairer
                 $"{harness} has no repository-scope file: its MCP servers are repository settings, not a file in the tree",
                 "Add the server in the repository's Copilot MCP configuration under 'mcpServers' (type and tools are "
                     + "required), and add the install step to .github/workflows/copilot-setup-steps.yml: the coding "
-                    + "agent reads MCP configuration from repository settings only. The DocGraph MCP runbook records the form.").Change);
+                    + "agent reads MCP configuration from repository settings only. The DocGraph MCP runbook records the form."));
         }
 
         return (row, TargetPath(row), null);
@@ -652,7 +699,7 @@ public static class McpWiringRepairer
             RefusalCode,
             named,
             "Targets are harness slugs from the catalog: "
-                + string.Join(", ", HarnessMcpCatalog.Rows.Select(row => row.Harness))).Change;
+                + string.Join(", ", HarnessMcpCatalog.Rows.Select(row => row.Harness)));
     }
 
     /// <summary>
@@ -1141,7 +1188,31 @@ public static class McpWiringRepairer
             record.Servers,
             McpWiringReceipt.DriftCode,
             $"{path} is gone, so the state the receipt recorded cannot be restored",
-            $"Replace {path} from version control and run the removal again; the receipt still records the write.").Change;
+            $"Replace {path} from version control and run the removal again; the receipt still records the write.");
+
+    /// <summary>
+    /// The report for a record whose write never landed: the state the removal was asked for is the
+    /// state the file is already in, so the record is dropped and nothing is rewritten.
+    /// </summary>
+    /// <remarks>
+    /// The repair persists its record before it replaces the file, so a run killed in between leaves a
+    /// record for a write that never happened. Reporting that as drift would name a foreign edit that
+    /// does not exist; refusing would leave the operator a record they cannot clear, and the undo it
+    /// describes has already happened. The record is dropped and the outcome says what the file holds,
+    /// which is why this is not a refusal.
+    /// </remarks>
+    private static McpWiringFileChange NeverWritten(
+        string harness,
+        string path,
+        McpWiringReceiptRecord record) =>
+        new(
+            harness,
+            path,
+            McpWiringChangeOutcome.Restored,
+            record.Servers,
+            Message: $"{path} already held the state the receipt recorded before the write, so the interrupted write "
+                + "needed no undo and its record was dropped",
+            Written: false);
 
     private static McpWiringFileChange UnreadableOnRemoval(
         string harness,
@@ -1154,7 +1225,7 @@ public static class McpWiringRepairer
             record.Servers,
             McpWiringReceipt.DriftCode,
             $"{path} could not be read: {reason}",
-            $"Check the permissions on {path}, then run the removal again; the receipt still records the write.").Change;
+            $"Check the permissions on {path}, then run the removal again; the receipt still records the write.");
 
     private static McpWiringFileChange NotRemovable(
         string harness,
@@ -1167,7 +1238,7 @@ public static class McpWiringRepairer
             record.Servers,
             McpWiringReceipt.DriftCode,
             $"{path} could not be removed: {reason}",
-            $"Check the permissions on {path} and its directory, then run the removal again.").Change;
+            $"Check the permissions on {path} and its directory, then run the removal again.");
 
     private static IReadOnlyList<RequiredMcpServer> Declared(McpConfig config) =>
         [.. config.RequiredServers.Values.OrderBy(server => server.Name, StringComparer.Ordinal)];
@@ -1199,9 +1270,9 @@ public static class McpWiringRepairer
             : null;
 
     /// <summary>
-    /// Keeps a write's audit note visible when the receipt could not be written. The files are
-    /// already written at that point, so throwing would lose the report of what did happen, and
-    /// silence would leave an operator with files that <c>mcp-unwire</c> will refuse to undo.
+    /// Keeps a removal's audit note visible when the receipt could not be rewritten after it. The
+    /// files are already restored at that point, so throwing would lose the report of what did happen,
+    /// and silence would leave an operator with a receipt that still claims writes it has undone.
     /// </summary>
     private static List<McpWiringFileChange> ReportReceiptFailure(
         List<McpWiringFileChange> changes,
@@ -1226,7 +1297,64 @@ public static class McpWiringRepairer
         ];
     }
 
-    private static TargetResult Refused(
+    /// <summary>
+    /// The receipt as the repair mutates it: one record per file, each persisted before the write it
+    /// describes.
+    /// </summary>
+    /// <remarks>
+    /// The order is the mechanism. Writing the file and then the record leaves a window in which a
+    /// killed run has mutated a harness configuration and persisted no account of its previous bytes,
+    /// so <c>mcp-unwire</c> refuses it as drift and the undo is unreachable outside version control.
+    /// Writing the record first costs the opposite failure — a record for a write that never landed —
+    /// and the removal can recognise that one, because the file still holds the bytes the record
+    /// captured. A record therefore also gates the write: a change this tool cannot record is a change
+    /// it does not make.
+    /// </remarks>
+    private sealed class ReceiptJournal
+    {
+        private readonly string _root;
+        private readonly List<McpWiringReceiptRecord> _records;
+
+        public ReceiptJournal(string root, List<McpWiringReceiptRecord> records)
+        {
+            _root = root;
+            _records = records;
+        }
+
+        /// <summary>
+        /// Persists <paramref name="record"/>, replacing any earlier record for the same file; answers
+        /// with the reason it could not be persisted, or null when it was.
+        /// </summary>
+        public string? Record(McpWiringReceiptRecord record)
+        {
+            ArgumentNullException.ThrowIfNull(record);
+
+            _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
+            _records.Add(record);
+
+            string? failure = McpWiringReceipt.Save(_root, _records);
+
+            // A receipt that could not be written must not read as though it had been, so the
+            // in-memory copy goes back to what is on disk before the caller is told.
+            if (failure is not null)
+                _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
+
+            return failure;
+        }
+
+        /// <summary>
+        /// Takes a record back out after the write it described failed. Best effort: a receipt that
+        /// cannot be saved again leaves a record the removal recognises as an interrupted write, which
+        /// is the smaller harm than failing a run that has nothing written to show for it.
+        /// </summary>
+        public void Discard(string relativePath)
+        {
+            if (_records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, relativePath)) > 0)
+                _ = McpWiringReceipt.Save(_root, _records);
+        }
+    }
+
+    private static McpWiringFileChange Refused(
         string harness,
         string? path,
         IReadOnlyList<string> servers,
@@ -1235,18 +1363,13 @@ public static class McpWiringRepairer
         string? hint = null,
         string? snippet = null) =>
         new(
-            new McpWiringFileChange(
-                harness,
-                path,
-                McpWiringChangeOutcome.Refused,
-                servers,
-                code,
-                message,
-                hint,
-                Written: false,
-                snippet),
-            null);
-
-    /// <summary>What repairing one target came to, and the receipt record it earns.</summary>
-    private readonly record struct TargetResult(McpWiringFileChange Change, McpWiringReceiptRecord? Record);
+            harness,
+            path,
+            McpWiringChangeOutcome.Refused,
+            servers,
+            code,
+            message,
+            hint,
+            Written: false,
+            snippet);
 }

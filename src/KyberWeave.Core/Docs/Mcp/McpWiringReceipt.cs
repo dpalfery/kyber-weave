@@ -225,9 +225,9 @@ public sealed class McpWiringReceipt
             StringComparison.Ordinal);
 
     /// <summary>
-    /// Writes the receipt, and reports why it could not be written instead of failing the run: the
-    /// configuration files are already written by then, and a caller that threw here would lose the
-    /// record of the files it did write.
+    /// Writes the receipt, and reports why it could not be written instead of failing the run: a
+    /// caller may already have restored files by the time it rewrites the record of them, and one that
+    /// threw here would lose the report of the work it did.
     /// </summary>
     /// <param name="repositoryRoot">The repository the receipt belongs to.</param>
     /// <param name="records">Every record the receipt should hold.</param>
