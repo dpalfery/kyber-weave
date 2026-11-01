@@ -1,5 +1,5 @@
 ---
-id: adr/0050-docs-branch-writes-repository-scope-mcp-configuration
+id: adr/0051-docs-branch-writes-repository-scope-mcp-configuration
 title: The Docs Branch Writes Repository-Scope Harness MCP Configuration, Never User Scope
 doc-type: adr
 status: current
@@ -10,7 +10,7 @@ decided-by: []
 supersedes: []
 ---
 
-# ADR 0050: The Docs Branch Writes Repository-Scope Harness MCP Configuration, Never User Scope
+# ADR 0051: The Docs Branch Writes Repository-Scope Harness MCP Configuration, Never User Scope
 
 ## Status
 

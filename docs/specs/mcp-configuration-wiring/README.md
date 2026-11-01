@@ -23,12 +23,12 @@ keywords:
 are wired and launchable, warns without failing the command, and offers a confirmed
 repair; a separate, bounded, receipted command (`docs mcp-wire` / `docs mcp-unwire`)
 performs the repository-scope remedy. Squad is untouched. The ownership boundary the
-remedy relies on is recorded in ADR 0050 before the remedy ships (R8.3).
+remedy relies on is recorded in ADR 0051 before the remedy ships (R8.3).
 
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | Approved 2026-10-31 (autonomous). Ten requirements in EARS form (R1–R10), non-goals, decisions D1–D18. |
-| [Design](design.md) | Approved 2026-10-31 (autonomous). The `mcp.required-servers` declaration, the harness catalog and detection model, the terminal-gated prompt, the two repair verbs and their write bounds, the receipt, and the ADR 0050 boundary. |
+| [Design](design.md) | Approved 2026-10-31 (autonomous). The `mcp.required-servers` declaration, the harness catalog and detection model, the terminal-gated prompt, the two repair verbs and their write bounds, the receipt, and the ADR 0051 boundary. |
 | [Tasks](tasks.md) | Approved 2026-10-31 (autonomous), test-first; execution approved 2026-10-31. Eleven tasks: nine build tasks across five parallel waves, the conductor-run whole-change review, and the closeout. |
 
 ## Decisions and harvest

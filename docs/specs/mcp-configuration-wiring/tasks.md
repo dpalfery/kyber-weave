@@ -228,13 +228,13 @@ sequencing; no task makes a design decision.
     - **RED reason:** the types do not exist (compile failure).
     - **GREEN:** all three classes pass.
 
-- [ ] 5. **ADR 0050 — the ownership boundary** · R8.1–R8.3 · design §8 (D16, DD15)
+- [ ] 5. **ADR 0051 — the ownership boundary** · R8.1–R8.3 · design §8 (D16, DD15)
   - **Implementer:** `docs-dev`. **No-test task**; replacement validation below.
   **Depends on:** none (Wave A); **predecessor of 4** — the boundary is recorded before the
   write-path implementation lands, and before the shipped remedy writes any file outside
   this repository (R8.3).
   - **Files:**
-    - new `docs/adr/0050-docs-branch-writes-repository-scope-mcp-configuration.md`
+    - new `docs/adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md`
     - `docs/adr/README.md` (index row)
   - **Work:** the ADR records the D16 decision — the docs-branch repair may write
     repository-scope harness MCP configuration under the R5 bounds; the
@@ -376,7 +376,7 @@ sequencing; no task makes a design decision.
     fill the Closeout mapping in each artifact, mapping the decision ids (requirements
     D15–D19, design DD17–DD20, tasks TK1–TK8 and the execution approval AP1 — every row
     this artifact's Decisions table holds at closeout) and harvest items H1–H7 to their
-    destinations with the ADR disposition (ADR 0050, task 5); move the specification to
+    destinations with the ADR disposition (ADR 0051, task 5); move the specification to
     the archive; update the index row. Live acceptance — a real harness session reaching
     the server after the repair — stays the owner's check and remains
     `[NOT LIVE-VERIFIED]` in the delivery notes until performed (design DG5).
@@ -421,7 +421,7 @@ appended here:
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
 | TK1 | How are the tasks sequenced, and what runs in parallel? | Five waves by file ownership: A: 1, 5. B: 2, 3. C: 4. D: 6, 7. E: 8, 9. Then review (10) and closeout (11). Same-wave tasks touch disjoint files. | Mirrors the archived ship-gate-catalogue task structure; every dependency edge is stated in "Order and parallelism". | autonomous: recommendation accepted |
-| TK2 | When does ADR 0050 land relative to the write path? | Task 5 precedes task 4: the recorded boundary lands before any code that writes a harness file, satisfying R8.3's "before the repair command writes its first file outside this repository". | The conductor's instruction makes the ADR a predecessor of any task that writes outside this repository; task 4 implements that writer. | autonomous: recommendation accepted |
+| TK2 | When does ADR 0051 land relative to the write path? | Task 5 precedes task 4: the recorded boundary lands before any code that writes a harness file, satisfying R8.3's "before the repair command writes its first file outside this repository". | The conductor's instruction makes the ADR a predecessor of any task that writes outside this repository; task 4 implements that writer. The number is 0051 by design.md's DD20, renumbered from 0050 after PR #489 landed that number on `main` for the universal grant while this specification executed. | autonomous: recommendation accepted |
 | TK3 | Does any task edit `.kyber-weave/kyber-weave.yml`, given the always-human policy? | Yes — task 8, deliberately: the dogfood run appends this repository's own declaration. The change escalates for human review by path alone under `review.policy.always-human`; the expected `NEEDS_HUMAN` verdict is acceptable and is not a failure. | D17 accepted the escalation consequence; task 8 is also the one real-host exercise of the append-when-absent path. No other task touches the file. | autonomous: recommendation accepted |
 | TK4 | How is the prompt's terminal-gating made testable? | Two injectable internal seams on `DocsInitCommand`: `InteractiveCheckOverride` (default: stdin and stdout both not redirected) and `ConfirmFixOverride` (default: `AnsiConsole.Confirm`). Tests inject both; the shipped default is the design's §4 contract. | Design named `ConfirmFixOverride`; the tasks add the interactive-check seam because `Console.IsInputRedirected` cannot be driven from a test process, and the non-interactive behaviour (R4.4) is a contract that must be tested, not assumed. | autonomous: low-confidence, no authoritative source |
 | TK5 | Is the DG3/DG4 pinning work scheduled as tasks? | No. ZCode's entry body and Codex's repository-scope semantics are snippet-only in v1 by decision (DD18, DD19); the pinning work is each row's declared widening path, not v1 scope. No `docs/todo` entry is created: deferred work enters the todo index only when the user accepts it (repository rule). | The conductor approved both decisions as deliberate, temporary narrowing with named unblocking sources; scheduling them would exceed the approved design. | autonomous: recommendation accepted |
@@ -433,7 +433,7 @@ appended here:
 ## Closeout mapping
 
 _To be completed at task 11: every decision id (D15–D19, DD17–DD20, TK1–TK8, AP1) and
-harvest item (H1–H7) mapped to its destination, with the ADR disposition (ADR 0050) and
+harvest item (H1–H7) mapped to its destination, with the ADR disposition (ADR 0051) and
 the merge-ready documentation checks recorded._
 
 ## Gaps carried forward
