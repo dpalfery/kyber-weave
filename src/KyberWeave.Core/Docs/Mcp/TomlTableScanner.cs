@@ -66,19 +66,48 @@ public static class TomlTableScanner
     /// <summary>The TOML table whose child tables declare MCP servers.</summary>
     private const string ServerTableRoot = "mcp_servers";
 
+    /// <summary>
+    /// The largest document this classifier reads, in characters. The same bound the Copilot config
+    /// probe uses: a real <c>config.toml</c> is a few kilobytes, and this file is one a harness wrote
+    /// rather than one this tool controls the size of.
+    /// </summary>
+    private const int MaxDocumentLength = 1024 * 1024;
+
+    /// <summary>A quoted line in a refusal reason is capped at this many characters.</summary>
+    private const int SummaryLength = 40;
+
     /// <summary>Reads a document and reports the server tables it declares.</summary>
-    /// <param name="text">The document's text. An empty or blank document declares nothing.</param>
+    /// <param name="text">
+    /// The document's text. An empty or blank document declares nothing. A document over
+    /// <see cref="MaxDocumentLength"/> is refused rather than read.
+    /// </param>
+    /// <remarks>
+    /// The document is walked as a span, one line at a time and with no array of them: the input is
+    /// a file of unknown size, and splitting it first made the check allocate one string per line of
+    /// whatever it was handed. A line ends at CRLF, LF or a lone CR, so a file written by an editor
+    /// that uses any of the three is read as the lines it visibly has — lone CR used to leave the
+    /// whole file as one line, where only the first header is in the position a header can occupy.
+    /// </remarks>
     public static TomlScanReport Scan(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+
+        if (text.Length > MaxDocumentLength)
+        {
+            return Refused(
+                $"the document is {text.Length} characters, over the {MaxDocumentLength}-character bound this classifier reads, so it is not classified");
+        }
 
         List<string> servers = [];
         bool inMultilineBasic = false;
         bool inMultilineLiteral = false;
 
-        foreach (string line in text.Split('\n'))
+        ReadOnlySpan<char> remaining = text.AsSpan();
+        while (true)
         {
-            string content = line.TrimEnd('\r');
+            int breakAt = remaining.IndexOfAny('\r', '\n');
+            ReadOnlySpan<char> content = breakAt < 0 ? remaining : remaining[..breakAt];
+
             int index = 0;
             int firstToken = FirstTokenIndex(content);
 
@@ -86,7 +115,7 @@ public static class TomlTableScanner
             {
                 if (inMultilineBasic)
                 {
-                    int close = content.IndexOf(MultilineBasicDelimiter, index, StringComparison.Ordinal);
+                    int close = IndexAfter(content, index, MultilineBasicDelimiter);
                     if (close < 0)
                     {
                         index = content.Length;
@@ -100,7 +129,7 @@ public static class TomlTableScanner
 
                 if (inMultilineLiteral)
                 {
-                    int close = content.IndexOf(MultilineLiteralDelimiter, index, StringComparison.Ordinal);
+                    int close = IndexAfter(content, index, MultilineLiteralDelimiter);
                     if (close < 0)
                     {
                         index = content.Length;
@@ -156,6 +185,16 @@ public static class TomlTableScanner
 
                 index++;
             }
+
+            if (breakAt < 0)
+                break;
+
+            // CRLF is one line break. Stepping past the CR alone would leave a line consisting of
+            // the LF, which costs nothing to scan but reads the file as one line longer than it is.
+            bool carriageReturn = remaining[breakAt] == '\r';
+            remaining = remaining[(breakAt + 1)..];
+            if (carriageReturn && remaining.Length > 0 && remaining[0] == '\n')
+                remaining = remaining[1..];
         }
 
         if (inMultilineBasic || inMultilineLiteral)
@@ -168,7 +207,7 @@ public static class TomlTableScanner
     /// Classifies one table header. Returns a refusal reason, or null when the header is either
     /// recorded or is not this scanner's business.
     /// </summary>
-    private static string? ReadHeader(string line, int start, List<string> servers, out int next)
+    private static string? ReadHeader(ReadOnlySpan<char> line, int start, List<string> servers, out int next)
     {
         next = line.Length;
 
@@ -212,7 +251,7 @@ public static class TomlTableScanner
     /// Splits a table path on its dots, keeping quoted segments intact. Dots inside a quoted key
     /// are part of the name, not separators.
     /// </summary>
-    private static List<TablePathSegment> SplitTablePath(string path)
+    private static List<TablePathSegment> SplitTablePath(ReadOnlySpan<char> path)
     {
         List<TablePathSegment> segments = [];
         StringBuilder current = new();
@@ -283,7 +322,7 @@ public static class TomlTableScanner
     }
 
     /// <summary>Finds the closing <c>]</c> of a header, ignoring brackets inside a quoted key.</summary>
-    private static int ClosingBracket(string line, int start)
+    private static int ClosingBracket(ReadOnlySpan<char> line, int start)
     {
         char quote = '\0';
 
@@ -316,7 +355,7 @@ public static class TomlTableScanner
     /// Finds the quote that closes a single-line string, skipping escaped quotes. A basic string
     /// cannot span lines, so reaching the end of the line means it was never closed.
     /// </summary>
-    private static int ClosingQuote(string line, int start, char quote)
+    private static int ClosingQuote(ReadOnlySpan<char> line, int start, char quote)
     {
         for (int index = start; index < line.Length; index++)
         {
@@ -335,11 +374,22 @@ public static class TomlTableScanner
         return -1;
     }
 
-    private static bool StartsWith(string line, int index, string token) =>
-        line.Length - index >= token.Length &&
-        string.CompareOrdinal(line, index, token, 0, token.Length) == 0;
+    private static bool StartsWith(ReadOnlySpan<char> line, int index, string token) =>
+        index <= line.Length &&
+        line[index..].StartsWith(token.AsSpan(), StringComparison.Ordinal);
 
-    private static int FirstTokenIndex(string line)
+    /// <summary>
+    /// Where <paramref name="token"/> next appears at or after <paramref name="start"/>, or -1. A
+    /// span has no search overload that takes a start index, so the span is sliced and the answer
+    /// shifted back into the caller's coordinates.
+    /// </summary>
+    private static int IndexAfter(ReadOnlySpan<char> line, int start, string token)
+    {
+        int found = line[start..].IndexOf(token.AsSpan(), StringComparison.Ordinal);
+        return found < 0 ? -1 : found + start;
+    }
+
+    private static int FirstTokenIndex(ReadOnlySpan<char> line)
     {
         for (int index = 0; index < line.Length; index++)
         {
@@ -354,10 +404,12 @@ public static class TomlTableScanner
     /// A short form of a line for a refusal reason: a diagnostic that quotes 200 characters of
     /// TOML is one nobody reads.
     /// </summary>
-    private static string Summarize(string line)
+    private static string Summarize(ReadOnlySpan<char> line)
     {
-        string trimmed = line.Trim();
-        return trimmed.Length <= 40 ? trimmed : trimmed[..40] + "…";
+        ReadOnlySpan<char> trimmed = line.Trim();
+        return trimmed.Length <= SummaryLength
+            ? trimmed.ToString()
+            : trimmed[..SummaryLength].ToString() + "…";
     }
 
     private static TomlScanReport Refused(string reason) =>
