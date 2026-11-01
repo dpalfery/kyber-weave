@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
 using Xunit;
@@ -89,6 +90,12 @@ public sealed class McpWiringReceiptTests : IDisposable
     /// now is — under the schema's own names, so the record is readable by anything that is not this
     /// code (5.8, DD13).
     /// </summary>
+    /// <remarks>
+    /// The pre-write <em>content</em> is asserted beside the digest, because 5.8 requires removal to
+    /// restore the state the receipt recorded and a digest cannot produce bytes to restore: it can
+    /// only prove that bytes are the ones recorded. Without the content the record would document
+    /// the write without being able to undo it.
+    /// </remarks>
     [Fact]
     public void AnInsertedWriteRecordsBothDigestsAndTheMode()
     {
@@ -109,12 +116,20 @@ public sealed class McpWiringReceiptTests : IDisposable
         Assert.Equal(Digest(original), Normalize(record.GetProperty("preSha256").GetString()));
         Assert.Equal(Digest(written), Normalize(record.GetProperty("postSha256").GetString()));
 
+        // The recorded content is the file the repair found, byte for byte, and it is the content the
+        // recorded digest describes. Asserting both is what makes the receipt the source a restore
+        // reads rather than a witness to bytes obtained some other way.
+        byte[] recordedPreWrite = Convert.FromBase64String(record.GetProperty("preContent").GetString() ?? string.Empty);
+        Assert.Equal(original, recordedPreWrite);
+        Assert.Equal(Normalize(record.GetProperty("preSha256").GetString()), Digest(recordedPreWrite));
+
         McpWiringReceiptRecord loaded = RecordFor(McpWiringReceipt.Load(Repo), VsCodeConfigFile);
         Assert.Equal(McpWiringWriteMode.Inserted, loaded.Mode);
         Assert.Equal(ServerName, Assert.Single(loaded.Servers));
         Assert.Equal(Digest(original), Normalize(loaded.PreSha256));
         Assert.Equal(Digest(written), Normalize(loaded.PostSha256));
         Assert.Equal(TimeSpan.Zero, loaded.WrittenAtUtc.Offset);
+        Assert.Equal(original, Convert.FromBase64String(loaded.PreContent ?? string.Empty));
     }
 
     /// <summary>
@@ -249,6 +264,48 @@ public sealed class McpWiringReceiptTests : IDisposable
     }
 
     /// <summary>
+    /// A receipt whose recorded content no longer matches its own recorded digest cannot restore
+    /// anything (5.8, 5.9): the digest is what makes the content trustworthy, so a payload that fails
+    /// it proves nothing about what the file held. Removal must refuse rather than write those bytes
+    /// — restoring a tampered payload would put a file on disk that the receipt does not describe,
+    /// which is the same failure as restoring over a foreign edit.
+    /// </summary>
+    [Fact]
+    public void UnwireRefusesAReceiptWhoseRecordedContentNoLongerMatchesItsDigest()
+    {
+        byte[] original = Encoding.UTF8.GetBytes("""{"servers": {}}""");
+        WriteBytes(VsCodeConfigFile, original);
+        Repair(VsCode);
+
+        byte[] repaired = File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile));
+
+        // The target file is untouched and still matches its post-write digest, so this is not the
+        // drift refusal: the only thing wrong is the record's own payload.
+        byte[] tampered = Encoding.UTF8.GetBytes("""{"servers": {}, "tampered": true}""");
+        ReplaceReceiptPreContent(VsCodeConfigFile, tampered);
+
+        // The tampered receipt still loads and still yields the record — otherwise a refusal would be
+        // indistinguishable from "the receipt could not be read", and this case would prove nothing
+        // about the integrity check.
+        McpWiringReceiptRecord? afterTampering = McpWiringReceipt.Load(Repo).Find(VsCodeConfigFile);
+        Assert.NotNull(afterTampering);
+        Assert.Equal(tampered, Convert.FromBase64String(afterTampering.PreContent ?? string.Empty));
+
+        McpWiringRepairReport report = McpWiringRepairer.Unwire(Repo, [VsCode]);
+
+        McpWiringFileChange change = Assert.Single(report.Files);
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.Equal(DriftCode, change.Code);
+        Assert.False(change.Written);
+        Assert.Contains("pre-write content", DiagnosticText(change), StringComparison.Ordinal);
+
+        // Neither the tampered payload nor the original bytes were written: a refusal is zero bytes.
+        Assert.Equal(repaired, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
+        Assert.NotNull(
+            McpWiringReceipt.Load(Repo).Find(VsCodeConfigFile));
+    }
+
+    /// <summary>
     /// Removal without a record is a refusal, not a deletion (5.9): Kyber-Weave only removes what it
     /// can prove it wrote.
     /// </summary>
@@ -303,6 +360,28 @@ public sealed class McpWiringReceiptTests : IDisposable
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
+
+    /// <summary>
+    /// Rewrites one record's <c>preContent</c> on disk and leaves its digests as they were, which is
+    /// exactly the corruption the removal path's integrity check exists for: a payload that no longer
+    /// proves itself. The receipt's other fields are preserved, so the record still looks complete.
+    /// </summary>
+    private void ReplaceReceiptPreContent(string relativePath, byte[] content)
+    {
+        JsonNode document = JsonNode.Parse(File.ReadAllText(ReceiptPath))
+            ?? throw new InvalidOperationException("the receipt is not a JSON document");
+
+        JsonNode? record = document["files"]?
+            .AsArray()
+            .FirstOrDefault(candidate => candidate?["path"]?.GetValue<string>() == relativePath);
+
+        if (record is null)
+            throw new InvalidOperationException($"the receipt holds no record for '{relativePath}'");
+
+        record["preContent"] = Convert.ToBase64String(content);
+
+        File.WriteAllText(ReceiptPath, document.ToJsonString());
+    }
 
     private static McpWiringReceiptRecord RecordFor(McpWiringReceipt receipt, string relativePath) =>
         receipt.Find(relativePath) ??

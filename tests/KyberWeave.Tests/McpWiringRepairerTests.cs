@@ -484,6 +484,87 @@ public sealed class McpWiringRepairerTests : IDisposable
     }
 
     /// <summary>
+    /// 6.2 refuses "that server's entry", which is a per-server rule, not a per-file one: when one
+    /// declared server launches and another does not, the harness still gets the entry that works,
+    /// the absent server's entry is left out, and the omission is named. Writing the whole
+    /// declaration would hand the operator a harness that fails at startup and blames the
+    /// configuration file; refusing the whole file would withhold a server that is ready to wire
+    /// because a different one is not installed yet.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same rule is checked by
+    /// <see cref="ADeclarationWhereNoServerResolvesIsRefusedOutright"/>: the whole-file refusal is
+    /// this rule applied where every server is excluded, not a second policy.
+    /// </remarks>
+    [Fact]
+    public void ADeclarationWithOneUnresolvableServerWritesTheRestAndNamesWhatItOmitted()
+    {
+        WriteInRepository(".mcp.json", """{"mcpServers": {}}""");
+
+        // Bin holds the first-party binary and nothing else, so 'kyber-weave-mcp' resolves and
+        // 'codegraph' does not: the mixed declaration 6.2 is written for, from one search path.
+        McpWiringRepairReport report = Repair(
+            Declare(FirstPartyServer(), ThirdPartyServer()),
+            ResolverOver(Bin),
+            ClaudeCode);
+
+        McpWiringFileChange change = SingleChange(report, ClaudeCode);
+
+        // Not refused: one server is writable, and the file is written for it.
+        Assert.Equal(McpWiringChangeOutcome.Inserted, change.Outcome);
+        Assert.True(change.Written, "the resolvable server's entry was written, so bytes reached the file");
+        Assert.Equal(ServerName, Assert.Single(change.Servers));
+
+        using JsonDocument parsed = JsonDocument.Parse(File.ReadAllText(Path.Combine(Repo, ".mcp.json")));
+        JsonElement servers = parsed.RootElement.GetProperty("mcpServers");
+
+        Assert.True(
+            servers.TryGetProperty(ServerName, out _),
+            "the server whose binary resolves must still be wired (6.2 refuses only the unresolved one)");
+        Assert.False(
+            servers.TryGetProperty("codegraph", out _),
+            "the entry for the server whose binary is absent must not be written, for this harness or any other");
+
+        // The omission is reported rather than left for the operator to notice: a partial write that
+        // reads as a complete one is the failure this note exists to prevent.
+        string diagnostic = DiagnosticText(change);
+        Assert.Contains("codegraph", diagnostic, StringComparison.Ordinal);
+        Assert.Contains(".mcp.json", diagnostic, StringComparison.Ordinal);
+
+        // The undo record names only what was written, so a removal never claims to take out an entry
+        // the repair declined to insert.
+        McpWiringReceiptRecord? record = McpWiringReceipt.Load(Repo).Find(".mcp.json");
+        Assert.NotNull(record);
+        Assert.Equal(ServerName, Assert.Single(record.Servers));
+    }
+
+    /// <summary>
+    /// The whole-file refusal is the per-server rule applied where no server survives it: with every
+    /// declared binary absent there is nothing 6.2 permits writing, so the file is refused outright
+    /// rather than created holding an empty server map — a created file that wires nothing would be
+    /// a worse answer than a refusal that says why.
+    /// </summary>
+    [Fact]
+    public void ADeclarationWhereNoServerResolvesIsRefusedOutright()
+    {
+        McpWiringRepairReport report = Repair(
+            Declare(FirstPartyServer(), ThirdPartyServer()),
+            ResolverOver(EmptyBin),
+            ClaudeCode);
+
+        McpWiringFileChange change = SingleChange(report, ClaudeCode);
+        Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
+        Assert.Equal(RefusalCode, change.Code);
+        Assert.False(change.Written);
+        Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a refusal creates nothing");
+        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt either");
+
+        // With a first-party binary missing the refusal names the broken installation (6.3), which is
+        // the root cause an operator can act on; the harness file is not what is wrong.
+        Assert.Contains(BinaryName, DiagnosticText(change), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A dry run is the same computation with the write withheld: it reports exactly the outcomes
     /// the real run reports, writes not one byte to a target, and does not create the receipt —
     /// not even the receipt (5.10).
