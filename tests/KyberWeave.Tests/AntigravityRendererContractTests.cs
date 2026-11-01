@@ -1529,10 +1529,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
             PreloadedSource: source));
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        // review-lens declares no delegates-to roster, so its record set must hold exactly one
+        // record. Asserting the total, not only the matching code, stops a duplicate same-agent
+        // record with a different code from slipping through.
         SquadDegradationRecord record = Assert.Single(
-            result.Degradations,
-            record => string.Equals(record.CanonicalIdentity, denied.Name, StringComparison.Ordinal) &&
-                      string.Equals(record.Code, "permission-not-expressible", StringComparison.Ordinal));
+            result.Degradations.Where(entry => string.Equals(
+                entry.CanonicalIdentity,
+                denied.Name,
+                StringComparison.Ordinal)).ToList());
+        Assert.Equal("permission-not-expressible", record.Code, StringComparer.Ordinal);
         Assert.NotNull(record.Details);
         Assert.Contains("does not allow 'filesystem.read'", record.Details, StringComparison.Ordinal);
         Assert.DoesNotContain("declares no 'kyber-weave' server", record.Details, StringComparison.Ordinal);
