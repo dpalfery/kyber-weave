@@ -14,7 +14,7 @@ impact-components: [KyberSquad, Distribution, DocGraph, ContextHygiene]
 
 # Kyber-Squad ships the Kyber-Weave skills, so they deploy at the same level as the Squad skills
 
-**Status: Archived 2026-10-31; closeout not complete until `docs drift .` is verified (no CodeGraph index in this worktree).** Revision 1 executed (T0 to T2, then closeout) on branch `fix/kyber-skills-ship-with-squad`, draft pull request #494. Approve-and-execute recorded as D15; the human's request ("kyber skills should be deployed at the same level as the squad") is the scope. Closeout and mapping are in the Closeout section at the end.
+**Status: Archived — complete 2026-10-31.** Revision 1 executed (T0 to T2, a review round, then closeout) on branch `fix/kyber-skills-ship-with-squad`, pull request #494. Approve-and-execute recorded as D15; the human's request ("kyber skills should be deployed at the same level as the squad") is the scope. Closeout and mapping are in the Closeout section at the end.
 
 **Branch:** a **new feature branch cut from `origin/main`** (`b25cb70` at planning time), suggested name `fix/kyber-skills-ship-with-squad`. The checkout this plan was written from (`fix/opencode-v2-capture`) is unrelated OpenCode work and must not carry this change.
 
@@ -235,11 +235,12 @@ No findings.
 0 critical, 0 error, 0 warning, 0 info.
 
 $ dotnet run --project src/KyberWeave.Cli -- docs drift .
-1 critical, 0 error, 0 warning, 0 info.
-KW-DOC-DRIFT-001: Drift cannot be verified: No CodeGraph index at <worktree>/.codegraph/codegraph.db.
+No findings.
+
+0 critical, 0 error, 0 warning, 0 info.
 ```
 
-`docs drift .` is not verified in this worktree. The worktree has no CodeGraph index, and the closeout did not build one. The drift check, including the `code-refs` added to ADR 0049 and the architecture and onboarding documents, must be run where an index exists before the closeout counts as complete.
+The first closeout run could not verify drift: the worktree had no CodeGraph index (`KW-DOC-DRIFT-001`). The conductor then built a local, git-ignored index with `codegraph init .` and re-ran `docs drift .` over the final documents, including the `code-refs` added to ADR 0049 and the architecture and onboarding documents: 0 findings. The closeout is complete.
 
 ### Documentation review
 

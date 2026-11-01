@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using YamlDotNet.Core;
@@ -32,10 +33,19 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// available to a subagent.
 /// </para>
 /// <para>
-/// Omitting <c>mcpServers</c> inherits the parent session's MCP tools (widening). This
-/// renderer always emits <c>mcpServers: []</c> and records
-/// <c>permission-not-expressible</c> that parent MCP was not inherited. Squad does not
-/// invent Factory MCP server names.
+/// Omitting <c>mcpServers</c> inherits the parent session's MCP tools (widening), so Factory
+/// documents the key as an exclusion that is only honoured when it is present: <c>[]</c>
+/// excludes every server, an absent key keeps the parent's availability, and a scalar is
+/// rejected. This renderer therefore never omits the key and never emits a scalar. Its value
+/// is the whitelist the droid is entitled to — exactly the servers the squad's own
+/// <c>mcp.json</c> declares, in ordinal order — for a droid whose capability profile allows
+/// <c>filesystem.read</c> and is not the pure orchestrator (profile id <c>orchestrator</c>),
+/// and <c>[]</c> for every other droid. Squad does not invent Factory MCP server names: a
+/// name that reaches a droid came from the squad's own declaration, and a squad that declares
+/// none grants none. Only an empty whitelist records <c>permission-not-expressible</c> saying
+/// parent MCP was not inherited; a deliberately whitelisted droid is a non-degraded outcome
+/// and makes no such claim, so the two outcomes stay distinguishable in the degradation
+/// stream.
 /// </para>
 /// <para>
 /// Profile-declared shared identities suppress their skill projections per the native
@@ -51,8 +61,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// entry-point skill at <c>.factory/skills/&lt;name&gt;/SKILL.md</c> the user can invoke in
 /// the main session. The skill body matches the canonical agent body verbatim and its
 /// resource closure is projected beside it; the skill runs under the session's permissions,
-/// so the droid's explicit <c>tools</c> allow-list and <c>mcpServers: []</c> do not apply to
-/// it. A canonical skill occupying the entry-point identity fails closed rather than
+/// so the droid's explicit <c>tools</c> allow-list and its rendered <c>mcpServers</c> value do
+/// not apply to it, and the entry-point caveat names that value rather than assuming it is
+/// empty. A canonical skill occupying the entry-point identity fails closed rather than
 /// renaming either projection. Under <c>no-primary-agent: omit</c> no entry-point skill is
 /// emitted.
 /// </para>
@@ -61,6 +72,22 @@ public sealed class FactoryRenderer : ISquadRenderer
 {
     private const string DroidsDirectory = ".factory/droids";
     private const string SkillsDirectory = ".factory/skills";
+
+    /// <summary>
+    /// The capability profile whose holder routes work rather than researching it, which
+    /// <see cref="ClaudeRenderer"/> also excludes from the standard MCP grant. Declared by id
+    /// here for the same reason those renderers do: the exemption belongs to the role, not to
+    /// a permission the profile happens to carry.
+    /// </summary>
+    private const string PureOrchestratorProfile = "orchestrator";
+
+    /// <summary>
+    /// The verbatim sentence a droid carries when its rendered <c>mcpServers</c> is empty.
+    /// Keeping the empty case word-for-word is what makes the withholding visible and
+    /// distinguishable from a deliberate whitelist.
+    /// </summary>
+    private const string McpWithheldSentence =
+        "mcpServers: [] excludes every MCP server so parent MCP was not inherited.";
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Factory's documented tool IDs,
@@ -166,13 +193,26 @@ public sealed class FactoryRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        // The whitelist source is the squad's own mcp.json, enumerated once per render and in
+        // ordinal order so a rendered droid stays byte-stable across an edit that only
+        // reorders the declaration. The toolchain roster is deliberately not the source: it
+        // names servers an install may never configure, and a grant for one would point the
+        // droid at a server with nothing behind it.
+        IReadOnlyList<string> declaredMcpServers = DeclaredMcpServerNames(source);
+
         foreach (SquadAgent agent in source.Agents)
         {
+            IReadOnlyList<string> mcpServers = ResolveMcpServers(
+                agent,
+                source.CapabilityProfiles.Profiles,
+                declaredMcpServers);
+
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
-                request.Scope);
+                request.Scope,
+                mcpServers);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -193,6 +233,7 @@ public sealed class FactoryRenderer : ISquadRenderer
                                 agent,
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
+                                mcpServers,
                                 $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
                                 true));
                         }
@@ -219,13 +260,17 @@ public sealed class FactoryRenderer : ISquadRenderer
                             agent,
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
+                            mcpServers,
                             skillPrincipal.RelativePath));
                     }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
                     // Omit mode: the droid renders exactly as before, with no entry-point skill.
-                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                    degradations.AddRange(BuildDegradationRecords(
+                        agent,
+                        source.CapabilityProfiles.Profiles,
+                        mcpServers));
                 }
                 else
                 {
@@ -236,7 +281,10 @@ public sealed class FactoryRenderer : ISquadRenderer
             }
             else
             {
-                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                degradations.AddRange(BuildDegradationRecords(
+                    agent,
+                    source.CapabilityProfiles.Profiles,
+                    mcpServers));
             }
         }
 
@@ -263,7 +311,8 @@ public sealed class FactoryRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        SquadDeploymentScope scope)
+        SquadDeploymentScope scope,
+        IReadOnlyList<string> mcpServers)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -286,8 +335,9 @@ public sealed class FactoryRenderer : ISquadRenderer
         // An empty grant is tools: [] (fail-closed), never omitted and never 'all'.
         frontmatter["tools"] = new FactoryYamlFlowSequence(ResolveTools(agent, capabilityProfiles));
 
-        // Omitting mcpServers inherits parent MCP. Emit [] so that widening does not happen.
-        frontmatter["mcpServers"] = new FactoryYamlFlowSequence([]);
+        // Omitting mcpServers inherits parent MCP. Emit the key always, carrying the droid's
+        // whitelist or [] when it is entitled to none, so the widening cannot happen.
+        frontmatter["mcpServers"] = new FactoryYamlFlowSequence(mcpServers);
 
         string content;
         lock (SerializerLock)
@@ -456,6 +506,91 @@ public sealed class FactoryRenderer : ISquadRenderer
     }
 
     /// <summary>
+    /// The MCP servers a droid is entitled to declare: the squad's declared servers in ordinal
+    /// order when <see cref="GrantsMcp"/> holds, and the empty list otherwise. Falling back to
+    /// the declaration for an unresolvable profile would grant a role its profile says nothing
+    /// about, so the empty list is the fail-closed answer as well as the orchestrator's.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveMcpServers(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> declaredMcpServers)
+    {
+        if (!GrantsMcp(agent, capabilityProfiles))
+        {
+            return [];
+        }
+
+        return declaredMcpServers;
+    }
+
+    /// <summary>
+    /// Whether a droid is entitled to the declared MCP servers: any role allowed to read the
+    /// filesystem, except a pure orchestrator, which routes work rather than researching it.
+    /// Mirrors the rule <see cref="ClaudeRenderer"/>, <see cref="ZCodeRenderer"/>, and
+    /// <see cref="DevinRenderer"/> apply to their own MCP grants, so Factory does not hand a
+    /// role a research surface its capability profile denies.
+    /// </summary>
+    private static bool GrantsMcp(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        return !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
+               capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+               profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+               decision == SquadPermissionDecision.Allow;
+    }
+
+    /// <summary>
+    /// The MCP server names the squad's own <c>mcp.json</c> declares, in ordinal order.
+    /// </summary>
+    /// <remarks>
+    /// The declaration is the source rather than the toolchain's <c>required-mcp-tools</c>
+    /// roster because the two answer different questions: the roster lists the tools the
+    /// renderers grant from, and a server the user has not configured still appears there.
+    /// Whitelisting from it would point a droid at a server with nothing behind it, which
+    /// fails silently and is exactly the failure a whitelist is meant to make honest. A
+    /// missing or non-object <c>mcpServers</c> yields no names, so a malformed declaration
+    /// fails closed instead of inheriting the parent session.
+    /// </remarks>
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source)
+    {
+        if (!source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. servers.EnumerateObject()
+                .Select(server => server.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+        ];
+    }
+
+    /// <summary>
+    /// The YAML spelling of a rendered whitelist, so the entry-point caveat names the value the
+    /// droid beside it actually carries — <c>mcpServers: [kyber-weave]</c> or, for a droid
+    /// entitled to none, the <c>mcpServers: []</c> the caveat has always named.
+    /// </summary>
+    private static string DescribeMcpServers(IReadOnlyList<string> mcpServers)
+    {
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["mcpServers"] = new FactoryYamlFlowSequence(mcpServers)
+        };
+
+        // Serialize through the same converter the droid frontmatter uses, so the caveat's
+        // spelling is the rendered value rather than a hand-joined approximation of it. A
+        // hand-joined name containing a comma would read as two servers in the receipt.
+        lock (SerializerLock)
+        {
+            return YamlSerializer.Serialize(frontmatter).TrimEnd('\r', '\n');
+        }
+    }
+
+    /// <summary>
     /// Builds the degradation records for a primary agent that also renders as an
     /// entry-point skill: the fallback record naming the additional projection, then the
     /// agent's own records with the entry-point caveat folded into the shared
@@ -467,6 +602,7 @@ public sealed class FactoryRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> mcpServers,
         string entryPointSkillPath,
         bool reusedCanonicalSkill = false)
     {
@@ -493,9 +629,10 @@ public sealed class FactoryRenderer : ISquadRenderer
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
                      agent,
                      capabilityProfiles,
+                     mcpServers,
                      $"The same-name entry point at {entryPointSkillPath} runs under the " +
                      "session's permissions; the droid's explicit tools allow-list and " +
-                     "mcpServers: [] do not apply to it."))
+                     $"{DescribeMcpServers(mcpServers)} do not apply to it."))
         {
             yield return record;
         }
@@ -504,10 +641,36 @@ public sealed class FactoryRenderer : ISquadRenderer
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> mcpServers,
         string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
+            // An unresolvable profile grants no MCP servers, so the rendered whitelist is empty
+            // even though no permission detail is available. The exclusion still has to be
+            // visible in the receipt; yielding nothing here would make it silent.
+            List<string> unresolvedDetails = [];
+            if (mcpServers.Count == 0)
+            {
+                unresolvedDetails.Add(McpWithheldSentence);
+            }
+
+            if (entryPointSkillNote is not null)
+            {
+                unresolvedDetails.Add(entryPointSkillNote);
+            }
+
+            if (unresolvedDetails.Count > 0)
+            {
+                yield return new SquadDegradationRecord(
+                    SquadTargetCatalog.GetToken(SquadTarget.Factory),
+                    agent.Name,
+                    agent.Name,
+                    "permission-not-expressible",
+                    agent.BodyDigest,
+                    string.Join(" ", unresolvedDetails));
+            }
+
             yield break;
         }
 
@@ -546,21 +709,29 @@ public sealed class FactoryRenderer : ISquadRenderer
                 "Capability 'delegate' cannot spawn subagents; Factory withholds the Task tool from custom droids.");
         }
 
-        notExpressibleDetails.Add(
-            "mcpServers: [] excludes every MCP server so parent MCP was not inherited.");
+        // The withholding sentence describes an empty whitelist only. A whitelisted droid is a
+        // non-degraded outcome, so it carries no MCP claim at all — the entry-point caveat is
+        // the one place a whitelisted primary's value is named, and it is passed in separately.
+        if (mcpServers.Count == 0)
+        {
+            notExpressibleDetails.Add(McpWithheldSentence);
+        }
 
         if (entryPointSkillNote is not null)
         {
             notExpressibleDetails.Add(entryPointSkillNote);
         }
 
-        yield return new SquadDegradationRecord(
-            SquadTargetCatalog.GetToken(SquadTarget.Factory),
-            agent.Name,
-            agent.Name,
-            "permission-not-expressible",
-            agent.BodyDigest,
-            string.Join(" ", notExpressibleDetails));
+        if (notExpressibleDetails.Count > 0)
+        {
+            yield return new SquadDegradationRecord(
+                SquadTargetCatalog.GetToken(SquadTarget.Factory),
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
+        }
 
         SquadPermissionDecision executeDecision =
             profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)

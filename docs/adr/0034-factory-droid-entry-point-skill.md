@@ -4,7 +4,7 @@ title: Factory Keeps the Conductor Droid and Adds an Entry-Point Skill
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-31
 ---
 
 # ADR 0034: Factory Keeps the Conductor Droid and Adds an Entry-Point Skill
@@ -14,6 +14,19 @@ last-reviewed: 2026-10-10
 Accepted, 2026-10-10. Records the Factory rendering classification delivered with the
 primary-agent entry-point skill. Does not change how Devin, Pi, ZCode, or Warp lower primary
 agents, and does not change the native single-projection rule for shared identities.
+
+Amended 2026-10-31, in place: the droid's `mcpServers` value is no longer always `[]`, so
+decision 2 is restated value-dependently. `FactoryRenderer` derives a per-droid server whitelist
+from the server names the squad itself declares (today exactly `kyber-weave`) and emits it for any
+droid whose capability profile allows `filesystem.read` and whose profile id is not the pure
+orchestrator; every other droid keeps `[]`, and the key is still never omitted, because omission
+inherits the parent session's servers. The substance of this record is unchanged: the entry-point
+skill runs under the session's permissions and is **not governed by the `mcpServers` whitelist's
+value** either way — the whitelist binds the droid file, not the skill. The
+`permission-not-expressible` detail about excluded parent MCP now appears only for an empty
+whitelist. This remains the record for the entry-point decision; the whitelist contract itself is
+stated in [Kyber-Squad architecture §4](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
+and the [capability matrix](../kyber-squad/requirements.md#target-capability-and-degradation-matrix).
 
 ## Context
 
@@ -40,9 +53,9 @@ native droid primitive works for delegation, and only the user-facing selection 
    resource closure projected beside it, recording `role-skill-fallback`. The droid file is
    kept for Task dispatch.
 2. **The entry-point skill runs unenforced.** A Factory skill is a Markdown instruction
-   file: the droid's explicit `tools` allow-list, `mcpServers: []`, and the safety-narrowed
-   `ask` handling do not apply to it. It runs in the main session under the session's
-   permissions, like any hand-typed instruction. The shared
+   file: the droid's explicit `tools` allow-list, the value its `mcpServers` key carries, and
+   the safety-narrowed `ask` handling do not apply to it. It runs in the main session under the
+   session's permissions, like any hand-typed instruction. The shared
    `permission-not-expressible` record states this caveat.
 3. **A canonical skill occupying the entry-point identity fails closed.** Factory renders
    both a droid and an entry-point skill for the identity, and there is no `role-` escape

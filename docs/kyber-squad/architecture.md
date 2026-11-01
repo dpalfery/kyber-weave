@@ -379,6 +379,18 @@ flowchart LR
   for the declared technologies — instead of writing them. The hint never changes the
   verb's exit code, and global scope never prints it, because there is no project.
 
+- **Factory MCP wiring splits between Squad and the operator, and the split is a standing rule.**
+  Squad owns the **droid whitelist**: the per-droid `mcpServers` value rendered into each droid
+  file Squad writes, and nothing more. Squad owns **no Factory settings file** — it does not
+  create, write, adopt, or check `.factory/mcp.json` (repository scope) or `~/.factory/mcp.json`
+  (global scope), and it invents no Factory server names for an operator to have to match. Those
+  files are user-owned, and the operator owns the app-level configuration in them. This is the
+  same boundary the task-gate bullet above draws: Squad renders the artifacts it owns and
+  documents the operator's half rather than writing it. The operator's half
+  is spelled out in the [MCP runbook](../docgraph/mcp-runbook.md#factory), because a dispatched
+  droid needs both halves — Squad's whitelist names a server, and the operator's file launches
+  it — and `squad doctor` checks neither.
+
 ### Cross-Process Mutex Lease
 
 - **Named OS Mutex**: Every mutating operation acquires an exclusive OS-named mutex (`kyber-weave-squad-<root-key>`).
@@ -817,6 +829,24 @@ and validates.
   because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
   generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
   server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
+  `FactoryRenderer` has no tool allow-list to extend, because a Factory droid's MCP reach is a
+  **server** list: its `mcpServers` key. Factory reads an omitted key as "inherit the parent
+  session's servers" and an explicit `[]` as "exclude every server", so the renderer derives a
+  per-droid whitelist from the names the squad itself declares in its `mcp.json` — today exactly
+  `kyber-weave`, launched `kyber-weave-mcp --repo-root .` — and emits it for any agent whose
+  capability profile allows `filesystem.read` and whose profile id is not the pure orchestrator,
+  under the same entitlement condition `ClaudeRenderer` and `ZCodeRenderer` apply to their own
+  grants. Every other droid gets `mcpServers: []`, and no droid ever omits the key, because
+  omission is the inherited-and-therefore-widened case. A non-empty whitelist is a distinguished,
+  non-degraded outcome: the `permission-not-expressible` detail that parent MCP was excluded is
+  recorded only for the empty list, so the frontmatter value and the receipt agree.
+  Widening that whitelist is a declared edit rather than a renderer change: naming a server in
+  `mcp.json` is what puts it in the list, and `SquadToolchainRosterGuardTests` fails until the
+  same name is a `required-mcp-tools` key in `toolchain.yml`, so a whitelist entry cannot outrun
+  the squad's own roster contract. `codegraph` and `context7` are absent on Factory because the
+  squad's `mcp.json` does not declare them, although Claude grants their tools: a Claude
+  allow-list entry that matches no configured server is inert, whereas a Factory entry names a
+  server the operator must already have configured.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
 - **Conductor operator-channel overlay ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md))**:
