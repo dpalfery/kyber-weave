@@ -55,13 +55,6 @@ public sealed class SquadPerformanceContractTests
     private const string DigestTestCountersRegex =
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
 
-    // Why this exists: when "task end" counted as a full-suite moment, every worker that finished
-    // ran the whole suite, and harnesses finish workers together, so several full runs landed on
-    // one machine at once. The span stops at a full stop so a task-end clause in the next
-    // sentence ("At task end a worker runs only ...") is not mistaken for the reservation.
-    private const string TaskEndFullSuiteReservationRegex =
-        @"(?i)\b(?:reserve|reserved|reserving)\b[^.\r\n]*\bfull\b[^.\r\n]*\btask (?:end|exit gates?)\b";
-
     private const string ContiguousSixFieldDigestRegex =
         @"STATUS:[^\r\n]*\r?\n[ \t]*FILES:[^\r\n]*\r?\n[ \t]*TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)[^\r\n]*\r?\n[ \t]*COMMIT:\s*<commit-sha\s*\|\s*NONE>[^\r\n]*\r?\n[ \t]*REMOTE_HEAD:\s*<remote-head-sha\s*\|\s*UNPUSHED>[^\r\n]*\r?\n[ \t]*TASK_GATE:";
 
@@ -89,6 +82,39 @@ public sealed class SquadPerformanceContractTests
                 return true;
 
         return false;
+    }
+
+    /// <summary>
+    ///     A tripwire for the retired wording, not proof that workers obey the new rule; the
+    ///     instruction itself enforces that. When "task end" counted as a full-suite moment, every
+    ///     worker that finished ran the whole suite, and harnesses finish workers together, so
+    ///     several full runs landed on one machine at once. It reads sentences, not lines: hard
+    ///     wraps in Markdown would otherwise hide the old wording, while a task-end clause in the
+    ///     next sentence ("At task end a worker runs only ...") must not be mistaken for it.
+    /// </summary>
+    internal static bool ReservesFullSuiteForTaskEnd(string content)
+    {
+        string flattened = Regex.Replace(content, @"\s+", " ");
+        foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
+            if (Regex.IsMatch(sentence, @"\breserv\w*", RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(sentence, @"\bfull[- ](?:test[- ])?suite\b", RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(sentence, @"\btask (?:end|exit gates?)\b", RegexOptions.IgnoreCase))
+                return true;
+
+        return false;
+    }
+
+    [Theory]
+    [InlineData("Reserve full test suite execution for task end or the final review council.", true)]
+    [InlineData("Full test suite runs are reserved strictly for task exit gates and final council review.", true)]
+    [InlineData("Full test suite\nruns are reserved strictly for task\nexit gates and final council review.", true)]
+    [InlineData(
+        "Reserve full test suite execution for the final review council. A worker's task end runs only the test classes its task touched.",
+        false)]
+    [InlineData("Task end used to be a full-suite moment.", false)]
+    public void FullSuiteReservationHelperReadsSentencesNotLines(string input, bool expected)
+    {
+        Assert.Equal(expected, ReservesFullSuiteForTaskEnd(input));
     }
 
     [Theory]
@@ -437,7 +463,11 @@ public sealed class SquadPerformanceContractTests
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
-        Assert.DoesNotMatch(TaskEndFullSuiteReservationRegex, content);
+        Assert.Matches(@"(?i)\bonce per run\b", content);
+        Assert.Matches(@"(?i)`TESTS: total=0`", content);
+        Assert.False(
+            ReservesFullSuiteForTaskEnd(content),
+            $"{relativePath} must not reserve the full suite for task end.");
     }
 
     [Theory]
