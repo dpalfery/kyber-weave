@@ -33,7 +33,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No plans are active.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-31-kyber-skills-user-level-deploy.md](2026-10-31-kyber-skills-user-level-deploy.md) | Ready, executing (test-first, autonomous) | 2026-10-31 | Kyber-Squad ships every `.apm/skills` skill beside its 28 Squad skills, at pack and from a checkout, so `squad install`/`update` deploy the six Kyber-Weave skills at the same scope, targets and receipt as the Squad (e.g. `~/.claude/skills`); `.apm/skills` stays the single source and the APM package and `docs init` are unchanged. |
 
 ## Archived Plans
 
