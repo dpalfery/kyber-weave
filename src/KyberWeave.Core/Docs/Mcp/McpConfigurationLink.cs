@@ -1,5 +1,27 @@
 namespace KyberWeave.Core.Docs.Mcp;
 
+/// <summary>Which segment of a configuration path stopped the guard, and why.</summary>
+internal enum McpLinkObstruction
+{
+    /// <summary>Every segment is a real file or directory, so the path may be read or written.</summary>
+    None,
+
+    /// <summary>A segment is a symbolic link, so the bytes would land where the link points.</summary>
+    Link,
+
+    /// <summary>A segment could not be inspected, so "absent" cannot be told from "denied".</summary>
+    Denied
+}
+
+/// <summary>
+/// The first segment of a configuration path the guard will not read through.
+/// </summary>
+/// <param name="Obstruction">Which of the two reasons applies, or none.</param>
+/// <param name="Segment">
+/// The repository-relative segment, with <c>/</c> separators, or null when nothing stopped the walk.
+/// </param>
+internal readonly record struct McpLinkProbe(McpLinkObstruction Obstruction, string? Segment);
+
 /// <summary>
 /// Finds the symbolic link, if any, that stands between a repository root and one of its
 /// configuration files.
@@ -37,14 +59,25 @@ internal static class McpConfigurationLink
     /// catalog's own ZCode walk is the one place a parent directory is read deliberately, and it
     /// reports what it finds rather than writing there.
     /// </remarks>
-    public static string? LinkedSegment(string repositoryRoot, string absolutePath)
+    public static string? LinkedSegment(string repositoryRoot, string absolutePath) =>
+        Probe(repositoryRoot, absolutePath) is { Obstruction: McpLinkObstruction.Link } probe
+            ? probe.Segment
+            : null;
+
+    /// <summary>
+    /// The first segment of <paramref name="absolutePath"/> this guard will not read through, and
+    /// which of the two reasons it is.
+    /// </summary>
+    /// <param name="repositoryRoot">The repository whose boundary the path must stay inside.</param>
+    /// <param name="absolutePath">The configuration file's absolute path.</param>
+    public static McpLinkProbe Probe(string repositoryRoot, string absolutePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(absolutePath);
 
         string relative = Path.GetRelativePath(repositoryRoot, absolutePath);
         if (Path.IsPathRooted(relative) || relative.StartsWith("..", StringComparison.Ordinal))
-            return null;
+            return default;
 
         string[] segments = relative.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
@@ -59,10 +92,10 @@ internal static class McpConfigurationLink
             traversed = traversed.Length == 0 ? segment : traversed + "/" + segment;
 
             if (IsLink(current))
-                return traversed;
+                return new McpLinkProbe(McpLinkObstruction.Link, traversed);
         }
 
-        return null;
+        return default;
     }
 
     /// <summary>

@@ -226,7 +226,8 @@ public static class McpWiringRepairer
         McpWiringReceiptRecord? record = records.Find(
             candidate => McpWiringReceipt.SamePath(candidate.Path, path));
 
-        string fullPath = FullPath(root, path);
+        string fullPath = ContainedPath(root, path)
+            ?? throw new InvalidOperationException($"'{path}' does not resolve inside the repository");
 
         // Removal restores the bytes the receipt captured, so through a link it would write those
         // bytes into whichever file the link names — outside the repository, and over a file this
@@ -375,7 +376,8 @@ public static class McpWiringRepairer
                 Snippet(row, declared));
         }
 
-        string fullPath = FullPath(root, path);
+        string fullPath = ContainedPath(root, path)
+            ?? throw new InvalidOperationException($"'{path}' does not resolve inside the repository");
         byte[]? original = null;
 
         // A link in the tree makes this repository-scope path name a file somebody else owns, and
@@ -744,7 +746,7 @@ public static class McpWiringRepairer
         return Encoding.UTF8.GetBytes(JsonServerSplice.RenderDocument(root) + "\n");
     }
 
-    private static JsonObject Container(JsonObject root, IReadOnlyList<string> serverKeyPath)
+    internal static JsonObject Container(JsonObject root, IReadOnlyList<string> serverKeyPath)
     {
         JsonObject current = root;
 
@@ -788,7 +790,7 @@ public static class McpWiringRepairer
                 "command" => Command(row, server, pathToken),
                 "args" => Arguments(server.Command.Skip(1), pathToken),
                 _ when HarnessMcpEntry.IsEnvironmentKey(property.Key) && property.Value is JsonObject environment
-                    => Environment(environment, pathToken),
+                    => Environment(environment, row.RepositoryRootToken, pathToken),
                 _ => property.Value?.DeepClone()
             };
         }
@@ -815,8 +817,10 @@ public static class McpWiringRepairer
         return array;
     }
 
-    private static JsonObject Environment(JsonObject template, string pathToken)
+    internal static JsonObject Environment(JsonObject template, string rootToken, string pathToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootToken);
+
         JsonObject environment = new();
 
         foreach (KeyValuePair<string, JsonNode?> setting in template)
@@ -867,7 +871,7 @@ public static class McpWiringRepairer
         return string.Join("\n\n", snippets);
     }
 
-    private static string TomlSnippet(IReadOnlyList<string> serverKeyPath, RequiredMcpServer server)
+    internal static string TomlSnippet(IReadOnlyList<string> serverKeyPath, RequiredMcpServer server)
     {
         string table = string.Join('.', serverKeyPath) + "." + server.Name;
         string arguments = string.Join(
@@ -1031,7 +1035,7 @@ public static class McpWiringRepairer
 
     private static string Digest(byte[] content) => Convert.ToHexString(SHA256.HashData(content));
 
-    private static string FullPath(string root, string relativePath) =>
+    internal static string? ContainedPath(string root, string relativePath) =>
         Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>
