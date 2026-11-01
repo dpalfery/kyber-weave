@@ -313,16 +313,23 @@ public static class McpWiringInspector
     /// the entry body can be read — with which launch command.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every uncertainty resolves toward a gap. A name is not a launch: an entry whose body cannot
     /// be read, or which names no command at all, is reported as unwired with the reason, because
     /// that is the only answer that cannot confirm a configuration no harness could start.
+    /// </para>
+    /// <para>
+    /// A harness can have more than one configured file, and each one that cannot be read is kept
+    /// rather than replacing the last: reporting only the final problem names one obstacle out of
+    /// however many stand between the operator and a working configuration.
+    /// </para>
     /// </remarks>
     private static Detection Detect(
         HarnessMcpEntry entry,
         RequiredMcpServer server,
         IReadOnlyList<ConfiguredFile> files)
     {
-        string? refusal = null;
+        List<string> refusals = [];
         string? linkedSegment = null;
 
         foreach (ConfiguredFile file in files)
@@ -332,8 +339,8 @@ public static class McpWiringInspector
             // repository's wiring — a confirming pass for a configuration a fresh checkout lacks.
             if (file.LinkedSegment is not null)
             {
-                refusal = $"{McpConfigurationLink.Describe(file.RelativePath, file.LinkedSegment)}, so it was not read";
-                linkedSegment = file.LinkedSegment;
+                refusals.Add($"{McpConfigurationLink.Describe(file.RelativePath, file.LinkedSegment)}, so it was not read");
+                linkedSegment ??= file.LinkedSegment;
                 continue;
             }
 
@@ -343,14 +350,14 @@ public static class McpWiringInspector
                     string? tomText = ReadText(file.AbsolutePath);
                     if (tomText is null)
                     {
-                        refusal = $"{file.RelativePath} could not be read";
+                        refusals.Add($"{file.RelativePath} could not be read");
                         continue;
                     }
 
                     TomlScanReport scan = TomlTableScanner.Scan(tomText);
                     if (scan.Status == TomlScanStatus.Refused)
                     {
-                        refusal = scan.Reason;
+                        refusals.Add(scan.Reason ?? $"{file.RelativePath} could not be classified");
                         continue;
                     }
 
@@ -367,7 +374,7 @@ public static class McpWiringInspector
                     {
                         if (document is null)
                         {
-                            refusal = $"{file.RelativePath} could not be read as JSON";
+                            refusals.Add($"{file.RelativePath} could not be read as JSON");
                             continue;
                         }
 
@@ -382,12 +389,16 @@ public static class McpWiringInspector
                     // change added without a reader here. It refuses for the same reason the
                     // scanner does: an unreadable configuration is a gap, never a pass and never a
                     // silent "not wired" with nothing to act on.
-                    refusal = $"{file.RelativePath} was not read: this build has no reader for its configuration shape";
+                    refusals.Add($"{file.RelativePath} was not read: this build has no reader for its configuration shape");
                     continue;
             }
         }
 
-        return new Detection(false, null, refusal, linkedSegment);
+        return new Detection(
+            false,
+            null,
+            refusals.Count == 0 ? null : string.Join("; ", refusals),
+            linkedSegment);
     }
 
     /// <summary>
@@ -1004,7 +1015,10 @@ public static class McpWiringInspector
     /// <param name="LaunchCommand">
     /// The command the wired entry names, or null when the entry body is not pinned or unreadable.
     /// </param>
-    /// <param name="Refusal">Why a document or an entry body could not be read, when one could not.</param>
+    /// <param name="Refusal">
+    /// Why a document or an entry body could not be read — every reason, when more than one file
+    /// could not be.
+    /// </param>
     /// <param name="LinkedSegment">
     /// The repository-relative segment of the configuration that is a symbolic link, when one was
     /// refused rather than followed.
