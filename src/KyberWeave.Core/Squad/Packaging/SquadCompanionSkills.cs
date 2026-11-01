@@ -1,4 +1,3 @@
-using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Validation;
 
 namespace KyberWeave.Core.Squad.Packaging;
@@ -55,8 +54,8 @@ public static class SquadCompanionSkills
     /// <remarks>
     /// A companion name that equals a Squad skill or a Squad agent throws <see cref="SquadSourceValidationException"/>.
     /// Failing closed keeps either side from silently shadowing the other: one skill would otherwise vanish from every
-    /// harness with no signal. A symbolic link at a companion skill's directory or <c>SKILL.md</c> throws for the same
-    /// reason. The exception carries no partial list, so no caller can report a partial tree.
+    /// harness with no signal. A symbolic link at a companion skill's directory, its <c>SKILL.md</c>, or any file or folder
+    /// nested in it throws for the same reason. The exception carries no partial list, so no caller can report a partial tree.
     /// </remarks>
     public static IReadOnlyList<(string RelativePath, string SourcePath)> Collect(
         string squadSourceRoot,
@@ -73,7 +72,7 @@ public static class SquadCompanionSkills
             string name = Path.GetFileName(skillDirectory);
             RejectClash(squadSourceRoot, name);
 
-            foreach (string filePath in DocsRootPath.EnumerateContainedFiles(skillDirectory, "*"))
+            foreach (string filePath in EnumerateSkillFiles(skillDirectory, $".apm/skills/{name}"))
             {
                 string relativePath = Path.GetRelativePath(skillDirectory, filePath).Replace('\\', '/');
                 files.Add(($"skills/{name}/{relativePath}", filePath));
@@ -91,6 +90,44 @@ public static class SquadCompanionSkills
         return Directory.EnumerateDirectories(companionSkillsRoot)
             .Where(IsSkillDirectory)
             .Order(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Every file under one companion skill, depth first, each folder ordinally sorted. A symbolic link at any depth
+    /// throws. The contained-file walk skips links, so skipping one here would ship a skill that is missing a file it
+    /// names, with no signal.
+    /// </summary>
+    /// <remarks>
+    /// Lists one folder at a time, so a link is seen as a link and never descended into. Hidden entries are included.
+    /// </remarks>
+    private static IEnumerable<string> EnumerateSkillFiles(string directory, string skillPath)
+    {
+        EnumerationOptions options = new() { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0 };
+        List<FileSystemInfo> entries = new DirectoryInfo(directory)
+            .EnumerateFileSystemInfos("*", options)
+            .OrderBy(entry => entry.Name, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (FileSystemInfo entry in entries)
+        {
+            string entryPath = $"{skillPath}/{entry.Name}";
+            if (entry.LinkTarget is not null)
+            {
+                throw SymbolicLink(entryPath);
+            }
+
+            if (entry is DirectoryInfo subdirectory)
+            {
+                foreach (string file in EnumerateSkillFiles(subdirectory.FullName, entryPath))
+                {
+                    yield return file;
+                }
+            }
+            else
+            {
+                yield return entry.FullName;
+            }
+        }
     }
 
     /// <remarks>

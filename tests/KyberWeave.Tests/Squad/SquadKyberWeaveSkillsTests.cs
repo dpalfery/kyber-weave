@@ -474,6 +474,50 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     }
 
     /// <summary>
+    /// Decision D16, fail closed, below the skill directory: a link to a file or folder nested in a companion skill is refused
+    /// too. The contained-file walk skips links, so skipping this one would ship a skill without a file it names, and pack
+    /// would still exit 0 with nothing in the output.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PackFailsClosedWhenACompanionSkillsNestedFileIsASymbolicLink(bool linkWholeReferencesFolder)
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
+        string skillDirectory = Path.Combine(repository, ".apm", "skills", ParitySkillName);
+        string outside = Path.Combine(_temp.Path, "outside-nested");
+        Directory.CreateDirectory(outside);
+        string link;
+        if (linkWholeReferencesFolder)
+        {
+            string outsideReferences = Path.Combine(outside, "references");
+            Directory.CreateDirectory(outsideReferences);
+            File.WriteAllText(Path.Combine(outsideReferences, "data.md"), "# Data\n");
+            link = Path.Combine(skillDirectory, "references");
+            Directory.CreateSymbolicLink(link, outsideReferences);
+        }
+        else
+        {
+            string outsideFile = Path.Combine(outside, "data.md");
+            File.WriteAllText(outsideFile, "# Data\n");
+            Directory.CreateDirectory(Path.Combine(skillDirectory, "references"));
+            link = Path.Combine(skillDirectory, "references", "data.md");
+            File.CreateSymbolicLink(link, outsideFile);
+        }
+        string relativeLink = Path.GetRelativePath(repository, link).Replace('\\', '/');
+        string outDirectory = Path.Combine(_temp.Path, "nested-link-out");
+
+        SquadPackRun run = PackInto(repository, "all", outDirectory);
+
+        AssertExit(run.ExitCode, run.Output, 1);
+        Assert.Empty(ArchivesIn(outDirectory));
+        Assert.Contains(Compact(relativeLink), Compact(run.Output), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Decision D5, fail closed, for the checkout release source: a symbolic-link companion throws before the destination is
     /// created, so a refused checkout leaves nothing behind and reports nothing as extracted.
     /// </summary>
