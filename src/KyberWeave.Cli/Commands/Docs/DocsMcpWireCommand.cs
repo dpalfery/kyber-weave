@@ -213,9 +213,16 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         if (change.Servers.Count == 0)
             return string.Empty;
 
-        string verb = change.Outcome is McpWiringChangeOutcome.Created or McpWiringChangeOutcome.Inserted
-            ? "adding"
-            : "removing";
+        // The outcome decides the word. A restore puts back what was there before this tool wrote,
+        // so telling the operator who asked to undo a change that the servers are being removed
+        // describes the opposite of what happened to the file they named.
+        string verb = change.Outcome switch
+        {
+            McpWiringChangeOutcome.Created or McpWiringChangeOutcome.Inserted => "adding",
+            McpWiringChangeOutcome.Restored => "restoring",
+            McpWiringChangeOutcome.Deleted => "removing",
+            _ => "naming"
+        };
 
         return $" [grey]{verb}[/] {Markup.Escape(TerminalText.Line(string.Join(", ", change.Servers)))}";
     }

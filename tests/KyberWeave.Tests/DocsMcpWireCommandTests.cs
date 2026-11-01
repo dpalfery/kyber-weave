@@ -579,6 +579,29 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains("wiredbinary", execution.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Removal restores a file it had inserted into, so the line it prints says the servers are being
+    /// put back — not that they are being removed. An operator who asked to undo a change was
+    /// otherwise told the opposite of what happened, and the exit code could not correct it.
+    /// </summary>
+    [Fact]
+    public void ARestoreIsLabelledRestoringRatherThanRemoving()
+    {
+        WriteDeclaration();
+        McpWiringFixture.WriteBytes(
+            Repo,
+            ".factory/mcp.json",
+            Encoding.UTF8.GetBytes("""{"mcpServers": {"other": {"command": "other-mcp"}}}"""));
+
+        Assert.Equal(0, Wire(Factory).Result);
+
+        CapturedConsoleExecution<int> unwire = Unwire(Factory);
+
+        Assert.Equal(0, unwire.Result);
+        Assert.Contains("restoring", unwire.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("removing", unwire.Output, StringComparison.Ordinal);
+    }
+
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
         ProcessConsoleCapture.Run(() => new DocsMcpWireCommand().Execute(
             null!,
