@@ -5,11 +5,14 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -353,10 +356,10 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     public async Task CheckoutReleaseSourceFailsClosedWhenAKyberWeaveSkillNameClashesWithASquadName()
     {
         string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
+        string destination = Path.Combine(_temp.Path, "checkout-clash");
         using LocalCheckoutSquadReleaseSource source =
             new(Path.Combine(repository, "products", "kyber-squad"));
-        SquadReleaseRequest request =
-            new("local/kyber-squad", PackedVersion, Path.Combine(_temp.Path, "checkout-clash"));
+        SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));
 
@@ -364,6 +367,172 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         Assert.Contains(Compact("task-gate"), message, StringComparison.Ordinal);
         Assert.Contains(Compact("products/kyber-squad/skills/task-gate"), message, StringComparison.Ordinal);
         Assert.Contains(Compact(".apm/skills/task-gate"), message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(destination), $"A refused checkout left '{destination}' behind.");
+    }
+
+    /// <summary>
+    /// Source validation covers the Squad tree itself, not only the staged copy. A Squad skill that is a symbolic link out
+    /// of the tree is copied into the staged tree as ordinary bytes, so the composed-tree check alone accepts it and the
+    /// outside file ships. Origin/main refused it when it loaded the source; the head exits 0. The outside target is a
+    /// valid copy of the real skill with a marker line, so the link is the only defect.
+    /// </summary>
+    [Theory]
+    [InlineData("apm")]
+    [InlineData("all")]
+    public void PackRefusesASquadSkillSymbolicLinkThatLeavesTheSourceTree(string format)
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string outside = Path.Combine(_temp.Path, "outside");
+        Directory.CreateDirectory(outside);
+        string outsideSkill = Path.Combine(outside, "SKILL.md");
+        File.Copy(Path.Combine(ProductRoot, "skills", "task-gate", "SKILL.md"), outsideSkill);
+        File.AppendAllText(outsideSkill, "OUTSIDE-TREE-MARKER\n", Encoding.UTF8);
+        string skillFile = Path.Combine(repository, "products", "kyber-squad", "skills", "task-gate", "SKILL.md");
+        File.Delete(skillFile);
+        File.CreateSymbolicLink(skillFile, outsideSkill);
+        string outDirectory = Path.Combine(_temp.Path, "source-link-out");
+
+        SquadPackRun run = PackInto(repository, format, outDirectory);
+
+        AssertExit(run.ExitCode, run.Output, 1);
+        Assert.Empty(ArchivesIn(outDirectory));
+        string output = Compact(run.Output);
+        Assert.Contains(Compact("skills/task-gate/SKILL.md"), output, StringComparison.Ordinal);
+        Assert.Contains(Compact("symbolic link"), output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Decision D5, fail closed: a companion skill that is a symbolic link is refused, not skipped. Skipping it would
+    /// release a tree without a skill the operator authored, and nothing would say so. The directory variant links the
+    /// whole skill; the file variant links only its SKILL.md. Both targets are valid skills outside the repository, so the
+    /// link is the only defect.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PackFailsClosedWhenACompanionSkillIsASymbolicLink(bool linkWholeDirectory)
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
+        string outDirectory = Path.Combine(_temp.Path, "companion-link-out");
+
+        SquadPackRun run = PackInto(repository, "all", outDirectory);
+
+        AssertExit(run.ExitCode, run.Output, 1);
+        Assert.Empty(ArchivesIn(outDirectory));
+        Assert.Contains(Compact(link), Compact(run.Output), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Decision D5, fail closed, for the checkout release source: a symbolic-link companion throws before the destination is
+    /// created, so a refused checkout leaves nothing behind and reports nothing as extracted.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckoutReleaseSourceFailsClosedWhenACompanionSkillIsASymbolicLink(bool linkWholeDirectory)
+    {
+        if (!CanCreateSymbolicLinks())
+            throw SkipException.ForSkip("This host cannot create symbolic links.");
+
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
+        string destination = Path.Combine(_temp.Path, "checkout-link");
+        using LocalCheckoutSquadReleaseSource source =
+            new(Path.Combine(repository, "products", "kyber-squad"));
+        SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
+
+        Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));
+
+        Assert.Contains(Compact(link), Compact(failure.Message), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(destination), $"A refused checkout left '{destination}' behind.");
+    }
+
+    /// <summary>
+    /// Regression guard, declared: passes on the base by design. A text companion ships with LF line endings whatever the
+    /// source uses, so a CRLF checkout packs the same bytes as an LF one. The archive side is compared exactly. If the
+    /// companion collection read sources with <c>File.ReadAllBytes</c>, the entries would keep their CR bytes and fail here.
+    /// </summary>
+    [Fact]
+    public void CompanionTextShipsWithLfOnlyBytesWhenTheSourceUsesCrlf()
+    {
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        WriteCrlfCompanionSkill(repository, ParitySkillName);
+        Assert.True(
+            File.ReadAllBytes(Path.Combine(repository, ".apm", "skills", ParitySkillName, "SKILL.md"))
+                .Contains((byte)'\r'),
+            "The fixture holds no CR bytes, so this case would prove nothing about line endings.");
+        SquadPackRun run = PackInto(repository, "apm", Path.Combine(_temp.Path, "crlf-out"));
+        AssertExit(run.ExitCode, run.Output, 0);
+
+        using ZipArchive archive = ZipFile.OpenRead(ArchivePath(run, $"kyber-squad-{PackedVersion}.zip"));
+        AssertEntryHoldsLfText(archive, $"skills/{ParitySkillName}/SKILL.md", CompanionSkillLfText(ParitySkillName));
+        AssertEntryHoldsLfText(archive, $"skills/{ParitySkillName}/references/notes.md", CompanionNotesLfText);
+    }
+
+    /// <summary>
+    /// Regression guard, declared: passes on the base by design. Two packs of one source give byte-identical archives and
+    /// SHA256SUMS.txt, so a release can be reproduced and checked. This guards entry order and timestamps; line endings are
+    /// covered by the CRLF case above.
+    /// </summary>
+    [Fact]
+    public void PackingTheSameCompanionSourceTwiceYieldsByteIdenticalArchivesAndChecksums()
+    {
+        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        WriteCrlfCompanionSkill(repository, ParitySkillName);
+        SquadPackRun first = PackInto(repository, "all", Path.Combine(_temp.Path, "twice-first"));
+        SquadPackRun second = PackInto(repository, "all", Path.Combine(_temp.Path, "twice-second"));
+        AssertExit(first.ExitCode, first.Output, 0);
+        AssertExit(second.ExitCode, second.Output, 0);
+
+        foreach (string fileName in new[]
+                 {
+                     $"kyber-squad-{PackedVersion}.zip",
+                     $"kyber-squad-plugin-{PackedVersion}.zip",
+                     "SHA256SUMS.txt"
+                 })
+        {
+            byte[] firstBytes = File.ReadAllBytes(ArchivePath(first, fileName));
+            byte[] secondBytes = File.ReadAllBytes(ArchivePath(second, fileName));
+            Assert.True(
+                firstBytes.SequenceEqual(secondBytes),
+                $"'{fileName}' differs between two packs of the same source.");
+        }
+    }
+
+    /// <summary>
+    /// A direct caller of <see cref="SquadPacker"/> that names a clashing companion keeps the archive it already had. The
+    /// packer used to delete the target archive before it collected the entries, so a refused pack destroyed the last good
+    /// release at that path.
+    /// </summary>
+    [Fact]
+    public void DirectPackApmKeepsThePreviousArchiveWhenACompanionNameClashes()
+    {
+        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
+        string outDirectory = Path.Combine(_temp.Path, "direct-out");
+        Directory.CreateDirectory(outDirectory);
+        string archivePath = Path.Combine(outDirectory, $"kyber-squad-{PackedVersion}.zip");
+        byte[] previous = Encoding.UTF8.GetBytes("previous archive bytes");
+        File.WriteAllBytes(archivePath, previous);
+
+        SquadSourceValidationException failure = Assert.Throws<SquadSourceValidationException>(() =>
+            SquadPacker.PackApm(
+                Path.Combine(repository, "products", "kyber-squad"),
+                outDirectory,
+                PackedVersion,
+                Path.Combine(repository, ".apm", "skills")));
+
+        Assert.Contains("task-gate", failure.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(archivePath), $"The refused pack deleted the previous archive at '{archivePath}'.");
+        Assert.True(
+            previous.SequenceEqual(File.ReadAllBytes(archivePath)),
+            $"The refused pack changed the previous archive at '{archivePath}'.");
     }
 
     /// <summary>
@@ -431,9 +600,15 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
                 Assert.True(
                     entry is not null,
                     $"The archive has no entry '{entryName}', so the Kyber-Weave skill '{name}' does not ship.");
-                Assert.Equal(
-                    NormalizeLineEndings(File.ReadAllText(sourceFile, Encoding.UTF8)),
-                    NormalizeLineEndings(ReadEntry(entry)));
+                // The expected side is the source with its line endings folded to LF, as UTF-8 bytes. The archive side is
+                // compared raw and never folded, so a change that stops folding companion text, or that copies source bytes
+                // with File.ReadAllBytes, fails here. The corpus holds no CR today, so the CRLF case is what proves the fold.
+                byte[] expected = Encoding.UTF8.GetBytes(LfNormalized(File.ReadAllText(sourceFile, Encoding.UTF8)));
+                byte[] actual = ReadEntryBytes(entry);
+                Assert.True(Array.IndexOf(actual, (byte)'\r') < 0, $"'{entryName}' carries a carriage return.");
+                Assert.True(
+                    expected.SequenceEqual(actual),
+                    $"'{entryName}' does not hold the LF-normalized bytes of '{sourceFile}'.");
             }
         }
 
@@ -456,10 +631,30 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         return parts is ["skills", _, "SKILL.md"];
     }
 
-    private static string ReadEntry(ZipArchiveEntry entry)
+    /// <summary>The entry's stored bytes, exactly as the archive holds them.</summary>
+    private static byte[] ReadEntryBytes(ZipArchiveEntry entry)
     {
-        using StreamReader reader = new(entry.Open(), Encoding.UTF8);
-        return reader.ReadToEnd();
+        using Stream stream = entry.Open();
+        using MemoryStream buffer = new();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Asserts an archive entry holds exactly the UTF-8 bytes of <paramref name="lfText"/>, which has no CR, so a
+    /// carriage return cannot slip in unnoticed.
+    /// </summary>
+    private static void AssertEntryHoldsLfText(ZipArchive archive, string entryName, string lfText)
+    {
+        ZipArchiveEntry? entry = archive.GetEntry(entryName);
+        Assert.True(entry is not null, $"The archive has no entry '{entryName}'.");
+        byte[] actual = ReadEntryBytes(entry);
+        Assert.True(
+            Array.IndexOf(actual, (byte)'\r') < 0,
+            $"'{entryName}' carries a carriage return; companion text must ship with LF line endings.");
+        Assert.True(
+            Encoding.UTF8.GetBytes(lfText).SequenceEqual(actual),
+            $"'{entryName}' does not hold the LF-only bytes of its source.");
     }
 
     private static string ArchivePath(SquadPackRun run, string fileName)
@@ -489,11 +684,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     /// </summary>
     private static string CreateRepositoryWithCompanionSkill(string root, string skillName)
     {
-        Directory.CreateDirectory(root);
-        File.WriteAllText(
-            Path.Combine(root, "KyberWeave.sln"),
-            "Microsoft Visual Studio Solution File, Format Version 12.00");
-        CopyDirectory(ProductRoot, Path.Combine(root, "products", "kyber-squad"));
+        CreateRepository(root);
 
         string skillDirectory = Path.Combine(root, ".apm", "skills", skillName);
         Directory.CreateDirectory(skillDirectory);
@@ -511,6 +702,118 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
              """);
         return root;
+    }
+
+    /// <summary>
+    /// A temp repository shaped like this one: a solution marker and a copy of the real <c>products/kyber-squad</c>. The
+    /// real repository is never written.
+    /// </summary>
+    private static string CreateRepository(string root)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            Path.Combine(root, "KyberWeave.sln"),
+            "Microsoft Visual Studio Solution File, Format Version 12.00");
+        CopyDirectory(ProductRoot, Path.Combine(root, "products", "kyber-squad"));
+        return root;
+    }
+
+    /// <summary>Runs <c>squad pack</c> from <paramref name="repository"/> into <paramref name="outDirectory"/>.</summary>
+    private static SquadPackRun PackInto(string repository, string format, string outDirectory)
+    {
+        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
+            new SquadPackCommand(workingDirectory: repository).Execute(
+                null!,
+                new SquadPackSettings { Format = format, Out = outDirectory, Version = PackedVersion }));
+        return new SquadPackRun(run.Result, run.Output, outDirectory);
+    }
+
+    /// <summary>
+    /// Replaces companion skill <paramref name="name"/> with a symbolic link to a valid skill outside the repository, and
+    /// returns the link's repository-relative path. A directory link replaces the whole skill; a file link replaces only
+    /// its SKILL.md, so the skill directory stays real.
+    /// </summary>
+    private string LinkCompanionSkill(string repository, string name, bool linkWholeDirectory)
+    {
+        string outsideSkill = Path.Combine(_temp.Path, "outside", name);
+        Directory.CreateDirectory(outsideSkill);
+        string outsideSkillFile = Path.Combine(outsideSkill, "SKILL.md");
+        File.WriteAllText(
+            outsideSkillFile,
+            string.Join(
+                '\n',
+                "---",
+                $"name: {name}",
+                "description: Outside-tree fixture for the companion symbolic-link refusal.",
+                "---",
+                string.Empty,
+                $"# {name}",
+                string.Empty,
+                "Fixture body.",
+                string.Empty));
+
+        string skillsRoot = Path.Combine(repository, ".apm", "skills");
+        Directory.CreateDirectory(skillsRoot);
+        if (linkWholeDirectory)
+        {
+            Directory.CreateSymbolicLink(Path.Combine(skillsRoot, name), outsideSkill);
+            return $".apm/skills/{name}";
+        }
+
+        string skillDirectory = Path.Combine(skillsRoot, name);
+        Directory.CreateDirectory(skillDirectory);
+        File.CreateSymbolicLink(Path.Combine(skillDirectory, "SKILL.md"), outsideSkillFile);
+        return $".apm/skills/{name}/SKILL.md";
+    }
+
+    /// <summary>
+    /// Writes a companion skill whose SKILL.md and resource hold CRLF line endings, as a Windows checkout does. Both are
+    /// folded to CRLF from LF text here, so the fixture does not depend on this file's own line endings.
+    /// </summary>
+    private static void WriteCrlfCompanionSkill(string repository, string skillName)
+    {
+        string skillDirectory = Path.Combine(repository, ".apm", "skills", skillName);
+        Directory.CreateDirectory(Path.Combine(skillDirectory, "references"));
+        File.WriteAllText(
+            Path.Combine(skillDirectory, "SKILL.md"),
+            CompanionSkillLfText(skillName).Replace("\n", "\r\n", StringComparison.Ordinal));
+        File.WriteAllText(
+            Path.Combine(skillDirectory, "references", "notes.md"),
+            CompanionNotesLfText.Replace("\n", "\r\n", StringComparison.Ordinal));
+    }
+
+    /// <summary>The LF text of a companion SKILL.md. Built from lines, so expected bytes never depend on source line endings.</summary>
+    private static string CompanionSkillLfText(string skillName)
+    {
+        return string.Join(
+            '\n',
+            "---",
+            $"name: {skillName}",
+            "description: Fixture companion skill for the line-ending and determinism cases.",
+            "---",
+            string.Empty,
+            $"# {skillName}",
+            string.Empty,
+            "Read [notes](references/notes.md) before acting.",
+            string.Empty);
+    }
+
+    private const string CompanionNotesLfText = "# Notes\n\nFirst line.\nSecond line.\n";
+
+    /// <summary>Whether this host lets the test process create a symbolic link, probed in the temporary root.</summary>
+    private bool CanCreateSymbolicLinks()
+    {
+        string probe = Path.Combine(_temp.Path, "symlink-probe");
+        try
+        {
+            File.CreateSymbolicLink(probe, Path.Combine(_temp.Path, "symlink-target"));
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void CopyDirectory(string source, string destination)
@@ -551,9 +854,10 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         return path.Replace('\\', '/');
     }
 
-    private static string NormalizeLineEndings(string text)
+    /// <summary>Folds CRLF and lone CR to LF, the line endings the packer writes for text companions.</summary>
+    private static string LfNormalized(string text)
     {
-        return text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     }
 
     /// <summary>Folds separators to '/' and drops whitespace, so a console line wrap cannot split an expected path.</summary>
