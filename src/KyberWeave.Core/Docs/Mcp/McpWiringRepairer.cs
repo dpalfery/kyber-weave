@@ -525,7 +525,7 @@ public static class McpWiringRepairer
                 RefusalCode,
                 $"{path} could not be wired: {exception.Message}",
                 $"Nothing was written. If the entry could not be built, report this: the catalog's template for "
-                    + $"{harness} is not valid JSON.");
+                    + $"{harness} is not the shape this writer needs.");
         }
 
         if (dryRun)
@@ -778,6 +778,16 @@ public static class McpWiringRepairer
         return Encoding.UTF8.GetBytes(JsonServerSplice.RenderDocument(root) + "\n");
     }
 
+    /// <summary>
+    /// The map the declared servers are written into, created along the key path where it is absent.
+    /// </summary>
+    /// <remarks>
+    /// A key that holds something other than an object is a document this writer does not
+    /// understand. Replacing the value would discard what the template — and so the operator whose
+    /// file was created from it — put there, without a word, and produce a file that harness cannot
+    /// load. The template is data, so the wrong shape stops the write and the refusal names the
+    /// catalog; a JSON null is nothing rather than a value, and is treated as an absent key.
+    /// </remarks>
     internal static JsonObject Container(JsonObject root, IReadOnlyList<string> serverKeyPath)
     {
         JsonObject current = root;
@@ -788,6 +798,12 @@ public static class McpWiringRepairer
             {
                 current = existing;
                 continue;
+            }
+
+            if (current[key] is { } unusable)
+            {
+                throw new JsonException(
+                    $"its '{key}' key holds a {unusable.GetValueKind()} rather than the map of servers");
             }
 
             JsonObject created = new();
