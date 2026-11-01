@@ -38,4 +38,8 @@ public sealed class DocsInitSettings : CommandSettings
     [CommandOption("--no-review-gates")]
     [Description("Do not write the catalogue review gates into .kyber-weave/kyber-weave.yml.")]
     public bool NoReviewGates { get; set; }
+
+    [CommandOption("--no-mcp-check")]
+    [Description("Do not check whether the declared MCP servers are wired into the harnesses this repository uses, and offer no repair.")]
+    public bool NoMcpCheck { get; set; }
 }
