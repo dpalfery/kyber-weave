@@ -51,9 +51,10 @@ public sealed record McpWiringReceiptRecord(
 /// bytes it is about to restore are the bytes it captured.
 /// </para>
 /// <para>
-/// A receipt that cannot be read is treated as empty rather than as an error. Nothing can be proven
-/// from it, and an empty receipt refuses every removal — which is the safe direction: Kyber-Weave
-/// only removes what it can show it wrote.
+/// A receipt that cannot be read — or that does not match the schema this code writes, down to a null
+/// file list or a record with no path — is treated as empty rather than as an error. Nothing can be
+/// proven from it, and an empty receipt refuses every removal — which is the safe direction:
+/// Kyber-Weave only removes what it can show it wrote.
 /// </para>
 /// </remarks>
 public sealed class McpWiringReceipt
@@ -111,7 +112,9 @@ public sealed class McpWiringReceipt
             if (document is null || document.Version != SchemaVersion)
                 return new McpWiringReceipt();
 
-            return new McpWiringReceipt { Files = document.Files };
+            return WellFormed(document.Files) is { } records
+                ? new McpWiringReceipt { Files = records }
+                : new McpWiringReceipt();
         }
         catch (IOException)
         {
@@ -125,6 +128,40 @@ public sealed class McpWiringReceipt
         {
             return new McpWiringReceipt();
         }
+    }
+
+    /// <summary>
+    /// The records of a document whose shape matches the schema, or null when it does not.
+    /// </summary>
+    /// <param name="files">The document's file list, exactly as it was deserialized.</param>
+    /// <remarks>
+    /// Nothing downstream re-checks what it reads: the removal path combines a record's path into a
+    /// filesystem path, enumerates its server list into the report, and compares its digest. A
+    /// document holding <c>"files": null</c>, or a record whose path or server list is null, would
+    /// therefore throw somewhere after this code said it had read a receipt — so the shape is
+    /// checked once, here, where refusing still means nothing was touched. The whole document is
+    /// rejected rather than the offending record dropped: a receipt whose shape this code cannot
+    /// trust is not a receipt it can prove anything from, and an empty receipt refuses every
+    /// removal, which is the safe direction.
+    /// </remarks>
+    private static IReadOnlyList<McpWiringReceiptRecord>? WellFormed(
+        IReadOnlyList<McpWiringReceiptRecord>? files)
+    {
+        if (files is null)
+            return null;
+
+        foreach (McpWiringReceiptRecord record in files)
+        {
+            if (string.IsNullOrWhiteSpace(record?.Path)
+                || record.Servers is null
+                || record.Servers.Any(string.IsNullOrEmpty)
+                || string.IsNullOrEmpty(record.PostSha256))
+            {
+                return null;
+            }
+        }
+
+        return files;
     }
 
     /// <summary>The record for a file, or null when the repair never wrote it.</summary>
