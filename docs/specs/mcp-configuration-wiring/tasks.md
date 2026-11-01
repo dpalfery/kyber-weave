@@ -202,7 +202,11 @@ sequencing; no task makes a design decision.
     cases, BOM preserved (DD9). The repairer respects catalog writability: a requested
     snippet-only harness is refused non-writable with its snippet (DD11, DD12, DD18,
     DD19); a server whose binary does not resolve is refused for every harness (R6.2);
-    the first-party binary absent points at `kyber-weave update` (R6.3). The receipt lives
+    the first-party binary absent points at `kyber-weave update` (R6.3). A requested
+    target is written whether or not its harness is in play: the explicit selection is the
+    consent, and an absent target file is created (R5.4, D19) — for Claude Code and
+    opencode, whose only repository-scope artefact is the file itself, "not in play" and
+    "file absent" are the same condition, and creation is the outcome. The receipt lives
     at `.kyber-weave/receipts/mcp-wiring.json` (version 1, one record per file, SHA-256
     pre/post digests, mode created/inserted); `mcp-unwire` restores `preSha256` content or
     deletes a `created` file, only when the current digest equals `postSha256` — any
@@ -218,7 +222,9 @@ sequencing; no task makes a design decision.
       the receipt, and reports the same outcome the real run would; the receipt records
       mode and both digests; unwire restores `inserted` and deletes `created`; drift →
       `KW-MCP-WIRE-006` and no restore; a snippet-only harness requested → non-writable
-      refusal with snippet.
+      refusal with snippet; a requested harness with no target file is created even though
+      it is not in play — a named claude-code with no `.mcp.json` and a named opencode
+      with no `opencode.json` get their canonical file (R5.4, D19).
     - **RED reason:** the types do not exist (compile failure).
     - **GREEN:** all three classes pass.
 
@@ -280,11 +286,14 @@ sequencing; no task makes a design decision.
     - new `src/KyberWeave.Cli/Commands/Docs/DocsMcpUnwireCommand.cs`
     - `src/KyberWeave.Cli/Program.cs` (docs-branch registration, descriptions, examples)
   - **Work:** the two verbs per design §5 — `[path]` default `.`, `--target` comma list,
-    `--dry-run` on wire. No target → list harnesses in play and fixable gaps, write
-    nothing, exit 0. A requested target refused (malformed, existing entry, non-writable,
-    absent binary) → exit 1 naming the file and reason; a requested target not in play or
-    without a gap is reported and skipped, not an error. `--dry-run` writes nothing
-    including the receipt and exits what the real run would. Unwire restores per receipt
+    `--dry-run` on wire. No target → list harnesses in play and fixable gaps, name each
+    writable harness no marker can detect, write nothing, exit 0. A requested target
+    refused (malformed, existing entry, non-writable, absent binary) → exit 1 naming the
+    file and reason; a requested target with nothing to write — its file already holds
+    every declared server — is reported and skipped, not an error. A named harness is
+    written whether or not it is in play, its absent target file created (R5.4, D19).
+    `--dry-run` writes nothing including the receipt and exits what the real run would.
+    Unwire restores per receipt
     with drift refusal per task 4. Human output through `AnsiConsole` with `Markup.Escape`
     on every interpolated path; configuration failures through the `KW-CONFIG-001` path.
   - **Test contract:**
@@ -294,7 +303,10 @@ sequencing; no task makes a design decision.
       produces the file and the receipt; a refusal exits 1 with the rule id; dry-run writes
       nothing (no receipt) and mirrors the real run's exit; unwire restores; unwire on
       drift exits 1; a requested snippet-only harness exits 1 with the snippet; a
-      requested harness not in play is reported and skipped with exit 0.
+      requested harness whose file already holds every declared entry is reported and
+      skipped with exit 0; a requested harness whose file is absent is created and exits 0
+      — claude-code and opencode included, where file absence is the not-in-play condition
+      (R5.4, D19); the no-target preview names each writable harness no marker can detect.
     - **RED reason:** the verbs are not registered.
     - **GREEN:** the class passes; the docs branch remains symmetric
       (one `WithDescription`, at least one `WithExample` per verb).
@@ -362,7 +374,7 @@ sequencing; no task makes a design decision.
     the archive path `docs/archive/specs/mcp-configuration-wiring/`.
   - **Work:** verify every requirement against the implementation and review evidence;
     fill the Closeout mapping in each artifact, mapping the decision ids (requirements
-    D15–D18, design DD17–DD20, tasks TK1–TK8 and the execution approval AP1 — every row
+    D15–D19, design DD17–DD20, tasks TK1–TK8 and the execution approval AP1 — every row
     this artifact's Decisions table holds at closeout) and harvest items H1–H7 to their
     destinations with the ADR disposition (ADR 0050, task 5); move the specification to
     the archive; update the index row. Live acceptance — a real harness session reaching
@@ -399,8 +411,9 @@ CI Pipelines), H4 reference (DocGraph), H5 runbook + reference (DocGraph), H6 ad
 ## Decisions
 
 The specification's decision lineage lives across the three artifacts — requirements.md
-holds D1–D18 (the owner's four decisions as D1–D4, the requirements-phase decisions, and
-the conductor's approvals as D15–D18) and design.md holds DD1–DD20 (the design decisions,
+holds D1–D19 (the owner's four decisions as D1–D4, the requirements-phase decisions, the
+conductor's approvals as D15–D18, and the mid-execution conflict settlement as D19) and
+design.md holds DD1–DD20 (the design decisions,
 approved as DD17, with DG3 and DG4 decided as DD18 and DD19, and the ADR-number correction
 recorded as DD20). Both tables are permanent and intact. The tasks-phase decisions are
 appended here:
@@ -419,7 +432,7 @@ appended here:
 
 ## Closeout mapping
 
-_To be completed at task 11: every decision id (D15–D18, DD17–DD20, TK1–TK8, AP1) and
+_To be completed at task 11: every decision id (D15–D19, DD17–DD20, TK1–TK8, AP1) and
 harvest item (H1–H7) mapped to its destination, with the ADR disposition (ADR 0050) and
 the merge-ready documentation checks recorded._
 

@@ -24,6 +24,7 @@ keywords:
 # Design Document
 
 **Phase status:** Approved — 2026-10-31, conductor `AUTONOMOUS_APPROVAL: design-phase-approval`, provenance `autonomous: recommendation accepted`. Recorded as DD17 in the Decisions table.
+**Design amendment (2026-10-31, D19):** §5's Defaults bullet was corrected mid-execution to agree with R5.4 as clarified by the requirements' D19 (a conductor-directed correction): a named `mcp-wire` target is not gated on the in-play heuristic, and an absent target file is created.
 **Specification status: Ready — approved for execution 2026-10-31 (`AUTONOMOUS_APPROVAL: approve-and-execute`, provenance `autonomous: recommendation accepted`); recorded in [tasks.md](tasks.md) as TK7 and AP1.** Frontmatter `status` stays `draft` because the ontology's closed vocabulary has no `ready` value; the lifecycle Ready is this body status line and the specification index row.
 **Requirements:** [requirements.md](requirements.md) — approved 2026-10-31
 (`AUTONOMOUS_APPROVAL: requirements-phase-approval`, provenance `autonomous: recommendation
@@ -329,9 +330,16 @@ kyber-weave docs mcp-unwire [path] [--target <targets>]
 - `path` defaults to `.` like `docs init`. `--target` is a comma list, mirroring
   `docs init --target`.
 - **Defaults (5.3)**: with no `--target`, `mcp-wire` lists the harnesses in play and the
-  fixable gaps and writes nothing (exit 0) — writing requires naming the harnesses. With
-  `--target`, only the named harnesses are considered; a named harness that is not in
-  play or has no fixable gap is reported and skipped, and is not an error.
+  fixable gaps and writes nothing (exit 0) — writing requires naming the harnesses; the
+  preview also names each writable harness that no marker can detect in this tree (Claude
+  Code and opencode when their files are absent), because naming it is the only way to
+  write it. With `--target`, only the named harnesses are considered, and a named harness
+  is **not** gated on the in-play heuristic: the selection is the operator's consent
+  (R5.1, D19), so a named harness whose target file does not exist is created per the
+  File-creation bullet below — for Claude Code and opencode, whose only repository-scope
+  artefact is the file itself, "not in play" and "file absent" are the same condition,
+  and creation is the answer. A named harness that has no fixable gap — its file exists
+  and already holds every declared server — is reported and skipped, and is not an error.
 - **Scopes (5.2)**: repository-scope files only. User-scope paths are never written, and
   are not read either (D8); where a harness's only fixable location is user scope the
   report says so and prints the runbook snippet.
