@@ -90,16 +90,25 @@ public sealed class SquadPerformanceContractTests
     ///     worker that finished ran the whole suite, and harnesses finish workers together, so
     ///     several full runs landed on one machine at once. It reads sentences, not lines: hard
     ///     wraps in Markdown would otherwise hide the old wording, while a task-end clause in the
-    ///     next sentence ("At task end a worker runs only ...") must not be mistaken for it.
+    ///     next sentence ("At task end a worker runs only ...") must not be mistaken for it. A
+    ///     blank line, heading, bullet or table row starts a new block, so an unpunctuated bullet
+    ///     never borrows words from its neighbour; "e.g." and "i.e." do not end a sentence.
     /// </summary>
     internal static bool ReservesFullSuiteForTaskEnd(string content)
     {
-        string flattened = Regex.Replace(content, @"\s+", " ");
-        foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
-            if (Regex.IsMatch(sentence, @"\breserv\w*", RegexOptions.IgnoreCase) &&
-                Regex.IsMatch(sentence, @"\bfull[- ](?:test[- ])?suite\b", RegexOptions.IgnoreCase) &&
-                Regex.IsMatch(sentence, @"\btask (?:end|exit gates?)\b", RegexOptions.IgnoreCase))
-                return true;
+        string text = Regex.Replace(content, @"\b(e\.g|i\.e)\.", "$1");
+        foreach (string block in Regex.Split(
+                     text,
+                     @"(?:\r?\n){2,}|\r?\n(?=\s*(?:[-*+]\s|\d+\.\s|#{1,6}\s|\|))|(?<=^#{1,6}[ \t][^\r\n]*)\r?\n",
+                     RegexOptions.Multiline))
+        {
+            string flattened = Regex.Replace(block, @"\s+", " ");
+            foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
+                if (Regex.IsMatch(sentence, @"\breserv(?:e|es|ed|ing)\b", RegexOptions.IgnoreCase) &&
+                    Regex.IsMatch(sentence, @"\bfull[- ](?:test[- ])?suite\b", RegexOptions.IgnoreCase) &&
+                    Regex.IsMatch(sentence, @"\btask[- ](?:end|exit[- ]gates?)\b", RegexOptions.IgnoreCase))
+                    return true;
+        }
 
         return false;
     }
@@ -112,6 +121,11 @@ public sealed class SquadPerformanceContractTests
         "Reserve full test suite execution for the final review council. A worker's task end runs only the test classes its task touched.",
         false)]
     [InlineData("Task end used to be a full-suite moment.", false)]
+    [InlineData("Full suite runs are reserved for task-end verification.", true)]
+    [InlineData("The reservoir holds the full suite at task end.", false)]
+    [InlineData("Reserve the full suite, e.g. at task end.", true)]
+    [InlineData("- Reserve the full suite for the council\n- At task end run only touched classes", false)]
+    [InlineData("## Reserve the full suite\nAt task end run only touched classes", false)]
     public void FullSuiteReservationHelperReadsSentencesNotLines(string input, bool expected)
     {
         Assert.Equal(expected, ReservesFullSuiteForTaskEnd(input));
@@ -464,10 +478,33 @@ public sealed class SquadPerformanceContractTests
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bonly the test classes (?:its|your|the) task touched\b", content);
         Assert.Matches(@"(?i)\bonce per run\b", content);
-        Assert.Matches(@"(?i)`TESTS: total=0`", content);
+        Assert.Matches(@"(?i)\bintegrated\s+head\b", content);
+        Assert.Matches(@"(?i)`TESTS: total=0`\s+with\s+the\s+reason\b", content);
         Assert.False(
             ReservesFullSuiteForTaskEnd(content),
             $"{relativePath} must not reserve the full suite for task end.");
+    }
+
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    [InlineData(CSharpDevAgentPath)]
+    [InlineData(TestDevAgentPath)]
+    [InlineData(TestCodingStandardPath)]
+    public void SharedTestInfrastructureEscalatesToOneConductorOwnedFullRun(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
+        Assert.Matches(
+            @"(?i)\b(?:ask the conductor for one full run|conductor alone dispatches one full run)\b",
+            content);
+    }
+
+    [Fact]
+    public void TestStandardBoundsSharedTestInfrastructure()
+    {
+        string content = ReadRepoFile(TestCodingStandardPath);
+        Assert.Matches(@"(?i)\banything more than one test class depends on\b", content);
     }
 
     [Theory]
