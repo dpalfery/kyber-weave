@@ -62,8 +62,32 @@ public static partial class McpDeclarationBlockWriter
 
     /// <summary>
     /// True when <paramref name="configText"/> already carries a top-level <c>mcp:</c> key. The
-    /// key must start in column zero, so a commented <c># mcp:</c> does not count.
+    /// key must start in column zero, so a commented <c># mcp:</c> does not count, and a line
+    /// break is any of CRLF, LF or a lone CR, so a file written with any of them is read the
+    /// same way.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The check is textual rather than a YAML load, and the anchor is what makes that safe: the
+    /// answer is "a column-zero <c>mcp:</c> appears", not "the document has a top-level
+    /// <c>mcp</c> key". A snapshot taken with the parser would have to survive a document this
+    /// tool did not write — an operator's file may already be invalid YAML — and the check's one
+    /// job is to answer before anything is appended. The cost of being wrong is asymmetric, so
+    /// the direction is chosen: a missed section appends a second <c>mcp:</c> and makes the
+    /// document invalid YAML, while an extra match only declines to append, and the operator adds
+    /// the section by hand.
+    /// </para>
+    /// <para>
+    /// The known limits follow from the anchor. A multi-line quoted scalar may continue at column
+    /// zero — <c>note: "first line</c> then <c>mcp: second line"</c> — and a second YAML document
+    /// after <c>---</c> may open with the key. Both read as present, so the block is not appended;
+    /// neither can produce the duplicate section a line-ending-blind match produced. A root-level
+    /// flow mapping — <c>{"mcp": {...}}</c>, which is valid YAML — reads as absent, because the key
+    /// does not start a line. Recognising that shape is a YAML load's job, and a load is what this
+    /// check must survive; a file already written in flow style is outside what a block-section
+    /// append can extend, so the append is the operator's cue that the file needs them to write it.
+    /// </para>
+    /// </remarks>
     public static bool HasMcpSection(string configText)
     {
         ArgumentNullException.ThrowIfNull(configText);
@@ -95,6 +119,12 @@ public static partial class McpDeclarationBlockWriter
             : prefix + newline + newline + block + newline;
     }
 
-    [GeneratedRegex(@"^mcp[ \t]*:", RegexOptions.Multiline)]
+    /// <summary>
+    /// The anchor is a line start rather than <see cref="RegexOptions.Multiline"/>'s <c>^</c>,
+    /// which in .NET matches only after <c>\n</c>: a file written with lone <c>\r</c> endings
+    /// would then never be recognised, and the append that follows would write a second
+    /// <c>mcp:</c> into it. Any of CRLF, LF or CR is a line start this matches.
+    /// </summary>
+    [GeneratedRegex(@"(?:\A|[\r\n])mcp[ \t]*:")]
     private static partial Regex McpKey();
 }
