@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -212,11 +213,11 @@ public static class McpWiringInspector
                 McpWiringFixability.NotFixable);
         }
 
-        // What a launch would actually run: the wired entry's executable when its body could be
-        // read, the declaration's otherwise. A Codex or ZCode entry is name-only, so the
-        // declaration is the only command the check can honestly test.
-        IReadOnlyList<string> launch = detection.LaunchCommand ?? server.Command;
-        string? executable = launch.Count > 0 ? launch[0] : null;
+        // What a launch would actually run: the wired entry's executable when the check could read
+        // it, the declaration's otherwise. A ZCode entry's body is pinned nowhere in this repository,
+        // so for that harness the declaration is the only command the check can honestly test.
+        string? executable = detection.Executable
+            ?? (server.Command.Count > 0 ? server.Command[0] : null);
 
         // An absent binary is reported whether or not the server is wired. Pointing an operator
         // at a repair command that would refuse to write — because the entry could not launch —
@@ -353,10 +354,13 @@ public static class McpWiringInspector
                         continue;
                     }
 
-                    if (scan.Servers.Contains(server.Name, StringComparer.Ordinal))
-                        return new Detection(true, null, null);
+                    if (!scan.Servers.Contains(server.Name, StringComparer.Ordinal))
+                        continue;
 
-                    continue;
+                    // The scanner answers which tables a document declares and nothing about their
+                    // bodies, so a header alone says only that the name is there. What the check has
+                    // to know is whether a launch is there, and that is read from the table.
+                    return FromEntryBody(entry, server, ReadTomlEntryBody(tomText, entry.ServerKeyPath, server.Name));
 
                 case McpConfigurationShape.Json:
                     using (JsonDocument? document = ReadJson(file.AbsolutePath))
@@ -370,7 +374,7 @@ public static class McpWiringInspector
                         if (!TryFindEntry(document.RootElement, entry.ServerKeyPath, server.Name, out JsonElement wired))
                             continue;
 
-                        return FromEntryBody(server, ReadEntryBody(wired, entry.CommandShape));
+                        return FromEntryBody(entry, server, ReadEntryBody(wired, entry.CommandShape));
                     }
 
                 default:
@@ -385,10 +389,25 @@ public static class McpWiringInspector
     /// The detection one entry body yields: a launch to compare, an identity-only match, or the gap
     /// an entry that names no launch command is.
     /// </summary>
-    private static Detection FromEntryBody(RequiredMcpServer server, EntryBody body) =>
+    /// <remarks>
+    /// A row whose <see cref="HarnessMcpEntry.CommandShape"/> is
+    /// <see cref="McpEntryCommandShape.Undetermined"/> keeps only the executable: the catalog records
+    /// that harness's entry body as pinned nowhere in this repository, so comparing an argv read
+    /// here against the declaration would report a difference nobody verified the meaning of. The
+    /// executable is enough to answer the question the body is read for — whether the binary a launch
+    /// would run is there.
+    /// </remarks>
+    private static Detection FromEntryBody(
+        HarnessMcpEntry entry,
+        RequiredMcpServer server,
+        EntryBody body) =>
         body.Reading switch
         {
-            McpEntryReading.Readable => new Detection(true, body.Tokens, null),
+            McpEntryReading.Readable => new Detection(
+                true,
+                entry.CommandShape == McpEntryCommandShape.Undetermined ? null : body.Tokens,
+                null,
+                Executable: body.Tokens[0]),
             McpEntryReading.Unpinned => new Detection(true, null, null),
 
             // The entry exists but cannot start anything. It stays a KW-MCP-WIRE-001 gap and not a
@@ -497,6 +516,203 @@ public static class McpWiringInspector
         }
 
         return EntryBody.FromCommandLine(commandLine);
+    }
+
+    /// <summary>
+    /// The launch command a Codex server table declares, read from a document the scanner has
+    /// already classified.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TomlTableScanner"/> answers which <c>[mcp_servers.&lt;name&gt;]</c> tables a
+    /// document declares, and nothing else. A header is a name, not a launch, so treating one as
+    /// the entry's identity reports a table that names no command as wired — a confirming pass for
+    /// a configuration the harness cannot start. That path is live even though the repair never
+    /// writes Codex's file: the check reads what the repair declines to touch.
+    /// </para>
+    /// <para>
+    /// This reads one value out of the table the scanner found, so it is not a second classifier:
+    /// the scanner has already established that the table exists and that every string in the
+    /// document is closed, and this only has to know where that table's region ends and what it
+    /// names as its command. Anything it does not recognise answers an unreadable body, which the
+    /// caller reports as a gap. Arguments are deliberately not read — they do not decide whether an
+    /// entry can launch, and this repository pins no full argv for the harness to compare against.
+    /// </para>
+    /// </remarks>
+    private static EntryBody ReadTomlEntryBody(
+        string text,
+        IReadOnlyList<string> tablePath,
+        string serverName)
+    {
+        string table = string.Join('.', tablePath.Append(serverName));
+        bool inTable = false;
+
+        foreach (string raw in WithoutMultilineStrings(text).Split('\n'))
+        {
+            string line = raw.Trim();
+
+            if (line.Length == 0)
+                continue;
+
+            if (line[0] == '[')
+            {
+                inTable = NamesTable(line, table);
+                continue;
+            }
+
+            if (!inTable)
+                continue;
+
+            int assignment = line.IndexOf('=', StringComparison.Ordinal);
+            if (assignment < 0 ||
+                !string.Equals(BareKey(line[..assignment]), "command", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return ReadTomlString(line[(assignment + 1)..]) is { } command
+                ? EntryBody.FromCommandLine([command])
+                : EntryBody.Unreadable;
+        }
+
+        return EntryBody.Unreadable;
+    }
+
+    /// <summary>
+    /// The document with the contents of every multi-line string blanked, so a note cannot
+    /// impersonate a table header or a command key.
+    /// </summary>
+    /// <remarks>
+    /// Newlines are kept, so the document stays line-aligned with the scanner's reading of it. The
+    /// delimiters are the ones the scanner uses, and a document reaching here has been classified by
+    /// it, so this only has to agree about where prose is: one value reader and one classifier
+    /// disagreeing about that is how a note becomes a launch command.
+    /// </remarks>
+    private static string WithoutMultilineStrings(string text)
+    {
+        StringBuilder builder = new(text.Length);
+        int index = 0;
+
+        while (index < text.Length)
+        {
+            string? delimiter = TripleDelimiterAt(text, index);
+            if (delimiter is null)
+            {
+                builder.Append(text[index]);
+                index++;
+                continue;
+            }
+
+            builder.Append(delimiter);
+            index += delimiter.Length;
+
+            int close = text.IndexOf(delimiter, index, StringComparison.Ordinal);
+            int end = close < 0 ? text.Length : close;
+
+            for (; index < end; index++)
+                builder.Append(text[index] == '\n' ? '\n' : ' ');
+
+            if (close >= 0)
+            {
+                builder.Append(delimiter);
+                index = close + delimiter.Length;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>The multi-line string delimiter starting at <paramref name="index"/>, when one does.</summary>
+    private static string? TripleDelimiterAt(string text, int index)
+    {
+        ReadOnlySpan<char> remainder = text.AsSpan(index);
+
+        if (remainder.StartsWith("\"\"\"", StringComparison.Ordinal))
+            return "\"\"\"";
+
+        return remainder.StartsWith("'''", StringComparison.Ordinal) ? "'''" : null;
+    }
+
+    /// <summary>
+    /// Whether a header line names <paramref name="table"/>, or a sub-table of it.
+    /// </summary>
+    /// <remarks>
+    /// Quoted keys and the whitespace TOML allows around them are removed before the comparison, so
+    /// a spelling the scanner accepted compares equal here too — one classifier and one value reader
+    /// disagreeing about which table they are looking at would report a working entry as a gap. A
+    /// sub-table counts as inside the server's region — <c>[mcp_servers.x.env]</c> implicitly
+    /// creates the server's table — which is the same reading the scanner takes.
+    /// </remarks>
+    private static bool NamesTable(string headerLine, string table)
+    {
+        string path = Normalize(StripComment(headerLine).TrimStart('[').TrimEnd(']'));
+
+        return string.Equals(path, table, StringComparison.Ordinal)
+            || path.StartsWith(table + ".", StringComparison.Ordinal);
+    }
+
+    /// <summary>One quoted TOML value, or null when the text is not a quoted string this reader knows.</summary>
+    /// <remarks>
+    /// A basic string (<c>"…"</c>) escapes with a backslash; a literal string (<c>'…'</c>) does not,
+    /// so a backslash inside one is the character it looks like. A multi-line value answers an empty
+    /// string — its contents were blanked as prose — and an empty command is the gap the caller
+    /// reports, not a launch.
+    /// </remarks>
+    private static string? ReadTomlString(string text)
+    {
+        string value = text.TrimStart();
+
+        if (value.Length < 2 || value[0] is not ('"' or '\''))
+            return null;
+
+        char quote = value[0];
+        StringBuilder literal = new();
+
+        for (int index = 1; index < value.Length; index++)
+        {
+            char current = value[index];
+
+            if (quote == '"' && current == '\\' && index + 1 < value.Length)
+            {
+                index++;
+                literal.Append(value[index]);
+                continue;
+            }
+
+            if (current == quote)
+                return literal.ToString();
+
+            literal.Append(current);
+        }
+
+        return null;
+    }
+
+    /// <summary>A key as it compares: unquoted, without the whitespace TOML allows around it.</summary>
+    private static string BareKey(string text) => Normalize(StripComment(text));
+
+    /// <summary>The text before a <c>#</c> comment, which ends a TOML line.</summary>
+    private static string StripComment(string text)
+    {
+        int comment = text.IndexOf('#', StringComparison.Ordinal);
+        return comment < 0 ? text : text[..comment];
+    }
+
+    /// <summary>
+    /// The text with the whitespace and quotes TOML allows around a key or a table path removed, so
+    /// two spellings of one name compare equal.
+    /// </summary>
+    private static string Normalize(string text)
+    {
+        StringBuilder builder = new(text.Length);
+
+        foreach (char character in text)
+        {
+            if (!char.IsWhiteSpace(character) && character is not ('"' or '\''))
+                builder.Append(character);
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>
@@ -788,6 +1004,11 @@ public static class McpWiringInspector
     /// The repository-relative segment of the configuration that is a symbolic link, when one was
     /// refused rather than followed.
     /// </param>
+    /// <param name="Executable">
+    /// The program a launch of the wired entry would run, when the check could read it. Kept apart
+    /// from <paramref name="LaunchCommand"/> because an entry body can name its executable without a
+    /// full argv the catalog pins far enough to compare.
+    /// </param>
     /// <param name="EntryUnlaunchable">
     /// Whether an entry exists but names no launch command this check could read. That is a gap, not
     /// a pass, and it is not one a second entry can repair.
@@ -797,6 +1018,7 @@ public static class McpWiringInspector
         IReadOnlyList<string>? LaunchCommand,
         string? Refusal,
         string? LinkedSegment = null,
+        string? Executable = null,
         bool EntryUnlaunchable = false);
 
     /// <summary>What reading one entry body established about the launch it names.</summary>
