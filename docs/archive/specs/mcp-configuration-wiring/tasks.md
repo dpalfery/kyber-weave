@@ -485,21 +485,39 @@ as it stands is what governs). ADR disposition: **ADR 0051**, task 5 — no ADR 
   the check reads configuration bytes and never starts a harness, which is now stated to the
   operator in [the runbook](../../../docgraph/mcp-runbook.md#the-check). The row closes when
   the owner records that observation, not when the suite is green.
-- **TG4 (accepted finding, carried for the owner's decision, 2026-11-01): one `DocsApp`
-  builder copied three times.** Accepted as Minor by the council's re-review:
-  `tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs` adds a third copy of the six-line `DocsApp`
-  command-app builder, identical to the copies in `DocsInitReviewGatesTests.cs` and
-  `GateCatalogueToolchainTests.cs`. The copies can diverge, so a `docs init` registration defect
-  could pass one suite and fail another. The suggestion on record is to move `DocsApp` into
-  `McpWiringFixture` and have all three suites call it. No `docs/todo` entry is created — a
-  review finding does not by itself authorize a repository change.
-- **TG5 (accepted finding, carried for the owner's decision, 2026-11-01): the atomic-write
-  idiom has a third copy.** Accepted as Minor:
+- **TG4 (closed 2026-11-01): one `DocsApp` builder copied three times.** Accepted as Minor by the
+  council's re-review: `tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs` adds a third copy of the
+  six-line `DocsApp` command-app builder, identical to the copies in `DocsInitReviewGatesTests.cs`
+  and `GateCatalogueToolchainTests.cs`. The copies can diverge, so a `docs init` registration
+  defect could pass one suite and fail another. The suggestion on record is to move `DocsApp` into
+  `McpWiringFixture` and have all three suites call it. No `docs/todo` entry is created — a review
+  finding does not by itself authorize a repository change. **Closed by the owner's decision to
+  fix it, executed on branch `feat/mcp-configuration-wiring` (2026-11-01):** the six copies — five
+  already in the test project, and the sixth this specification added — are now one,
+  `tests/KyberWeave.Tests/CommandAppFixture.cs`, which registers the `docs` branch and its `init`
+  command once for the whole test project and offers four named compositions for the four shapes
+  the suites need (`DocsInit`, `ReviewGates`, `ReviewCatalogue`, `DocsInitWithReviewGates`). Two
+  further copies the finding had not named turned up and were verbatim copies of the strict
+  review-gates app, so the strict cluster is one implementation with three presets rather than
+  four copies; no assertion changed and no test was deleted. Commit `a3263a91`. No `docs/todo`
+  entry follows the decision either: the owner asked for the fix, so the work is done rather than
+  tracked.
+- **TG5 (closed 2026-11-01): the atomic-write idiom has a third copy.** Accepted as Minor:
   `src/KyberWeave.Core/Docs/Mcp/McpWiringRepairer.cs` is a third implementation of the
   temp-file-then-rename idiom that `ManagedGlossaryService.AtomicWrite` and
   `StatusLineReceiptStore.Write` already provide — and the three already disagree, the receipt
   store using a predictable `<path>.tmp` with no cleanup. A durability fix landing in one copy
-  leaves the others behind.
+  leaves the others behind. **Closed by the owner's decision to fix it, executed on branch
+  `feat/mcp-configuration-wiring` (2026-11-01):** the four copies — the three this finding names
+  and the docs review export's own — are now one,
+  `src/KyberWeave.Core/FileSystem/AtomicFile.cs`, used by the MCP repair, the glossary service,
+  the status-line receipt store and the docs review export. The disagreements the finding named
+  are resolved with the copies: the receipt store no longer writes a predictable `<path>.tmp`,
+  and the cleanup is guarded so a failure to sweep cannot replace the reason the write failed.
+  Squad's eight near-copies are left alone — they gate a disk flush on a global test toggle,
+  take an exclusive create, and name their temporaries without the leading dot, so consolidating
+  them is a change of its own, and this specification's Squad-untouched bound (R7) is why that
+  change is not this one. Commit `46c6240b`.
 - **TG6 (observed at closeout, carried for the owner's decision, 2026-11-01):
   `KW-MCP-WIRE-002` cannot separate "wired, differently spelled" from "wired wrong".** The
   finding compares the declared launch command with the wired one as text, allowing exactly one
