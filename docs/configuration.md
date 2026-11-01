@@ -429,12 +429,15 @@ repository-scope path that is a symbolic link is refused as well — the check r
 symbolic link it did not read, and neither repair verb writes through it, because the bytes
 would land in whichever file the link names. A linked configuration is therefore checked
 against nothing: the report says the server is not wired until a real file stands in the tree.
+A repository-scope file this process may not inspect is refused for the adjacent reason: a
+denied file cannot be told from an absent one, so it is reported as a gap and no repair is
+offered for it either.
 
 | Key | Default | Effect |
 |---|---|---|
 | `required-servers` | empty | The declared servers, keyed by the name an MCP client sees |
 | `required-servers.<name>.command` | required | Launch command as argv — the program first, then each argument. Never a shell line, for the same reason `review.gates` takes argv |
-| `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked |
+| `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships, today `kyber-weave-mcp`) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked. `first-party` is bound to the shipped binary: it is accepted only when the command's program is `kyber-weave-mcp` |
 | `required-servers.<name>.level` | `required` | `required` reports a missing server as a warning; `recommended` reports the same line at `info` |
 | `required-servers.<name>.install` | none | Free-text manual install command, printed verbatim when the binary is absent. Never executed — Kyber-Weave installs no external software |
 
@@ -455,15 +458,27 @@ mcp:
 `docs init` scaffolds the section with exactly one server — `kyber-weave`, launched
 `kyber-weave-mcp --repo-root .`, first-party — when it creates a host configuration, and
 appends it, leaving every other byte alone, when an existing file has none. An existing
-section is never rewritten: it is host-owned from then on.
+section is never rewritten: it is host-owned from then on. The append is textual, so it
+survives the file's own encoding and line endings: the section is recognised under CRLF, LF,
+or lone-CR endings and past a UTF-8 byte-order mark, the lines it adds take the ending the
+file uses most, and the operator's trailing blank lines are returned unchanged.
 
 The product default is **no servers at all**. An absent section behaves exactly as it did
 before this key existed, and upgrading never invents a declaration a host did not make. The
 host's map **replaces** the inherited one rather than merging into it, so removing a server
 from your own section retracts it; a union would keep reporting a dependency nobody declares.
-Unknown keys are ignored, as in every other section. A declaration that names no command,
-carries an empty argument, or gives an unrecognised `provenance` or `level` fails the load
-as `KW-CONFIG-001`, naming the section and the server at fault.
+Unknown keys are ignored, as in every other section. A declaration that gives a server a
+blank name, names no command, carries an empty argument, claims `first-party` for a command
+that does not run `kyber-weave-mcp`, or gives an unrecognised `provenance` or `level` fails
+the load as `KW-CONFIG-001`, naming the section and the server at fault.
+
+**`first-party` is a claim about who ships the binary, so it is refused when it is untrue.**
+The provenance decides the remedy an absent binary gets, and the first-party remedy is
+"this Kyber-Weave installation is broken; run `kyber-weave update`" — advice about a program
+the repository never installed if the server were somebody else's. The claim is therefore
+checked against argv[0] at load time, and the comparison is a case-insensitive filename
+containment so a locally built or renamed copy of the shipped server still counts. Declare a
+binary you install yourself as `third-party`, whatever it does.
 
 The declaration is independent of Squad: it is not Squad's `toolchain.yml`
 `required-mcp-tools` roster and not `products/kyber-squad/mcp.json`, and neither is read by

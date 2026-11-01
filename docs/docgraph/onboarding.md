@@ -104,15 +104,16 @@ shares — and prints one `MCP wiring:` section: an `ok` line per harness that i
 `warn` line with a copy-ready `docs mcp-wire --target <harness>` command per fixable gap, and
 an `info` line for a harness that is not in play. A gap the repair cannot close is reported
 with the edit to make by hand instead of an offer — an entry whose launch command differs from
-the declaration, because the repair never modifies an entry that already exists, and a
+the declaration, because the repair never modifies an entry that already exists; a
 configuration that arrived as a symbolic link, because the repair refuses a link for the same
-reason the check does not read one. The Copilot coding agent is the one undetectable harness
-whose advice is printed with its `info` line — its configuration is repository settings, not a
-file, so the settings entry and the workflow step are the whole answer. It reads no file under
-your home directory, follows no symbolic link into one, writes nothing, and **does not change
-the exit code**: a scaffold that succeeded exits 0 with findings, exactly as the APM-missing
-and retired-skill paths do. A declaration the loader rejects fails the run as
-`KW-CONFIG-001`, before the check.
+reason the check does not read one; and a configuration this process may not inspect, because
+a file it cannot read cannot be told from one that is not there. The Copilot coding agent is
+the one undetectable harness whose advice is printed with its `info` line — its configuration
+is repository settings, not a file, so the settings entry and the workflow step are the whole
+answer. It reads no file under your home directory, follows no symbolic link into one, writes
+nothing and **does not change the exit code**: a scaffold that succeeded exits 0 with findings,
+exactly as the APM-missing and retired-skill paths do. A declaration the loader rejects fails
+the run as `KW-CONFIG-001`, before the check.
 
 ```bash
 kyber-weave docs init . --no-mcp-check   # skip the check, the prompt, and any repair

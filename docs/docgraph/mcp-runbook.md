@@ -13,10 +13,12 @@ code-refs:
   - HarnessMcpCatalog
   - HarnessMcpEntry
   - JsonServerSplice
+  - LaunchCommandResolver
   - McpConfigurationLink
   - McpWiringFix
   - McpWiringFixes
   - McpWiringInspector
+  - McpWiringReceipt
   - McpWiringRepairer
 ---
 
@@ -628,6 +630,18 @@ key is absent) or `recommended`, and it decides whether a gap is a warning or an
 line. An optional `install` carries the exact manual command to print when a third-party
 binary is absent; Kyber-Weave prints it and never runs it.
 
+**`first-party` is bound to the binary this product ships.** The class is a statement about
+who ships the binary, not a preference, and the whole first-party remedy rests on it: an
+absent first-party binary is reported as *this Kyber-Weave installation is broken; run
+`kyber-weave update`*, which is only true while every loaded first-party server really is the
+shipped one. So the claim is checked at load time against argv[0] — the element the check
+probes and a harness launches — and a declaration that claims it about any other program
+fails to load as `KW-CONFIG-001`, naming the offending program. The match is a
+case-insensitive filename containment rather than an equality, so a locally built or renamed
+copy of `kyber-weave-mcp` still qualifies, and a wrapper command cannot pass a claim about
+the thing it wraps. A binary you install yourself is `third-party` whatever it does, even
+when it serves this repository's documentation.
+
 `docs init` scaffolds the section with exactly one server when it creates a host
 configuration, and appends it — leaving every other byte alone — when an existing file has
 none. Once the section exists it is yours: no run of `docs init` ever rewrites it.
@@ -655,9 +669,9 @@ What it reports:
 
 | Id | Level | Raised when |
 |---|---|---|
-| `KW-MCP-WIRE-001` | warning for a `required` server, `info` for a `recommended` one | a declared server is not wired for a harness in play, or the file could not be read — including a configuration that reached the repository as a symbolic link, which is not read at all |
+| `KW-MCP-WIRE-001` | warning for a `required` server, `info` for a `recommended` one | a declared server is not wired for a harness in play, or the file could not be read — including a configuration that reached the repository as a symbolic link, which is not read at all, and one this process may not inspect, which is reported as a gap rather than as a configuration the repository does not have |
 | `KW-MCP-WIRE-002` | same as above | the entry is wired but its launch command differs from the declaration, once the harness's own spelling of the repository root is allowed for; the line names both. Never fixable, so never offered as a repair |
-| `KW-MCP-WIRE-003` | same as above | the entry is wired — or would be — but the launch binary does not resolve on `PATH` |
+| `KW-MCP-WIRE-003` | same as above | the entry is wired — or would be — but the launch binary does not resolve: a command name is looked up on `PATH`, and a command that names a path is resolved against the repository under inspection |
 | `KW-MCP-WIRE-004` | `info`, always | the harness is not in play, has no marker to detect it, or keeps its configuration in repository settings |
 
 **The comparison allows one substitution, and only one.** The repair writes the harness's own
@@ -670,6 +684,31 @@ named that to a harness which substitutes nothing, so it must not compare equal 
 what makes the second-run contract below true for every writable harness — the file the repair
 wrote is a file the check passes, so a second `mcp-wire` over it reports `nothing to write` at
 exit 0 rather than refusing its own success.
+
+**The spelling is the one held under `KYBER_WEAVE_REPO_ROOT`.** A harness's token is read from
+the value its entry keeps under that environment key — the same name the MCP server resolves
+its own root from — and not from whichever environment entry happens to come first. Key order
+in an entry body is the harness author's choice, and a block that listed another variable first
+would otherwise have made that variable's value the spelling the repair substitutes and the
+check accepts: one wrong token, agreed on by both sides of the round trip. A harness whose
+entry carries no such key substitutes nothing, and the declaration's own `.` is what it keeps.
+
+**A launch command is resolved the way a harness would start it.** A bare name is looked up
+along `PATH` in order, so a later entry never masks the earlier answer and an empty entry means
+the repository root. A command that names a path — `./bin/kyber-weave-mcp`, `tools/serve-mcp`,
+`C:serve-mcp` — is not something `PATH` resolves, so it is taken as given when fully qualified
+and resolved against the **repository under inspection** when it is not. That is the directory
+`docs init` or `docs mcp-wire` was pointed at, never the one you happened to run from: the
+declaration is committed, so the same entry has to answer the same from a checkout, a CI
+runner, and a shell somewhere else. No process is started either way — this is a file-existence
+test, not a `--version` probe.
+
+**An entry that names no launch command is a gap with an edit, not an offer.** A harness file
+holding an entry under the declared server's name whose body is empty, or whose command cannot
+be read, is reported as not wired (`KW-MCP-WIRE-001`) with the command the entry should carry.
+It is never a `KW-MCP-WIRE-002` difference, because there is no wired command to compare
+against, and it is never offered as a repair, because the repair refuses an entry that already
+exists. Deleting the entry is the route back to a repair that works, and the hint says so.
 
 A harness is "in play" when its repository-scope configuration file or its marker directory
 exists — `.factory/`, `.cursor/`, `.vscode/`, `.codex/`, `.zcode/`, or the configuration file
@@ -694,11 +733,21 @@ servers prints no section at all.
 
 **What it proves, and what it does not.** The check reads configuration bytes and never
 starts a harness. A clean report means each in-play harness's file declares the server with
-the command the repository declared, and that the binary resolves on `PATH` — the whole of
-what a check confined to the repository can establish. Whether a live session then lists that
-server's tools is a separate observation, made once after wiring: open the harness in this
-repository and confirm the declared server's tools appear. Until it is made, read "wired" as
-wired correctly on disk, not as reachable from a running agent.
+the command the repository declared, and that the binary resolves — the whole of what a check
+confined to the repository can establish. Whether a live session then lists that server's
+tools is a separate observation, made once after wiring: open the harness in this repository
+and confirm the declared server's tools appear. Until it is made, read "wired" as wired
+correctly on disk, not as reachable from a running agent.
+
+**Everything it prints that came out of a file is stripped and capped first.** A server name,
+a declared command, a finding's hint, the snippet to paste, and the paths and names a receipt
+records are all somebody else's text by the time they reach this report: `kyber-weave.yml` is
+whatever was cloned, a harness configuration belongs to the harness, and the receipt is local
+state a teammate or an earlier tool can have written. Terminal escape sequences are removed
+whole — including the two-character forms, so no fragment is left behind — line breaks are
+folded into a hint's single line, and a value is capped at 512 characters a line and 4096
+characters a block, marked when it was cut. A truncated entry is a better outcome than a value
+that clears the scrollback or colours the operator's console.
 
 `--no-mcp-check` skips the check, the prompt and any repair, and prints one line saying so.
 
@@ -711,16 +760,18 @@ per file, what was written, then the receipt's location. Declining writes nothin
 findings and their printed commands stand, so the same repair is one command away.
 
 The question is built from fixable gaps alone — a server that is not wired, on a harness the
-repair writes, with no link on the path to the file. Three findings are reported and never
-offered. A differing launch command (`KW-MCP-WIRE-002`) is never fixable, because closing it
-means modifying an entry that already exists and the repair never touches one; its hint names
-the exact command the entry should carry, quotes the wire command only with the caveat that it
-refuses the existing entry, and so amounts to an edit by hand — or a deletion of the entry,
-after which the wire command can add it back. An absent binary (`KW-MCP-WIRE-003`) is never
-fixable either, because the remedy is installing software and Kyber-Weave installs none but its
-own. And a configuration that reached the repository as a symbolic link is not fixable, because
-the repair refuses the file the check refused to read. None of the three appears in the
-question.
+repair writes, with no link or denial on the path to the file. Four findings are reported and
+never offered. A differing launch command (`KW-MCP-WIRE-002`) is never fixable, because
+closing it means modifying an entry that already exists and the repair never touches one; its
+hint names the exact command the entry should carry, quotes the wire command only with the
+caveat that it refuses the existing entry, and so amounts to an edit by hand — or a deletion
+of the entry, after which the wire command can add it back. An absent binary
+(`KW-MCP-WIRE-003`) is never fixable either, because the remedy is installing software and
+Kyber-Weave installs none but its own. Neither is a configuration that reached the repository
+as a symbolic link, nor one this process may not inspect, because the repair refuses the file
+the check refused to read. None of the four appears in the question. An entry that exists but
+names no launch command is excluded from it for the same reason, and reported with the edit
+instead.
 
 **When stdin is not an interactive terminal — redirected, piped, no TTY, CI — the command
 never prompts, never writes, and the output ends with the printed manual repair command.**
@@ -750,9 +801,14 @@ kyber-weave docs mcp-wire [path] [--target <targets>] [--dry-run]
   the entry the first run created.
 - **A refused target** exits 1, names the file and the reason, and writes nothing to that
   file: a slug the catalog does not know, a malformed or foreign document, an entry with the
-  same server name already present, a harness the repair does not write, an absent binary, or
-  a configuration that is a symbolic link — refused before it is read, so not one byte of the
-  target is opened. Other named targets still proceed.
+  same server name already present, a harness the repair does not write, an absent binary, a
+  configuration that is a symbolic link — refused before it is read, so not one byte of the
+  target is opened — a configuration this process may not inspect, and a receipt that could
+  not be persisted. Other named targets still proceed.
+- **A write it cannot record is a write it does not make.** The undo record is persisted
+  before the harness file is touched, so a target whose record cannot be written is refused
+  (`KW-MCP-WIRE-005`) rather than left as a changed file with no account of what it held. See
+  [The receipt](#the-receipt).
 - `--dry-run` prints the exact per-file change — the file, the harness, the servers it would
   gain, and whether the file exists yet — writes nothing, not even the receipt, and exits what
   the real run would have exited:
@@ -776,12 +832,25 @@ section is malformed can still be unwound. An `inserted` file is restored to the
 repair found; a `created` file is deleted. With no `--target` it lists the files the receipt
 records and removes nothing. It exits 0 when every named file was restored or deleted, and 1
 on any refusal: a slug the catalog does not know, no receipt record, a file that is gone, a
-current digest that differs from the recorded one, or a file that is a symbolic link —
-refused ahead of the receipt lookup, because restoring the recorded bytes through the link
-would write them into whichever file it names.
+current digest that differs from the recorded one, a file that is a symbolic link — refused
+ahead of the receipt lookup, because restoring the recorded bytes through the link would
+write them into whichever file it names — or a file this process may not read.
 
-That last case is the point of the verb. **A file that changed after the repair is drift, and
-drift is refused** (`KW-MCP-WIRE-006`) rather than restored over someone else's edit.
+That digest comparison is the point of the verb. **A file that changed after the repair is
+drift, and drift is refused** (`KW-MCP-WIRE-006`) rather than restored over someone else's
+edit.
+
+**An interrupted write is recognised rather than refused.** Because the record is persisted
+before the file, a run killed in between can leave a record for a write that never landed.
+Removal therefore compares the file's digest against *both* recorded digests, and the one
+digest that is not drift is the pre-write one: the file then already holds the state the
+removal was asked for, so the record is dropped and the file is left alone. A `created`
+record whose file does not exist at all is the same window seen from the other side — nothing
+was ever written, so the record goes and nothing is reported as a foreign edit. A receipt
+that cannot be read, that was written under another schema version, or whose shape this build
+cannot trust — a null file list, a record with no path or no digest — is treated as an empty
+receipt instead: Kyber-Weave only removes what it can show it wrote, so a receipt that proves
+nothing refuses everything rather than restoring from a record it cannot check.
 
 ### The receipt
 
@@ -792,8 +861,25 @@ timestamp, and, for an inserted file, the pre-write bytes it captured — a dige
 restore is safe, but it cannot produce the bytes to restore. `docs init` adds `receipts/` to
 `.kyber-weave/.gitignore` beside `cache/`.
 
-It is the writer's local undo record and nobody else's. Teammates receive the committed
-configuration file and never need the receipt; their removal path is `git revert`.
+**It is a journal, and the order is the mechanism.** Each record is persisted *before* the
+harness file it describes is replaced. Written the other way round, a run killed in between
+leaves a mutated harness configuration with no account of its previous bytes: the removal
+refuses it as drift and the undo is unreachable outside version control. Written first, the
+same kill leaves a record for a write that never landed, and the removal recognises that from
+the bytes still on disk — which is why removal treats the pre-write digest as "already
+undone" rather than as drift. The record also gates the write: a change this tool cannot
+record is a change it does not make, reported as `KW-MCP-WIRE-005` with the receipt path in
+the hint.
+
+**What an operator does with it.** Read its `files` list to see which harness files a run
+wrote and in which mode; run `docs mcp-unwire --target <harness>` to undo one, and
+`docs mcp-unwire` with no target to list what the record holds. It is the writer's local undo
+record and nobody else's: teammates receive the committed configuration file and never need
+it, and their removal path is `git revert`. It can be deleted once the write has been
+committed and reviewed — deleting it retires the undo along with it. A hand-edited record is
+not refused for being hand-edited: removal acts on what the record proves against the file,
+and a record whose digests no longer describe the bytes on disk is refused as drift like any
+other. A receipt whose shape does not match schema version 1 is treated as empty instead.
 
 ### What the repair writes, and what it will not
 
@@ -814,7 +900,10 @@ The three snippet-only rows are checked and never written, and each says why:
   the runbook's verified form is an absolute path, which cannot go into a committed file
   without breaking every other teammate. The unblocking source is Codex's own documentation
   or source for how a project-scope `--repo-root .` resolves; verifying it adds the form
-  here and flips that catalog row's writability.
+  here and flips that catalog row's writability. The snippet it prints is a real TOML table,
+  with every segment of the header spelled as a TOML key: one holding a dot, a bracket, a
+  quote or a newline is quoted, so a server name cannot turn into a nested table or close the
+  header and put whatever follows it into the file the operator pastes.
 - **ZCode** is refused because the entry body inside `mcp.servers` is pinned nowhere in this
   repository — see [ZCode](#zcode). The unblocking source is ZCode's `mcpSchema`.
 - **The Copilot coding agent** has no file to write: its configuration is repository
@@ -835,7 +924,17 @@ convenience:
   trailing comma survive byte-for-byte; the repair never reformats, reorders, or
   re-serializes.
 - **An existing entry is never modified.** A file already holding an entry with the declared
-  server's name is refused for that file, with the difference reported.
+  server's name is refused for that file, with the difference reported. That is also why a
+  written entry's environment block comes from the harness's own template rather than from a
+  merge: within it, only the value holding the repository root is rewritten to the harness's
+  spelling, and any other variable the block carries travels as it stands instead of being
+  overwritten with a second copy of the root.
+- **A name is written in the host's own form, never a stripped one.** A JSON harness gets a
+  JSON string literal and a TOML snippet gets a TOML key, so a name holding a quote, a dot, a
+  bracket or a control character is escaped rather than mangled — a raw name in a table header
+  would become a nested table or end the header outright. The console report is the same
+  values made safe the other way: stripped of terminal sequences and capped before printing,
+  so an escape sequence in a name reaches neither the file nor the operator's terminal.
 - **An absent binary is never installed and never written.** A third-party server whose
   binary does not resolve on `PATH` is refused for every harness; a missing
   `kyber-weave-mcp` is reported as a broken Kyber-Weave installation, to be repaired with
@@ -845,7 +944,10 @@ convenience:
   never written and never read; they are reported with the manual snippet.
 - **A symbolic link is refused, not followed.** A repository-scope path that is a link names a
   file outside the tree just as surely as a home-directory path does, so the check does not
-  read it and neither verb writes through it. See [Symbolic links](#symbolic-links).
+  read it and neither verb writes through it. A file this process may not inspect is refused
+  on the same three paths, because "denied" and "absent" are opposite answers and only one of
+  them may be read as "this harness has nothing to say". See [Symbolic links and unreadable
+  files](#symbolic-links-and-unreadable-files).
 - **The root follows the harness's own substitution rule.** VS Code gets
   `${workspaceFolder}`; Factory, Claude Code, Cursor and opencode get `.`, the
   workspace-relative form each documents. Codex substitutes no workspace variable and its
@@ -855,7 +957,7 @@ convenience:
 Five more clients above have recipes here and no catalog row — Command Code, Kilo,
 Antigravity, Pi, and Warp. Nothing checks or writes them; the recipe is the whole grant.
 
-### Symbolic links
+### Symbolic links and unreadable files
 
 A repository-scope configuration cannot be a symbolic link. The link's own path is inside the
 tree, so every containment check passes, while the bytes behind it live wherever it points —
@@ -870,15 +972,37 @@ path, the write path and the removal path cannot give three different answers:
 | the repair | refused **before** the read, so zero bytes of the target are opened and zero written; the diagnostic names the file and that it is a symbolic link | `KW-MCP-WIRE-005` |
 | the removal | refused ahead of the receipt lookup; zero bytes written; the diagnostic names the file | `KW-MCP-WIRE-006` |
 
+**A path this process may not inspect is the second refusal**, and it is the one that used to
+be silent. `File.Exists` answers `false` for a file it cannot reach just as it does for one
+that is not there, so a guard built on it would have reported a permission problem as "this
+harness has nothing configured" — and the repair, told the file was absent, would have taken
+the path that creates one over it. The guard therefore has three states rather than two —
+absent, present, and *denied* — and a denial is reported as a gap, on the same three paths:
+
+| Path | What happens | Rule id |
+|---|---|---|
+| the check | the file is not read; the finding says access to the named segment was denied and that a file this process cannot inspect cannot be told from one that is absent; the harness is reported as not wired **and no repair is offered** | `KW-MCP-WIRE-001` |
+| the repair | refused before the read, so nothing is read and nothing is written over a file it could not inspect; the hint names the permission to fix | `KW-MCP-WIRE-005` |
+| the removal | refused ahead of the receipt lookup, because restoring recorded bytes over a file this process cannot read would be a guess | `KW-MCP-WIRE-006` |
+
+No repair is offered for a denial, for the same reason a link gets none: the repair asks the
+same guard the same question, so sending the operator to a command that will refuse again is
+worse than silence. A denial and a link are also kept as separate sentences, because their
+remedies differ — one is a permission on a real file inside the repository, the other is a file
+outside it — and a single "cannot read this" would leave the operator to guess which they have.
+
 Every segment below the repository root is tested, not only the file itself, so a linked
 `.vscode/` beside an ordinary `mcp.json` is refused the same way and the clause names the
 segment: `<path> lies behind the symbolic link '.vscode'`. A link whose target is gone is
-still a link, and still not something these commands may read through or write into.
+still a link, and still not something these commands may read through or write into. A parent
+reference is recognised as a whole path segment, so a file named `..foo` inside the tree is a
+file inside the tree rather than a way out of it.
 
-The remedy is the same on all three paths: copy the content out of the linked file, delete the
-link, leave the real file in the tree, and run the command again. The check's hint says that
-rather than naming the wire command, because pointing at a repair that will refuse again is
-worse than silence. With this guard in place, [ADR
+The remedy is the same on all three paths for a link: copy the content out of the linked file,
+delete the link, leave the real file in the tree, and run the command again. The check's hint
+says that rather than naming the wire command, because pointing at a repair that will refuse
+again is worse than silence. For a denial the remedy is the permission, on the file or on a
+directory above it. With this guard in place, [ADR
 0051](../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)'s promise that
 these commands never write and never read a user-scope configuration is enforced rather than
 merely intended.
