@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
@@ -609,6 +610,58 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         AssertSucceeded(execution);
         Assert.DoesNotContain(McpWiringInspector.NotWiredCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(McpWiringInspector.BinaryAbsentCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The repair <c>docs init</c> offers resolves a repository-relative launch command against the
+    /// repository root, the same way the dedicated repair command does.
+    /// </summary>
+    /// <remarks>
+    /// Two servers are declared so the case can tell the two resolvers apart: one is named by an
+    /// absolute path, so it resolves wherever the command was run from and is what makes the prompt
+    /// appear at all; the other is named relative to the repository root, so only a resolver given
+    /// that root finds it. The file the repair writes is the assertion — a repair whose resolver
+    /// read the process's working directory would write the absolute server and skip the relative
+    /// one, which is exactly the asymmetry between the two verbs this case exists to rule out.
+    /// </remarks>
+    [Fact]
+    public void TheOfferedRepairResolvesARepositoryRelativeCommandAgainstTheRoot()
+    {
+        string repository = NewRepository();
+        Directory.CreateDirectory(Path.Combine(repository, ".cursor"));
+        string absolute = McpWiringFixture.WriteExecutable(Bin, "kw-t6-absolute-server");
+
+        DeclareServers(
+            repository,
+            $"""
+            absolute-server:
+              command: ['{absolute}', --repo-root, .]
+              provenance: third-party
+              level: required
+            relative-server:
+              command: [tools/serve-mcp, --repo-root, .]
+              provenance: third-party
+              level: required
+            """);
+        McpWiringFixture.WriteExecutable(Path.Combine(repository, "tools"), "serve-mcp");
+
+        DocsInitCommand.InteractiveCheckOverride = static () => true;
+        DocsInitCommand.ConfirmFixOverride = _ => true;
+
+        CapturedConsoleExecution<int> execution = RunDocsInit(repository);
+
+        AssertSucceeded(execution);
+
+        string path = CursorConfigPath(repository);
+        Assert.True(
+            File.Exists(path),
+            $"the confirmed repair wrote nothing to {path}. Output:{Environment.NewLine}{execution.Output}");
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.True(
+            document.RootElement.GetProperty("mcpServers").TryGetProperty("relative-server", out _),
+            $"the repair skipped the command that is relative to the repository root. File:"
+                + $"{Environment.NewLine}{File.ReadAllText(path)}");
     }
 
     /// <summary>

@@ -68,7 +68,10 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             return 0;
         }
 
-        LaunchCommandResolver resolver = LaunchCommandResolver.FromEnvironment();
+        // The resolver takes the repository root, not the process's working directory: the
+        // declaration is committed and a launch command written as a path in the tree means the same
+        // file wherever the operator ran this from.
+        LaunchCommandResolver resolver = LaunchCommandResolver.FromEnvironment(root);
         IReadOnlyList<string> targets = Targets(settings.Target);
 
         return targets.Count == 0

@@ -619,6 +619,51 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A launch command written as a repository-relative path is resolved against the repository
+    /// root, not against the directory the operator happened to run this command from.
+    /// </summary>
+    /// <remarks>
+    /// The declaration is committed and the binary it names lives in the tree, so the answer must
+    /// not depend on the shell's working directory: run from the repository it names a file, and run
+    /// from anywhere else the same declaration names the same file. This case runs from the test
+    /// process's own working directory — never the fixture's repository — so a resolver that read
+    /// the process's directory would report the server unlaunchable and write nothing.
+    /// </remarks>
+    [Fact]
+    public void ARepositoryRelativeLaunchCommandResolvesAgainstTheRepositoryRoot()
+    {
+        McpWiringFixture.WriteExecutable(Path.Combine(Repo, "tools"), "serve-mcp");
+        Write(
+            ".kyber-weave/kyber-weave.yml",
+            "mcp:\n"
+            + "  required-servers:\n"
+            + "    tools-server:\n"
+            + "      command: [tools/serve-mcp, --repo-root, .]\n"
+            + "      provenance: third-party\n"
+            + "      level: required\n");
+
+        Assert.NotEqual(
+            Path.GetFullPath(Repo),
+            Path.GetFullPath(Directory.GetCurrentDirectory()));
+
+        CapturedConsoleExecution<int> execution = Wire(ClaudeCode);
+
+        Assert.Equal(0, execution.Result);
+
+        string path = InRepo(".mcp.json");
+        Assert.True(
+            File.Exists(path),
+            $"a command relative to the repository root was not resolved against it. Output:{Environment.NewLine}{execution.Output}");
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.True(
+            document.RootElement
+                .GetProperty("mcpServers")
+                .TryGetProperty("tools-server", out _),
+            "the server the declaration names must be the entry the write added");
+    }
+
+    /// <summary>
     /// A value long enough to flood the console is cut, and the cut is marked. The length is part of
     /// the same bound as the escape sequences: the operator asked for a finding, not for one
     /// harness entry to push the finding and the remedy above it off the scrollback. The entry comes

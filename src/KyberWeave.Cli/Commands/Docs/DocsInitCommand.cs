@@ -546,10 +546,13 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// </remarks>
     private static void WriteRepair(string root, McpConfig config, IReadOnlyList<McpWiringFix> fixes)
     {
+        // The root goes to the resolver so this repair and the dedicated verb read a relative launch
+        // command the same way; without it the same confirmation would write different bytes
+        // depending on the directory the operator ran `docs init` from.
         McpWiringRepairReport repair = McpWiringRepairer.Repair(
             root,
             config,
-            LaunchCommandResolver.FromEnvironment(),
+            LaunchCommandResolver.FromEnvironment(root),
             McpWiringFixes.Harnesses(fixes));
 
         CommandHelpers.WriteUnfolded(() =>
