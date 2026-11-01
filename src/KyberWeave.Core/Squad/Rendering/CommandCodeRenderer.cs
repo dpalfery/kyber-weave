@@ -176,7 +176,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         // Read from canonical source through the shared derivation rather than a renderer-local
         // list, so a tool renamed upstream is a source edit, the doctor check reads the same
         // roster, and this target cannot disagree with the others about which server is which
-        // entitlement class (ADR 0048 decision 4).
+        // entitlement class (ADR 0049 decision 4).
         IReadOnlyList<string> universalMcpToolNames =
             CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
 

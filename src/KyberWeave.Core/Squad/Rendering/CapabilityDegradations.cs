@@ -45,7 +45,7 @@ internal static class CapabilityDegradations
     /// The MCP server every agent needs: granted on the file-read entitlement alone, the pure
     /// orchestrator included, and never withheld on a profile's identity. It carries
     /// <c>agent_coding_standards</c>, the tool that hands an agent the standards it is held to
-    /// (ADR 0048).
+    /// (ADR 0049).
     /// </summary>
     /// <remarks>
     /// Declared here rather than in each renderer because the server is one half of the partition
@@ -142,7 +142,7 @@ internal static class CapabilityDegradations
     /// Two named members rather than one member with a filter argument, for the reason the two
     /// predicates above are two named methods: a call site then states which class of server it is
     /// asking for, and neither call site decides on its own what belongs to the class. That
-    /// decision is the partition, and it is made here once (ADR 0048 decision 4).
+    /// decision is the partition, and it is made here once (ADR 0049 decision 4).
     /// </remarks>
     /// <param name="requiredMcpTools">The toolchain's declared <c>required-mcp-tools</c> roster.</param>
     public static IReadOnlyList<string> OrchestratorExcludedMcpToolNames(

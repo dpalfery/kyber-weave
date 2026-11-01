@@ -1265,7 +1265,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     /// <remarks>
     /// Two outcomes, two records. A blanket "MCP is not expressible here" sentence would have made
     /// a deliberately granted agent indistinguishable from a withheld one in the only place a
-    /// review or a <c>squad doctor</c> run reads either, which is how the pre-ADR-0048 renderer
+    /// review or a <c>squad doctor</c> run reads either, which is how the pre-ADR-0049 renderer
     /// reported every agent as degraded while granting nobody.
     /// </remarks>
     [Fact]
