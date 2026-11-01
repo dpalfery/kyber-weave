@@ -62,7 +62,9 @@ public static class McpWiringFixes
 
         foreach (McpWiringFinding finding in report.Findings)
         {
-            if (finding.Fixable != McpWiringFixability.Fixable || finding.Path is null)
+            // Path.Combine(root, "") is the root itself, so an absent, empty or whitespace path is
+            // excluded here rather than resolved into a question about the repository directory.
+            if (finding.Fixable != McpWiringFixability.Fixable || string.IsNullOrWhiteSpace(finding.Path))
                 continue;
 
             if (!plans.TryGetValue(finding.Harness, out HarnessPlan? plan))
