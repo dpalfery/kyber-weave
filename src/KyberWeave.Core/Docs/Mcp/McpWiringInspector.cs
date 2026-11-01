@@ -378,6 +378,11 @@ public static class McpWiringInspector
                     }
 
                 default:
+                    // Every shape the catalog can hold is named above, so this is a member a later
+                    // change added without a reader here. It refuses for the same reason the
+                    // scanner does: an unreadable configuration is a gap, never a pass and never a
+                    // silent "not wired" with nothing to act on.
+                    refusal = $"{file.RelativePath} was not read: this build has no reader for its configuration shape";
                     continue;
             }
         }
