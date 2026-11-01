@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
+using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
@@ -283,6 +284,14 @@ app.Configure(config =>
             .WithDescription("Compute approve / request-changes / needs-human from findings and gates.")
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
     });
+
+    // Repository documentation tooling: the CodeGraph index and the live docs MCP server. Repository-scoped, so it
+    // is a top-level verb rather than a squad or docs subcommand; `squad doctor` diagnoses a deployment instead.
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Check the repository's CodeGraph index and docs MCP server, and provision the index.")
+        .WithExample("doctor", "--check")
+        .WithExample("doctor", "--provision")
+        .WithExample("doctor", ".", "--provision", "--index-timeout", "1200");
 
     // Distribution: replace the running Release binaries. Not an artifact-class branch.
     config.AddCommand<UpdateCommand>("update")

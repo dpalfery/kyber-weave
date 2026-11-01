@@ -12,7 +12,7 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// decide which file to read, the repair to decide which file it may write — and when each answered
 /// it in its own private helper the two answers drifted: one refused a name holding a parent
 /// reference before resolving it, the other resolved first and accepted whatever stayed inside the
-/// root. A repository does not want two answers to this question (ADR 0051), because the answer
+/// root. A repository does not want two answers to this question (ADR 0052), because the answer
 /// decides whether a byte this repository does not own can be touched.
 /// </para>
 /// <para>

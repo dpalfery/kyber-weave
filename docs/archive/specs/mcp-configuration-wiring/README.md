@@ -32,12 +32,12 @@ remains the owner's check and is `[NOT LIVE-VERIFIED]` (design DG5, TG2).
 are wired and launchable, warns without failing the command, and offers a confirmed
 repair; a separate, bounded, receipted command (`docs mcp-wire` / `docs mcp-unwire`)
 performs the repository-scope remedy. Squad is untouched. The ownership boundary the
-remedy relies on is recorded in ADR 0051 before the remedy ships (R8.3).
+remedy relies on is recorded in ADR 0052 before the remedy ships (R8.3).
 
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | Delivered 2026-11-01. Ten requirements in EARS form (R1–R10), non-goals, decisions D1–D19. |
-| [Design](design.md) | Delivered 2026-11-01. The `mcp.required-servers` declaration, the harness catalog and detection model, the terminal-gated prompt, the two repair verbs and their write bounds, the receipt, and the ADR 0051 boundary. |
+| [Design](design.md) | Delivered 2026-11-01. The `mcp.required-servers` declaration, the harness catalog and detection model, the terminal-gated prompt, the two repair verbs and their write bounds, the receipt, and the ADR 0052 boundary. |
 | [Tasks](tasks.md) | Delivered 2026-11-01, test-first; execution approved 2026-10-31. Eleven tasks: nine build tasks across five parallel waves, the conductor-run whole-change review, and the closeout. |
 
 ## Decisions
@@ -63,14 +63,14 @@ carries the same ids so its own closeout stands alone:
 | H3 | The `docs init` check step — `KW-MCP-WIRE-001..004`, severities, unchanged exit code, `--no-mcp-check` | DocGraph · CI Pipelines · onboarding and reference |
 | H4 | The prompt and non-interactive contract — terminal-gated, decline-on-redirect, no consent flag | DocGraph · reference |
 | H5 | `docs mcp-wire` / `docs mcp-unwire` — target selection, insertion without re-serialization, receipt and drift-refusing removal, dry run, exit codes | DocGraph · runbook and reference |
-| H6 | ADR 0051 — the repository-scope write exception versus ADR 0026 | DocGraph · adr |
+| H6 | ADR 0052 — the repository-scope write exception versus ADR 0026 | DocGraph · adr |
 | H7 | The docs-init / Squad split — Squad owns droid-level visibility, the docs branch owns harness-level wiring | KyberSquad · architecture |
 
 ## Closeout mapping
 
 Harvest H1–H7 migrated into canonical documentation at `extends-component` scale, components
 DocGraph and Distribution, with the implementation as the truth where it diverged from the
-design. **ADR disposition: [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)**
+design. **ADR disposition: [ADR 0052](../../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md)**
 (design DD15, DD20; task 5) — no ADR waiver. Both merge-ready checks exit 0 after the archive
 move.
 
@@ -82,5 +82,5 @@ move.
 | H3 | [Install](../../../install.md) — what an adopting repository's `docs init` now checks and offers; [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring), [CLI command surface](../../../cli-command-surface.md), [Rule reference](../../../ci-pipelines/rule-reference.md) |
 | H4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [CLI command surface](../../../cli-command-surface.md) |
 | H5 | [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire), [MCP runbook: `docs mcp-unwire`](../../../docgraph/mcp-runbook.md#docs-mcp-unwire), [CLI command surface](../../../cli-command-surface.md) |
-| H6 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| H6 | [ADR 0052](../../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
 | H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) |

@@ -457,7 +457,7 @@ file's closeout stands alone.
 
 Verified at closeout (2026-11-01) against the shipped code and tests, not against this
 document. Every row of this file's Decisions table (D1–D19) and every harvest row (H1–H7) is
-mapped below to a live governed document. **ADR disposition: [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md)**
+mapped below to a live governed document. **ADR disposition: [ADR 0052](../../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md)**
 records the D16 boundary, ahead of the write path (R8.3, design DD20, task 5) — no ADR waiver
 is claimed for it.
 
@@ -470,14 +470,14 @@ is claimed for it.
 | D7, D8, D11 | [MCP runbook: the check](../../../docgraph/mcp-runbook.md#the-check) — the in-play markers, repository scope only, and the absent-binary classes |
 | D9 | [MCP runbook: the receipt](../../../docgraph/mcp-runbook.md#the-receipt), [MCP runbook: what the repair writes](../../../docgraph/mcp-runbook.md#what-the-repair-writes-and-what-it-will-not) — the write bounds, refusal, and dry run |
 | D12 | [Component catalog](../../../catalog.md) — the two components this specification extends, DocGraph and Distribution |
-| D13, D16 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| D13, D16 | [ADR 0052](../../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
 | D15 | Documentation waiver — the requirements-phase approval is a historical record, not a surviving architectural, operational, or behavioural invariant; it is preserved permanently in this document's Decisions table. |
 | H1 | [MCP runbook](../../../docgraph/mcp-runbook.md) — the per-harness shape catalog, the ZCode row, and the writable/snippet-only table |
 | H2 | [Configuration: MCP servers](../../../configuration.md#mcp-servers), [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring) |
 | H3 | [Install](../../../install.md) — what an adopting repository's `docs init` now checks and offers; [DocGraph onboarding](../../../docgraph/onboarding.md#mcp-wiring), [CLI command surface](../../../cli-command-surface.md), [Rule reference](../../../ci-pipelines/rule-reference.md) |
 | H4 | [MCP runbook: the prompt and no terminal](../../../docgraph/mcp-runbook.md#the-prompt-and-what-happens-without-a-terminal), [CLI command surface](../../../cli-command-surface.md) |
 | H5 | [MCP runbook: `docs mcp-wire`](../../../docgraph/mcp-runbook.md#docs-mcp-wire), [MCP runbook: `docs mcp-unwire`](../../../docgraph/mcp-runbook.md#docs-mcp-unwire), [CLI command surface](../../../cli-command-surface.md) |
-| H6 | [ADR 0051](../../../adr/0051-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
+| H6 | [ADR 0052](../../../adr/0052-docs-branch-writes-repository-scope-mcp-configuration.md), [ADR index](../../../adr/README.md) |
 | H7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) |
 
 **Requirement verification.** R1–R9 are met by delivered code with a named test each; R10.1

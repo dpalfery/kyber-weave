@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using KyberWeave.Cli.Commands.Doctor;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
@@ -52,6 +55,18 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// value: a case that exercised the real prompt would block on a terminal it does not have.
     /// </remarks>
     internal static Func<IReadOnlyList<McpWiringFix>, bool>? ConfirmFixOverride { get; set; }
+
+    /// <summary>
+    ///     The bound for a provisioning run's CodeGraph child. It matches the doctor verb's default, so
+    ///     <c>docs init --provision</c> behaves like a bare <c>kyber-weave doctor --provision</c>.
+    /// </summary>
+    private static readonly TimeSpan ProvisionIndexTimeout = TimeSpan.FromSeconds(600);
+
+    /// <summary>Runs the provisioning doctor's CodeGraph child. Null uses a process executor bounded by <see cref="ProvisionIndexTimeout"/>.</summary>
+    internal IProcessExecutor? Executor { get; init; }
+
+    /// <summary>The MCP executable the provisioning doctor proves. Null uses the PATH name <c>kyber-weave-mcp</c>.</summary>
+    internal string? McpExecutable { get; init; }
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
@@ -110,7 +125,36 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-docs-authoring[/] skill to the failing documents.");
         AnsiConsole.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
 
-        return 0;
+        return settings.Provision ? Provision(settings) : 0;
+    }
+
+    /// <summary>
+    ///     Runs the repository doctor in provision mode against the scaffolded repository. The root is the git
+    ///     toplevel of the target path, which the doctor resolves itself.
+    /// </summary>
+    /// <remarks>
+    ///     <c>--target</c> names the APM harnesses that receive the skill, not a path, so provisioning always goes to
+    ///     the repository that holds the scaffold. Pure scaffolding stays the default, so CI's scaffold step is
+    ///     unchanged unless it opts in.
+    /// </remarks>
+    private int Provision(DocsInitSettings settings)
+    {
+        DoctorOptions options = new(
+            ProvisionIndexTimeout,
+            TimeSpan.FromSeconds(20),
+            "codegraph",
+            McpExecutable ?? "kyber-weave-mcp");
+        IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(ProvisionIndexTimeout);
+
+        DoctorReport report = RepositoryDoctor.Run(
+            Path.GetFullPath(settings.Path),
+            DoctorMode.Provision,
+            options,
+            executor,
+            Environment.GetEnvironmentVariable);
+
+        DoctorReportRenderer.Write(report, asJson: false);
+        return report.ExitCode;
     }
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>

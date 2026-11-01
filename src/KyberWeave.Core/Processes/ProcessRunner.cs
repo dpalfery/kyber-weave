@@ -102,7 +102,7 @@ public static class ProcessRunner
             standardError.GetAwaiter().GetResult());
     }
 
-    private static void TryKillTree(Process process)
+    internal static void TryKillTree(Process process)
     {
         try
         {
@@ -181,7 +181,7 @@ public static class ProcessRunner
         return process.ExitCode;
     }
 
-    private static ProcessStartInfo CreateSafeStartInfo(ProcessStartInfo startInfo)
+    internal static ProcessStartInfo CreateSafeStartInfo(ProcessStartInfo startInfo)
     {
         ProcessStartInfo safe = new(startInfo.FileName)
         {

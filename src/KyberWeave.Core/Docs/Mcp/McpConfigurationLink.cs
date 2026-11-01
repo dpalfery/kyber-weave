@@ -33,7 +33,7 @@ internal readonly record struct McpLinkProbe(McpLinkObstruction Obstruction, str
 /// inside the tree, so every containment check passes, and the bytes land wherever the link points.
 /// The case is a developer sharing one MCP configuration across checkouts —
 /// <c>ln -s ~/.mcp.json .mcp.json</c> — which turns a repository-scope write into a write to the
-/// user scope, the exact boundary ADR 0051 draws.
+/// user scope, the exact boundary ADR 0052 draws.
 /// </para>
 /// <para>
 /// The check walks every segment below the root rather than testing only the file, because

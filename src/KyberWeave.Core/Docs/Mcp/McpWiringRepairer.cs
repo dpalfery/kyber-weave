@@ -439,7 +439,7 @@ public static class McpWiringRepairer
         }
 
         // A link in the tree makes this repository-scope path name a file somebody else owns, and
-        // reading or writing through it leaves the repository entirely (2.6, 5.2, ADR 0051). The
+        // reading or writing through it leaves the repository entirely (2.6, 5.2, ADR 0052). The
         // refusal comes before the read so that not one byte of the target is opened. The same
         // position answers the denial case, which is the other way this path can prove nothing about
         // the file it names.
