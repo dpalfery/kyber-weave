@@ -39,7 +39,16 @@ public enum McpRequirementLevel
 /// </remarks>
 public sealed record RequiredMcpServer
 {
-    /// <summary>Builds a declared server, refusing one that cannot describe a server at all.</summary>
+    /// <summary>
+    /// The binary Kyber-Weave itself ships for its own MCP server (R1.1: today
+    /// <c>kyber-weave-mcp</c>). Named here because <see cref="McpProvenance.FirstParty"/> is a claim
+    /// about this binary and nothing else.
+    /// </summary>
+    public const string ShippedBinary = "kyber-weave-mcp";
+
+    /// <summary>
+    /// Builds a declared server, refusing one that cannot describe a server at all.
+    /// </summary>
     /// <param name="Name">The server's name, as the declaration keyed it and as an MCP client sees it.</param>
     /// <param name="Command">
     /// The launch command as argv: the program first, then each argument in the order written. Never a
@@ -53,7 +62,10 @@ public sealed record RequiredMcpServer
     /// purpose: Kyber-Weave never installs external software as a side effect, so this is shown to the
     /// operator rather than executed.
     /// </param>
-    /// <exception cref="ArgumentException"><paramref name="Name"/> is blank, or the command is empty or holds a blank element.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="Name"/> is blank, the command is empty or holds a blank element, or
+    /// <paramref name="Provenance"/> claims a first-party binary the command does not name.
+    /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="Command"/> is null.</exception>
     /// <remarks>
     /// The parameters keep the PascalCase names a positional record would have given them, so a
@@ -95,6 +107,44 @@ public sealed record RequiredMcpServer
         this.Provenance = Provenance;
         this.Level = Level;
         this.Install = Install;
+
+        // First-party is a claim about which side ships the binary, so it is only true of a command
+        // that runs that binary. Both remedies downstream are built on the claim — "this Kyber-Weave
+        // installation is broken; run kyber-weave update" — and each would be advice about a program
+        // the repository never installed if a claim like this one were carried.
+        if (this.Provenance == McpProvenance.FirstParty && !NamesShippedBinary(this.Command))
+        {
+            throw new ArgumentException(
+                $"FirstParty claims Kyber-Weave ships this server, but the command runs '{this.Command[0]}'. "
+                + $"Kyber-Weave ships {ShippedBinary}; a binary it does not ship is McpProvenance.ThirdParty.",
+                nameof(Provenance));
+        }
+    }
+
+    /// <summary>
+    /// Whether a launch command runs the binary Kyber-Weave ships, which is the only thing
+    /// <see cref="McpProvenance.FirstParty"/> can truthfully be claimed about.
+    /// </summary>
+    /// <param name="command">The launch command as argv.</param>
+    /// <returns><see langword="true"/> when argv[0] names <see cref="ShippedBinary"/>.</returns>
+    /// <remarks>
+    /// Only argv[0] is read, because it is the whole of what the rest of this feature treats as "the
+    /// binary a declaration names": the check probes it, and a harness launches it. Matching any
+    /// later element would let <c>[wrapper, --server, kyber-weave-mcp]</c> pass as first-party while
+    /// the thing a missing-binary finding would be about is <c>wrapper</c>.
+    /// The match is a containment rather than an equality so a locally built or renamed copy of the
+    /// shipped server still counts, and it ignores case because the file name on Windows does.
+    /// </remarks>
+    public static bool NamesShippedBinary(IReadOnlyList<string> command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        if (command.Count == 0)
+            return false;
+
+        string program = Path.GetFileName(command[0]);
+
+        return program.Contains(ShippedBinary, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The server's name, as the declaration keyed it and as an MCP client sees it.</summary>

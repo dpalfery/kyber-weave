@@ -54,10 +54,14 @@ public static class McpConfigLoader
 
         string where = $"{SectionPath}.{name}";
 
+        // Parsed in declaration order, because the provenance is a claim about the command and the
+        // refusal can only name the offending program once the command has been read.
+        IReadOnlyList<string> command = ParseCommand(declaration?.Command, where);
+
         return new RequiredMcpServer(
             name,
-            ParseCommand(declaration?.Command, where),
-            ParseProvenance(declaration?.Provenance, where),
+            command,
+            ParseProvenance(declaration?.Provenance, command, where),
             ParseLevel(declaration?.Level, where),
             declaration?.Install);
     }
@@ -85,7 +89,23 @@ public static class McpConfigLoader
         return [.. command];
     }
 
-    private static McpProvenance ParseProvenance(string? value, string where)
+    /// <summary>
+    /// Reads the provenance class, refusing <c>first-party</c> for a command that runs a binary
+    /// Kyber-Weave does not ship.
+    /// </summary>
+    /// <remarks>
+    /// The classes are not a preference, they are a statement of fact about who ships the binary
+    /// (R1.1), and 6.3 builds the first-party remedy on it: an absent first-party binary is reported
+    /// as this installation being broken. A declaration that says <c>first-party</c> while running
+    /// somebody else's program would make that remedy advice about a program Kyber-Weave never
+    /// installed — so it is refused here, where the operator can still read which value was wrong,
+    /// rather than loaded and acted on. Refusing keeps 6.3's promise true for the declarations that
+    /// do load: every first-party server the rest of the product sees really is the shipped binary.
+    /// </remarks>
+    private static McpProvenance ParseProvenance(
+        string? value,
+        IReadOnlyList<string> command,
+        string where)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -95,7 +115,11 @@ public static class McpConfigLoader
 
         return value switch
         {
-            "first-party" => McpProvenance.FirstParty,
+            "first-party" when RequiredMcpServer.NamesShippedBinary(command) => McpProvenance.FirstParty,
+            "first-party" => throw new YamlException(
+                $"{where}.provenance is 'first-party', but the command runs '{command[0]}'. first-party "
+                + $"means a binary Kyber-Weave ships, today {RequiredMcpServer.ShippedBinary}; declare this "
+                + "server third-party if the binary is somebody else's."),
             "third-party" => McpProvenance.ThirdParty,
             _ => throw new YamlException(
                 $"{where}.provenance '{value}' is not recognised; use first-party or third-party.")

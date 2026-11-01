@@ -17,7 +17,9 @@ namespace KyberWeave.Tests;
 /// Second, a misspelt <c>provenance</c> or <c>level</c> is refused at load time through the
 /// existing <c>KW-CONFIG-001</c> path, because the alternative — falling back to a default
 /// enum member — turns a typo into "this server is first-party and required", which is a
-/// silent change to what the repository claims to rely on.
+/// silent change to what the repository claims to rely on. The merge cases below declare their
+/// invented inherited server third-party for that same reason: <c>first-party</c> is a claim
+/// about the binary Kyber-Weave ships, and a made-up binary name cannot support it.
 /// </remarks>
 public sealed class McpConfigTests : IDisposable
 {
@@ -189,7 +191,7 @@ public sealed class McpConfigTests : IDisposable
               required-servers:
                 inherited:
                   command: [inherited-mcp, --serve]
-                  provenance: first-party
+                  provenance: third-party
             """).Mcp;
         McpYamlSection? section = KyberWeaveYamlParser.Parse("""
             mcp:
@@ -219,7 +221,7 @@ public sealed class McpConfigTests : IDisposable
               required-servers:
                 inherited:
                   command: [inherited-mcp, --serve]
-                  provenance: first-party
+                  provenance: third-party
             """).Mcp;
         McpYamlSection? section = KyberWeaveYamlParser.Parse("autonomy: autonomous\n").Mcp;
 

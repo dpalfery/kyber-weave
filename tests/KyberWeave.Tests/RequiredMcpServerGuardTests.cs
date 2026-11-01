@@ -61,4 +61,28 @@ public sealed class RequiredMcpServerGuardTests
         Assert.Throws<ArgumentException>(() =>
             new RequiredMcpServer("kyber-weave", [ShippedBinary, element], McpProvenance.FirstParty));
     }
+
+    /// <summary>
+    /// A constructed first-party server makes the same claim a document does, so it carries the same
+    /// rule. Anything downstream may report "this installation is broken" on provenance alone, and
+    /// that sentence has to be true of the binary the server actually launches.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredRecordRefusesAFirstPartyClaimAboutAnotherBinary()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new RequiredMcpServer("kyber-weave", ["codegraph", "serve"], McpProvenance.FirstParty));
+    }
+
+    /// <summary>
+    /// A third-party server is a binary Kyber-Weave does not ship by definition, so its command is
+    /// somebody else's program and there is nothing to refuse.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredRecordAcceptsAThirdPartyCommand()
+    {
+        RequiredMcpServer server = new("codegraph", ["codegraph", "serve"], McpProvenance.ThirdParty);
+
+        Assert.Equal(McpProvenance.ThirdParty, server.Provenance);
+    }
 }

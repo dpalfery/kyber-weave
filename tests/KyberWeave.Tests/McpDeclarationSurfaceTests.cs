@@ -22,6 +22,9 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
     private const string SectionPath = "mcp.required-servers";
     private const string ThirdPartyServer = "codegraph";
 
+    /// <summary>Today's first-party server: the binary Kyber-Weave itself ships (R1.1).</summary>
+    private const string ShippedBinary = "kyber-weave-mcp";
+
     private readonly TempDirectory _root = new();
 
     /// <summary>Deletes the repository tree the cases wrote.</summary>
@@ -76,6 +79,58 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
         string error = AssertRefusedAsConfigError(configPath);
 
         Assert.Contains(ThirdPartyServer, error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>first-party</c> is a claim that Kyber-Weave ships the binary (R1.1), and 6.3 turns that
+    /// claim into advice: the first-party remedy says the installation is broken and points at
+    /// <c>kyber-weave update</c>. That advice is only honest when the missing binary really is
+    /// Kyber-Weave's, so a claim whose command runs some other program is refused instead of being
+    /// loaded and acted on.
+    /// </summary>
+    [Theory]
+    [InlineData("codegraph, serve, --mcp")]
+    [InlineData("dotnet, tool, run, some-other-tool")]
+    [InlineData("codegraph")]
+    public void AFirstPartyDeclarationNamingAnotherBinaryIsRefusedAsKwConfig001(string command)
+    {
+        string configPath = WriteDeclaration(
+            "kyber-weave",
+            $"command: [{command}]",
+            "provenance: first-party");
+
+        string error = AssertRefusedAsConfigError(configPath);
+
+        Assert.Contains(SectionPath, error, StringComparison.Ordinal);
+        Assert.Contains("first-party", error, StringComparison.Ordinal);
+        Assert.Contains(ShippedBinary, error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rule refuses only what it can prove false. A bare name, an absolute path and a locally
+    /// built copy all name the binary Kyber-Weave ships, so all three stay loadable — the guard is
+    /// not an allow-list of one string.
+    /// </summary>
+    [Theory]
+    [InlineData(ShippedBinary)]
+    [InlineData("/opt/kyber/bin/kyber-weave-mcp")]
+    [InlineData("fake-kyber-weave-mcp")]
+    public void AFirstPartyDeclarationNamingTheShippedBinaryLoads(string executable)
+    {
+        WriteDeclaration(
+            "kyber-weave",
+            $"command: ['{executable}', --repo-root, .]",
+            "provenance: first-party");
+
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+
+        Assert.True(
+            result.Success,
+            $"a first-party declaration naming '{executable}' must load: {result.Error}");
+
+        RequiredMcpServer declared = Assert.Single(result.Config!.Mcp.RequiredServers).Value;
+        Assert.Equal(McpProvenance.FirstParty, declared.Provenance);
+        Assert.Equal(executable, declared.Command[0]);
     }
 
     /// <summary>Builds a one-server declaration whose entry body is the given lines.</summary>
