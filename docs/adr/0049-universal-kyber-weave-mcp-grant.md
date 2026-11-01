@@ -132,11 +132,14 @@ The change lands on top of the Factory per-droid whitelist delivered in
    stating: **a tool added to the `kyber-weave` server later reaches every Claude agent with no
    renderer change and no failing test**, because the wildcard grants whatever the server
    exposes. Today every tool on that server is declared `ReadOnly`, so the exposure is
-   read-only, and the server's tool set is fixed by the roster the toolchain guard pins — a
+   read-only, and the server's tool set is fixed by the roster the toolchain guard pins. A
    mutating tool would need a new capability decision before the wildcard could carry it to
-   Claude. The three enumerating targets would need no such decision to be widened, and that
-   asymmetry is the argument for enumerating everywhere if the server's tool set ever becomes
-   mutable rather than by decision.
+   Claude, and nothing enforces that today: the guard pins the declared tool names and every
+   server tool carries `ReadOnly = true`, so a mutating tool would arrive as a visible roster
+   change plus a lost attribute, and the decision is a review obligation rather than a gate. The
+   three enumerating targets would need no such decision to be widened, and that asymmetry is
+   the argument for enumerating everywhere if the server's tool set ever becomes mutable rather
+   than by decision.
 
 6. **`conductor` receives the Copilot entry through canonical frontmatter.** Copilot's per-agent
    tool grant comes from the agent's own `copilot-tools` list, which is canonical source rather

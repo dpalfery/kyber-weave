@@ -593,7 +593,7 @@ kyberdash kyber capture plugin install --harness opencode --preserve --config-di
   upgrade that changed the plugin file, the relayed line reads: `OpenCode 2.x picks up the capture plugin
   for new sessions; if KyberDash shows no new OpenCode sessions, restart OpenCode.`
 - **Support.** The plugin targets OpenCode 2.x only. Squad does not check the OpenCode version before it
-  runs the verb ([ADR 0049](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+  runs the verb ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
 
 ---
 
