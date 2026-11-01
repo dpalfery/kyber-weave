@@ -849,14 +849,32 @@ public static class McpWiringRepairer
         return array;
     }
 
+    /// <summary>
+    /// The entry's environment block, with the harness's own spelling of the repository root
+    /// rewritten and every other value left as the template holds it.
+    /// </summary>
+    /// <remarks>
+    /// An environment block describes the harness's world, not this tool's relation to the
+    /// repository: a template carries <c>KYBER_WEAVE_REPO_ROOT</c> and may carry anything else the
+    /// harness needs. Stamping the root into every entry collapsed such a template into copies of
+    /// one value, so only the entries that hold the root token are rewritten — and an entry without
+    /// it is the harness's to define.
+    /// </remarks>
     internal static JsonObject Environment(JsonObject template, string rootToken, string pathToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pathToken);
 
         JsonObject environment = new();
 
         foreach (KeyValuePair<string, JsonNode?> setting in template)
-            environment[setting.Key] = JsonValue.Create(pathToken);
+        {
+            environment[setting.Key] = setting.Value is JsonValue value
+                && value.TryGetValue(out string? text)
+                && text.Contains(rootToken, StringComparison.Ordinal)
+                    ? JsonValue.Create(text.Replace(rootToken, pathToken, StringComparison.Ordinal))
+                    : setting.Value?.DeepClone();
+        }
 
         return environment;
     }
