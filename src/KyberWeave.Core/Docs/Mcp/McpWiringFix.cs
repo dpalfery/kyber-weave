@@ -39,6 +39,12 @@ public sealed record McpWiringFix(
 /// file per harness: two findings for the same harness describe two servers going into the same file,
 /// which is one write and one question.
 /// </para>
+/// <para>
+/// A finding is dropped rather than listed when its path is empty, whitespace, or resolves outside
+/// the repository. The paths come from the catalog, which is trusted, so those guards are defence in
+/// depth rather than a live escape: they are what keeps a catalog mistake from reaching an operator
+/// as a question whose consent would write outside the tree.
+/// </para>
 /// </remarks>
 public static class McpWiringFixes
 {
@@ -67,9 +73,12 @@ public static class McpWiringFixes
             if (finding.Fixable != McpWiringFixability.Fixable || string.IsNullOrWhiteSpace(finding.Path))
                 continue;
 
+            if (ContainedPath(root, finding.Path) is not { } absolutePath)
+                continue;
+
             if (!plans.TryGetValue(finding.Harness, out HarnessPlan? plan))
             {
-                plan = new HarnessPlan(finding.Path);
+                plan = new HarnessPlan(finding.Path, absolutePath);
                 plans[finding.Harness] = plan;
                 harnesses.Add(finding.Harness);
             }
@@ -83,8 +92,38 @@ public static class McpWiringFixes
                 harness,
                 plans[harness].Path,
                 [.. plans[harness].Servers],
-                Create: !File.Exists(Path.Combine(root, plans[harness].Path))))
+                Create: !File.Exists(plans[harness].AbsolutePath)))
         ];
+    }
+
+    /// <summary>
+    /// The absolute path a repository-relative finding path names, or null when the platform cannot
+    /// resolve it or it leaves the repository.
+    /// </summary>
+    /// <remarks>
+    /// The comparison is ordinal and does not resolve symbolic links: the repository root and the
+    /// combined path are both produced here, so the only question is whether the result is inside the
+    /// root. A link is a separate guard — <see cref="McpConfigurationLink"/> refuses one before a
+    /// finding ever reaches this list — and resolving a link here would be the read that guard
+    /// exists to refuse.
+    /// </remarks>
+    private static string? ContainedPath(string root, string relativePath)
+    {
+        string full;
+        try
+        {
+            full = Path.GetFullPath(Path.Combine(root, relativePath));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        string prefix = Path.EndsInDirectorySeparator(root)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        return full.StartsWith(prefix, StringComparison.Ordinal) ? full : null;
     }
 
     /// <summary>
@@ -112,10 +151,16 @@ public static class McpWiringFixes
     }
 
     /// <summary>What one harness's write would contain, accumulated as its findings are read.</summary>
-    private sealed class HarnessPlan(string path)
+    private sealed class HarnessPlan(string path, string absolutePath)
     {
         /// <summary>The file the harness's findings named.</summary>
         public string Path { get; } = path;
+
+        /// <summary>
+        /// That file as this process resolved it, checked to be inside the repository. Read only to
+        /// say whether the write would create it; the fix itself carries the relative path.
+        /// </summary>
+        public string AbsolutePath { get; } = absolutePath;
 
         /// <summary>The servers to add, ordinal-sorted so the same tree yields the same question.</summary>
         public SortedSet<string> Servers { get; } = new(StringComparer.Ordinal);

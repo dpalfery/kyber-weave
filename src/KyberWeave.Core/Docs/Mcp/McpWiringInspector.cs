@@ -410,8 +410,8 @@ public static class McpWiringInspector
     /// <see cref="McpEntryCommandShape.Undetermined"/> keeps only the executable: the catalog records
     /// that harness's entry body as pinned nowhere in this repository, so comparing an argv read
     /// here against the declaration would report a difference nobody verified the meaning of. The
-    /// executable is enough to answer the question the body is read for — whether the binary a launch
-    /// would run is there.
+    /// executable is enough to answer the question the body is read for — whether the binary a
+    /// launch would run is there.
     /// </remarks>
     private static Detection FromEntryBody(
         HarnessMcpEntry entry,
