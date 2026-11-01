@@ -1,0 +1,195 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace KyberWeave.Core.Docs.Mcp;
+
+/// <summary>How the repair wrote a file, which is what decides how removal undoes it.</summary>
+public enum McpWiringWriteMode
+{
+    /// <summary>The file did not exist, so removal deletes it.</summary>
+    Created,
+
+    /// <summary>Entries were inserted into an existing file, so removal restores its bytes.</summary>
+    Inserted
+}
+
+/// <summary>One file the repair wrote, and enough of its state to undo that write.</summary>
+/// <param name="Path">The repository-relative file, with <c>/</c> separators.</param>
+/// <param name="Mode">Whether the repair created the file or inserted into it.</param>
+/// <param name="Servers">The server names written, in the order they were inserted.</param>
+/// <param name="PreSha256">The digest of the file before the write, or null for a created file.</param>
+/// <param name="PostSha256">The digest of the file as the repair left it.</param>
+/// <param name="WrittenAtUtc">When the write happened, in UTC.</param>
+/// <param name="PreContent">
+/// The file's bytes before an insertion, base64-encoded. A digest proves a restore is safe but
+/// cannot produce the bytes to restore, so the pre-write content travels with the record; without
+/// it "restores the pre-write state" (5.8) would be a promise the removal path could not keep.
+/// </param>
+public sealed record McpWiringReceiptRecord(
+    string Path,
+    McpWiringWriteMode Mode,
+    IReadOnlyList<string> Servers,
+    string? PreSha256,
+    string PostSha256,
+    DateTimeOffset WrittenAtUtc,
+    string? PreContent = null);
+
+/// <summary>
+/// The writer's local undo record: which files the repair wrote, and what they looked like before.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The receipt lives at a fixed repository-relative path, gitignored, because it is the writer's
+/// own undo record and nobody else needs it: teammates receive the committed configuration file and
+/// their removal path is <c>git revert</c> (DD13). One record per file, latest write wins — a second
+/// record for the same path would leave the removal path guessing which write it is undoing.
+/// </para>
+/// <para>
+/// Both digests are recorded because they answer different questions. The post-write digest is what
+/// lets removal tell its own write from a foreign edit, so a file someone has since changed is
+/// refused rather than restored over (5.9); the pre-write digest is what lets removal prove the
+/// bytes it is about to restore are the bytes it captured.
+/// </para>
+/// <para>
+/// A receipt that cannot be read is treated as empty rather than as an error. Nothing can be proven
+/// from it, and an empty receipt refuses every removal — which is the safe direction: Kyber-Weave
+/// only removes what it can show it wrote.
+/// </para>
+/// </remarks>
+public sealed class McpWiringReceipt
+{
+    /// <summary>Where the receipt lives, relative to the repository root.</summary>
+    public const string RelativePath = ".kyber-weave/receipts/mcp-wiring.json";
+
+    /// <summary>The schema this code writes and understands.</summary>
+    public const int SchemaVersion = 1;
+
+    /// <summary>Removal was refused: there is no record, or the file changed since the write.</summary>
+    public const string DriftCode = "KW-MCP-WIRE-006";
+
+    private static JsonSerializerOptions SerializerOptions { get; } = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
+    };
+
+    /// <summary>One record per file the repair wrote, in the order the writes happened.</summary>
+    public IReadOnlyList<McpWiringReceiptRecord> Files { get; init; } = [];
+
+    /// <summary>The absolute path of the receipt for a repository.</summary>
+    /// <param name="repositoryRoot">The repository root, as given by the caller.</param>
+    public static string PathFor(string repositoryRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+
+        return Path.Combine(
+            repositoryRoot,
+            ".kyber-weave",
+            "receipts",
+            "mcp-wiring.json");
+    }
+
+    /// <summary>Reads the receipt, or answers with an empty one when none can be read.</summary>
+    /// <param name="repositoryRoot">The repository whose receipt is read.</param>
+    public static McpWiringReceipt Load(string repositoryRoot)
+    {
+        string path = PathFor(repositoryRoot);
+
+        if (!File.Exists(path))
+            return new McpWiringReceipt();
+
+        try
+        {
+            McpWiringReceiptDocument? document = JsonSerializer.Deserialize<McpWiringReceiptDocument>(
+                File.ReadAllText(path),
+                SerializerOptions);
+
+            // A receipt written by another schema is not this code's to interpret: reading it as
+            // if it were would put a restore behind a record this code cannot check.
+            if (document is null || document.Version != SchemaVersion)
+                return new McpWiringReceipt();
+
+            return new McpWiringReceipt { Files = document.Files };
+        }
+        catch (IOException)
+        {
+            return new McpWiringReceipt();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new McpWiringReceipt();
+        }
+        catch (JsonException)
+        {
+            return new McpWiringReceipt();
+        }
+    }
+
+    /// <summary>The record for a file, or null when the repair never wrote it.</summary>
+    /// <param name="relativePath">The repository-relative path, as the receipt names it.</param>
+    public McpWiringReceiptRecord? Find(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        foreach (McpWiringReceiptRecord record in Files)
+        {
+            if (SamePath(record.Path, relativePath))
+                return record;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether two repository-relative paths name the same file. Separators differ between the
+    /// platform that wrote a receipt and the one reading it, and the path's value is the file.
+    /// </summary>
+    internal static bool SamePath(string left, string right) =>
+        string.Equals(
+            left.Replace('\\', '/'),
+            right.Replace('\\', '/'),
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Writes the receipt, and reports why it could not be written instead of failing the run: the
+    /// configuration files are already written by then, and a caller that threw here would lose the
+    /// record of the files it did write.
+    /// </summary>
+    /// <param name="repositoryRoot">The repository the receipt belongs to.</param>
+    /// <param name="records">Every record the receipt should hold.</param>
+    /// <returns>Null when written, or the reason it was not.</returns>
+    internal static string? Save(string repositoryRoot, IReadOnlyList<McpWiringReceiptRecord> records)
+    {
+        string path = PathFor(repositoryRoot);
+
+        try
+        {
+            string? directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(
+                path,
+                JsonSerializer.Serialize(
+                    new McpWiringReceiptDocument(SchemaVersion, records),
+                    SerializerOptions));
+
+            return null;
+        }
+        catch (IOException exception)
+        {
+            return exception.Message;
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    /// <summary>The receipt's document, so the schema's own shape is what gets written.</summary>
+    /// <param name="Version">The schema version.</param>
+    /// <param name="Files">One record per file.</param>
+    internal sealed record McpWiringReceiptDocument(int Version, IReadOnlyList<McpWiringReceiptRecord> Files);
+}
