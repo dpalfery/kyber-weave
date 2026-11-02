@@ -1,9 +1,7 @@
 using System.Diagnostics;
 using System.Text;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
-using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -39,7 +37,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
             "The go fixture planned no review block, so the stdout comparison proves nothing.");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo]));
 
         Assert.True(
             execution.Result == 0,
@@ -57,7 +55,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         string[] before = Snapshot(repo);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo]));
 
         Assert.True(
             execution.Result == 0,
@@ -75,7 +73,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "gox"]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "gox"]));
 
         Assert.Equal(2, execution.Result);
         Assert.Contains("gox", execution.Output, StringComparison.Ordinal);
@@ -91,7 +89,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "azure"]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "azure"]));
 
         Assert.True(
             execution.Result == 0,
@@ -109,7 +107,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         File.WriteAllText(ConfigPath(repo), "ontology: [unclosed\n  technologies: : : bad\n");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo]));
 
         Assert.Equal(1, execution.Result);
     }
@@ -121,7 +119,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     public void UnresolvablePathExitsOneWithTheConfigDiagnostic()
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", "bad\0path"]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", "bad\0path"]));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("KW-CONFIG-001", execution.Output, StringComparison.Ordinal);
@@ -137,25 +135,13 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> lower = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "go"]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "go"]));
         CapturedConsoleExecution<int> mixed = ProcessConsoleCapture.Run(
-            () => CatalogueApp().Run(["review", "catalogue", repo, "--technology", "Go"]));
+            () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "Go"]));
 
         Assert.Equal(0, mixed.Result);
         Assert.False(string.IsNullOrWhiteSpace(lower.Output));
         Assert.Equal(lower.Output, mixed.Output);
-    }
-
-    private static CommandApp CatalogueApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("review", review => { review.AddCommand<ReviewCatalogueCommand>("catalogue"); });
-        });
-        return app;
     }
 
     /// <summary>

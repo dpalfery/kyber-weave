@@ -376,7 +376,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         if (receiptError is not null)
         {
             string message = receiptError;
-            SquadCommandComposition.WriteUnfolded(() =>
+            CommandHelpers.WriteUnfolded(() =>
             {
                 AnsiConsole.MarkupLine(
                     $"  [yellow]warn[/] Deployment receipt is unreadable: {Markup.Escape(message)}");
@@ -390,7 +390,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return;
         }
 
-        SquadCommandComposition.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             foreach (string staleDir in staleDirs)
             {

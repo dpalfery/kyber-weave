@@ -1318,7 +1318,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
-- [ADR 0050](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
+- [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

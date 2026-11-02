@@ -142,7 +142,8 @@ public static class KyberWeaveConfigLoader
                 ReviewConfig.ProductDefaults,
                 document.Review,
                 repositoryRoot,
-                ReviewConfigLoader.UnknownKeyWarnings(yaml))
+                ReviewConfigLoader.UnknownKeyWarnings(yaml)),
+            Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp)
         };
     }
 }

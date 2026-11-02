@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text.Json;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
@@ -364,20 +363,9 @@ public sealed class ReviewGatesCouncilCommandTests : IDisposable
     /// </summary>
     private static CliRun Cli(string[] arguments)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => CreateApp().Run(arguments));
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CommandAppFixture.ReviewGates().Run(arguments));
         return new CliRun(execution.Result, execution.Output);
-    }
-
-    private static CommandApp CreateApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });
-        });
-        return app;
     }
 
     private JsonDocument ReadReport()

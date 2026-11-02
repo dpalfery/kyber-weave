@@ -48,8 +48,9 @@ Four facts constrain the choice:
 
 1. **Kyber-Squad deploys the Kyber-Weave skills with its own skills.** Install, update, status,
    doctor, and uninstall, at global and project scope and on every target, carry the six skills
-   beside the 28 Squad skills, under the same receipt. `kyber-weave docs init` does not change: no
-   flag, no default, no skip.
+   beside the 28 Squad skills, under the same receipt. This decision adds no flag, no default,
+   and no skip to `kyber-weave docs init`: a change another record makes to that command is that
+   record's, not this one's.
 2. **`.apm/skills/` stays the only source.** Nothing is moved, copied, or symlinked into
    `products/kyber-squad/`. When Squad builds an archive or a checkout release source, it adds
    every `.apm/skills/<name>/**` file as `skills/<name>/**`. One Core type,
