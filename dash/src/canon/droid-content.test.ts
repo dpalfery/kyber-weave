@@ -21,6 +21,14 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { readConsentState, writeContentConsent } from '../capture/consent-file.js'
+import {
+  FACTORY_CONSENT_FILE_NAME as PLUGIN_CONSENT_FILE_NAME,
+  KYBERDASH_FACTORY_CONTEXT_ENV as PLUGIN_CONTEXT_ENV,
+  readContentConsent as readPluginContentConsent,
+  resolveContentConsent as resolvePluginContentConsent,
+} from '../capture/harnesses/factory-plugin/consent.js'
+
 /** The module under test. It does not exist yet; every test fails on this import. */
 type DroidContentModule = typeof import('./droid-content.js')
 
@@ -243,5 +251,107 @@ describe('the bounded memory of Factory traces', () => {
     traces.clear()
     expect(traces.has('trace-1')).toBe(false)
     expect(traces.size).toBe(0)
+  })
+})
+
+// The consent reader exists in TWO production copies: the canon copy in this directory, and
+// the plugin-side copy the plugin bundle inlines
+// (capture/harnesses/factory-plugin/consent.ts). They stay apart on purpose — the plugin's
+// copy MUST stay a leaf, so it cannot import the canon copy — which means nothing but a
+// test ties the two together. Without this guard a one-sided shape change (a version bump,
+// a renamed field) applied to the shared writer and one reader would leave the other reading
+// the old shape, and the suite would not notice: the plugin would keep publishing the
+// prompt text while the engine's ingest gate read the consent as off, or the reverse.
+//
+// This is a DRIFT GUARD, not a RED test: the two copies agree today, and that is exactly
+// what the guard records.
+describe('the two copies of the consent reader', () => {
+  /** One corpus of consent bodies: every shape the file may be found in. */
+  const CORPUS: { name: string; body: string | null; expected: boolean }[] = [
+    { name: 'the on shape', body: '{"version":1,"content":true}', expected: true },
+    { name: 'the off shape', body: '{"version":1,"content":false}', expected: false },
+    { name: 'an unknown version', body: '{"version":2,"content":true}', expected: false },
+    { name: 'a content field of the wrong type', body: '{"version":1,"content":"true"}', expected: false },
+    { name: 'a missing content field', body: '{"version":1}', expected: false },
+    { name: 'malformed JSON', body: '{', expected: false },
+    { name: 'a JSON string', body: '"hello"', expected: false },
+    { name: 'a JSON array', body: '[]', expected: false },
+    { name: 'a JSON null', body: 'null', expected: false },
+    { name: 'an empty file', body: '', expected: false },
+    {
+      name: 'a file larger than the size bound',
+      body: JSON.stringify({ version: 1, content: true, padding: 'x'.repeat(MAX_CONSENT_BYTES) }),
+      expected: false,
+    },
+    { name: 'a file that is not there', body: null, expected: false },
+  ]
+
+  /** A consent path under a throwaway home with nothing written at it. */
+  async function consentPath(): Promise<string> {
+    const content = await loadDroidContent()
+    return content.resolveConsentPath(temp())
+  }
+
+  it('names the same file and the same override variable', async () => {
+    const content = await loadDroidContent()
+    expect(PLUGIN_CONSENT_FILE_NAME).toBe(content.FACTORY_CONSENT_FILE_NAME)
+    expect(PLUGIN_CONTEXT_ENV).toBe(content.KYBERDASH_FACTORY_CONTEXT_ENV)
+  })
+
+  for (const entry of CORPUS) {
+    it(`reads ${entry.name} the same way in both copies`, async () => {
+      const content = await loadDroidContent()
+      const path = entry.body === null ? await consentPath() : await consentFixture(entry.body)
+
+      const canon = content.readContentConsent(path)
+      const plugin = readPluginContentConsent(path)
+
+      expect(plugin, `${entry.name}: the two copies must reach the same decision`).toBe(canon)
+      expect(canon, `${entry.name}: the consent decision`).toBe(entry.expected)
+    })
+  }
+
+  it('reads the shared writer\'s own output the way the writer meant it', async () => {
+    // The writer is the one place the shape is decided, so its own output is the corpus
+    // that catches a shape change applied to the writer and to only one of the readers.
+    const content = await loadDroidContent()
+
+    const onPath = await consentPath()
+    writeContentConsent(onPath, true)
+    expect(readConsentState(onPath), 'the writer wrote the on shape').toBe('on')
+    expect(content.readContentConsent(onPath), 'the canon copy reads the writer\'s on shape').toBe(true)
+    expect(readPluginContentConsent(onPath), 'the plugin copy reads the writer\'s on shape').toBe(true)
+
+    const offPath = await consentPath()
+    writeContentConsent(offPath, false)
+    expect(readConsentState(offPath), 'the writer wrote the off shape').toBe('off')
+    expect(content.readContentConsent(offPath), 'the canon copy reads the writer\'s off shape').toBe(false)
+    expect(readPluginContentConsent(offPath), 'the plugin copy reads the writer\'s off shape').toBe(false)
+  })
+
+  it('resolves the env override the same way in both copies', async () => {
+    const content = await loadDroidContent()
+    const envName = content.KYBERDASH_FACTORY_CONTEXT_ENV
+    const onPath = await consentFixture(ON_BODY)
+    const offPath = await consentFixture('{"version":1,"content":false}')
+    const missingPath = await consentPath()
+
+    const cases: { name: string; env: NodeJS.ProcessEnv; path: string; expected: boolean }[] = [
+      { name: "'1' forces content on over an off file", env: { [envName]: '1' }, path: offPath, expected: true },
+      { name: "'1' forces content on over a missing file", env: { [envName]: '1' }, path: missingPath, expected: true },
+      { name: "'0' forces content off over an on file", env: { [envName]: '0' }, path: onPath, expected: false },
+      { name: "'0' forces content off over a missing file", env: { [envName]: '0' }, path: missingPath, expected: false },
+      { name: 'any other value defers to an on file', env: { [envName]: 'yes' }, path: onPath, expected: true },
+      { name: 'an empty value defers to an on file', env: { [envName]: '' }, path: onPath, expected: true },
+      { name: 'an absent variable defers to an on file', env: {}, path: onPath, expected: true },
+      { name: 'an absent variable defers to an off file', env: {}, path: offPath, expected: false },
+    ]
+
+    for (const entry of cases) {
+      const canon = content.resolveContentConsent(entry.env, entry.path)
+      const plugin = resolvePluginContentConsent(entry.env, entry.path)
+      expect(plugin, `${entry.name}: the two copies must reach the same decision`).toBe(canon)
+      expect(canon, `${entry.name}: the consent decision`).toBe(entry.expected)
+    }
   })
 })

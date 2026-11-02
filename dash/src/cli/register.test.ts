@@ -640,6 +640,36 @@ describe('dash clean: one clean at a time', () => {
   })
 })
 
+describe('the capture plugin consent verb\'s help', () => {
+  // The Factory plugin publishes BYTE COUNTS for the tool arguments and the tool result
+  // (`factory.tool.input_bytes`, `factory.tool.result_bytes`), so it never carries tool
+  // content at all. A help that promises the tool content describes a capture that does not
+  // exist, and an owner reading it is deciding on the wrong thing.
+  it('names the prompt text and claims no tool content', () => {
+    const program = new Command()
+    registerKyberCommands(program)
+
+    const consent = program.commands
+      .find((command) => command.name() === 'kyber')
+      ?.commands.find((command) => command.name() === 'capture')
+      ?.commands.find((command) => command.name() === 'plugin')
+      ?.commands.find((command) => command.name() === 'consent')
+    expect(consent, 'the consent verb must be registered').toBeDefined()
+
+    // The whole subcommand help, so both option descriptions are covered.
+    const help = consent?.helpInformation() ?? ''
+    expect(help, 'the consent help must name what it governs').toMatch(/prompt text/i)
+    expect(
+      help,
+      `the consent help must not promise a tool capture:\n${help}`,
+    ).not.toMatch(/tool content/i)
+    expect(
+      help,
+      `the consent help must not mention tool content at all:\n${help}`,
+    ).not.toMatch(/\btools?\b/i)
+  })
+})
+
 describe('the stderr tail main.ts reads to decide whether to print a message', () => {
   // main.ts cannot be imported to exercise this: it is the entry point and parses argv on
   // import. The two halves of the decision are therefore pure and exported from here.
