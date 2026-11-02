@@ -537,6 +537,14 @@ export type FactoryOwnership = {
    * different marketplace that happens to share the name (D46).
    */
   marketplaceRoot?: string
+  /**
+   * The plugin identity KyberDash's receipt proves it installed.
+   *
+   * It is the proof of ownership when the marketplace registration is gone but the plugin
+   * remains: the harness removes a marketplace registration WITHOUT removing the plugin,
+   * so the plugin outlives the registration that named it.
+   */
+  ownedPluginIdentity?: string
 }
 
 /** The local path a marketplace source names, or undefined when the source is not local. */
@@ -577,7 +585,8 @@ function marketplaceIsOurs(entry: FactoryMarketplaceEntry, ownership: FactoryOwn
  *
  * The identity names the marketplace it came from, so the marketplace decides. The
  * harness's marketplace removal does not remove the plugin, so the identity can also
- * stand alone: ours when KyberDash wrote the tree it came from.
+ * stand alone: ours when KyberDash wrote the tree it came from, or when the receipt
+ * proves that very identity is ours.
  */
 function pluginIsOurs(
   entry: FactoryPluginEntry,
@@ -586,7 +595,10 @@ function pluginIsOurs(
 ): boolean {
   const marketplace = registry.marketplaces.find((row) => row.name === FACTORY_MARKETPLACE_NAME)
   if (marketplace !== undefined) return marketplaceIsOurs(marketplace, ownership)
-  return ownership.treeWritten
+  return (
+    ownership.treeWritten ||
+    (ownership.ownedPluginIdentity !== undefined && entry.identity === ownership.ownedPluginIdentity)
+  )
 }
 
 // ── The conflict ────────────────────────────────────────────────────────────────────────────
@@ -706,11 +718,14 @@ export type FactoryHarnessStateReport = {
  */
 export function readFactoryHarnessState(
   harness: FactoryHarnessCli,
-  options: { treeWritten: boolean; marketplaceRoot?: string },
+  options: { treeWritten: boolean; marketplaceRoot?: string; ownedPluginIdentity?: string },
 ): FactoryHarnessStateReport {
   const ownership: FactoryOwnership = {
     treeWritten: options.treeWritten,
     ...(options.marketplaceRoot === undefined ? {} : { marketplaceRoot: options.marketplaceRoot }),
+    ...(options.ownedPluginIdentity === undefined
+      ? {}
+      : { ownedPluginIdentity: options.ownedPluginIdentity }),
   }
   const read = readFactoryHarnessRegistry(harness)
   if (!read.ok) {

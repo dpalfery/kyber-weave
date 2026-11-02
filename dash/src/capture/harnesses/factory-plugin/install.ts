@@ -266,6 +266,27 @@ function receiptFor(paths: FactoryPluginPaths): Receipt {
   }
 }
 
+/**
+ * The plugin identity the receipt proves is KyberDash's own, or undefined when the receipt
+ * proves nothing of the sort.
+ *
+ * The receipt is the proof that survives the harness's own teardown: it names the
+ * marketplace KyberDash registered, the identity it installed and the tree it describes.
+ * Every part of that has to hold — a receipt that names another tree, another marketplace
+ * or no identity at all proves nothing, and an arbitrary plugin identity must never be
+ * treated as ours.
+ */
+function provenPluginIdentity(
+  receipt: Receipt | undefined,
+  paths: FactoryPluginPaths,
+): string | undefined {
+  if (receipt === undefined || isLegacyReceipt(receipt)) return undefined
+  if (receipt.root !== paths.pluginDir) return undefined
+  if (receipt.marketplace !== FACTORY_MARKETPLACE_NAME) return undefined
+  if (receipt.plugin !== FACTORY_PLUGIN_IDENTITY) return undefined
+  return receipt.plugin
+}
+
 // ---------------------------------------------------------------------------------------------
 // Reading the tree
 
@@ -585,6 +606,8 @@ export function installFactoryPlugin(
   const preserve = mode === 'preserve'
   /** The receipt on disk, read before this install can overwrite it. */
   const receipt = readReceipt(paths.receiptFile)
+  /** The plugin identity the receipt proves is KyberDash's own, when it proves one. */
+  const provenIdentity = provenPluginIdentity(receipt, paths)
   /** What the previous route's tree costs this install: nothing until it is cleared. */
   let legacyLines: LegacyOutcome = { out: [], err: [] }
 
@@ -637,10 +660,13 @@ export function installFactoryPlugin(
   // The harness's own registry is the install's evidence, and it is read through the
   // harness's own commands and nothing else. The tree root travels with the read because
   // the harness's SOURCE column is what decides whether a marketplace named `kyberdash`
-  // is KyberDash's own (D46).
+  // is KyberDash's own (D46). The receipt's proven identity travels with it because the
+  // harness removes a marketplace registration WITHOUT removing the plugin, so the plugin
+  // can outlive the registration and is still KyberDash's own.
   const harnessState = readFactoryHarnessState(harness, {
     treeWritten: found.kind !== 'absent',
     marketplaceRoot: paths.pluginDir,
+    ...(provenIdentity === undefined ? {} : { ownedPluginIdentity: provenIdentity }),
   })
 
   if (options.ifInstalled === true && harnessState.state !== 'plugin-installed') {
@@ -710,7 +736,14 @@ export function installFactoryPlugin(
     writeReceipt(paths)
   }
 
-  const refresh = found.kind === 'upgrade'
+  // The harness's CACHED COPY — the copy that actually runs — goes stale in two cases:
+  // the tree's content changed, and the tree was just written while the harness already
+  // held the plugin. The harness state was read BEFORE the tree was written, because the
+  // registry is the harness's own state and not the tree's.
+  const upgraded = found.kind === 'upgrade'
+  const refresh =
+    upgraded || (found.kind === 'absent' && harnessState.state === 'plugin-installed')
+
   if (!refresh && found.kind === 'same' && harnessState.state === 'plugin-installed') {
     // The tree is current and the harness already holds the plugin: there is nothing to do,
     // and a routine update mutates nothing.
@@ -734,10 +767,13 @@ export function installFactoryPlugin(
   }
 
   const executable = harness.executable ?? FACTORY_HARNESS_EXECUTABLE
-  return result(refresh ? 'upgraded' : 'installed', 'wrote', {
+  // The wording names what happened to the TREE: an upgrade of the tree reads `upgraded`,
+  // and a tree that was written fresh reads `installed` even when the harness's cached
+  // copy was refreshed with it.
+  return result(upgraded ? 'upgraded' : 'installed', 'wrote', {
     consent: ensureConsent(paths, false),
     out: [
-      `factory plugin: ${refresh ? 'upgraded' : 'installed'} ${paths.pluginDir}`,
+      `factory plugin: ${upgraded ? 'upgraded' : 'installed'} ${paths.pluginDir}`,
       `factory marketplace: ${FACTORY_MARKETPLACE_NAME}`,
       `factory plugin identity: ${FACTORY_PLUGIN_IDENTITY}`,
       `factory harness: ${executable}`,
@@ -859,7 +895,10 @@ export function uninstallFactoryPlugin(
 // The state and status surface
 
 export type FactoryPluginState = {
-  /** on: the tree matches the receipt. off: nothing installed. unknown: not ours, or edited. */
+  /**
+   * on: the tree matches the receipt. off: nothing installed. partial: an older plugin of
+   * ours. unknown: not ours, or edited.
+   */
   state: 'on' | 'off' | 'partial' | 'unknown'
   exists: boolean
   receipt: boolean
@@ -885,7 +924,9 @@ export function factoryPluginState(
     return { state: 'off', exists: false, receipt: recorded, unreadable: false }
   }
   return {
-    state: found.kind === 'same' ? 'on' : 'unknown',
+    // A tree KyberDash wrote and the owner never touched, holding the bundle KyberDash
+    // wrote before, is an OLDER VERSION of ours — not an owner edit and not a foreign tree.
+    state: found.kind === 'same' ? 'on' : found.kind === 'upgrade' ? 'partial' : 'unknown',
     exists: true,
     receipt: recorded,
     unreadable: false,
@@ -905,7 +946,13 @@ export function factoryHarnessState(
 ): FactoryHarnessStateReport {
   const paths = factoryPluginPaths(home, env, options)
   const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
-  return readFactoryHarnessState(harness, { treeWritten: classify(paths).kind !== 'absent' })
+  // The receipt's proven identity travels with the read, so this reports the same
+  // ownership the install does: a plugin the receipt proves is ours is ours here too.
+  const provenIdentity = provenPluginIdentity(readReceipt(paths.receiptFile), paths)
+  return readFactoryHarnessState(harness, {
+    treeWritten: classify(paths).kind !== 'absent',
+    ...(provenIdentity === undefined ? {} : { ownedPluginIdentity: provenIdentity }),
+  })
 }
 
 /** Fixed-format status lines. Never echoes owner-written text. */
@@ -923,6 +970,8 @@ export function describeFactoryPluginStatus(
     lines.push('plugin: not installed')
   } else if (plugin.state === 'on') {
     lines.push('plugin: installed')
+  } else if (plugin.state === 'partial') {
+    lines.push('plugin: installed (an older version than this build)')
   } else {
     lines.push('plugin: modified since install or not written by KyberDash')
   }

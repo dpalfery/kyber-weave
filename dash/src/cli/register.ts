@@ -507,15 +507,18 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       },
     )
 
-  // The content consent of a capture plugin: whether the prompt text and the tool content
-  // may be recorded at all. It is off unless the owner says otherwise, and this verb is how
-  // they say it. Contract in capture/harnesses/factory-plugin/install-command.ts.
+  // The content consent of a capture plugin: whether the prompt text may be recorded at
+  // all. It is off unless the owner says otherwise, and this verb is how they say it.
+  // The Factory plugin publishes the tool arguments and the tool result as BYTE COUNTS
+  // (`factory.tool.input_bytes`, `factory.tool.result_bytes`), so it never carries tool
+  // content and the consent governs the prompt text alone. Contract in
+  // capture/harnesses/factory-plugin/install-command.ts.
   capturePlugin
     .command('consent')
     .description('Turn the content consent of a harness capture plugin on or off')
     .option('--harness <id>', 'Harness whose plugin consent to set (only: factory)')
-    .option('--on', 'Let the plugin record the prompt text and the tool content')
-    .option('--off', 'Keep the plugin from recording the prompt text and the tool content')
+    .option('--on', 'Let the plugin record the prompt text')
+    .option('--off', 'Keep the plugin from recording the prompt text')
     .exitOverride(captureUsageExit)
     .action(async (opts: { harness?: string; on?: boolean; off?: boolean }) => {
       const { homedir } = await import('node:os')
