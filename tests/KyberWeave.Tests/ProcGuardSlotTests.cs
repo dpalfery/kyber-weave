@@ -21,7 +21,7 @@ namespace KyberWeave.Tests;
 /// <para>
 /// Why the cases are shaped this way. A holder is simulated by writing the lock directory by hand, with the test host's own
 /// pid for a live holder and a pid far above any real pid_max for a dead one, so no case needs a second real holder
-/// process. The slot directory is a per-test temp directory, handed over through <c>KW_PROC_GUARD_SLOT_DIR</c>, so a case
+/// process. The slot directory is a per-test temp directory, handed over through the <c>--slot-dir</c> flag, so a case
 /// never touches the real <c>~/.cache/kyber-weave/test-slots</c>.
 /// </para>
 /// <para>
@@ -378,6 +378,80 @@ public sealed class ProcGuardSlotTests : IDisposable
     }
 
     /// <summary>
+    /// A stray <c>KW_PROC_GUARD_SLOT_DIR</c> in the environment changes nothing: the guard still queues behind the
+    /// holder in the directory it is given, and creates nothing in the stray one.
+    /// </summary>
+    /// <remarks>
+    /// The slot is only machine-wide if every caller agrees where it lives. An environment variable could move one caller to a
+    /// private directory without anyone choosing it, and that caller would run beside the holder with no queue and no 88. The
+    /// directory is a flag, like the caps.
+    /// </remarks>
+    [Fact]
+    public void RunWithStrayEnvironmentSlotDir_IgnoresItAndStillQueues()
+    {
+        SkipIfBashUnavailable();
+        SeedLock(SlotName, 1, Environment.ProcessId, "real-holder");
+        using TempDirectory stray = new();
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--slot-wait", "0", "--", "sh", "-c", "exit 0"],
+            options: new GuardOptions(Environment: new Dictionary<string, string> { ["KW_PROC_GUARD_SLOT_DIR"] = stray.Path }));
+
+        Assert.Equal(SlotWaitExitCode, result.ExitCode);
+        Assert.Empty(Directory.GetFileSystemEntries(stray.Path));
+    }
+
+    /// <summary>
+    /// Without <c>--slot-dir</c> the lock lives under <c>$HOME/.cache/kyber-weave/test-slots</c> while the command runs and
+    /// is gone afterwards.
+    /// </summary>
+    /// <remarks>
+    /// That path is where every harness on the machine meets, so it is the one location no other test would notice moving.
+    /// </remarks>
+    [Fact]
+    public void RunWithoutSlotDir_TakesTheLockUnderHomeCacheAndReleasesIt()
+    {
+        SkipIfBashUnavailable();
+        string home = Path.Combine(work.Path, "home");
+        Directory.CreateDirectory(home);
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--", "sh", "-c", "ls \"$HOME/.cache/kyber-weave/test-slots\""],
+            options: new GuardOptions(UseDefaultSlotDir: true, Environment: new Dictionary<string, string> { ["HOME"] = home }));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains($"{SlotName}.1.lock", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(home, ".cache", "kyber-weave", "test-slots")));
+    }
+
+    /// <summary>
+    /// A relative <c>--slot-dir</c>, the filesystem root, and <c>--slot-dir</c> without <c>--slot</c> are usage errors.
+    /// </summary>
+    /// <remarks>
+    /// A relative directory would be a different place for every caller's working directory, which is the opposite of one
+    /// shared queue.
+    /// </remarks>
+    [Theory]
+    [InlineData("relative/slots", true)]
+    [InlineData("/", true)]
+    [InlineData("/absolute/but/unused", false)]
+    public void RunWithBadSlotDir_ExitsUsageError(string slotDir, bool withSlot)
+    {
+        SkipIfBashUnavailable();
+        List<string> arguments = ["run"];
+        if (withSlot)
+        {
+            arguments.AddRange(["--slot", SlotName]);
+        }
+
+        arguments.AddRange(["--slot-dir", slotDir, "--", "sh", "-c", "exit 0"]);
+
+        GuardRun result = RunGuard([.. arguments], options: new GuardOptions(UseDefaultSlotDir: true));
+
+        Assert.Equal(UsageExitCode, result.ExitCode);
+    }
+
+    /// <summary>
     /// A <c>--slot-wait</c> that is not a plain integer of at most a day is a usage error: text, a sign, an empty value,
     /// a leading zero, or more than 86400 seconds.
     /// </summary>
@@ -575,14 +649,24 @@ public sealed class ProcGuardSlotTests : IDisposable
         startInfo.ArgumentList.Add("exec /bin/bash \"$@\" 2>\"$KW_TEST_GUARD_STDERR\"");
         startInfo.ArgumentList.Add("proc-guard-slot-test");
         startInfo.ArgumentList.Add(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "proc-guard.sh"));
-        foreach (string argument in guardArguments)
+        // The slot directory is a flag, never an environment variable, so a stray exported value cannot move the queue.
+        bool takesSlot = guardArguments.Contains("--slot");
+        for (int index = 0; index < guardArguments.Length; index++)
         {
-            startInfo.ArgumentList.Add(argument);
+            startInfo.ArgumentList.Add(guardArguments[index]);
+            if (index == 0 && takesSlot && options?.UseDefaultSlotDir != true)
+            {
+                startInfo.ArgumentList.Add("--slot-dir");
+                startInfo.ArgumentList.Add(slotRoot.Path);
+            }
         }
 
         startInfo.Environment["KW_PROC_GUARD_PS"] = FixturePath("ps-clean.sh");
-        startInfo.Environment["KW_PROC_GUARD_SLOT_DIR"] = slotRoot.Path;
         startInfo.Environment["KW_TEST_GUARD_STDERR"] = stderrFile;
+        foreach ((string name, string value) in options?.Environment ?? new Dictionary<string, string>())
+        {
+            startInfo.Environment[name] = value;
+        }
         if (options?.PathPrefix is not null)
         {
             startInfo.Environment["PATH"] = options.PathPrefix + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
@@ -619,8 +703,12 @@ public sealed class ProcGuardSlotTests : IDisposable
         }
     }
 
-    /// <summary>What a case changes about the guard's environment: a directory put first on PATH (a fake <c>ps</c>) and LC_ALL.</summary>
-    private sealed record GuardOptions(string? PathPrefix = null, string? LcAll = null);
+    /// <summary>What a case changes about the guard's environment: a directory put first on PATH (a fake <c>ps</c>), LC_ALL, other variables, and whether to leave out <c>--slot-dir</c>.</summary>
+    private sealed record GuardOptions(
+        string? PathPrefix = null,
+        string? LcAll = null,
+        IReadOnlyDictionary<string, string>? Environment = null,
+        bool UseDefaultSlotDir = false);
 
     private sealed record GuardRun(int ExitCode, string StandardOutput, string StandardError);
 }

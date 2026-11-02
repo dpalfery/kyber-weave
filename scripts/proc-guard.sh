@@ -8,7 +8,8 @@
 #
 # Usage:
 #   scripts/proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]
-#                             [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL]] -- <cmd...>
+#                             [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]
+#                             -- <cmd...>
 #   scripts/proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]
 #
 # Exit codes:
@@ -40,15 +41,18 @@
 #   --slot-wait S      give up with exit 88 after S seconds queued (default 540, 0 = do not queue,
 #                      at most 86400; no leading zero)
 #   --task LABEL       what to show other callers while this run holds the slot (default: the
-#                      checkout's directory name and the command)
-# A slot is the lock directory ~/.cache/kyber-weave/test-slots/NAME.<n>.lock, taken with an
-# atomic mkdir because macOS has no flock. Its holder file records this guard's pid, process
+#                      checkout's directory name and the command; cut to 100 characters)
+#   --slot-dir DIR     absolute directory for the locks instead of the default below. For the
+#                      guard's own tests: callers with different directories do not queue behind
+#                      each other, so this is a flag, never an environment variable.
+# The slot is machine-wide for one user account (the default directory is under $HOME), not
+# across accounts. A slot is the lock directory ~/.cache/kyber-weave/test-slots/NAME.<n>.lock,
+# taken with an atomic mkdir because macOS has no flock. Its holder file records this guard's pid, process
 # start time, task and start. A queued caller prints who holds the slot and polls every half
 # second; it is not first-in-first-out, the first caller to retry after a release wins. A lock is
 # stale, and is recovered, when its holder pid is gone, when that pid now belongs to a process
 # with a different start time, or when the lock directory has had no holder file for 30 seconds.
 # The time spent queued does not count against --timeout, which starts with the command.
-# Test hook: KW_PROC_GUARD_SLOT_DIR replaces the slot directory.
 #
 # Test hook: KW_PROC_GUARD_PS names an executable that prints the process table
 # (rows: "<pid> <ppid> <user> <comm> <args...>") instead of the real ps.
@@ -90,7 +94,8 @@ self_pid=$$
 
 usage() {
   printf 'usage: proc-guard.sh run [--max-node N] [--max-tree N] [--timeout S] [--tty]\n' >&2
-  printf '                         [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL]] -- <cmd...>\n' >&2
+  printf '                         [--slot NAME [--slot-count N] [--slot-wait S] [--task LABEL] [--slot-dir DIR]]\n' >&2
+  printf '                         -- <cmd...>\n' >&2
   printf '       proc-guard.sh check-leftovers --root <dir> [--since <epoch-seconds>]\n' >&2
 }
 
@@ -393,10 +398,11 @@ check_leftovers() {
 # The lock directory this guard holds, or empty. A global because the EXIT trap reads it.
 slot_lock=""
 
-# Where the lock directories live. Empty when there is neither the test hook nor a home directory.
+# Where the lock directories live: --slot-dir ($1) when given, else under the home directory.
+# Empty when there is neither.
 slot_base() {
-  if [[ -n "${KW_PROC_GUARD_SLOT_DIR:-}" ]]; then
-    printf '%s\n' "${KW_PROC_GUARD_SLOT_DIR}"
+  if [[ -n "$1" ]]; then
+    printf '%s\n' "$1"
   elif [[ -n "${HOME:-}" ]]; then
     printf '%s\n' "${HOME}/.cache/kyber-weave/test-slots"
   fi
@@ -602,7 +608,7 @@ acquire_slot() {
 
 run_guarded() {
   local max_node=128 max_tree=64 timeout_s=0 keep_tty=0
-  local slot="" slot_given=0 slot_count=1 slot_wait="${SLOT_DEFAULT_WAIT}" task_label="" extras_given=0
+  local slot="" slot_given=0 slot_count=1 slot_wait="${SLOT_DEFAULT_WAIT}" task_label="" slot_dir="" extras_given=0
   while (($#)); do
     case "$1" in
       --max-node) max_node="${2:-}"; shift 2 ;;
@@ -613,6 +619,7 @@ run_guarded() {
       --slot-count) (($# >= 2)) || { usage; return 2; }; slot_count="$2"; extras_given=1; shift 2 ;;
       --slot-wait) (($# >= 2)) || { usage; return 2; }; slot_wait="$2"; extras_given=1; shift 2 ;;
       --task) (($# >= 2)) || { usage; return 2; }; task_label="$2"; extras_given=1; shift 2 ;;
+      --slot-dir) (($# >= 2)) || { usage; return 2; }; slot_dir="$2"; extras_given=1; shift 2 ;;
       --) shift; break ;;
       *) usage; return 2 ;;
     esac
@@ -625,7 +632,7 @@ run_guarded() {
     fi
   done
   if ((slot_given == 0 && extras_given == 1)); then
-    printf 'proc-guard: --slot-count, --slot-wait and --task need --slot\n' >&2
+    printf 'proc-guard: --slot-count, --slot-wait, --task and --slot-dir need --slot\n' >&2
     return 2
   fi
   if ((slot_given == 1)); then
@@ -636,6 +643,12 @@ run_guarded() {
     fi
     if [[ ! "${slot_count}" =~ ^[1-9][0-9]{0,2}$ ]] || ((slot_count > SLOT_MAX_COUNT)); then
       printf 'proc-guard: --slot-count must be an integer from 1 to %s\n' "${SLOT_MAX_COUNT}" >&2
+      return 2
+    fi
+    # An absolute path other than /: a relative one would be a different place for each caller's
+    # working directory, which is the opposite of one shared queue.
+    if [[ -n "${slot_dir}" && ( "${slot_dir}" != /* || -z "${slot_dir%%/}" ) ]]; then
+      printf 'proc-guard: --slot-dir must be an absolute directory other than /\n' >&2
       return 2
     fi
     # No leading zero: bash would read 08 as a bad octal number and the wait would never expire.
@@ -661,9 +674,9 @@ run_guarded() {
 
   if ((slot_given == 1)); then
     local base cmd_line slot_rc
-    base="$(slot_base)"
+    base="$(slot_base "${slot_dir}")"
     if [[ -z "${base}" ]]; then
-      printf 'proc-guard: cannot place the slot directory: HOME is not set\n' >&2
+      printf 'proc-guard: cannot place the slot directory: HOME is not set and no --slot-dir was given\n' >&2
       return 2
     fi
     cmd_line="$*"

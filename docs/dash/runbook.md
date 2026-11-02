@@ -1400,7 +1400,8 @@ the safety limit.
 | `--slot NAME` | none | Takes a machine-wide slot before the command starts and queues while it is held. For full test suites only. |
 | `--slot-count N` | 1 | How many runs may hold the slot at once. Needs `--slot`. |
 | `--slot-wait S` | 540 | Queues at most S seconds, then exits 88. 0 means do not queue. Needs `--slot`. |
-| `--task LABEL` | checkout name and command | What other callers see while this run holds the slot. Needs `--slot`. |
+| `--task LABEL` | checkout name and command | What other callers see while this run holds the slot (cut to 100 characters). Needs `--slot`. |
+| `--slot-dir DIR` | `~/.cache/kyber-weave/test-slots` | Absolute directory for the locks. For the guard's own tests only. Needs `--slot`. |
 
 The watchdog refuses to run with an empty root, a root that is not a directory, or `/` (exit 2).
 
@@ -1474,8 +1475,10 @@ scripts/proc-guard.sh run --slot dotnet-test -- dotnet test tests/KyberWeave.Tes
   stale. Its wrapped command can outlive the guard in that case and run without holding the slot
   until it ends.
 
-Do not set `KW_PROC_GUARD_SLOT_DIR` outside a test: it replaces the slot directory, so a private
-directory defeats the machine-wide queue. It exists so the guard's own tests never touch the real one.
+Do not pass `--slot-dir` outside the guard's own tests: it replaces the slot directory, and callers
+with different directories do not queue behind each other. It is a flag rather than an environment
+variable so that a stray exported value cannot move one caller out of the queue; the guard ignores
+any environment variable for this.
 
 **Playwright runs only with the isolated config.** Give `--config dash/playwright.isolated.config.ts`
 on every invocation, from the repository root, through the watchdog:
