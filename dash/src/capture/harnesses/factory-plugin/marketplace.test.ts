@@ -33,7 +33,10 @@ import { installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
 import {
   FACTORY_MARKETPLACE_NAME,
   FACTORY_PLUGIN_IDENTITY,
+  readFactoryHarnessRegistry,
+  readFactoryHarnessResidue,
   readFactoryHarnessState,
+  type FactoryHarnessRegistry,
 } from './marketplace.js'
 import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
 
@@ -238,6 +241,29 @@ describe('the marketplace install route', () => {
     expect(statSync(join(f.root, 'settings.json')).isFile()).toBe(true)
   })
 
+  it('leaves the owner\'s settings file byte-identical across the whole install and uninstall cycle', () => {
+    const f = fixture('factory-marketplace-settings-cycle-')
+    const fake = fakeHarness()
+    mkdirSync(f.root, { recursive: true })
+    // The owner's own registry: a marketplace and a plugin of their own, and our plugin
+    // named as disabled. None of it is ours, and none of it may change.
+    const owner = `${JSON.stringify(
+      {
+        extraKnownMarketplaces: { other: { source: { source: 'local', path: '/somewhere/else' } } },
+        enabledPlugins: { 'kyberdash-factory@kyberdash': false },
+      },
+      null,
+      2,
+    )}\n`
+    const settings = join(f.root, 'settings.json')
+    writeFileSync(settings, owner)
+
+    install(f, fake)
+    uninstall(f, fake)
+
+    expect(readFileSync(settings, 'utf8')).toBe(owner)
+  })
+
   it('never writes the harness\'s own plugin cache or its installed-plugin record', () => {
     const f = fixture('factory-marketplace-cache-')
     const fake = fakeHarness()
@@ -343,5 +369,184 @@ describe('the install reports the harness it used', () => {
     expect(result.err.join('\n')).toMatch(/was not found on PATH/)
     expect(existsSync(f.marketplaceRoot)).toBe(false)
     expect(existsSync(f.receiptFile)).toBe(false)
+  })
+})
+
+describe('a name the harness already holds', () => {
+  it('refuses a marketplace of the same name, and writes nothing', () => {
+    const f = fixture('factory-marketplace-collision-')
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.err.join('\n')).toContain(FACTORY_MARKETPLACE_NAME)
+    // The refusal names the command that removes the entry it collides with.
+    expect(result.err.join('\n')).toContain('droid plugin marketplace remove kyberdash')
+    expect(existsSync(f.marketplaceRoot)).toBe(false)
+    expect(existsSync(f.receiptFile)).toBe(false)
+  })
+
+  it('keeps a marketplace of the same name with a warning in preserve mode', () => {
+    const f = fixture('factory-marketplace-collision-preserve-')
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+
+    const result = install(f, fake, { mode: 'preserve' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.err.join('\n')).toMatch(/warning/)
+    expect(result.err.join('\n')).toContain('droid plugin marketplace remove kyberdash')
+    expect(existsSync(f.marketplaceRoot)).toBe(false)
+  })
+
+  it('refuses the plugin identity the harness holds from a marketplace KyberDash does not own', () => {
+    const f = fixture('factory-plugin-collision-')
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+    fake.plugins.add(FACTORY_PLUGIN_IDENTITY)
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.err.join('\n')).toContain(FACTORY_PLUGIN_IDENTITY)
+    // The refusal names the command that removes the entry it collides with.
+    expect(result.err.join('\n')).toContain('droid plugin uninstall kyberdash-factory@kyberdash --scope user')
+    expect(existsSync(f.marketplaceRoot)).toBe(false)
+  })
+
+  it('does not treat a plugin of the same name in another marketplace as a conflict', () => {
+    const f = fixture('factory-other-marketplace-plugin-')
+    const fake = fakeHarness()
+    fake.plugins.add('kyberdash-factory@other')
+
+    const result = install(f, fake)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(f.marketplaceRoot)).toBe(true)
+  })
+
+  it('reports the conflict with the registry, the entry and the command that removes it', () => {
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+
+    const report = readFactoryHarnessState(fake.harness, { treeWritten: false })
+
+    expect(report.state).toBe('conflict')
+    expect(report.conflict?.registry).toBe('extraKnownMarketplaces')
+    expect(report.conflict?.entry).toBe(FACTORY_MARKETPLACE_NAME)
+    expect(report.conflict?.command).toBe('droid plugin marketplace remove kyberdash')
+    // A conflict is not a state the install may proceed from.
+    expect(report.readable).toBe(false)
+  })
+
+  it('decides the conflict by the path the harness registered the marketplace from', () => {
+    const fake = fakeHarness()
+    fake.harness.run = (argv) =>
+      argv[1] === 'marketplace'
+        ? {
+            exitCode: 0,
+            stdout: `MARKETPLACE  SOURCE  PLUGINS  DISPLAY NAME\n${FACTORY_MARKETPLACE_NAME}  local:/somewhere/else/kyberdash  1  —\n`,
+            stderr: '',
+          }
+        : { exitCode: 0, stdout: 'PLUGIN  STATUS  SOURCE  VERSION\n', stderr: '' }
+
+    const ours = readFactoryHarnessState(fake.harness, {
+      treeWritten: true,
+      marketplaceRoot: '/somewhere/else/kyberdash',
+    })
+    const theirs = readFactoryHarnessState(fake.harness, {
+      treeWritten: true,
+      marketplaceRoot: '/kyberdash/marketplaces/kyberdash',
+    })
+
+    // The same registered path is ours when it is our tree, and a collision when it is not.
+    expect(ours.state).toBe('marketplace-registered')
+    expect(ours.conflict).toBeUndefined()
+    expect(theirs.state).toBe('conflict')
+    expect(theirs.conflict?.entry).toBe(FACTORY_MARKETPLACE_NAME)
+  })
+})
+
+describe('the harness-side snapshot the receipt records', () => {
+  it('snapshots the registered marketplaces and the installed plugins with their statuses', () => {
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+    fake.plugins.add(FACTORY_PLUGIN_IDENTITY)
+
+    const read = readFactoryHarnessRegistry(fake.harness)
+
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.registry.marketplaces.map((entry) => entry.name)).toEqual([FACTORY_MARKETPLACE_NAME])
+    expect(read.registry.marketplaces[0]?.source).toContain('/kyberdash')
+    expect(read.registry.plugins.map((entry) => entry.identity)).toEqual([FACTORY_PLUGIN_IDENTITY])
+    expect(read.registry.plugins[0]?.status).toBe('Enabled')
+  })
+
+  it('reports the harness\'s own answer when the registry cannot be read', () => {
+    const fake = fakeHarness({ unavailable: 'the droid CLI was not found on PATH' })
+
+    const read = readFactoryHarnessRegistry(fake.harness)
+
+    expect(read.ok).toBe(false)
+    if (read.ok) return
+    expect(read.cause).toBe('the droid CLI was not found on PATH')
+  })
+})
+
+describe('the residue the harness\'s own teardown leaves', () => {
+  const before: FactoryHarnessRegistry = {
+    marketplaces: [{ name: FACTORY_MARKETPLACE_NAME, source: 'local:/kyberdash/marketplaces/kyberdash' }],
+    plugins: [{ identity: FACTORY_PLUGIN_IDENTITY, status: 'Enabled' }],
+  }
+
+  it('reports the marketplace registration the harness\'s uninstall left behind', () => {
+    const fake = fakeHarness()
+    fake.marketplaces.add(FACTORY_MARKETPLACE_NAME)
+
+    const residue = readFactoryHarnessResidue(fake.harness, before)
+
+    expect(residue).toHaveLength(1)
+    expect(residue[0]?.registry).toBe('extraKnownMarketplaces')
+    expect(residue[0]?.entry).toBe(FACTORY_MARKETPLACE_NAME)
+    expect(residue[0]?.command).toBe('droid plugin marketplace remove kyberdash')
+  })
+
+  it('reports the plugin the harness\'s uninstall left behind', () => {
+    const fake = fakeHarness()
+    fake.plugins.add(FACTORY_PLUGIN_IDENTITY)
+
+    const residue = readFactoryHarnessResidue(fake.harness, before)
+
+    expect(residue).toHaveLength(1)
+    expect(residue[0]?.registry).toBe('enabledPlugins')
+    expect(residue[0]?.entry).toBe(FACTORY_PLUGIN_IDENTITY)
+    expect(residue[0]?.command).toBe('droid plugin uninstall kyberdash-factory@kyberdash --scope user')
+  })
+
+  it('reports the owner\'s disabled entry the harness\'s uninstall deleted, with the exact restoration', () => {
+    const fake = fakeHarness()
+    const disabled: FactoryHarnessRegistry = {
+      marketplaces: [],
+      plugins: [{ identity: FACTORY_PLUGIN_IDENTITY, status: 'Disabled' }],
+    }
+
+    const residue = readFactoryHarnessResidue(fake.harness, disabled)
+
+    expect(residue).toHaveLength(1)
+    expect(residue[0]?.registry).toBe('enabledPlugins')
+    expect(residue[0]?.entry).toBe(FACTORY_PLUGIN_IDENTITY)
+    // The harness has no command that restores a disabled entry, so the residue names the
+    // exact edit the owner makes instead.
+    expect(residue[0]?.command).toContain('"kyberdash-factory@kyberdash": false')
+    expect(residue[0]?.command).toContain('enabledPlugins')
+  })
+
+  it('reports nothing when the harness\'s own teardown cleaned up after itself', () => {
+    const fake = fakeHarness()
+
+    expect(readFactoryHarnessResidue(fake.harness, before)).toEqual([])
   })
 })
