@@ -27,6 +27,7 @@ import {
   parseNetstatOutput,
   parseSsOutput,
   type OtlpSpan,
+  type OtlpMetric,
 } from './receiver.js'
 import {
   DEFAULT_BATCH_SIZE,
@@ -340,6 +341,107 @@ describe('IngestWriter batching and backpressure (R2.5)', () => {
     await reingest.stop()
     expect(canon.count()).toBe(500)
     canon.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The metrics port of the writer
+// ---------------------------------------------------------------------------
+
+/**
+ * A decoded metric, as the receiver hands it over: the shape a native
+ * OpenTelemetry exporter's metrics arrive in.
+ */
+function makeMetric(name = 'droid.code.files_modified'): OtlpMetric {
+  return {
+    name,
+    unit: '1',
+    kind: 'sum',
+    aggregationTemporality: 2,
+    isMonotonic: true,
+    dataPoints: [
+      {
+        attributes: { 'session.id': 'writer-metric-session' },
+        timeUnixNano: '1756478400123456789',
+        startTimeUnixNano: null,
+        value: 4200,
+        count: null,
+        sum: null,
+      },
+    ],
+    resource: { 'service.name': 'droid' },
+    scope: { name: 'droid.telemetry', version: '1.0.0' },
+  }
+}
+
+/** A sink that can persist metrics, beside the spans it persists. */
+class MetricsCapableSink implements SpanBatchSink {
+  readonly spans: OtlpSpan[] = []
+  readonly metrics: OtlpMetric[] = []
+
+  upsertMany(batch: readonly OtlpSpan[]): void {
+    this.spans.push(...batch)
+  }
+
+  upsertMetrics(batch: readonly OtlpMetric[]): void {
+    this.metrics.push(...batch)
+  }
+}
+
+describe('IngestWriter metrics port', () => {
+  it('refuses a metrics batch on a sink that cannot persist metrics, and queues nothing', async () => {
+    // The sink offers no metrics port. The writer must refuse the batch
+    // rather than accept one it would then drop: the refusal reaches the
+    // exporter as a failed request, never as a silent loss.
+    const sink = new SlowBatchSink(0)
+    const writer = new IngestWriter(sink, { batchSize: 4 })
+
+    expect(() => writer.writeMetrics([makeMetric()])).toThrow(/metrics/)
+
+    // Nothing was accepted, so nothing can be left half-queued: the refusal
+    // happens before the batch reaches the backlog.
+    expect(writer.pendingMetrics).toBe(0)
+    expect(writer.pending).toBe(0)
+    expect(writer.pendingBytes).toBe(0)
+    expect(writer.inflightRecords).toBe(0)
+
+    // And a later flush hands the sink nothing.
+    await writer.flush()
+    expect(sink.spans).toEqual([])
+  })
+
+  it('commits a metrics batch through a sink that offers the port', async () => {
+    const sink = new MetricsCapableSink()
+    const writer = new IngestWriter(sink, { batchSize: 4 })
+
+    writer.writeMetrics([makeMetric()])
+    await writer.flush()
+
+    expect(sink.metrics).toHaveLength(1)
+    expect(sink.metrics[0]?.name).toBe('droid.code.files_modified')
+    expect(writer.pendingMetrics).toBe(0)
+  })
+
+  it('notifies the persisted hook for a metrics-only commit', async () => {
+    // The persisted hook is what moves the receiver's last-persisted fact. It
+    // counts spans and logs but not metrics, so a metrics-only commit — the
+    // shape Factory's native export sends by default — never moved it, and
+    // the receiver could not prove it had persisted anything.
+    const sink = new MetricsCapableSink()
+    const seen: Array<{ spans: number; logs: number; metrics?: number }> = []
+    const writer = new IngestWriter(sink, {
+      batchSize: 4,
+      onPersisted: (info) => {
+        seen.push(info)
+      },
+    })
+
+    writer.writeMetrics([makeMetric()])
+    await writer.flush()
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ spans: 0, logs: 0 })
+    expect(seen[0]?.metrics).toBe(1)
   })
 })
 
