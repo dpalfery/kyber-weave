@@ -99,6 +99,20 @@ const CONTRACT_VERSION = '1'
 /** The model the companion file names for the Factory session. */
 const MODEL = 'custom:gpt-5-[Proxy]-0'
 
+/** The model the plugin's own turn names, when its turn names one. */
+const PLUGIN_MODEL = 'gpt-5-codex'
+
+/**
+ * The model a companion file names, distinct from the plugin's own.
+ *
+ * Two distinct names let a case tell which source published the model it
+ * sees.
+ */
+const FILE_MODEL = 'custom:glm-5.1-[Proxy]-0'
+
+/** The model the file source publishes for that name: the wrapper stripped. */
+const FILE_MODEL_PUBLISHED = 'glm-5.1'
+
 let factoryDir: string
 
 beforeEach(async () => {
@@ -167,9 +181,25 @@ function pluginAttributes(sessionId: string, over: Record<string, unknown> = {})
   return {
     'factory.contract_version': CONTRACT_VERSION,
     'factory.session.id': sessionId,
-    'factory.model.id': 'gpt-5-codex',
+    'factory.model.id': PLUGIN_MODEL,
     ...over,
   }
+}
+
+/**
+ * The plugin's turn span for a session whose turn names no model.
+ *
+ * Factory's own `UserPromptSubmit` payload does NOT carry a model field, so a
+ * plugin-sourced turn generally names none: the session's model then has to
+ * come from the source that does know it.
+ */
+function pluginTurnSpanWithoutModel(
+  sessionId: string,
+  timestamp = '2026-04-20T10:00:02.000Z',
+): OtlpSpan {
+  const attributes = pluginAttributes(sessionId)
+  delete attributes['factory.model.id']
+  return otlpSpan(`plugin-turn-${sessionId}`, 'factory.turn', attributes, timestamp)
 }
 
 /** A decoded OTLP span, built whole so no field is left to a cast. */
@@ -236,6 +266,15 @@ function summaryOf(store: CanonStore, sessionId: string): Record<string, unknown
     | undefined
   if (payload === undefined) throw new Error(`no session payload was projected for ${sessionId}`)
   return payload.summary ?? {}
+}
+
+/** The session's published turns, as the dashboard projects them. */
+function publishedTurns(store: CanonStore, sessionId: string): Array<Record<string, unknown>> {
+  const payload = store.getSessionPayload(sessionId) as
+    | { turns?: Array<Record<string, unknown>> }
+    | undefined
+  if (payload === undefined) throw new Error(`no session payload was projected for ${sessionId}`)
+  return payload.turns ?? []
 }
 
 /** The reason a session's token total carries, when it carries one. */
@@ -666,6 +705,100 @@ describe('the Factory source precedence rule', () => {
       // The context input comes from the same counters.
       const context = contextOf(store, SESSION_ID)
       expect(reportedInputOf(context['first'])).toBe(FILE_SESSION_INPUT)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('publishes the model the file source knows when the plugin turn names none', async () => {
+    await writeFactorySession(SESSION_ID, { model: FILE_MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([pluginTurnSpanWithoutModel(SESSION_ID)], store, [droidAdapter])
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      // Factory's own turn payload names no model, so the session's model is
+      // the one the source that knows it published: the companion file's,
+      // under its own name and not under the wrapper the file wrote.
+      expect(summaryOf(store, SESSION_ID)['models']).toEqual([FILE_MODEL_PUBLISHED])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('publishes the turn model of a paired session and not the file source model beside it', async () => {
+    await writeFactorySession(SESSION_ID, { model: FILE_MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters([pluginTurnSpan(SESSION_ID)], store, [droidAdapter])
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      // The paired session's turn is the plugin's own turn, so the model that
+      // turn names is the session's model. The file row is the counter source
+      // of that same call, not a second turn of it, so the model its
+      // companion file names is not a second model of the session.
+      expect(summaryOf(store, SESSION_ID)['models']).toEqual([PLUGIN_MODEL])
+      expect(publishedTurns(store, SESSION_ID).map((turn) => turn['model'])).not.toContain(
+        FILE_MODEL_PUBLISHED,
+      )
+    } finally {
+      store.close()
+    }
+  })
+
+  it('publishes no model for a plugin session whose own turn names none', async () => {
+    const store = new CanonStore(':memory:')
+    try {
+      ingestBatchWithAdapters(
+        [pluginTurnSpanWithoutModel(PLUGIN_ONLY_SESSION_ID)],
+        store,
+        [droidAdapter],
+      )
+
+      await buildSessions(store)
+
+      // The plugin's turn names no model and no other source observed this
+      // session, so the session publishes none: no model in the summary, and
+      // no model on its turn.
+      expect(summaryOf(store, PLUGIN_ONLY_SESSION_ID)['models']).toEqual([])
+      const turns = publishedTurns(store, PLUGIN_ONLY_SESSION_ID)
+      expect(turns).toHaveLength(1)
+      expect(turns[0]?.['model'] ?? null).toBeNull()
+
+      // And the record itself carries no model attribute: the adapter never
+      // defaults one, so an absent model stays absent all the way down.
+      const record = store.get(`plugin-turn-${PLUGIN_ONLY_SESSION_ID}`)
+      const raw = record?.raw
+      expect(raw, 'the plugin record was stored').toBeTypeOf('object')
+      const attributes = (raw ?? {}) as Record<string, unknown>
+      expect(
+        Object.keys(attributes).filter((key) => key.includes('model')),
+        'the plugin turn carries no model attribute',
+      ).toEqual([])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('leaves a session only the file source observed with the model its companion file names', async () => {
+    await writeFactorySession(SESSION_ID, { model: FILE_MODEL, tokenUsage: parentTokenUsage() })
+
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([await fileRow(SESSION_ID)])
+
+      await buildSessions(store)
+
+      // No plugin record joins this session, so the file row stays the
+      // session's own turn and the session's own model: the precedence rule
+      // must not empty or rename what the plugin never observed.
+      expect(summaryOf(store, SESSION_ID)['models']).toEqual([FILE_MODEL_PUBLISHED])
     } finally {
       store.close()
     }
