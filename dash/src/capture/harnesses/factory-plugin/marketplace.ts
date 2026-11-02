@@ -40,6 +40,7 @@ import {
   openSync,
   renameSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from 'node:fs'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -159,13 +160,25 @@ export const FACTORY_MARKETPLACE_CONTENT: Record<string, string> = {
  * Every file is staged as a temporary sibling first and renamed into place only once all of
  * them are staged, so a tree that cannot be written in full leaves no partial tree behind.
  * The receipt is written by the caller, after this returned.
+ *
+ * The renames are inside the guard too: a rename that fails takes the staged siblings AND
+ * the files already renamed into place back out, and the empty directories of the tree with
+ * them. A tree left behind — even an empty one — reads as a foreign tree, and a foreign
+ * tree is refused by the install and by the uninstall, so a half-written tree would leave
+ * the owner with a capture they can neither install nor remove.
  */
 export function writeMarketplaceTree(root: string): void {
   const staged: { temp: string; target: string }[] = []
+  /** The targets that were renamed into place, so a later failure can take them back out. */
+  const landed: string[] = []
+  /** The directories the tree lives in, so a failed write leaves no tree behind at all. */
+  const directories = new Set<string>()
   try {
     for (const relative of FACTORY_MARKETPLACE_FILES) {
       const target = join(root, ...relative.split('/'))
-      mkdirSync(dirname(target), { recursive: true })
+      const dir = dirname(target)
+      mkdirSync(dir, { recursive: true })
+      for (const path of treeDirectories(dir, root)) directories.add(path)
       const temp = `${target}.${randomBytes(8).toString('hex')}.tmp`
       const fd = openSync(temp, 'wx', 0o644)
       try {
@@ -176,11 +189,47 @@ export function writeMarketplaceTree(root: string): void {
       }
       staged.push({ temp, target })
     }
+    for (const entry of staged) {
+      renameSync(entry.temp, entry.target)
+      landed.push(entry.target)
+    }
   } catch (error) {
     for (const entry of staged) rmSync(entry.temp, { force: true })
+    for (const target of landed) rmSync(target, { force: true })
+    removeEmptyDirectories(directories)
     throw error
   }
-  for (const entry of staged) renameSync(entry.temp, entry.target)
+}
+
+/**
+ * Every directory from `dir` up to and including `root`: the tree's own directories, and
+ * never one above the root.
+ */
+function treeDirectories(dir: string, root: string): string[] {
+  const found: string[] = []
+  let current = dir
+  while (current !== root) {
+    const parent = dirname(current)
+    if (parent === current) return found
+    found.push(current)
+    current = parent
+  }
+  found.push(root)
+  return found
+}
+
+/**
+ * Take the empty directories of a failed tree away, deepest first: a directory that is not
+ * empty holds a file that is not ours to remove, so it stays.
+ */
+function removeEmptyDirectories(directories: ReadonlySet<string>): void {
+  for (const dir of [...directories].sort((left, right) => right.length - left.length)) {
+    try {
+      rmdirSync(dir)
+    } catch {
+      // A directory that holds something else is not ours to remove.
+    }
+  }
 }
 
 // ── The harness command driver ───────────────────────────────────────────────────────────────

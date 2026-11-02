@@ -70,6 +70,10 @@ export function clearSpool(stateDir: string): void {
  * The events the spool keeps, oldest first: at most `SPOOL_MAX_EVENTS` of them, and at most
  * `SPOOL_MAX_BYTES` bytes. The oldest event is dropped first, because the newest event is the
  * one the next run is most likely to still care about.
+ *
+ * The bound is weighed in BYTES, because the spool file is written as UTF-8: a line of
+ * characters can be up to three times as many bytes, and a bound that counted characters
+ * would let the file grow to three times the ceiling it documents.
  */
 function boundEvents(events: readonly unknown[]): string[] {
   const kept: string[] = []
@@ -78,9 +82,11 @@ function boundEvents(events: readonly unknown[]): string[] {
     const line = serializeEvent(events[index])
     if (line === undefined) continue
     if (kept.length >= SPOOL_MAX_EVENTS) break
-    if (bytes + line.length + 1 > SPOOL_MAX_BYTES) break
+    // The newline the line is written with is a byte of the file too.
+    const size = Buffer.byteLength(line, 'utf8') + 1
+    if (bytes + size > SPOOL_MAX_BYTES) break
     kept.unshift(line)
-    bytes += line.length + 1
+    bytes += size
   }
   return kept
 }

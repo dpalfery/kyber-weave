@@ -670,6 +670,17 @@ export function installFactoryPlugin(
   })
 
   if (options.ifInstalled === true && harnessState.state !== 'plugin-installed') {
+    // A CONFLICT is not an absence: the harness holds the name KyberDash wants, so the
+    // skip must not report it as "not installed" — the owner would never learn that the
+    // name has to be cleared. The cause names the exact command that removes the entry,
+    // and it goes to STDOUT because the callers of this path (the updater and the Squad
+    // deploy step) relay stdout and nothing else. A conflict is never acted on.
+    if (harnessState.state === 'conflict') {
+      const message = harnessState.cause ?? 'the harness holds a name KyberDash does not own'
+      return result('kept-conflict', 'kept', {
+        out: [`factory plugin: kept-conflict ${paths.pluginDir}`, `factory plugin: conflict ${message}`],
+      })
+    }
     return result('skipped', 'skipped', {
       out: [`factory plugin: skipped-not-installed ${paths.pluginDir}`],
     })
