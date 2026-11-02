@@ -403,7 +403,7 @@ slot_lock=""
 # Where the lock directories live: --slot-dir ($1) when given, else under the home directory.
 # Empty when there is neither.
 slot_base() {
-  if [[ -n "$1" ]]; then
+  if [[ -n "${1:-}" ]]; then
     printf '%s\n' "$1"
   elif [[ -n "${HOME:-}" ]]; then
     printf '%s\n' "${HOME}/.cache/kyber-weave/test-slots"
