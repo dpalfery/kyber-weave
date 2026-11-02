@@ -37,7 +37,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { sha256Hex } from '../../receipt.js'
 import { factoryPluginPaths, installFactoryPlugin, uninstallFactoryPlugin } from './install.js'
-import { fakeHarness, type FakeHarness } from './testing.js'
+import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
 
 /** The marketplace the tree is registered as. Pinned as a literal, not read from the module. */
 const MARKETPLACE_NAME = 'kyberdash'
@@ -154,6 +154,15 @@ function expectedPaths(pluginDir: string): string[] {
   return OWNED_FILES.map((relative) => join(pluginDir, ...relative.split('/'))).sort()
 }
 
+/** The strict-mode install, driven through the fixture's fake harness. */
+const strict = (f: Fixture, extra: Record<string, unknown> = {}) =>
+  installFactoryPlugin(f.home, undefined, {
+    mode: 'strict',
+    processEnv: f.env,
+    harnessCli: f.fake.harness,
+    ...extra,
+  })
+
 // ── The tree the PREVIOUS route wrote ───────────────────────────────────────────────────────
 
 /** The plugin directory the previous route wrote into the Factory root. */
@@ -212,14 +221,6 @@ describe('factoryPluginPaths', () => {
 })
 
 describe('installFactoryPlugin: strict mode', () => {
-  const strict = (f: Fixture, extra: Record<string, unknown> = {}) =>
-    installFactoryPlugin(f.home, undefined, {
-      mode: 'strict',
-      processEnv: f.env,
-      harnessCli: f.fake.harness,
-      ...extra,
-    })
-
   it('writes the whole marketplace tree and a receipt listing every file with its digest', () => {
     const f = fixture('factory-install-')
     const result = strict(f)
@@ -704,5 +705,200 @@ describe("the plugin's hooks file", () => {
       'Stop',
       'SessionEnd',
     ])
+  })
+})
+
+describe('the upgrade path', () => {
+  /** The file the bundle's bytes are read from. */
+  const SCRIPT = join('kyberdash-factory', 'hooks', 'kyberdash-factory.mjs')
+
+  /**
+   * Put the tree back to the bundle KyberDash wrote BEFORE, and keep the receipt proving
+   * it: the bytes no longer match the current bundle, and nothing proves the owner edited
+   * them. That is an upgrade, not an owner edit and not `unchanged`.
+   */
+  function supersede(f: Fixture): void {
+    const script = join(f.pluginDir, SCRIPT)
+    writeFileSync(script, '// the bundle KyberDash wrote before\n')
+    const receipt = readReceipt(f.receiptFile)
+    for (const entry of receipt.files) {
+      const absolute = isAbsolute(entry.path) ? entry.path : join(receipt.root, entry.path)
+      entry.sha256 = sha256Hex(readFileSync(absolute))
+    }
+    writeFileSync(f.receiptFile, `${JSON.stringify(receipt, null, 2)}\n`)
+  }
+
+  it('rewrites the tree with the current bundle and refreshes the harness\'s cached copy', () => {
+    const f = fixture('factory-upgrade-')
+    strict(f)
+    supersede(f)
+    const before = fakeCommandLines(f.fake).length
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('upgraded')
+    expect(result.out.join('\n')).toContain(`factory plugin: upgraded ${f.pluginDir}`)
+    // The tree holds the CURRENT bundle again.
+    expect(readFileSync(join(f.pluginDir, SCRIPT), 'utf8')).not.toContain('wrote before')
+    // The receipt describes the tree that is there now.
+    const receipt = readReceipt(f.receiptFile)
+    for (const entry of receipt.files) {
+      const absolute = isAbsolute(entry.path) ? entry.path : join(receipt.root, entry.path)
+      expect(entry.sha256).toBe(sha256Hex(readFileSync(absolute)))
+    }
+    // The harness's CACHED COPY is refreshed with the command that re-copies it. The
+    // harness refuses `plugin install` for a plugin that is already installed, so the
+    // update command is the only one that can do it.
+    const commands = fakeCommandLines(f.fake).slice(before)
+    expect(commands).toContain(`plugin update ${PLUGIN_IDENTITY} --scope user`)
+    expect(commands).not.toContain(`plugin install ${PLUGIN_IDENTITY} --scope user`)
+  })
+
+  it('never runs a harness command when the tree is current and the harness holds the plugin', () => {
+    const f = fixture('factory-current-')
+    strict(f)
+    const before = fakeCommandLines(f.fake).length
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('unchanged')
+    // A routine update that finds everything current mutates nothing. The registry is
+    // READ, because the harness's own view is the install's evidence.
+    const commands = fakeCommandLines(f.fake).slice(before)
+    expect(commands.filter((line) => !line.startsWith('plugin marketplace list') && !line.startsWith('plugin list'))).toEqual([])
+  })
+
+  it('says what a dry run would do over a superseded tree', () => {
+    const f = fixture('factory-upgrade-dry-')
+    strict(f)
+    supersede(f)
+
+    const result = strict(f, { dryRun: true })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.out.join('\n')).toContain(`factory plugin: would-upgrade ${f.pluginDir}`)
+  })
+
+  it('leaves an owner-edited tree alone: that is drift, not an upgrade', () => {
+    const f = fixture('factory-upgrade-edited-')
+    strict(f)
+    // The bytes changed and the receipt still records the OLD digest, so the owner edited
+    // the tree and it is not KyberDash's to overwrite.
+    writeFileSync(join(f.pluginDir, SCRIPT), '// the owner edited this\n')
+    const before = fakeCommandLines(f.fake).length
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.reason).toBe('drift')
+    expect(fakeCommandLines(f.fake).slice(before)).toEqual([])
+  })
+})
+
+describe('a name the harness holds that KyberDash does not own', () => {
+  it('refuses with the conflict reason, not as an unreadable state', () => {
+    const f = fixture('factory-conflict-reason-')
+    // A marketplace named `kyberdash` registered from somewhere else: the harness resolves
+    // the plugin identity through the registered name, so installing against it would
+    // install somebody else's payload.
+    f.fake.marketplaces.add(MARKETPLACE_NAME)
+
+    const result = strict(f)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.reason).toBe('conflict')
+    expect(result.err.join('\n')).toContain('droid plugin marketplace remove kyberdash')
+    expect(existsSync(f.pluginDir)).toBe(false)
+  })
+
+  it('keeps the name with a warning in preserve mode, and writes nothing', () => {
+    const f = fixture('factory-conflict-preserve-')
+    f.fake.marketplaces.add(MARKETPLACE_NAME)
+
+    const result = installFactoryPlugin(f.home, undefined, {
+      mode: 'preserve',
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.disposition).toBe('kept-conflict')
+    expect(existsSync(f.pluginDir)).toBe(false)
+  })
+
+  it('never runs a harness command against a name it does not own', () => {
+    const f = fixture('factory-conflict-command-')
+    f.fake.marketplaces.add(MARKETPLACE_NAME)
+    const before = fakeCommandLines(f.fake).length
+
+    strict(f)
+
+    const commands = fakeCommandLines(f.fake).slice(before)
+    expect(commands).not.toContain(`plugin marketplace remove ${MARKETPLACE_NAME}`)
+    expect(commands).not.toContain(`plugin install ${PLUGIN_IDENTITY} --scope user`)
+  })
+
+  it('the uninstall removes KyberDash\'s own tree and leaves the name it does not own', () => {
+    const f = fixture('factory-conflict-uninstall-')
+    // A tree KyberDash wrote, and then the marketplace of the same name taken over by
+    // somebody else: the harness's SOURCE column says the registration is not ours.
+    strict(f)
+    f.fake.sources.set(MARKETPLACE_NAME, '/somewhere/else/kyberdash')
+    const before = fakeCommandLines(f.fake).length
+
+    const result = uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    expect(result.exitCode).toBe(0)
+    // The harness's commands are not run against the name that is not ours. The registry is
+    // READ, because the harness's own view is the install's evidence.
+    const commands = fakeCommandLines(f.fake).slice(before)
+    expect(commands).not.toContain(`plugin marketplace remove ${MARKETPLACE_NAME}`)
+    expect(commands).not.toContain(`plugin uninstall ${PLUGIN_IDENTITY} --scope user`)
+    // KyberDash's own tree is KyberDash's, and the receipt proves it.
+    expect(existsSync(f.pluginDir)).toBe(false)
+    expect(existsSync(f.receiptFile)).toBe(false)
+    expect(result.out.join('\n')).toContain('left alone')
+  })
+})
+
+describe('the residue the harness\'s own teardown leaves', () => {
+  it('reports what the teardown did not remove, with the exact command that clears it', () => {
+    const f = fixture('factory-residue-')
+    strict(f)
+    // The harness's uninstall leaves the marketplace registration behind.
+    f.fake.harness.run = ((original: FakeHarness['harness']['run']) => (argv: readonly string[]) => {
+      if (argv[1] === 'marketplace' && argv[2] === 'remove') {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+      return original(argv)
+    })(f.fake.harness.run)
+
+    const result = uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    expect(result.exitCode).toBe(0)
+    const out = result.out.join('\n')
+    expect(out).toContain('factory residue:')
+    expect(out).toContain('droid plugin marketplace remove kyberdash')
+  })
+
+  it('reports nothing when the harness\'s own teardown cleaned up after itself', () => {
+    const f = fixture('factory-residue-none-')
+    strict(f)
+
+    const result = uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.out.join('\n')).not.toContain('factory residue:')
   })
 })

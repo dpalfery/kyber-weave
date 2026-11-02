@@ -64,6 +64,7 @@ import {
   FACTORY_PLUGIN_IDENTITY,
   marketplaceInstallCommands,
   marketplaceUninstallCommands,
+  readFactoryHarnessResidue,
   readFactoryHarnessState,
   resolveFactoryHarnessCli,
   writeMarketplaceTree,
@@ -116,7 +117,9 @@ export type FactoryPluginOutcome =
 /** What the install decided about the plugin tree. */
 export type FactoryPluginDisposition =
   | 'installed'
+  | 'upgraded'
   | 'unchanged'
+  | 'kept-conflict'
   | 'kept-edited'
   | 'kept-foreign'
   | 'kept-unreadable'
@@ -349,6 +352,7 @@ type Classified =
   | { kind: 'unreadable'; detail: string }
   | { kind: 'foreign'; detail: string }
   | { kind: 'edited'; detail: string }
+  | { kind: 'upgrade'; detail: string }
   | { kind: 'same' }
 
 /**
@@ -360,6 +364,9 @@ type Classified =
  *              Kyber writes. Nothing proves Kyber owns it.
  *   edited     the receipt proves Kyber wrote the tree, and a file no longer matches its
  *              digest.
+ *   upgrade    the receipt proves Kyber wrote the tree, the owner has not touched it, and
+ *              its content is the bundle KyberDash wrote BEFORE — the bundle has been
+ *              superseded (D65).
  *   same       every file matches the receipt (or, without one, matches what Kyber writes).
  */
 function classify(paths: FactoryPluginPaths): Classified {
@@ -393,6 +400,18 @@ function classify(paths: FactoryPluginPaths): Classified {
       const digest = receiptDigest(receipt, paths.pluginDir, relative)
       if (digest !== undefined && sha256Hex(found.get(relative) ?? '') !== digest) {
         return { kind: 'edited', detail: `${relative} changed since install` }
+      }
+    }
+    // The tree is KyberDash's and the owner has not touched it. Is its content the CURRENT
+    // bundle? If it is not, the bundle KyberDash wrote has been superseded and the tree is
+    // an UPGRADE — not an owner edit, and not `unchanged` (D65).
+    const superseded = FACTORY_MARKETPLACE_FILES.filter(
+      (relative) => found.get(relative) !== FACTORY_MARKETPLACE_CONTENT[relative],
+    )
+    if (superseded.length > 0) {
+      return {
+        kind: 'upgrade',
+        detail: `${superseded.join(', ')} holds the bundle KyberDash wrote before, not the current one`,
       }
     }
     return { kind: 'same' }
@@ -615,8 +634,13 @@ export function installFactoryPlugin(
   }
 
   // The harness's own registry is the install's evidence, and it is read through the
-  // harness's own commands and nothing else.
-  const harnessState = readFactoryHarnessState(harness, { treeWritten: found.kind !== 'absent' })
+  // harness's own commands and nothing else. The tree root travels with the read because
+  // the harness's SOURCE column is what decides whether a marketplace named `kyberdash`
+  // is KyberDash's own (D46).
+  const harnessState = readFactoryHarnessState(harness, {
+    treeWritten: found.kind !== 'absent',
+    marketplaceRoot: paths.pluginDir,
+  })
 
   if (options.ifInstalled === true && harnessState.state !== 'plugin-installed') {
     return result('skipped', 'skipped', {
@@ -624,16 +648,18 @@ export function installFactoryPlugin(
     })
   }
 
-  if (dryRun) {
-    const legacy = clearLegacyTree(paths, receipt, env?.platform, true)
-    return result('installed', 'would-write', {
-      consent: ensureConsent(paths, true),
-      out: [`factory plugin: would-install ${paths.pluginDir}`, ...legacy.out],
-      err: legacy.err,
-    })
-  }
-
   if (!harnessState.readable) {
+    // A CONFLICT is a name the harness holds that KyberDash does not own, and it is
+    // reported as a conflict: the registry, the entry and the exact command that removes
+    // it are named. An unreadable state is a different thing and says so.
+    if (harnessState.state === 'conflict') {
+      const message = harnessState.cause ?? 'the harness holds a name KyberDash does not own'
+      if (!preserve) return strictRefusal('conflict', message)
+      return result('kept-conflict', 'kept', {
+        out: [`factory plugin: kept-conflict ${paths.pluginDir}`],
+        err: [`kyberdash capture: warning: ${message}`],
+      })
+    }
     const message = `the Factory harness's state could not be read: ${harnessState.cause ?? 'unknown cause'}; nothing was written`
     if (!preserve) return strictRefusal('unreadable', message)
     return result('kept-unreadable', 'kept', {
@@ -642,11 +668,19 @@ export function installFactoryPlugin(
     })
   }
 
-  if (found.kind === 'same' && harnessState.state === 'plugin-installed') {
-    // The tree is Kyber's and the harness already holds the plugin: there is nothing to do.
-    return result('unchanged', 'noop', {
-      consent: ensureConsent(paths, false),
-      out: [`factory plugin: unchanged ${paths.pluginDir}`],
+  if (dryRun) {
+    const legacy = clearLegacyTree(paths, receipt, env?.platform, true)
+    if (found.kind === 'upgrade') {
+      return result('upgraded', 'would-write', {
+        consent: ensureConsent(paths, true),
+        out: [`factory plugin: would-upgrade ${paths.pluginDir}`, ...legacy.out],
+        err: legacy.err,
+      })
+    }
+    return result('installed', 'would-write', {
+      consent: ensureConsent(paths, true),
+      out: [`factory plugin: would-install ${paths.pluginDir}`, ...legacy.out],
+      err: legacy.err,
     })
   }
 
@@ -662,7 +696,29 @@ export function installFactoryPlugin(
     legacyLines = legacy
   }
 
-  const commands = marketplaceInstallCommands(harnessState.state, paths.pluginDir)
+  if (found.kind === 'upgrade') {
+    // The tree KyberDash wrote is superseded: the tree and its receipt are rewritten with
+    // the current bundle, and the harness's CACHED COPY — the copy that actually runs — is
+    // refreshed by the harness's own command below (D65).
+    writeTree(paths)
+    writeReceipt(paths)
+  } else if (found.kind === 'same' && receipt === undefined) {
+    // The tree holds exactly what KyberDash writes, but nothing proves KyberDash wrote
+    // it, so the receipt that proves it for the next upgrade is written now.
+    writeReceipt(paths)
+  }
+
+  const refresh = found.kind === 'upgrade'
+  if (!refresh && found.kind === 'same' && harnessState.state === 'plugin-installed') {
+    // The tree is current and the harness already holds the plugin: there is nothing to do,
+    // and a routine update mutates nothing.
+    return result('unchanged', 'noop', {
+      consent: ensureConsent(paths, false),
+      out: [`factory plugin: unchanged ${paths.pluginDir}`],
+    })
+  }
+
+  const commands = marketplaceInstallCommands(harnessState, paths.pluginDir, { refresh })
   for (const argv of commands) {
     const answer = harness.run(argv)
     if (answer.exitCode !== 0) {
@@ -676,10 +732,10 @@ export function installFactoryPlugin(
   }
 
   const executable = harness.executable ?? FACTORY_HARNESS_EXECUTABLE
-  return result('installed', 'wrote', {
+  return result(refresh ? 'upgraded' : 'installed', 'wrote', {
     consent: ensureConsent(paths, false),
     out: [
-      `factory plugin: installed ${paths.pluginDir}`,
+      `factory plugin: ${refresh ? 'upgraded' : 'installed'} ${paths.pluginDir}`,
       `factory marketplace: ${FACTORY_MARKETPLACE_NAME}`,
       `factory plugin identity: ${FACTORY_PLUGIN_IDENTITY}`,
       `factory harness: ${executable}`,
@@ -735,8 +791,25 @@ export function uninstallFactoryPlugin(
 
   // The harness-side state goes first: the harness's own uninstall, then the harness's own
   // marketplace removal. The Kyber-owned tree and the receipt follow.
-  const harnessState = readFactoryHarnessState(harness, { treeWritten: found.kind !== 'absent' })
+  const harnessState = readFactoryHarnessState(harness, {
+    treeWritten: found.kind !== 'absent',
+    marketplaceRoot: paths.pluginDir,
+  })
   if (!harnessState.readable) {
+    // A conflict is not an unreadable state: the entry that holds KyberDash's name belongs
+    // to somebody else, so the harness's commands are not run against it — but KyberDash's
+    // OWN tree is KyberDash's, and the receipt proves it, so it is still removed.
+    if (harnessState.state === 'conflict') {
+      const message = harnessState.cause ?? 'the harness holds a name KyberDash does not own'
+      rmSync(paths.pluginDir, { recursive: true, force: true })
+      rmSync(paths.receiptFile, { force: true })
+      return result('skipped', 'restored', {
+        out: [
+          `factory plugin: removed capture plugin ${paths.pluginDir}`,
+          `factory harness: left alone (${message})`,
+        ],
+      })
+    }
     const message = `the Factory harness's state could not be read: ${harnessState.cause ?? 'unknown cause'}; nothing was removed`
     return result('refused', 'refused', {
       exitCode: 1,
@@ -744,7 +817,11 @@ export function uninstallFactoryPlugin(
       err: [`kyberdash capture: ${message}`],
     })
   }
-  for (const argv of marketplaceUninstallCommands(harnessState.state)) {
+  // The registry as it stands BEFORE the teardown: the residue is what the teardown was
+  // meant to remove and did not, and the owner's own disabled entry is only visible before
+  // the harness's uninstall deletes it.
+  const before = harnessState.registry
+  for (const argv of marketplaceUninstallCommands(harnessState)) {
     const answer = harness.run(argv)
     if (answer.exitCode !== 0) {
       return result('refused', 'refused', {
@@ -763,8 +840,15 @@ export function uninstallFactoryPlugin(
   // reported with the exact command when it does not.
   const legacy = clearLegacyTree(paths, receipt, env?.platform, false)
   rmSync(paths.receiptFile, { force: true })
+  // The residue the harness's own teardown left behind is REPORTED, never patched: the
+  // owner's settings file is never written by KyberDash (D48, D59).
+  const residue = readFactoryHarnessResidue(harness, before)
   return result('skipped', 'restored', {
-    out: [`factory plugin: removed capture plugin ${paths.pluginDir}`, ...legacy.out],
+    out: [
+      `factory plugin: removed capture plugin ${paths.pluginDir}`,
+      ...legacy.out,
+      ...residue.map((row) => `factory residue: ${row.detail} — ${row.command}`),
+    ],
     err: legacy.err,
   })
 }

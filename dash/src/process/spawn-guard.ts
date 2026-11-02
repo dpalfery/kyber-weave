@@ -169,6 +169,38 @@ function refusalReason(request: GuardedSpawnRequest, env: NodeJS.ProcessEnv, dep
 }
 
 /**
+ * The guard's own limits for a caller that cannot use `guardedSpawn`.
+ *
+ * The Factory harness driver is synchronous and must report a refusal as a RESULT rather
+ * than throw, so it cannot use `guardedSpawn`. It asks the guard here instead of
+ * re-implementing half of it: deny mode, the depth limit, and a role that may not spawn
+ * at all. The ONE exception is the engine role, which the role table does not list among
+ * the kinds an engine may spawn, because the engine drives the owner's harness CLI — the
+ * spawn-site allowlist records that deviation and the bound that contains it.
+ *
+ * `undefined` means the guard has no objection.
+ */
+export function guardLimitsForHarnessTool(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const depth = ownDepth(env)
+  if (depth === null) {
+    return `KYBERDASH_SPAWN_DEPTH=${env.KYBERDASH_SPAWN_DEPTH ?? ''} is not a depth`
+  }
+  if (depth >= MAX_DEPTH) {
+    return `calling process is at depth ${depth}, the limit is ${MAX_DEPTH - 1}`
+  }
+  const role = env.KYBERDASH_SPAWN_ROLE
+  if (role !== undefined && role !== '' && role !== 'engine') {
+    const allowed = SPAWNABLE_BY_ROLE[role]
+    if (allowed === undefined) return `a process with role ${role} never spawns`
+    if (!allowed.includes('tool')) return `a ${role} process never spawns a tool`
+  }
+  if (env.KYBERDASH_SPAWN_GUARD === 'deny' && allowReason === null) {
+    return 'spawn guard is in deny mode and the test did not call allowRealSpawns'
+  }
+  return undefined
+}
+
+/**
  * Runs spawnFn only when the guard allows it, with the role and depth stamped into the
  * child environment. Throws SpawnRefusedError, and records a hit, otherwise.
  */

@@ -38,9 +38,11 @@ import {
   readFactoryHarnessRegistry,
   readFactoryHarnessResidue,
   readFactoryHarnessState,
+  resolveFactoryHarnessCli,
   type FactoryHarnessRegistry,
 } from './marketplace.js'
 import { fakeCommandLines, fakeHarness, type FakeHarness } from './testing.js'
+import { allowRealSpawns, resetSpawnAllowance } from '../../../../tests/setup/spawn-guard.js'
 
 /** The marketplace tree root, relative to the injected home. */
 const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', FACTORY_MARKETPLACE_NAME)
@@ -59,6 +61,7 @@ const READ_COMMANDS = ['plugin marketplace list', 'plugin list --scope user']
 const dirs: string[] = []
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  resetSpawnAllowance()
 })
 
 function temp(prefix: string): string {
@@ -220,6 +223,9 @@ describe('the marketplace install route', () => {
       ...READ_COMMANDS,
       `plugin uninstall ${FACTORY_PLUGIN_IDENTITY} --scope user`,
       `plugin marketplace remove ${FACTORY_MARKETPLACE_NAME}`,
+      // The registry is read again after the teardown, because the residue is what the
+      // teardown was meant to remove and did not.
+      ...READ_COMMANDS,
     ])
     expect(existsSync(f.marketplaceRoot)).toBe(false)
     expect(existsSync(f.receiptFile)).toBe(false)
@@ -637,5 +643,60 @@ describe('the harness prints a wrapped table', () => {
     expect(ours.state).toBe('marketplace-registered')
     expect(ours.conflict).toBeUndefined()
     expect(theirs.state).toBe('conflict')
+  })
+})
+
+describe('the driver that runs the harness', () => {
+  it('refuses to start the real CLI when the spawn guard forbids it', () => {
+    // The guard's deny mode is set for every test file, so the driver must not reach the
+    // developer's own Factory installation.
+    const cli = resolveFactoryHarnessCli({ processEnv: { ...process.env } })
+
+    expect(cli.unavailable).toMatch(/spawn guard/i)
+    expect(cli.run(['plugin', 'list'])).toMatchObject({ exitCode: 127 })
+  })
+
+  it('refuses when the injected environment carries the deny flag', () => {
+    const cli = resolveFactoryHarnessCli({
+      processEnv: { PATH: '/usr/bin:/bin', KYBERDASH_SPAWN_GUARD: 'deny' },
+    })
+
+    expect(cli.unavailable).toMatch(/spawn guard/i)
+  })
+
+  it('reports a timeout as a timeout, and not as a missing executable', () => {
+    // A real child, because only a real child can time out. It sleeps past the cap.
+    allowRealSpawns('the driver timeout case needs a real child that outlives the cap')
+    const dir = temp('factory-driver-timeout-')
+    const script = join(dir, 'droid')
+    writeFileSync(script, '#!/bin/sh\nsleep 5\n')
+    chmodSync(script, 0o755)
+
+    const cli = resolveFactoryHarnessCli({
+      processEnv: { PATH: dir },
+      timeoutMs: 250,
+    })
+
+    const answer = cli.run(['plugin', 'list'])
+
+    expect(answer.exitCode).toBe(124)
+    expect(answer.stderr).toMatch(/timed out after 250 ms/)
+  })
+
+  it('bounds the command\'s output, not one stream of it', () => {
+    const dir = temp('factory-driver-output-')
+    const script = join(dir, 'droid')
+    writeFileSync(script, '#!/bin/sh\necho aaaaaaaaaaaaaaaaaaaa\necho bbbbbbbbbbbbbbbbbbbb 1>&2\n')
+    chmodSync(script, 0o755)
+    allowRealSpawns('the driver output case needs a real child that writes to both streams')
+
+    const cli = resolveFactoryHarnessCli({ processEnv: { PATH: dir }, maxOutputBytes: 4096 })
+
+    const answer = cli.run(['plugin', 'list'])
+
+    // Both streams arrived, and neither exceeded the cap: the cap is on the command.
+    expect(answer.stdout).toContain('aaaa')
+    expect(answer.stderr).toContain('bbbb')
+    expect(answer.exitCode).toBe(0)
   })
 })

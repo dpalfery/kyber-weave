@@ -45,6 +45,7 @@ import {
 import { delimiter, dirname, join, resolve } from 'node:path'
 
 import { FACTORY_PLUGIN_SOURCE } from './generated/plugin-source.js'
+import { guardLimitsForHarnessTool } from '../../../process/spawn-guard.js'
 import type { HarnessCli } from '../registry.js'
 
 // ── The names the harness knows the unit by ───────────────────────────────────────────────────
@@ -203,20 +204,16 @@ export type DroidCommandResult = {
 /** The cap on one harness command's runtime. The harness's own plugin verbs are quick. */
 export const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 
-/** The cap on the bytes one harness command's output may contribute. */
+/**
+ * The cap on the bytes one harness command's output may contribute.
+ *
+ * The cap is on the COMMAND's output, and `spawnSync` caps each stream separately, so
+ * each stream gets half of it.
+ */
 export const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024
 
 /** The executable the driver looks for on PATH. */
 export const FACTORY_HARNESS_EXECUTABLE = 'droid'
-
-/**
- * The spawn guard's deny mode, which the test setup sets for every test file.
- *
- * The driver honours it: under deny mode no child process starts at all, so a test that
- * forgets to inject a fake fails loudly with a named cause instead of running the real CLI
- * against the developer's own Factory installation.
- */
-const SPAWN_GUARD_ENV = 'KYBERDASH_SPAWN_GUARD'
 
 export type FactoryHarnessCliOptions = {
   /** The environment PATH is read from; defaults to `process.env`. */
@@ -271,9 +268,13 @@ export function resolveFactoryHarnessCli(
   const processEnv = options.processEnv ?? process.env
   const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
-  if (processEnv[SPAWN_GUARD_ENV] === 'deny') {
+  // The guard's own limits, asked of the guard rather than re-implemented here: the deny
+  // mode, the depth limit, and a role that may not spawn at all. The INJECTED environment
+  // is asked as well, so a test that injects a deny flag is refused exactly as it asked.
+  const guardRefusal = guardLimitsForHarnessTool() ?? guardLimitsForHarnessTool(processEnv)
+  if (guardRefusal !== undefined) {
     return unreachableHarness(
-      'the spawn guard forbids starting a child process, so the Factory harness\'s state cannot be read or changed',
+      `the spawn guard forbids starting a child process (${guardRefusal}), so the Factory harness's state cannot be read or changed`,
     )
   }
   const executable = resolveExecutable(FACTORY_HARNESS_EXECUTABLE, processEnv)
@@ -288,20 +289,33 @@ export function resolveFactoryHarnessCli(
     run: (argv: readonly string[]) => {
       const result = spawnSync(executable, [...argv], {
         timeout: timeoutMs,
-        maxBuffer: maxOutputBytes,
+        // The cap is on the command's output and `spawnSync` caps each stream separately,
+        // so each stream gets half of the budget.
+        maxBuffer: Math.max(1024, Math.floor(maxOutputBytes / 2)),
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       })
+      // A timeout arrives as an error AND a null status, so it is read FIRST: reporting it
+      // as a missing executable would name the wrong cause, and a child killed by a
+      // signal is neither a timeout nor a refusal.
+      if (result.status === null) {
+        const timedOut = (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
+        if (timedOut) {
+          return {
+            exitCode: 124,
+            stdout: '',
+            stderr: `the ${FACTORY_HARNESS_EXECUTABLE} command timed out after ${timeoutMs} ms`,
+          }
+        }
+        return {
+          exitCode: 125,
+          stdout: '',
+          stderr: `the ${FACTORY_HARNESS_EXECUTABLE} command was killed by ${result.signal ?? 'a signal'}`,
+        }
+      }
       if (result.error !== undefined) {
         return { exitCode: 127, stdout: '', stderr: result.error.message }
-      }
-      if (result.status === null) {
-        return {
-          exitCode: 124,
-          stdout: '',
-          stderr: `the ${FACTORY_HARNESS_EXECUTABLE} command timed out after ${timeoutMs} ms`,
-        }
       }
       return { exitCode: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
     },
@@ -830,20 +844,44 @@ export function readFactoryHarnessResidue(
 
 /**
  * The harness commands that move the harness to `plugin-installed` from the state it is in,
- * in the order they must run. An empty list means the harness already holds the plugin.
+ * in the order they must run.
+ *
+ * The commands come from the harness's OWN registry rather than from a state name, because
+ * the registry says two things at once and the harness resolves the plugin identity through
+ * the REGISTERED MARKETPLACE NAME:
+ *
+ *   - the marketplace is not registered → `plugin marketplace add <the tree>` runs first,
+ *     because `plugin update` fails without a registration ("Marketplace \"kyberdash\" not
+ *     found");
+ *   - the plugin is installed → `plugin update`, which re-copies the plugin's files into the
+ *     harness's cache. `plugin install` is REFUSED for an installed plugin ("already
+ *     installed at user scope"), so it is never run against one;
+ *   - the plugin is not installed → `plugin install`.
+ *
+ * `refresh` says the tree's CONTENT changed, so the harness's cached copy must be
+ * refreshed. Without it an installed plugin is left exactly as it is, so a routine update
+ * that finds everything current runs no harness command at all.
  *
  * A conflict is never acted on: the installer refuses before it writes anything, and a
  * marketplace KyberDash does not own must never be installed against.
  */
 export function marketplaceInstallCommands(
-  state: FactoryHarnessState,
+  report: FactoryHarnessStateReport,
   marketplaceRoot: string,
+  options: { refresh?: boolean } = {},
 ): string[][] {
-  if (state === 'plugin-installed') return []
-  if (state === 'conflict') return []
+  if (report.state === 'conflict') return []
+  const registered = report.registry.marketplaces.some(
+    (row) => row.name === FACTORY_MARKETPLACE_NAME,
+  )
+  const installed = report.registry.plugins.some((row) => row.identity === FACTORY_PLUGIN_IDENTITY)
   const commands: string[][] = []
-  if (state !== 'marketplace-registered') {
-    commands.push(['plugin', 'marketplace', 'add', marketplaceRoot])
+  if (!registered) commands.push(['plugin', 'marketplace', 'add', marketplaceRoot])
+  if (installed) {
+    if (options.refresh === true) {
+      commands.push(['plugin', 'update', FACTORY_PLUGIN_IDENTITY, '--scope', 'user'])
+    }
+    return commands
   }
   commands.push(['plugin', 'install', FACTORY_PLUGIN_IDENTITY, '--scope', 'user'])
   return commands
@@ -853,16 +891,19 @@ export function marketplaceInstallCommands(
  * The harness commands that remove the harness-side state, in the order they must run: the
  * plugin first, then the marketplace it came from.
  *
+ * The commands come from the harness's OWN registry: a marketplace that is not registered is
+ * not removed, because the harness has nothing of KyberDash's to remove there.
+ *
  * A conflict is never acted on either: the entry that holds KyberDash's name belongs to
  * somebody else, and the owner's registry must be left exactly as it was found (D46).
  */
-export function marketplaceUninstallCommands(state: FactoryHarnessState): string[][] {
-  if (state === 'conflict') return []
+export function marketplaceUninstallCommands(report: FactoryHarnessStateReport): string[][] {
+  if (report.state === 'conflict') return []
   const commands: string[][] = []
-  if (state === 'plugin-installed') {
+  if (report.registry.plugins.some((row) => row.identity === FACTORY_PLUGIN_IDENTITY)) {
     commands.push(['plugin', 'uninstall', FACTORY_PLUGIN_IDENTITY, '--scope', 'user'])
   }
-  if (state === 'plugin-installed' || state === 'marketplace-registered') {
+  if (report.registry.marketplaces.some((row) => row.name === FACTORY_MARKETPLACE_NAME)) {
     commands.push(['plugin', 'marketplace', 'remove', FACTORY_MARKETPLACE_NAME])
   }
   return commands
