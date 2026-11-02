@@ -212,21 +212,25 @@ describe('detectInstall: factory', () => {
   // runs (and reports) while factory is not yet in the registry.
   const factory = (): CaptureHarnessWriter => writerFor('factory')
 
-  /** The Factory root a test points $FACTORY_DIR at, and the plugin tree inside it. */
+  /**
+   * The Factory root a test points $FACTORY_DIR at, and the marketplace tree KyberDash
+   * owns. The tree is under KyberDash's own state directory: the install writes nothing
+   * under the Factory root, so the tree is no longer evidence that lives there.
+   */
   const ROOT = '/env/factory'
-  const PLUGIN_DIR = '/env/factory/plugins/kyberdash-factory'
+  const PLUGIN_DIR = '/h/.kyberdash/marketplaces/kyberdash'
 
-  it('is detected by the Factory plugin tree', () => {
+  it('is detected by the Factory marketplace tree', () => {
     vi.stubEnv('FACTORY_DIR', ROOT)
-    // The plugin directory and the directory that holds it: the probe may ask for either.
+    // The marketplace tree and the directory that holds it: the probe may ask for either.
     const result = detectInstall(
       factory(),
       '/h',
       POSIX,
-      probeOf([PLUGIN_DIR, '/env/factory/plugins']),
+      probeOf([PLUGIN_DIR, '/h/.kyberdash/marketplaces']),
     )
     expect(result.installed).toBe('detected')
-    expect(result.evidence.join('\n')).toContain(ROOT)
+    expect(result.evidence.join('\n')).toContain(PLUGIN_DIR)
   })
 
   it('is not detected by an empty .factory directory', () => {
@@ -247,7 +251,7 @@ describe('detectInstall: factory', () => {
     expect(result.installed).toBe('not-detected')
   })
 
-  it('resolves the Factory tree through $FACTORY_DIR, not through the home', () => {
+  it('resolves the Factory tree under KyberDash\'s own state directory, not under the Factory root', () => {
     vi.stubEnv('FACTORY_DIR', ROOT)
     const seen: string[] = []
     detectInstall(factory(), '/h', POSIX, (path) => {
@@ -255,7 +259,7 @@ describe('detectInstall: factory', () => {
       return 'absent'
     })
     expect(seen.length).toBeGreaterThan(0)
-    expect(seen.some((path) => path.startsWith(ROOT))).toBe(true)
-    expect(seen.some((path) => path.startsWith('/h/.factory'))).toBe(false)
+    expect(seen.some((path) => path.startsWith(PLUGIN_DIR))).toBe(true)
+    expect(seen.some((path) => path.startsWith(ROOT))).toBe(false)
   })
 })

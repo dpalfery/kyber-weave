@@ -30,11 +30,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CAPTURE_ENDPOINT, isPluginOnly, runCapture, type PluginOnlyWriter } from '../index.js'
 import type { PathEnv } from '../paths.js'
 import { harnessWriterFor, type CaptureHarnessWriter } from './registry.js'
+import { fakeHarness, type FakeHarness } from './factory-plugin/testing.js'
 
-/** The plugin directory Kyber owns inside the Factory root. */
-const PLUGIN_DIR_NAME = 'kyberdash-factory'
-/** The files Kyber owns in that directory, relative to it: the tree shape. */
-const OWNED_FILES = ['.factory-plugin/plugin.json', 'hooks/hooks.json', 'hooks/kyberdash-factory.mjs']
+/** The marketplace tree Kyber owns, relative to the injected home. */
+const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', 'kyberdash')
+/** The files Kyber owns in that tree, relative to it: the tree shape. */
+const OWNED_FILES = [
+  '.factory-plugin/marketplace.json',
+  'kyberdash-factory/.factory-plugin/plugin.json',
+  'kyberdash-factory/hooks/hooks.json',
+  'kyberdash-factory/hooks/kyberdash-factory.mjs',
+]
 
 const HOST = process.platform
 const pathEnv = (): PathEnv => ({ platform: HOST })
@@ -49,10 +55,12 @@ type Fixture = {
   home: string
   /** The Factory root: the home's `.factory`, which `$FACTORY_DIR` also points at. */
   root: string
-  /** The plugin directory Kyber owns inside the Factory root. */
+  /** The marketplace tree Kyber owns, under KyberDash's own state directory. */
   pluginDir: string
   /** The owner's Factory settings. KyberDash never writes it. */
   settingsFile: string
+  /** The fake harness CLI the install and the uninstall are driven through. */
+  fake: FakeHarness
 }
 
 const tempDirs: string[] = []
@@ -77,8 +85,9 @@ function fixture(prefix: string): Fixture {
   return {
     home,
     root,
-    pluginDir: join(root, 'plugins', PLUGIN_DIR_NAME),
+    pluginDir: join(home, MARKETPLACE_RELATIVE),
     settingsFile: join(root, 'settings.json'),
+    fake: fakeHarness(),
   }
 }
 
@@ -286,31 +295,37 @@ describe('the Factory (Droid) capture writer', () => {
     expect(factoryWriter().resolvePath(f.home, pathEnv())).toBe(join(elsewhere, 'settings.json'))
   })
 
-  it('owns a plugin directory inside the Factory root', () => {
+  it('owns the marketplace tree under KyberDash\'s own state directory', () => {
     const f = fixture('factory-writer-plugin-')
     expect(factoryPluginWriter().filePlugin.path(f.home, pathEnv())).toBe(f.pluginDir)
   })
 
-  it('installs the plugin tree and leaves the owner settings file byte-identical', () => {
+  it('installs the marketplace tree and leaves the owner settings file byte-identical', () => {
     const f = fixture('factory-writer-install-')
     const owner = '{\n  "theme": "dark"\n}\n'
     writeFileSync(f.settingsFile, owner)
 
-    const result = factoryPluginWriter().filePlugin.install(f.home, pathEnv(), { dryRun: false })
+    const result = factoryPluginWriter().filePlugin.install(f.home, pathEnv(), {
+      dryRun: false,
+      harnessCli: f.fake.harness,
+    })
 
     expect(result.exitCode).toBe(0)
     expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
     expect(readFileSync(f.settingsFile, 'utf8')).toBe(owner)
   })
 
-  it('removes the plugin tree again and leaves the owner settings file byte-identical', () => {
+  it('removes the marketplace tree again and leaves the owner settings file byte-identical', () => {
     const f = fixture('factory-writer-uninstall-')
     const owner = '{\n  "theme": "dark"\n}\n'
     writeFileSync(f.settingsFile, owner)
     const writer = factoryPluginWriter()
-    writer.filePlugin.install(f.home, pathEnv(), { dryRun: false })
+    writer.filePlugin.install(f.home, pathEnv(), { dryRun: false, harnessCli: f.fake.harness })
 
-    const removed = writer.filePlugin.uninstall(f.home, pathEnv(), { dryRun: false })
+    const removed = writer.filePlugin.uninstall(f.home, pathEnv(), {
+      dryRun: false,
+      harnessCli: f.fake.harness,
+    })
 
     expect(removed.exitCode).toBe(0)
     expect(existsSync(f.pluginDir)).toBe(false)
@@ -327,6 +342,7 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
 
     expect(enabled.exitCode).toBe(0)
@@ -341,6 +357,7 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
 
     expect(disabled.exitCode).toBe(0)
@@ -355,6 +372,7 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
     // The switch starts the capture; it does not opt the prompt text in.
     expect(existsSync(f.pluginDir)).toBe(true)
@@ -369,6 +387,7 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
     expect(existsSync(f.pluginDir)).toBe(true)
     expect(consentContent(f)).toBe(true)
@@ -382,6 +401,7 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
     expect(consentContent(f)).toBe(false)
   })
@@ -394,12 +414,14 @@ describe('the Factory (Droid) capture writer', () => {
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
     await runCapture('disable', {
       homeDir: f.home,
       platform: HOST,
       harnessIds: ['factory'],
       fetchHealth: NO_LISTENER,
+      harnessCli: f.fake.harness,
     })
     expect(existsSync(f.pluginDir)).toBe(false)
     expect(consentContent(f)).toBe(false)

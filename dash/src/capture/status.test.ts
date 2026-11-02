@@ -13,6 +13,7 @@ import { DEFAULT_CAPTURE_ENDPOINT, isPluginOnly, runCapture, type PluginOnlyWrit
 import { buildCaptureStatus, buildHarnessStatus, createApplicabilityFilter } from './status.js'
 import type { CaptureHarnessStatus, StatusContext } from './status.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
+import { fakeHarness } from './harnesses/factory-plugin/testing.js'
 import { KILO_PLUGIN_SOURCE } from './kilo-plugin/source.js'
 
 const temporaryHomes: string[] = []
@@ -187,6 +188,9 @@ async function enableViaEngine(home: string, harnessIds: string[]): Promise<void
     appDataDir: hostEnv(home).appData,
     harnessIds,
     fetchHealth: NO_LISTENER,
+    // The Factory route drives the harness's own CLI: a fake stands in for it, so no test
+    // needs the real CLI on the machine.
+    harnessCli: fakeHarness().harness,
   })
   expect(result.exitCode).toBe(0)
 }
@@ -639,7 +643,10 @@ describe('factory (droid) capture status', () => {
   it('reports the plugin as on with a recorded receipt after it is installed', () => {
     const home = makeHome()
     const writer = factoryWriter()
-    const installed = writer.filePlugin.install(home, hostEnv(home), { dryRun: false })
+    const installed = writer.filePlugin.install(home, hostEnv(home), {
+      dryRun: false,
+      harnessCli: fakeHarness().harness,
+    })
     expect(installed.exitCode).toBe(0)
 
     const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
@@ -652,7 +659,7 @@ describe('factory (droid) capture status', () => {
   it('names the resolved plugin directory and the consent', () => {
     const home = makeHome()
     const writer = factoryWriter()
-    writer.filePlugin.install(home, hostEnv(home), { dryRun: false })
+    writer.filePlugin.install(home, hostEnv(home), { dryRun: false, harnessCli: fakeHarness().harness })
 
     const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
     // The directory the plugin resolves to is reported wherever the row carries it.
@@ -670,11 +677,11 @@ describe('factory (droid) capture status', () => {
     expect(consent).toMatch(/consent: off/i)
   })
 
-  it('reports unknown for a plugin tree KyberDash did not write', () => {
+  it('reports unknown for a marketplace tree KyberDash did not write', () => {
     const home = makeHome()
-    const pluginDir = join(home, '.factory', 'plugins', 'kyberdash-factory')
-    mkdirSync(join(pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+    const pluginDir = join(home, '.kyberdash', 'marketplaces', 'kyberdash')
+    mkdirSync(join(pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
 
     const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
     expect(factory.state).toBe('unknown')

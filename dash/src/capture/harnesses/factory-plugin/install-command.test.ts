@@ -32,11 +32,17 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PathEnv } from '../../paths.js'
+import { fakeHarness, type FakeHarness } from './testing.js'
 
-/** The plugin directory Kyber owns inside the Factory root. */
-const PLUGIN_DIR_NAME = 'kyberdash-factory'
-/** The files Kyber owns in that directory, relative to it: the tree shape. */
-const OWNED_FILES = ['.factory-plugin/plugin.json', 'hooks/hooks.json', 'hooks/kyberdash-factory.mjs']
+/** The marketplace tree Kyber owns, relative to the injected home. */
+const MARKETPLACE_RELATIVE = join('.kyberdash', 'marketplaces', 'kyberdash')
+/** The files Kyber owns in that tree, relative to it: the tree shape. */
+const OWNED_FILES = [
+  '.factory-plugin/marketplace.json',
+  'kyberdash-factory/.factory-plugin/plugin.json',
+  'kyberdash-factory/hooks/hooks.json',
+  'kyberdash-factory/hooks/kyberdash-factory.mjs',
+]
 
 type PluginInstallCommandResult = { exitCode: number; stdout: string; stderr: string }
 
@@ -50,6 +56,8 @@ type PluginInstallCommandOptions = {
   homeDir: string
   env?: PathEnv
   processEnv?: NodeJS.ProcessEnv
+  /** The harness's CLI, as the install reaches it. A test injects a fake. */
+  harnessCli?: unknown
 }
 
 type PluginInstallCommandRunner = (options: PluginInstallCommandOptions) => PluginInstallCommandResult
@@ -95,7 +103,7 @@ type Fixture = {
   home: string
   /** The Factory root: the home's `.factory`, which `$FACTORY_DIR` also points at. */
   root: string
-  /** The plugin directory Kyber owns inside the Factory root. */
+  /** The marketplace tree Kyber owns, under KyberDash's own state directory. */
   pluginDir: string
   /** The owner's Factory settings. The command never writes it. */
   settingsFile: string
@@ -103,6 +111,8 @@ type Fixture = {
   receiptFile: string
   /** The content consent file: the owner's decision about the prompt text. */
   consentFile: string
+  /** The fake harness CLI the install is driven through. */
+  fake: FakeHarness
 }
 
 const tempDirs: string[] = []
@@ -120,10 +130,11 @@ function fixture(prefix: string): Fixture {
   return {
     home,
     root,
-    pluginDir: join(root, 'plugins', PLUGIN_DIR_NAME),
+    pluginDir: join(home, MARKETPLACE_RELATIVE),
     settingsFile: join(root, 'settings.json'),
     receiptFile: join(home, '.kyberdash', 'factory-plugin-receipt.json'),
     consentFile: join(home, '.kyberdash', 'factory-plugin.json'),
+    fake: fakeHarness(),
   }
 }
 
@@ -171,12 +182,13 @@ async function run(
     homeDir: f.home,
     env: { platform: process.platform },
     processEnv: { FACTORY_DIR: f.root },
+    harnessCli: f.fake.harness,
     ...extra,
   })
 }
 
 describe('capture plugin install --harness factory', () => {
-  it('installs the Factory capture plugin directory', async () => {
+  it('installs the Factory capture plugin marketplace tree', async () => {
     const f = fixture('factory-command-install-')
     const result = await run(f)
     expect(result.exitCode).toBe(0)
@@ -193,7 +205,7 @@ describe('capture plugin install --harness factory', () => {
     const result = await run(f)
     expect(result.exitCode).toBe(0)
     expect(readFileSync(f.settingsFile, 'utf8')).toBe(owner)
-    expect(listFiles(f.root).filter((relative) => !relative.startsWith('plugins/'))).toEqual(['settings.json'])
+    expect(listFiles(f.root)).toEqual(['settings.json'])
   })
 
   it('rejects a missing or unsupported harness with exit 2', async () => {
@@ -219,7 +231,7 @@ describe('capture plugin install --harness factory', () => {
     expect(result.stdout).not.toContain('factory plugin:')
   })
 
-  it('a refused --config-dir writes nothing, and the Factory tree still lands in the Factory root', async () => {
+  it('a refused --config-dir writes nothing, and the Factory tree lands under KyberDash\'s own state directory', async () => {
     const f = fixture('factory-command-config-dir-nowrite-')
     const openCodeRoot = join(f.home, 'opencode-root')
     // A Factory root the harness owns, and that is NOT the home's `.factory`: the verb resolves
@@ -237,12 +249,13 @@ describe('capture plugin install --harness factory', () => {
     // The named root never became a Factory tree.
     expect(existsSync(join(openCodeRoot, 'plugins'))).toBe(false)
 
-    // Without the flag the tree lands in the Factory root the harness resolves itself.
+    // Without the flag the tree lands in KyberDash's own state directory, whatever Factory
+    // root the harness resolves: the install writes nothing under the Factory root.
     const installed = await run(f, { processEnv: { FACTORY_DIR: harnessRoot } })
 
     expect(installed.exitCode).toBe(0)
-    expect(listFiles(join(harnessRoot, 'plugins', PLUGIN_DIR_NAME))).toEqual([...OWNED_FILES].sort())
-    expect(existsSync(join(f.root, 'plugins'))).toBe(false)
+    expect(listFiles(f.pluginDir)).toEqual([...OWNED_FILES].sort())
+    expect(listFiles(harnessRoot)).toEqual([])
     expect(existsSync(join(openCodeRoot, 'plugins'))).toBe(false)
   })
 
@@ -267,8 +280,8 @@ describe('capture plugin install --harness factory', () => {
 
   it('refuses a foreign plugin tree in strict mode and writes nothing', async () => {
     const f = fixture('factory-command-foreign-')
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
     const before = listFiles(f.pluginDir)
 
     const result = await run(f)
@@ -281,8 +294,8 @@ describe('capture plugin install --harness factory', () => {
 
   it('keeps a foreign plugin tree in preserve mode, warns and exits 0', async () => {
     const f = fixture('factory-command-preserve-')
-    mkdirSync(join(f.pluginDir, 'hooks'), { recursive: true })
-    writeFileSync(join(f.pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+    mkdirSync(join(f.pluginDir, 'kyberdash-factory', 'hooks'), { recursive: true })
+    writeFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
     const before = listFiles(f.pluginDir)
 
     const result = await run(f, { preserve: true })
@@ -300,7 +313,7 @@ describe('capture plugin install --harness factory', () => {
     expect(existsSync(f.pluginDir)).toBe(false)
   })
 
-  it('--if-installed over an installed tree keeps it intact', async () => {
+  it('--if-installed over an installed plugin keeps the tree intact', async () => {
     const f = fixture('factory-command-ifinst-installed-')
     await run(f)
     const before = listFiles(f.pluginDir)

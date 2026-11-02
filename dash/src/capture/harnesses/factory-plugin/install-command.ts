@@ -35,6 +35,7 @@ import {
   installFactoryPlugin,
   type FactoryPluginOptions,
 } from './install.js'
+import type { FactoryHarnessCli } from './marketplace.js'
 
 export const FACTORY_PLUGIN_USAGE_EXIT = 2
 
@@ -54,6 +55,11 @@ export type FactoryPluginInstallCommandOptions = {
   env?: PathEnv
   /** Injectable; defaults to `process.env` (read only for `FACTORY_DIR`). */
   processEnv?: NodeJS.ProcessEnv
+  /**
+   * The harness's CLI, as the install reaches it. A test injects a fake; production
+   * resolves `droid` from PATH.
+   */
+  harnessCli?: FactoryHarnessCli
 }
 
 export type FactoryPluginConsentCommandOptions = {
@@ -105,6 +111,7 @@ export function runFactoryPluginInstall(
     dryRun: options.dryRun === true,
     ifInstalled: options.ifInstalled === true,
     ...(options.processEnv !== undefined ? { processEnv: options.processEnv } : {}),
+    ...(options.harnessCli !== undefined ? { harnessCli: options.harnessCli } : {}),
   }
   let result
   try {

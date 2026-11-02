@@ -1,66 +1,99 @@
-// Install, remove and report on the Factory (Droid) capture plugin (plan D3, D11, D13).
+// Install, remove and report on the Factory (Droid) capture plugin (plan D3, D11, D13, D43,
+// D44, D47).
 //
-// KyberDash owns one whole plugin DIRECTORY under the Factory root:
+// KyberDash owns one whole MARKETPLACE TREE under its own state directory:
 //
-//   <factoryRoot>/plugins/kyberdash-factory/
-//   ├── .factory-plugin/plugin.json
-//   └── hooks/
-//       ├── hooks.json
-//       └── kyberdash-factory.mjs
+//   <home>/.kyberdash/marketplaces/kyberdash/
+//   ├── .factory-plugin/marketplace.json
+//   └── kyberdash-factory/
+//       ├── .factory-plugin/plugin.json
+//       └── hooks/
+//           ├── hooks.json
+//           └── kyberdash-factory.mjs
 //
-// as ONE unit with ONE receipt (`~/.kyberdash/factory-plugin-receipt.json`) that holds the
-// SHA-256 digest of every file Kyber wrote. The owner's own Factory files — the user's
+// as ONE unit with ONE receipt (`~/.kyberdash/factory-plugin-receipt.json`) that names the
+// marketplace, the plugin's identity and the tree root, and holds the SHA-256 digest of
+// every file Kyber wrote — the marketplace manifest included.
+//
+// The tree is not the installation: Factory loads a plugin from a marketplace, so the
+// install drives the harness's OWN commands, in this order:
+//
+//   droid plugin marketplace add <marketplace root>
+//   droid plugin install kyberdash-factory@kyberdash --scope user
+//
+// and the uninstall drives the harness's own uninstall and marketplace removal FIRST, and
+// only then removes the Kyber-owned tree and the receipt. The harness's CLI is the only
+// interface to the harness's state: the owner's own Factory files — the user's
 // `~/.factory/settings.json`, the user's `~/.factory/hooks.json` and the project's
-// `.factory/hooks.json` — are never read, written, merged or restored (ADR 0026, ADR 0031).
+// `.factory/hooks.json` — are never read, written, merged or restored (ADR 0026, ADR 0031,
+// D48), and the harness's own plugin cache is the harness's file (D44).
 //
 // Two install modes, the OpenCode installer's semantics extended from one file to a tree:
 //
 //   strict    `capture enable`: refuses a foreign tree (one holding a file Kyber did not
-//             write, or one whose files are not the files Kyber writes) and an owner-edited
-//             tree (one Kyber wrote whose bytes no longer match the receipt) with exit 1,
-//             and writes nothing at all.
+//             write, or one whose files are not the files Kyber writes), an owner-edited
+//             tree (one Kyber wrote whose bytes no longer match the receipt) and a harness
+//             whose registry cannot be read, with exit 1, and writes nothing at all.
 //   preserve  Squad and `kyber-weave update`: keeps such a tree, warns, and exits 0.
 //
-// The Factory root is `$FACTORY_DIR`, else `~/.factory` — the resolution the Factory file
-// provider already uses (`dash/src/providers/droid.ts`).
+// The Factory root (`$FACTORY_DIR`, else `~/.factory`) is named for READING only: nothing
+// is written under it any more.
 
-import { randomBytes } from 'node:crypto'
 import {
   closeSync,
   constants,
   fstatSync,
-  fsyncSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 import { createConsentIfAbsent, readConsentState, writeFileAtomic } from '../../consent-file.js'
 import { envJoin, type PathEnv } from '../../paths.js'
 import { sha256Hex } from '../../receipt.js'
-import { FACTORY_PLUGIN_SOURCE } from './generated/plugin-source.js'
+import {
+  FACTORY_HARNESS_EXECUTABLE,
+  FACTORY_MARKETPLACE_CONTENT,
+  FACTORY_MARKETPLACE_FILES,
+  FACTORY_MARKETPLACE_NAME,
+  FACTORY_PLUGIN_IDENTITY,
+  marketplaceInstallCommands,
+  marketplaceUninstallCommands,
+  readFactoryHarnessState,
+  resolveFactoryHarnessCli,
+  writeMarketplaceTree,
+  type FactoryHarnessCli,
+  type FactoryHarnessStateReport,
+} from './marketplace.js'
 
 export type FactoryPluginMode = 'strict' | 'preserve'
 
 export type FactoryPluginOptions = {
   mode?: FactoryPluginMode
   dryRun?: boolean
-  /** Act only when a plugin tree is already installed (the update path). */
+  /**
+   * Act only when the harness's own registry reports the plugin installed (the update
+   * path). The harness's registry is the install's evidence; the tree on disk is not.
+   */
   ifInstalled?: boolean
   /** Injectable for tests; defaults to `process.env`. */
   processEnv?: NodeJS.ProcessEnv
+  /**
+   * The harness's CLI, as the install reaches it. A test injects a fake that records the
+   * argv; production resolves `droid` from PATH.
+   */
+  harnessCli?: FactoryHarnessCli
 }
 
 export type FactoryPluginPaths = {
-  /** The Factory root the plugin tree lives under. */
+  /** The Factory root. Named for reading only: KyberDash writes nothing under it. */
   root: string
-  /** The plugin directory Kyber owns. */
+  /** The Kyber-owned marketplace tree: the unit the receipt digests. */
+  marketplaceRoot: string
+  /** The marketplace tree Kyber owns. The tree's directory name IS the registered name. */
   pluginDir: string
   /** The receipt: what Kyber wrote, and the digest of every file. */
   receiptFile: string
@@ -101,67 +134,16 @@ export type FactoryPluginResult = {
   err: string[]
 }
 
-type Receipt = { version: 1; root: string; files: { path: string; sha256: string }[] }
-
-/** The plugin directory Kyber owns inside the Factory root. */
-export const FACTORY_PLUGIN_DIR_NAME = 'kyberdash-factory'
-
-/** The files Kyber owns, relative to the plugin directory. This is the tree shape. */
-const MANIFEST_FILE = '.factory-plugin/plugin.json'
-const HOOKS_FILE = 'hooks/hooks.json'
-const SCRIPT_FILE = 'hooks/kyberdash-factory.mjs'
-const OWNED_FILES = [MANIFEST_FILE, HOOKS_FILE, SCRIPT_FILE] as const
-
-/**
- * The hook events the plugin registers on. `PreCompact` is not one of them: the contract names
- * no span for a compaction, so the hook would only cost a process per compaction.
- */
-const HOOK_EVENTS = [
-  'SessionStart',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'Stop',
-  'SubagentStop',
-  'SessionEnd',
-] as const
-
-/**
- * The command the hooks file runs. Factory expands `${DROID_PLUGIN_ROOT}` to the plugin root
- * before the command runs, so the script is found wherever the plugin was installed. The
- * script carries no shebang (its first line is the ownership marker), so the command names
- * the interpreter.
- */
-const HOOK_COMMAND = `node \${DROID_PLUGIN_ROOT}/${SCRIPT_FILE}`
-
-/** The manifest Factory reads from the plugin root. */
-const MANIFEST_SOURCE = `${JSON.stringify(
-  {
-    name: FACTORY_PLUGIN_DIR_NAME,
-    version: '1.0.0',
-    description:
-      'KyberDash capture plugin for Factory (Droid): reports session, turn and tool spans to the local KyberDash receiver.',
-  },
-  null,
-  2,
-)}\n`
-
-/** The hooks file: one command per hook event, in the shape Factory's plugin loader reads. */
-const HOOKS_SOURCE = `${JSON.stringify(
-  {
-    hooks: Object.fromEntries(
-      HOOK_EVENTS.map((event) => [event, [{ hooks: [{ type: 'command', command: HOOK_COMMAND }] }]]),
-    ),
-  },
-  null,
-  2,
-)}\n`
-
-/** The bytes of every file Kyber owns, keyed by its path relative to the plugin directory. */
-const OWNED_CONTENT: Record<string, string> = {
-  [MANIFEST_FILE]: MANIFEST_SOURCE,
-  [HOOKS_FILE]: HOOKS_SOURCE,
-  [SCRIPT_FILE]: FACTORY_PLUGIN_SOURCE,
+type Receipt = {
+  version: 1
+  /** The marketplace the tree is registered as. */
+  marketplace: string
+  /** The plugin's identity in the harness: `<plugin>@<marketplace>`. */
+  plugin: string
+  /** The marketplace tree root. */
+  root: string
+  /** Every file Kyber owns, and its digest. */
+  files: { path: string; sha256: string }[]
 }
 
 /** The cap on one file the installer reads. Kyber's own files are far smaller. */
@@ -170,7 +152,7 @@ const MAX_FILE_BYTES = 1024 * 1024
 /** The cap on the files the installer reads in one tree. */
 const MAX_TREE_FILES = 64
 
-/** Where the plugin tree, its receipt and its consent file live. */
+/** Where the marketplace tree, its receipt and its consent file live. */
 export function factoryPluginPaths(
   home: string,
   env?: PathEnv,
@@ -179,9 +161,11 @@ export function factoryPluginPaths(
   const processEnv = options.processEnv ?? process.env
   const fromEnv = processEnv['FACTORY_DIR']
   const root = fromEnv !== undefined && fromEnv !== '' ? fromEnv : envJoin(env, home, '.factory')
+  const marketplaceRoot = envJoin(env, home, '.kyberdash', 'marketplaces', FACTORY_MARKETPLACE_NAME)
   return {
     root,
-    pluginDir: envJoin(env, root, 'plugins', FACTORY_PLUGIN_DIR_NAME),
+    marketplaceRoot,
+    pluginDir: marketplaceRoot,
     receiptFile: envJoin(env, home, '.kyberdash', 'factory-plugin-receipt.json'),
     consentFile: envJoin(env, home, '.kyberdash', 'factory-plugin.json'),
   }
@@ -193,7 +177,13 @@ export function factoryPluginPaths(
 function readReceipt(path: string): Receipt | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Receipt>
-    if (parsed.version !== 1 || typeof parsed.root !== 'string' || !Array.isArray(parsed.files)) {
+    if (
+      parsed.version !== 1 ||
+      typeof parsed.root !== 'string' ||
+      typeof parsed.marketplace !== 'string' ||
+      typeof parsed.plugin !== 'string' ||
+      !Array.isArray(parsed.files)
+    ) {
       return undefined
     }
     const files: { path: string; sha256: string }[] = []
@@ -201,7 +191,13 @@ function readReceipt(path: string): Receipt | undefined {
       if (typeof entry?.path !== 'string' || typeof entry?.sha256 !== 'string') return undefined
       files.push({ path: entry.path, sha256: entry.sha256 })
     }
-    return { version: 1, root: parsed.root, files }
+    return {
+      version: 1,
+      marketplace: parsed.marketplace,
+      plugin: parsed.plugin,
+      root: parsed.root,
+      files,
+    }
   } catch {
     // A missing or unreadable receipt means nothing was recorded.
     return undefined
@@ -223,14 +219,16 @@ function receiptDigest(receipt: Receipt, pluginDir: string, relative: string): s
   return undefined
 }
 
-/** The receipt Kyber writes: the tree, and the digest of every file in it. */
+/** The receipt Kyber writes: the marketplace, the identity, the tree, and every digest. */
 function receiptFor(paths: FactoryPluginPaths): Receipt {
   return {
     version: 1,
+    marketplace: FACTORY_MARKETPLACE_NAME,
+    plugin: FACTORY_PLUGIN_IDENTITY,
     root: paths.pluginDir,
-    files: OWNED_FILES.map((relative) => ({
+    files: FACTORY_MARKETPLACE_FILES.map((relative) => ({
       path: ownedPath(paths.pluginDir, relative),
-      sha256: sha256Hex(OWNED_CONTENT[relative] ?? ''),
+      sha256: sha256Hex(FACTORY_MARKETPLACE_CONTENT[relative] ?? ''),
     })),
   }
 }
@@ -339,7 +337,7 @@ function classify(paths: FactoryPluginPaths): Classified {
   if (tree.kind !== 'ok') return tree
 
   const found = new Map(tree.files.map((file) => [file.relative, file.text]))
-  const owned = new Set<string>(OWNED_FILES)
+  const owned = new Set<string>(FACTORY_MARKETPLACE_FILES)
   const extra = [...found.keys()].filter((relative) => !owned.has(relative)).sort()
   if (extra.length > 0) {
     return { kind: 'foreign', detail: `${extra.join(', ')} was not written by KyberDash` }
@@ -349,9 +347,11 @@ function classify(paths: FactoryPluginPaths): Classified {
   const proven =
     receipt !== undefined &&
     receipt.root === paths.pluginDir &&
-    OWNED_FILES.every((relative) => receiptDigest(receipt, paths.pluginDir, relative) !== undefined)
+    FACTORY_MARKETPLACE_FILES.every(
+      (relative) => receiptDigest(receipt, paths.pluginDir, relative) !== undefined,
+    )
 
-  const missing = OWNED_FILES.filter((relative) => !found.has(relative))
+  const missing = FACTORY_MARKETPLACE_FILES.filter((relative) => !found.has(relative))
   if (missing.length > 0) {
     return proven
       ? { kind: 'edited', detail: `${missing.join(', ')} is missing; it changed since install` }
@@ -359,7 +359,7 @@ function classify(paths: FactoryPluginPaths): Classified {
   }
 
   if (proven && receipt !== undefined) {
-    for (const relative of OWNED_FILES) {
+    for (const relative of FACTORY_MARKETPLACE_FILES) {
       const digest = receiptDigest(receipt, paths.pluginDir, relative)
       if (digest !== undefined && sha256Hex(found.get(relative) ?? '') !== digest) {
         return { kind: 'edited', detail: `${relative} changed since install` }
@@ -368,8 +368,8 @@ function classify(paths: FactoryPluginPaths): Classified {
     return { kind: 'same' }
   }
 
-  for (const relative of OWNED_FILES) {
-    if (found.get(relative) !== OWNED_CONTENT[relative]) {
+  for (const relative of FACTORY_MARKETPLACE_FILES) {
+    if (found.get(relative) !== FACTORY_MARKETPLACE_CONTENT[relative]) {
       return { kind: 'foreign', detail: `${relative} is not the file KyberDash writes` }
     }
   }
@@ -380,33 +380,14 @@ function classify(paths: FactoryPluginPaths): Classified {
 // Writing the tree
 
 /**
- * Write the whole tree, or nothing of it.
+ * Write the whole marketplace tree, or nothing of it.
  *
- * Every file is staged as a temporary sibling first and renamed into place only once all of
- * them are staged, so a tree that cannot be written in full leaves no partial tree behind. The
- * receipt is written after the tree has landed, never before.
+ * The tree writer stages every file as a temporary sibling and renames them into place only
+ * once all of them are staged, so a tree that cannot be written in full leaves no partial
+ * tree behind. The receipt is written after the tree has landed, never before.
  */
 function writeTree(paths: FactoryPluginPaths): void {
-  const staged: { temp: string; target: string }[] = []
-  try {
-    for (const relative of OWNED_FILES) {
-      const target = ownedPath(paths.pluginDir, relative)
-      mkdirSync(dirname(target), { recursive: true })
-      const temp = `${target}.${randomBytes(8).toString('hex')}.tmp`
-      const fd = openSync(temp, 'wx', 0o644)
-      try {
-        writeFileSync(fd, OWNED_CONTENT[relative] ?? '')
-        fsyncSync(fd)
-      } finally {
-        closeSync(fd)
-      }
-      staged.push({ temp, target })
-    }
-  } catch (error) {
-    for (const entry of staged) rmSync(entry.temp, { force: true })
-    throw error
-  }
-  for (const entry of staged) renameSync(entry.temp, entry.target)
+  writeMarketplaceTree(paths.pluginDir)
 }
 
 function writeReceipt(paths: FactoryPluginPaths): void {
@@ -439,15 +420,10 @@ export function installFactoryPlugin(
   const mode = options.mode ?? 'strict'
   const dryRun = options.dryRun === true
   const paths = factoryPluginPaths(home, env, options)
+  const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
   const found = classify(paths)
-
-  if (found.kind === 'absent' && options.ifInstalled === true) {
-    return result('skipped', 'skipped', {
-      out: [`factory plugin: skipped-not-installed ${paths.pluginDir}`],
-    })
-  }
-
   const preserve = mode === 'preserve'
+
   const strictRefusal = (
     reason: 'conflict' | 'drift' | 'unreadable',
     message: string,
@@ -490,39 +466,85 @@ export function installFactoryPlugin(
       })
     }
     case 'same':
-      return result('unchanged', 'noop', {
-        consent: ensureConsent(paths, dryRun),
-        out: [`factory plugin: unchanged ${paths.pluginDir}`],
-      })
-    case 'absent': {
-      if (dryRun) {
-        return result('installed', 'would-write', {
-          consent: ensureConsent(paths, true),
-          out: [`factory plugin: would-install ${paths.pluginDir}`],
-        })
-      }
-      writeTree(paths)
-      writeReceipt(paths)
-      return result('installed', 'wrote', {
-        consent: ensureConsent(paths, false),
-        out: [`factory plugin: installed ${paths.pluginDir}`],
+    case 'absent':
+      break
+  }
+
+  // The harness's own registry is the install's evidence, and it is read through the
+  // harness's own commands and nothing else.
+  const harnessState = readFactoryHarnessState(harness, { treeWritten: found.kind !== 'absent' })
+
+  if (options.ifInstalled === true && harnessState.state !== 'plugin-installed') {
+    return result('skipped', 'skipped', {
+      out: [`factory plugin: skipped-not-installed ${paths.pluginDir}`],
+    })
+  }
+
+  if (dryRun) {
+    return result('installed', 'would-write', {
+      consent: ensureConsent(paths, true),
+      out: [`factory plugin: would-install ${paths.pluginDir}`],
+    })
+  }
+
+  if (!harnessState.readable) {
+    const message = `the Factory harness's state could not be read: ${harnessState.cause ?? 'unknown cause'}; nothing was written`
+    if (!preserve) return strictRefusal('unreadable', message)
+    return result('kept-unreadable', 'kept', {
+      out: [`factory plugin: kept-unreadable ${paths.pluginDir}`],
+      err: [`kyberdash capture: warning: ${message}`],
+    })
+  }
+
+  if (found.kind === 'same' && harnessState.state === 'plugin-installed') {
+    // The tree is Kyber's and the harness already holds the plugin: there is nothing to do.
+    return result('unchanged', 'noop', {
+      consent: ensureConsent(paths, false),
+      out: [`factory plugin: unchanged ${paths.pluginDir}`],
+    })
+  }
+
+  if (found.kind === 'absent') {
+    // The tree lands before the receipt, and the receipt before the harness is asked to
+    // take the tree: a receipt never describes a tree that is not there.
+    writeTree(paths)
+    writeReceipt(paths)
+  }
+
+  const commands = marketplaceInstallCommands(harnessState.state, paths.pluginDir)
+  for (const argv of commands) {
+    const answer = harness.run(argv)
+    if (answer.exitCode !== 0) {
+      const message = `the Factory harness refused "${argv.join(' ')}" (exit ${answer.exitCode})${answer.stderr.trim() === '' ? '' : `: ${answer.stderr.trim().split('\n')[0]}`}`
+      if (!preserve) return strictRefusal('unreadable', message)
+      return result('kept-unreadable', 'kept', {
+        out: [`factory plugin: kept-unreadable ${paths.pluginDir}`],
+        err: [`kyberdash capture: warning: ${message}`],
       })
     }
   }
+
+  const executable = harness.executable ?? FACTORY_HARNESS_EXECUTABLE
+  return result('installed', 'wrote', {
+    consent: ensureConsent(paths, false),
+    out: [
+      `factory plugin: installed ${paths.pluginDir}`,
+      `factory marketplace: ${FACTORY_MARKETPLACE_NAME}`,
+      `factory plugin identity: ${FACTORY_PLUGIN_IDENTITY}`,
+      `factory harness: ${executable}`,
+    ],
+  })
 }
 
 export function uninstallFactoryPlugin(
   home: string,
   env?: PathEnv,
-  options: Pick<FactoryPluginOptions, 'dryRun' | 'processEnv'> = {},
+  options: Pick<FactoryPluginOptions, 'dryRun' | 'processEnv' | 'harnessCli'> = {},
 ): FactoryPluginResult {
   const paths = factoryPluginPaths(home, env, options)
+  const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
   const found = classify(paths)
 
-  if (found.kind === 'absent') {
-    rmSync(paths.receiptFile, { force: true })
-    return result('skipped', 'noop', { out: ['harness factory: capture plugin not installed; nothing to do'] })
-  }
   if (found.kind === 'unreadable') {
     return result('refused', 'refused', {
       exitCode: 1,
@@ -553,9 +575,36 @@ export function uninstallFactoryPlugin(
       out: [`factory plugin: would remove capture plugin ${paths.pluginDir}`],
     })
   }
+
+  // The harness-side state goes first: the harness's own uninstall, then the harness's own
+  // marketplace removal. The Kyber-owned tree and the receipt follow.
+  const harnessState = readFactoryHarnessState(harness, { treeWritten: found.kind !== 'absent' })
+  if (!harnessState.readable) {
+    const message = `the Factory harness's state could not be read: ${harnessState.cause ?? 'unknown cause'}; nothing was removed`
+    return result('refused', 'refused', {
+      exitCode: 1,
+      reason: 'unreadable',
+      err: [`kyberdash capture: ${message}`],
+    })
+  }
+  for (const argv of marketplaceUninstallCommands(harnessState.state)) {
+    const answer = harness.run(argv)
+    if (answer.exitCode !== 0) {
+      return result('refused', 'refused', {
+        exitCode: 1,
+        reason: 'unreadable',
+        err: [
+          `kyberdash capture: the Factory harness refused "${argv.join(' ')}" (exit ${answer.exitCode})${answer.stderr.trim() === '' ? '' : `: ${answer.stderr.trim().split('\n')[0]}`}`,
+        ],
+      })
+    }
+  }
+
   rmSync(paths.pluginDir, { recursive: true, force: true })
   rmSync(paths.receiptFile, { force: true })
-  return result('skipped', 'restored', { out: [`factory plugin: removed capture plugin ${paths.pluginDir}`] })
+  return result('skipped', 'restored', {
+    out: [`factory plugin: removed capture plugin ${paths.pluginDir}`],
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -592,11 +641,27 @@ export function factoryPluginState(
   }
 }
 
+/**
+ * The harness-side install state, read through the harness's OWN commands and nothing else.
+ *
+ * The caller supplies the harness CLI: reading it spawns the harness, so a caller that must
+ * not spawn — a status read, for instance — does not call this.
+ */
+export function factoryHarnessState(
+  home: string,
+  env?: PathEnv,
+  options: Pick<FactoryPluginOptions, 'processEnv' | 'harnessCli'> = {},
+): FactoryHarnessStateReport {
+  const paths = factoryPluginPaths(home, env, options)
+  const harness = options.harnessCli ?? resolveFactoryHarnessCli({ processEnv: options.processEnv })
+  return readFactoryHarnessState(harness, { treeWritten: classify(paths).kind !== 'absent' })
+}
+
 /** Fixed-format status lines. Never echoes owner-written text. */
 export function describeFactoryPluginStatus(
   home: string,
   env?: PathEnv,
-  options: Pick<FactoryPluginOptions, 'processEnv'> = {},
+  options: Pick<FactoryPluginOptions, 'processEnv' | 'harnessCli'> = {},
 ): string[] {
   const paths = factoryPluginPaths(home, env, options)
   const plugin = factoryPluginState(home, env, options)
@@ -609,6 +674,16 @@ export function describeFactoryPluginStatus(
     lines.push('plugin: installed')
   } else {
     lines.push('plugin: modified since install or not written by KyberDash')
+  }
+  lines.push(`factory marketplace: ${FACTORY_MARKETPLACE_NAME}`)
+  lines.push(`factory plugin identity: ${FACTORY_PLUGIN_IDENTITY}`)
+  if (options.harnessCli !== undefined) {
+    const harness = factoryHarnessState(home, env, options)
+    lines.push(
+      harness.cause === undefined
+        ? `factory harness: ${harness.state}`
+        : `factory harness: ${harness.state} (${harness.cause})`,
+    )
   }
   const consent = readConsentState(paths.consentFile)
   switch (consent) {

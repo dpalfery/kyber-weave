@@ -63,6 +63,23 @@ export type PendingHarnessWriter = {
 }
 
 /**
+ * A harness's own CLI, for a harness whose plugin lifecycle the harness owns.
+ *
+ * KyberDash does not write into such a harness's files; it asks the harness to install and
+ * to remove the plugin, and reads the harness's own registry through the same CLI. The
+ * driver is a dependency like any other, so a test injects a fake and no test needs the
+ * real CLI on the machine.
+ */
+export type HarnessCli = {
+  /** The executable the driver runs, as resolved from PATH; undefined when PATH holds none. */
+  readonly executable: string | undefined
+  /** Why the CLI cannot be reached; undefined when it can. */
+  readonly unavailable: string | undefined
+  /** Run one command. The argv holds the arguments AFTER the executable. */
+  run(argv: readonly string[]): { exitCode: number; stdout: string; stderr: string }
+}
+
+/**
  * The live state of one declared file, handed to a harness's exporter
  * resolver. `observed` carries only the keys the harness declares, mapped to
  * their live value (absent keys are `undefined`); `processEnv` is the
@@ -189,8 +206,16 @@ export type ManagedHarnessWriter = {
 
 /** The whole-file plugin a managed harness owns. Results reuse the Kilo plugin shape. */
 export type ManagedFilePlugin = {
-  install: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
-  uninstall: (home: string, env: PathEnv | undefined, options: { dryRun: boolean; configDir?: string }) => KiloPluginResult
+  install: (
+    home: string,
+    env: PathEnv | undefined,
+    options: { dryRun: boolean; configDir?: string; harnessCli?: HarnessCli },
+  ) => KiloPluginResult
+  uninstall: (
+    home: string,
+    env: PathEnv | undefined,
+    options: { dryRun: boolean; configDir?: string; harnessCli?: HarnessCli },
+  ) => KiloPluginResult
   path: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => string
   state: (home: string, env: PathEnv | undefined, options?: { configDir?: string }) => KiloPluginState
   /** Fixed-format status lines for the plugin and its consent. Never echoes owner text. */

@@ -38,6 +38,7 @@ import {
   type NativeExportShapeSource,
   type NativeExportVerdict,
 } from './factory-plugin/native-export.js'
+import { resolveFactoryHarnessCli } from './factory-plugin/marketplace.js'
 import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
@@ -178,9 +179,20 @@ function factoryStatusLines(home: string, env: PathEnv | undefined): string[] {
 
 const factoryFilePlugin: ManagedFilePlugin = {
   install: (home, env, options) =>
-    narrow(installFactoryPlugin(home, env, { mode: 'strict', dryRun: options.dryRun })),
+    narrow(
+      installFactoryPlugin(home, env, {
+        mode: 'strict',
+        dryRun: options.dryRun,
+        harnessCli: options.harnessCli ?? resolveFactoryHarnessCli(),
+      }),
+    ),
   uninstall: (home, env, options) =>
-    narrow(uninstallFactoryPlugin(home, env, { dryRun: options.dryRun })),
+    narrow(
+      uninstallFactoryPlugin(home, env, {
+        dryRun: options.dryRun,
+        harnessCli: options.harnessCli ?? resolveFactoryHarnessCli(),
+      }),
+    ),
   path: (home, env) => factoryPluginPaths(home, env).pluginDir,
   state: (home, env) => factoryPluginState(home, env),
   describeStatus: (home, env) => factoryStatusLines(home, env),

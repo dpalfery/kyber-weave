@@ -48,6 +48,7 @@ import {
   type CaptureExporterResolution,
   type CaptureFileFormat,
   type CaptureHarnessWriter,
+  type HarnessCli,
   type ManagedFilePlugin,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
@@ -96,6 +97,12 @@ export type CaptureRunOptions = {
   appDataDir?: string
   /** Injectable health fetch so tests pin liveness without a socket. */
   fetchHealth?: HealthFetcher
+  /**
+   * The harness's own CLI, for a harness whose plugin lifecycle the harness owns (the
+   * Factory marketplace route). Injected so a test drives a fake and never runs the real
+   * CLI; production resolves the executable from PATH inside the writer.
+   */
+  harnessCli?: HarnessCli
   /** Writer set override; defaults to the pending-discovery registry. */
   writers?: CaptureHarnessWriter[]
   /** Deadline for the receiver liveness probe; defaults to the probe's own 5s. */
@@ -477,6 +484,7 @@ export async function runCapture(
         options.dryRun ?? false,
         options.fileFilter,
         options.opencodeConfigDir,
+        options.harnessCli,
       )
       return await ensureEngineAfterEnable(enabled, selected, options)
     }
@@ -490,6 +498,7 @@ export async function runCapture(
       endpoint,
       options.removeUnreceiptedKeys ?? false,
       options.opencodeConfigDir,
+      options.harnessCli,
     )
   } catch (error) {
     if (typeof error === 'object' && error !== null) {
@@ -931,8 +940,13 @@ function enableFilePlugin(
   env: PathEnv,
   dryRun: boolean,
   configDir: string | undefined,
+  harnessCli: HarnessCli | undefined,
 ): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
-  const installed = plugin.install(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
+  const installed = plugin.install(home, env, {
+    dryRun,
+    ...(configDir !== undefined ? { configDir } : {}),
+    ...(harnessCli !== undefined ? { harnessCli } : {}),
+  })
   const out = [...installed.out]
   // A noop adds nothing beside the config file's own event, so it stays in the text only.
   const events: CaptureEvent[] =
@@ -959,9 +973,14 @@ function disableFilePlugin(
   env: PathEnv,
   dryRun: boolean,
   configDir: string | undefined,
+  harnessCli: HarnessCli | undefined,
 ): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
   const out = [...plugin.consent.set(home, env, false, { dryRun }).out]
-  const removed = plugin.uninstall(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
+  const removed = plugin.uninstall(home, env, {
+    dryRun,
+    ...(configDir !== undefined ? { configDir } : {}),
+    ...(harnessCli !== undefined ? { harnessCli } : {}),
+  })
   out.push(...removed.out)
   const events: CaptureEvent[] =
     removed.outcome === 'wrote' || removed.outcome === 'would-write' || removed.outcome === 'noop'
@@ -989,6 +1008,7 @@ async function runEnable(
   dryRun: boolean,
   fileFilter: CaptureFileFilter | undefined,
   configDir: string | undefined,
+  harnessCli: HarnessCli | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -1073,7 +1093,7 @@ async function runEnable(
         if (migrated.receiptChanged) receiptChanged = true
       }
       if (writer.filePlugin !== undefined && !writerFailed) {
-        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
+        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir, harnessCli)
         out.push(...plugin.out)
         err.push(...plugin.err)
         events.push(...plugin.events)
@@ -1436,6 +1456,7 @@ async function runDisable(
   endpoint: string,
   removeUnreceiptedKeys: boolean,
   configDir: string | undefined,
+  harnessCli: HarnessCli | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -1478,7 +1499,7 @@ async function runDisable(
       continue
     }
     if (writer.filePlugin !== undefined) {
-      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
+      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir, harnessCli)
       out.push(...plugin.out)
       err.push(...plugin.err)
       events.push(...plugin.events)
