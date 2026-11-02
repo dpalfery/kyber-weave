@@ -602,14 +602,16 @@ place and the Factory call follows it, each call handed its own harness's resolv
 
 ```text
 kyberdash kyber capture plugin install --harness opencode --preserve --config-dir <Squad-resolved OpenCode root>
-kyberdash kyber capture plugin install --harness factory --preserve --config-dir <Squad-resolved Factory root>
+kyberdash kyber capture plugin install --harness factory --preserve
 ```
 
 - **Owner of the files.** KyberDash owns the plugin file or tree, its receipt, and the consent
   file. Squad passes the OpenCode global root as `--config-dir`, so both agree on the path.
   Squad keeps its own receipts for its own files and reads none of KyberDash's. The flag is the
-  **OpenCode** root: the Factory verb refuses it, and the Factory plugin is published as a
-  marketplace tree under KyberDash's own state directory rather than under the Factory root.
+  **OpenCode** root: the Factory verb refuses it — a request that carries it is a usage error and
+  writes nothing — and the Factory plugin is published as a marketplace tree under KyberDash's
+  own state directory rather than under the Factory root. The Factory call therefore names **no
+  root at all**: that verb resolves the Factory harness's own root itself.
 - **Non-overwrite (C4).** Preserve mode keeps an edited or foreign plugin file or tree with a
   warning. It creates the consent file with content off only when that file is absent, and never
   touches an existing one. The step never writes `opencode.jsonc`, and it never writes

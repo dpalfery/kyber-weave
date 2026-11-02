@@ -315,6 +315,28 @@ tokenless by Factory's own documentation. The export also carries no subagent li
 [the architecture](architecture.md#factorys-native-opentelemetry-path-authorized-complementary)
 for the vocabulary, the `POST /v1/metrics` route and the withdrawal of the native span claim.
 
+**The export's effective shape is reported, and it is not the endpoint.** The endpoint says where
+the export sends; the shape says what it sends, and the two are configured by different rules.
+The **format** (`legacy` | `genai`) follows precedence — the organisation's `telemetry.format`
+wins, and where it is set the machine's `OTEL_TELEMETRY_FORMAT` is not read at all, and anything
+unrecognised resolves to `legacy`. The **granularity** (`user` | `aggregate`) follows
+most-restrictive-wins rather than precedence, so `aggregate` beats `user` whichever level each
+came from; a value that exists and cannot be read resolves to `aggregate`, the restrictive one,
+while a granularity nothing pinned stays `user`, the documented default. The **message-content
+switch** follows precedence for the organisation's `telemetry.logMessageContent`, and the
+granularity overrides every content opt-in — `aggregate` carries no per-individual content. The
+organisation's **`enabled` master switch** decides whether the export runs at all: `true` keeps it
+on even where `OTEL_CUSTOMER_ENABLED=false`, `false` keeps it off even where
+`OTEL_CUSTOMER_ENABLED=true`, and omitting it falls back to that machine variable. The status row
+names each value and **which level pinned it**, so a reader sees an export that is switched off
+rather than one that is merely pointed somewhere else.
+
+**What the consent governs, and what it does not.** KyberDash's consent file governs **the
+capture plugin's prompt text, and nothing else**. The Factory **file source** stores the
+owner's first message fragment whatever the consent file says, and that route is outside the
+consent's reach. The native route's content follows **Factory's own message-content switch**,
+which is the harness's decision and not KyberDash's.
+
 **Native metric points are stored, not projected.** A decoded metric point becomes **one row per
 distinct decoded point** in the canon store's own `metric_point` table — a point's identity is a
 content digest, so a re-delivered point lands on the row it already occupies instead of beside it
