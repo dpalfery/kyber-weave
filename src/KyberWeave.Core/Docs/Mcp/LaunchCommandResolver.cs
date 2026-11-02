@@ -137,6 +137,16 @@ public sealed class LaunchCommandResolver
     /// Null when the string cannot name a file at all — a path the platform rejects is not
     /// launchable, and that answer belongs to the caller as a finding rather than as an exception.
     /// </summary>
+    /// <remarks>
+    /// The three exceptions are the complete set <see cref="Path.GetFullPath(string, string)"/>
+    /// documents for a path this code composed, and they are the set
+    /// <see cref="McpRepositoryPath.Contained"/> already answers with a refusal. Catching two of the
+    /// three made the same question — can this process name that path — answer a gap in one place
+    /// and a crash in the other: a Windows-shaped colon outside the volume position (a command
+    /// spelled as a URL is how one arrives) threw past this method and out of the check, so a
+    /// declaration nobody could launch took the run down instead of being reported at
+    /// <c>KW-MCP-WIRE-003</c>.
+    /// </remarks>
     private string? Absolute(string command)
     {
         if (Path.IsPathFullyQualified(command))
@@ -146,11 +156,8 @@ public sealed class LaunchCommandResolver
         {
             return Path.GetFullPath(command, _baseDirectory);
         }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-        catch (PathTooLongException)
+        catch (Exception exception)
+            when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return null;
         }

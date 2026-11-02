@@ -174,6 +174,55 @@ public sealed class McpWiringInspectorTests : IDisposable
     }
 
     /// <summary>
+    /// A launch command this platform cannot spell as a path is reported as a missing binary, not
+    /// thrown out of the check.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A harness entry whose command is a URL — <c>https://localhost:8765/mcp</c> — is how a path
+    /// shape the platform rejects arrives here in practice: it holds the separator a path is
+    /// recognized by, and on Windows the colon outside the volume position makes
+    /// <see cref="Path.GetFullPath(string, string)"/> answer <see cref="NotSupportedException"/>
+    /// rather than a path. The resolver caught only the argument and length failures, so that
+    /// answer escaped out of <see cref="McpWiringInspector.Inspect(string, McpConfig, LaunchCommandResolver)"/>
+    /// instead of becoming the <c>KW-MCP-WIRE-003</c> gap an absent binary produces.
+    /// </para>
+    /// <para>
+    /// The assertion holds on every platform, and only the arm that reaches it differs: on Unix a
+    /// colon is an ordinary file-name character, so the command resolves to a path under the base
+    /// directory that holds nothing and is refused for that reason. That is why this case needs no
+    /// platform guard — a gap is the answer either way, and an exception is the answer neither
+    /// platform may give.
+    /// </para>
+    /// <para>
+    /// The resolver is asked directly as well as through the check, because an exception is thrown
+    /// before any report exists: the resolver-level assertion names the call that threw even if the
+    /// check's wording moves.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ALaunchCommandThePlatformCannotSpellAsAPathIsReportedAsAMissingBinary()
+    {
+        const string UrlCommand = "https://localhost:8765/mcp";
+
+        McpWiringFixture.WriteText(Repo, ".mcp.json", McpServersDocument(".", UrlCommand));
+
+        Assert.Null(new LaunchCommandResolver([EmptyBin]).Resolve(UrlCommand));
+
+        // Third-party, because a server Kyber-Weave ships is one whose command runs its own binary:
+        // this case is about the shape of a name, not about which side installed it.
+        McpWiringReport report = Inspect(McpWiringFixture.Declare(
+            new RequiredMcpServer(
+                ServerName,
+                [UrlCommand, "--repo-root", "."],
+                McpProvenance.ThirdParty)));
+
+        Assert.Contains(
+            FindingsFor(report, ClaudeCode),
+            finding => finding.Code == BinaryAbsentCode);
+    }
+
+    /// <summary>
     /// A declared launch command spelled as a repository-relative path resolves against the
     /// repository under inspection, so the tree that launches from the repository root is never
     /// reported as one whose binary is missing.
