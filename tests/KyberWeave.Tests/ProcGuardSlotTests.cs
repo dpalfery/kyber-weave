@@ -377,6 +377,90 @@ public sealed class ProcGuardSlotTests : IDisposable
         Assert.Equal(UsageExitCode, result.ExitCode);
     }
 
+    /// <summary>
+    /// When <c>ps</c> cannot answer, a lock held by a live process is not recovered and the caller queues (exit 88).
+    /// </summary>
+    /// <remarks>
+    /// An empty answer from <c>ps</c> is what a missing process looks like, and also what an overloaded machine can
+    /// produce. Reading it as "gone" would delete a live holder's lock and start a second full run beside it, which is the
+    /// overlap the slot exists to prevent.
+    /// </remarks>
+    [Fact]
+    public void RunWhenPsCannotAnswerAndHolderIsAlive_DoesNotRecoverTheLock()
+    {
+        SkipIfBashUnavailable();
+        SeedLock(SlotName, 1, Environment.ProcessId, "live-run");
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--slot-wait", "0", "--", "sh", "-c", "exit 0"],
+            options: new GuardOptions(PathPrefix: FixtureDirectory("fake-ps-fails")));
+
+        Assert.Equal(SlotWaitExitCode, result.ExitCode);
+        Assert.True(Directory.Exists(LockPath(SlotName, 1)), "The live holder's lock was deleted.");
+    }
+
+    /// <summary>
+    /// When <c>ps</c> cannot answer, even a lock whose holder looks dead is not recovered: a missing process is only
+    /// believed when <c>ps</c> can still find this guard.
+    /// </summary>
+    [Fact]
+    public void RunWhenPsCannotAnswerAndHolderLooksDead_DoesNotRecoverTheLock()
+    {
+        SkipIfBashUnavailable();
+        SeedLock(SlotName, 1, DeadPid, "maybe-dead-run");
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--slot-wait", "0", "--", "sh", "-c", "exit 0"],
+            options: new GuardOptions(PathPrefix: FixtureDirectory("fake-ps-fails")));
+
+        Assert.Equal(SlotWaitExitCode, result.ExitCode);
+        Assert.True(Directory.Exists(LockPath(SlotName, 1)), "A lock was recovered on the word of a ps that could not answer.");
+    }
+
+    /// <summary>
+    /// A guard that cannot read its own process start time refuses to take the slot (exit 2) and leaves no lock behind.
+    /// </summary>
+    /// <remarks>
+    /// The start time is what tells a later caller that a reused pid is not the holder. A holder file without it can never be
+    /// proved stale by reuse, so a crashed holder whose pid a long-lived process then takes would block the slot until every
+    /// caller's wait ran out.
+    /// </remarks>
+    [Fact]
+    public void RunWhenOwnStartTimeCannotBeRead_FailsClosedAndLeavesNoLock()
+    {
+        SkipIfBashUnavailable();
+        string marker = Path.Combine(work.Path, "ran");
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--", "sh", "-c", "echo ran > \"$0\"", marker],
+            options: new GuardOptions(PathPrefix: FixtureDirectory("fake-ps-fails")));
+
+        Assert.Equal(UsageExitCode, result.ExitCode);
+        Assert.False(File.Exists(marker), "The command ran without a recorded start time.");
+        AssertNoLocksRemain();
+    }
+
+    /// <summary>
+    /// The start time is compared in the C locale, so a guard run under another locale still recognises the live holder.
+    /// </summary>
+    /// <remarks>
+    /// <c>ps -o lstart=</c> is localised (French prints <c>dim. 1 nov.</c>). Harnesses start with different locales, and a
+    /// holder recorded under one would look like a reused pid to a caller under another, so the live lock would be deleted.
+    /// </remarks>
+    [Fact]
+    public void RunUnderAnotherLocale_StillRecognisesTheLiveHolder()
+    {
+        SkipIfBashUnavailable();
+        SeedLock(SlotName, 1, Environment.ProcessId, "c-locale-holder", started: "Mon Nov 2 10:00:00 2026");
+
+        GuardRun result = RunGuard(
+            ["run", "--slot", SlotName, "--slot-wait", "0", "--", "sh", "-c", "exit 0"],
+            options: new GuardOptions(PathPrefix: FixtureDirectory("fake-ps-locale"), LcAll: "fr_FR.UTF-8"));
+
+        Assert.Equal(SlotWaitExitCode, result.ExitCode);
+        Assert.True(Directory.Exists(LockPath(SlotName, 1)), "The live holder's lock was deleted as a reused pid.");
+    }
+
     private static void SkipIfBashUnavailable()
     {
         if (OperatingSystem.IsWindows() || !File.Exists("/bin/bash"))
@@ -388,6 +472,11 @@ public sealed class ProcGuardSlotTests : IDisposable
     private static string FixturePath(string fixtureName)
     {
         return Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests", "Fixtures", "proc-guard", fixtureName);
+    }
+
+    private static string FixtureDirectory(string directoryName)
+    {
+        return FixturePath(directoryName);
     }
 
     private string LockPath(string name, int index)
@@ -431,7 +520,7 @@ public sealed class ProcGuardSlotTests : IDisposable
     /// The environment is set on the child's <see cref="ProcessStartInfo"/>, never on the test process, so parallel test
     /// classes cannot observe it. The stderr file is read back into the result once the guard exits.
     /// </remarks>
-    private GuardRun RunGuard(string[] guardArguments, string? stderrFile = null)
+    private GuardRun RunGuard(string[] guardArguments, string? stderrFile = null, GuardOptions? options = null)
     {
         stderrFile ??= Path.Combine(work.Path, "guard-" + Guid.NewGuid().ToString("N") + ".err");
         ProcessStartInfo startInfo = new("/bin/bash")
@@ -455,6 +544,15 @@ public sealed class ProcGuardSlotTests : IDisposable
         startInfo.Environment["KW_PROC_GUARD_PS"] = FixturePath("ps-clean.sh");
         startInfo.Environment["KW_PROC_GUARD_SLOT_DIR"] = slotRoot.Path;
         startInfo.Environment["KW_TEST_GUARD_STDERR"] = stderrFile;
+        if (options?.PathPrefix is not null)
+        {
+            startInfo.Environment["PATH"] = options.PathPrefix + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        }
+
+        if (options?.LcAll is not null)
+        {
+            startInfo.Environment["LC_ALL"] = options.LcAll;
+        }
 
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);
         return new GuardRun(result.ExitCode, result.StandardOutput, ReadStderr(stderrFile));
@@ -481,6 +579,9 @@ public sealed class ProcGuardSlotTests : IDisposable
             await Task.Delay(TimeSpan.FromMilliseconds(50));
         }
     }
+
+    /// <summary>What a case changes about the guard's environment: a directory put first on PATH (a fake <c>ps</c>) and LC_ALL.</summary>
+    private sealed record GuardOptions(string? PathPrefix = null, string? LcAll = null);
 
     private sealed record GuardRun(int ExitCode, string StandardOutput, string StandardError);
 }

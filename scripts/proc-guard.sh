@@ -405,10 +405,23 @@ holder_field() {
   awk -F= -v k="$2" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$1/holder" 2>/dev/null
 }
 
-# A process's start time as ps prints it, whitespace squeezed; empty when the pid does not exist.
-# With the pid it identifies a process even after the pid is reused.
+# A process's start time as ps prints it, whitespace squeezed; empty when ps cannot answer. With
+# the pid it identifies a process even after the pid is reused. The C locale is pinned because
+# ps localises this column and callers run under different locales: a holder recorded under one
+# would otherwise look like a reused pid to a caller under another.
 process_start() {
-  ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'
+  LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+
+# Succeeds only when pid $1 is positively gone. An empty answer from ps is also what a ps that
+# failed under load prints, so "gone" is believed only when kill -0 cannot reach the pid, ps does
+# not list it, and ps can still find this very process. Anything less leaves the lock alone: a
+# wrongly recovered lock starts a second full run beside the holder's.
+pid_is_gone() {
+  local pid="$1"
+  kill -0 "${pid}" 2>/dev/null && return 1
+  [[ -z "$(ps -o pid= -p "${pid}" 2>/dev/null)" ]] || return 1
+  [[ -n "$(ps -o pid= -p "${self_pid}" 2>/dev/null)" ]]
 }
 
 # Modification time of a path in epoch seconds; empty when unreadable.
@@ -433,8 +446,7 @@ slot_is_stale() {
     ((now - modified > SLOT_ORPHAN_GRACE))
     return
   fi
-  # ps rather than kill -0: signalling another user's process fails with EPERM, which is not "gone".
-  if [[ -z "$(ps -o pid= -p "${holder_pid}" 2>/dev/null)" ]]; then
+  if pid_is_gone "${holder_pid}"; then
     return 0
   fi
   recorded="$(holder_field "${lock}" started)"
@@ -499,6 +511,12 @@ take_slot() {
     return 2
   fi
   started="$(process_start "${self_pid}")"
+  if [[ -z "${started}" ]]; then
+    # Without a start time, a later caller could never tell this holder's reused pid from the holder.
+    printf 'proc-guard: cannot read this process'"'"'s start time (ps failed); refusing to hold a slot that pid reuse could wedge\n' >&2
+    release_slot
+    return 2
+  fi
   tmp="${lock}/holder.tmp"
   # Written aside and renamed, so a reader never sees half a holder file.
   if ! { printf 'pid=%s\nstarted=%s\nsince=%s\ntask=%s\nroot=%s\ncmd=%s\n' \
