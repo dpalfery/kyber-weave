@@ -1304,6 +1304,143 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
+    // ---- the Factory (Droid) capture plugin ----
+
+    /// <summary>
+    ///     Runs an update and records every process the updater started, so a test can assert which
+    ///     capture-plugin verbs ran and with which arguments. The capture seam dispatches on the harness
+    ///     the verb names, so a test can fail the Factory verb and leave the OpenCode one alone.
+    /// </summary>
+    private SelfUpdateOutcome RunRecording(
+        HttpMessageHandler handler,
+        SelfUpdateHost host,
+        SelfUpdateOptions options,
+        List<string> log,
+        List<ReconcileStep> steps,
+        Func<string, IReadOnlyList<string>, ProcessResult>? capture = null)
+    {
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            HomeWithTrayVersion("0.9.23"),
+            (file, args) =>
+            {
+                steps.Add(new ReconcileStep("tray", file, args));
+                return 0;
+            },
+            captureProcess: (file, args) =>
+            {
+                steps.Add(new ReconcileStep("capture", file, args));
+                return capture is null ? QuietSuccess : capture(file, args);
+            });
+        return updater.Run(options);
+    }
+
+    /// <summary>The harness a verb names, or an empty string when it names none.</summary>
+    private static string HarnessOf(IReadOnlyList<string> args)
+    {
+        for (int index = 0; index + 1 < args.Count; index++)
+            if (args[index] == "--harness")
+                return args[index + 1];
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    ///     The self-updater installs the Kyber-owned Factory capture plugin with the same verb, but with
+    ///     the "only if already installed" flag, so an update never adds a surface the owner did not
+    ///     choose. It names no root: the plugin is installed where the harness already has it.
+    /// </summary>
+    [Fact]
+    public void RunInstallsTheFactoryCapturePluginWithTheIfInstalledFlag()
+    {
+        string kyberdash = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        ReconcileStep factory = Assert.Single(steps, step => HarnessOf(step.Args) == "factory");
+        Assert.Equal(kyberdash, factory.File);
+        string[] verb = ["kyber", "capture", "plugin", "install"];
+        Assert.Equal(verb, factory.Args.Take(4));
+        Assert.Contains("--if-installed", factory.Args);
+        Assert.DoesNotContain("--config-dir", factory.Args);
+    }
+
+    /// <summary>
+    ///     A refused Factory install is a warning: the capture plugin is an optional surface, so the
+    ///     update keeps its exit code and the owner can rerun the printed command.
+    /// </summary>
+    [Fact]
+    public void RunLeavesTheExitCodeUnchangedWhenTheFactoryCapturePluginStepFails()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            (file, args) => HarnessOf(args) == "factory"
+                ? new ProcessResult(3, string.Empty, "factory plugin write refused")
+                : QuietSuccess);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("capture plugin step failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     The OpenCode capture plugin step is unchanged: the same verb with the same flags. The Factory
+    ///     plugin is installed beside it, not in place of it.
+    /// </summary>
+    [Fact]
+    public void RunKeepsTheOpenCodeCapturePluginInstallUnchanged()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        ReconcileStep openCode = Assert.Single(steps, step => HarnessOf(step.Args) == "opencode");
+        Assert.Equal(PluginArgs, openCode.Args);
+    }
+
+    /// <summary>
+    ///     A missing kyberdash leaves the capture plugin alone, and the update's exit code with it: the
+    ///     plugin step is skipped, not failed.
+    /// </summary>
+    [Fact]
+    public void RunLeavesTheExitCodeUnchangedWhenKyberDashIsMissing()
+    {
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(steps, step => HarnessOf(step.Args) == "factory");
+        Assert.Contains(log, line => line.Contains("capture plugin", StringComparison.OrdinalIgnoreCase));
+    }
+
     private SelfUpdateOutcome Run(
         HttpMessageHandler handler,
         SelfUpdateHost host,
