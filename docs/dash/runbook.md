@@ -342,8 +342,10 @@ process for you.
 **The native export, if you want it.** Factory can push its own OpenTelemetry to the loopback
 receiver, and `export OTEL_TELEMETRY_ENDPOINT="http://localhost:4318"` is Factory's own
 documented example — the receiver's address. The receiver serves `POST /v1/metrics` beside
-`POST /v1/traces` and `POST /v1/logs`. The native path is **complementary, not primary**: it
-carries no token counters and no subagent lineage, and where an organisation-managed `telemetry`
+`POST /v1/traces` and `POST /v1/logs`. The native path is **complementary, not primary**: its
+**metrics** are stored in the canon store's `metric_point` table, and **no native span is
+claimed** — a native span is quarantined as `unclaimed`. The native export carries no token
+counters and no subagent lineage, and where an organisation-managed `telemetry`
 block overrides the machine environment variables, nothing arrives locally at all. The plugin
 path is unaffected either way. See
 [the architecture](architecture.md#factorys-native-opentelemetry-path-authorized-complementary).
@@ -1752,8 +1754,8 @@ root is `$FACTORY_DIR` when set, else `~/.factory` — the same resolution the F
 provider uses. (`--config-dir` is the OpenCode root and does not move the Factory tree.) The tree
 holds `.factory-plugin/plugin.json`, `hooks/hooks.json` and `hooks/kyberdash-factory.mjs`; the
 receipt is `~/.kyberdash/factory-plugin-receipt.json` and records the SHA-256 digest of every
-file, so removal requires every digest to match. The plugin posts contract-1 session, turn, tool
-and child-session spans to the loopback receiver, and it never fails Factory: every error is
+file, so removal requires every digest to match. The plugin posts contract-1 session, turn and
+tool spans to the loopback receiver, and it never fails Factory: every error is
 swallowed and the hook exits 0. It writes no key into `~/.factory/settings.json` and never
 touches `~/.factory/hooks.json`. Unlike the OpenCode plugin, the Factory switch that installs
 the capture **does not** turn the content consent on — see

@@ -585,13 +585,17 @@ recorded digest to match, so an edited file is left in place. The owner's
 created, read, merged, rewritten or restored.
 
 **The wire contract.** Contract version `1`, in the `factory.*` attribute namespace, with its own
-span names (`factory.session`, `factory.turn`, `factory.tool`, `factory.child_session`) and
-deterministic id derivations (`dash/src/capture/harnesses/factory-plugin/contract.ts`). The
+span names (`factory.session`, `factory.turn`, `factory.tool`) and deterministic id derivations
+(`dash/src/capture/harnesses/factory-plugin/contract.ts`). The
 OpenCode contract-3 keys are deliberately not reused: the OpenCode adapter claims every span
 carrying them, so an `opencode.*` key here would attribute every Factory row to OpenCode. The
 seven registered hook events are `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `Stop`, `SubagentStop` and `SessionEnd`; `PreCompact` produces no span in this contract, so no
-process is spent on it. The mapper (`mapper.ts`) is pure: an attribute the payload does not carry
+process is spent on it. `SubagentStop` is registered but produces no span either: Factory's
+documented payload for that event carries `task_name`, `task_result`, `task_error` and
+`stop_hook_active`, and **no child session id** — the common `session_id` is the session the hook
+fires in, which for a subagent's stop is the **parent's** session, so a span there would name the
+parent as the child. The mapper (`mapper.ts`) is pure: an attribute the payload does not carry
 is absent, never zero and never an empty string, and the prompt text is capped at 64 KiB and
 marked when it is cut.
 
@@ -629,10 +633,12 @@ consent off.
 **The shared `droid` harness id.** Factory is one harness under one canonical id, `droid` — the
 id the Factory file source already stores (`dash/src/providers/droid.ts`), so the dashboard shows
 Factory once and the plugin's rows sit beside the file source's rows. One adapter, named
-`droid`, claims both the plugin envelope and Factory's native export; the two are told apart by
-attribute fingerprint alone, never by the span's source name (R6.2). An envelope span naming an
-unsupported or missing contract version scores zero and quarantines under the fixed reason
-`unknown droid contract version`, the same guard the OpenCode envelope carries
+`droid`, claims the plugin envelope, and only the plugin envelope: it recognises a span by its
+attribute fingerprint alone, never by the span's source name (R6.2), and Factory's **native** span
+surface is not among the fingerprints it recognises (see
+[the native path](#factorys-native-opentelemetry-path-authorized-complementary)). An envelope span
+naming an unsupported or missing contract version scores zero and quarantines under the fixed
+reason `unknown droid contract version`, the same guard the OpenCode envelope carries
 (`dash/src/canon/adapters/droid-envelope.ts`).
 
 ### The Factory source-precedence rule
@@ -686,13 +692,24 @@ metrics sink port with the same admission, shedding and health-window discipline
 path. Only OTLP/HTTP is documented for Factory — port 4318, no gRPC, no 4317 — so no other
 protocol is added. Logs are never exported by Droid, so `/v1/logs` receives nothing from Factory.
 
-**Where the metric points go.** A decoded point becomes **one row** in the canon store's own
-`metric_point` table (`dash/src/canon/store.ts`), written through the production sink's
-`upsertMetrics` port and the `ingestMetricBatch` seam
-(`dash/src/canon/metric-ingest.ts`). The row carries the metric's name, kind and unit, its
-aggregation temporality, the point's timestamp and its value or its count and sum, the point's
-attributes, the resource attributes, the scope, and the exporter's `service.name` as the row's
-**source**. A point that carried no value of its own keeps the value absent, never zero.
+**Where the metric points go.** A decoded point becomes **one row per distinct decoded point** in
+the canon store's own `metric_point` table (`dash/src/canon/store.ts`), written through the
+production sink's `upsertMetrics` port and the `ingestMetricBatch` seam
+(`dash/src/canon/metric-ingest.ts`). A point's identity is a content digest of everything the row
+carries, so a re-delivered point lands on the row it already occupies instead of beside it. The
+row carries the metric's name, kind and unit, its aggregation temporality, the point's timestamp
+and its value or its count and sum, the point's attributes, the resource attributes, the scope,
+and the exporter's `service.name` as the row's **source**. A point that carried no value of its
+own keeps the value absent, never zero.
+
+**What the row stores is the exporter's own content.** `attributes_json` holds the point's own
+attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
+it redacts nothing. The receiver strips account identity from the **resource** at the decode
+seam, exactly as it does for spans and logs, so `resource_json` carries the exporter's resource
+attributes (`service.name`, `service.version`, `os.type`, …) and never `user.id`, `user.email` or
+`organization.id`. A metric **point's** own attributes are not stripped, and Factory's native
+export puts the identity keys `user.id`, `user.email` and `organization.id` on every data point —
+so those keys reach `attributes_json` verbatim and stay in the store.
 
 The table is created by the store's own schema with `CREATE ... IF NOT EXISTS`, the
 `model_context_window_catalog` precedent, so **the schema version does not move and there is no
@@ -713,8 +730,19 @@ recorded as receiver activity under the single `otlp:metrics` key, carrying the 
 the batch carried, and that audit write is fenced exactly like the span and log audit writes: a
 failed audit row never fails the ingest it audits and never requeues the batch.
 
-**The native claim.** The `droid` adapter recognises the native `genai` fingerprint by
-attribute, never by source name. The vocabulary is:
+**The native span claim is withdrawn.** **No adapter claims a native span.** The `droid` adapter
+recognises only the plugin envelope. It used to recognise the native `genai` fingerprint by
+attribute — never by source name — and that fingerprint (`gen_ai.agent.name` = `droid`) sits on
+the trace **root alone**. The registry normalises a group's score by the group's span count, so a
+trace of one root and `k` children scores `1/(1+k)` against the registry's **0.6** threshold: a
+real turn's trace has at least one child, scores at most **0.5**, and is quarantined. Measured
+against real captured spans: **accepted 0, quarantined 2**. The `legacy` format's content-shaped
+spans carry no attribute fingerprint at all — only span names, which no adapter may claim. A
+native span therefore leaves the corpus for quarantine as **`unclaimed`**, and the quarantine row
+keeps the whole decoded packet as the audit evidence. The native **metrics** path is untouched by
+this: it is what remains of the native path.
+
+The vocabulary Factory's own export uses is:
 
 | Aspect | Value |
 |---|---|
@@ -732,26 +760,22 @@ attribute, never by source name. The vocabulary is:
 | Common (every data point) | `user.id`, `user.email`, `organization.id`, `session.id`, `model.id`, `parent_session.id` |
 | Resource | `service.name` = `cli`, `service.version`, `os.type`, `os.version`, `host.arch`, `terminal.type`, `telemetry.granularity` |
 
-**Plugin-first precedence.** The plugin envelope is claimed first. A native span for a session the
-plugin already covers is **not counted with it**: it leaves the corpus for quarantine under the
-fixed reason `droid native span superseded by the Factory plugin envelope`, and the quarantine row
-keeps the decoded packet as the evidence that the session was seen twice. It therefore adds no
-turn, no tool and no duration to that session. The rule holds whichever order the two exporters
-arrive in: a native row that reached the corpus before the plugin's row for its session leaves it
-the same way.
+**Plugin-first precedence.** The plugin envelope is the only Factory span KyberDash claims, so
+there is nothing for a native span to be counted with: every native span is quarantined as
+`unclaimed` and never reaches the corpus.
 
-**What the native path cannot do.** It carries **no token or cost counters** — Factory's own
-documentation states that token and cost data "are not exported as customer OTEL metrics" — and
-it carries **no subagent lineage**. It therefore complements the plugin rows and the file
-source's counters, and replaces neither. Native rows declare their counters `not_measurable`
-with a reason that names the harness and the metric.
+**What the native path cannot do.** Its metrics carry **no token or cost counters** — Factory's
+own documentation states that token and cost data "are not exported as customer OTEL metrics" —
+and the export carries **no subagent lineage**. A Factory session's counters therefore still come
+from the file source, and the native path replaces neither the plugin rows nor the file source's
+counters.
 
 **Where it is silently absent.** Factory's endpoint is configured by machine environment
 variables (`OTEL_TELEMETRY_ENDPOINT` and its siblings); there is no personal `settings.json`
 telemetry key. An organisation-managed `telemetry` block **overrides** those variables, so a
 deployment under such an override exports nothing locally and the plugin path is the only
-capture path in that deployment. KyberDash reports what it observes — native spans arriving or
-not — and never claims the native path is available when none arrives.
+capture path in that deployment. KyberDash reports what it observes and never claims the native
+path is available when none arrives.
 
 ## Local harness-source refresh
 

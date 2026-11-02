@@ -78,11 +78,10 @@ Factory's own plugin directory at `~/.factory/plugins/kyberdash-factory/`. It de
 config key: your `~/.factory/settings.json` and `~/.factory/hooks.json` are never written, and
 the plugin is removed again by `kyberdash kyber capture disable --harness factory`.
 
-**What it collects.** The plugin turns Factory's hook events into session, turn, tool and
-child-session spans: the turn boundary, the tool names and their sizes, the timing, the model,
-and the link from a subagent session to its parent. Factory's own hook payload carries no token
-counter, so the plugin reports none — the counters come from the Factory session file's companion
-settings, joined to the plugin's rows on the session id.
+**What it collects.** The plugin turns Factory's hook events into session, turn and tool spans:
+the turn boundary, the tool names and their sizes, the timing and the model. Factory's own hook
+payload carries no token counter, so the plugin reports none — the counters come from the Factory
+session file's companion settings, joined to the plugin's rows on the session id.
 
 **What consent governs.** The prompt text is content, and it is **off by default**. The consent
 file is `~/.kyberdash/factory-plugin.json`; it holds `content: false` until you say otherwise.

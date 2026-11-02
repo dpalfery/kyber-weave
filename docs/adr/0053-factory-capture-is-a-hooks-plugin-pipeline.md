@@ -20,6 +20,10 @@ Accepted, 2026-11-02, with the Factory (Droid) capture plan. It amends
 [ADR 0031](0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) in place for the
 Factory writer.
 
+Amended 2026-11-02: the plugin's `SubagentStop` event produces no span, because Factory's
+documented payload for that event carries no child session id; and the native **span** claim is
+withdrawn, so the native **metrics** path is what remains of the native path.
+
 ## Context
 
 Factory (`droid`) was already a Kyber-Squad target and KyberDash already ingested it — but only
@@ -40,8 +44,9 @@ Four collection paths were available, and the choice is expensive to revisit:
 The native export is real, but it is tokenless by Factory's own documentation — token and cost
 data "are not exported as customer OTEL metrics" — and its `genai` format carries no subagent
 lineage: a subagent's trace is a separate trace root, so it cannot be joined to its parent's. The
-Factory transcript's own `parentId` does carry that linkage, and the plugin's `SubagentStop` event
-carries the child session id.
+Factory transcript's own `parentId` does carry that linkage; the plugin's `SubagentStop` event
+does not — its documented payload names `task_name`, `task_result`, `task_error` and
+`stop_hook_active`, and no child session id — so that event produces no span.
 
 ## Decision
 
@@ -57,22 +62,32 @@ projection, then `/api/kyber/*`.
   records the SHA-256 digest of every file KyberDash wrote. Project scope is not used: the
   capture is per-user, and the owner may work in many projects.
 - **The wire contract is Factory's own.** Version `1`, the `factory.*` attribute namespace, its
-  own span names (`factory.session`, `factory.turn`, `factory.tool`, `factory.child_session`),
+  own span names (`factory.session`, `factory.turn`, `factory.tool`),
   and deterministic id derivations. The OpenCode contract-3 keys are not reused: the OpenCode
   adapter claims every span carrying them, so an `opencode.*` key here would attribute every
-  Factory row to OpenCode.
+  Factory row to OpenCode. The `SubagentStop` event produces no span: Factory's documented
+  payload for it names `task_name`, `task_result`, `task_error` and `stop_hook_active`, and no
+  child session id, while the common `session_id` is the session the hook fires in — the
+  **parent's**, for a subagent's stop. A span there would name the parent as the child, so none
+  is written, and a child session's own turns arrive as the child's own plugin spans.
 - **One canonical harness id: `droid`.** It is the id the Factory file source already stores, so
   the dashboard shows Factory once and the plugin's turns sit beside the file source's counters.
-  One adapter, named `droid`, claims both the plugin envelope (`factory.contract_version = 1`)
-  and Factory's native `gen_ai.*` export.
-- **The plugin envelope is claimed first.** A native span for a session the plugin already covers
-  is not counted with it: it leaves the corpus for quarantine under a fixed reason, so a session
-  observed through both paths is counted once. The two are told apart by attribute fingerprint,
-  never by the span's source name.
-- **Native OpenTelemetry is an authorized second path, never the primary one.** The receiver
-  serves `POST /v1/metrics` beside `/v1/traces` and `/v1/logs`, and the `droid` adapter claims
-  the native `genai` vocabulary (`gen_ai.agent.name = droid`, `gen_ai.operation.name`,
-  `gen_ai.conversation.id` as the session id). The native path carries no token or cost counter
+  One adapter, named `droid`, claims the plugin envelope (`factory.contract_version = 1`) and
+  nothing else.
+- **The native span claim is withdrawn; the plugin envelope is the only Factory span claimed.**
+  No adapter claims a native span. The `droid` adapter used to recognise the native `genai`
+  fingerprint by attribute — never by the span's source name — and that fingerprint
+  (`gen_ai.agent.name` = `droid`) sits on the trace **root alone**. The registry normalises a
+  group's score by the group's span count, so a trace of one root and `k` children scores
+  `1/(1+k)` against the registry's 0.6 threshold, and a real turn's trace scores at most 0.5.
+  The `legacy` format's content-shaped spans carry no attribute fingerprint at all — only span
+  names, which no adapter may claim. A native span therefore leaves the corpus for quarantine as
+  `unclaimed`, its decoded packet kept as the audit evidence. Measured against real captured
+  spans: accepted 0, quarantined 2.
+- **Native OpenTelemetry is an authorized second path, never the primary one — and only its
+  metrics are collected.** The receiver serves `POST /v1/metrics` beside `/v1/traces` and
+  `/v1/logs`, and the decoded metric points are persisted in the canon store's own
+  `metric_point` table. The native path carries no token or cost counter
   and no subagent lineage, so it complements the plugin rows and the file source's counters; it
   replaces neither. Factory's endpoint is set by machine environment variables
   (`OTEL_TELEMETRY_ENDPOINT` and its siblings), and an organisation-managed `telemetry` block
@@ -104,7 +119,7 @@ projection, then `/api/kyber/*`.
 2. **Native OpenTelemetry as the primary path.** Rejected. It is tokenless by Factory's own
    documentation, so it can never carry a session's token totals, and its `genai` format carries
    no subagent lineage, so a subagent's turn cannot be joined to its parent. It is authorized as
-   a complementary path instead.
+   a complementary path for its metrics instead, and no native span is claimed.
 3. **Merging into the owner's `~/.factory/hooks.json`.** Rejected. It edits a shared harness
    settings file, which is exactly what ADR 0026 forbids and what ADR 0031's file-plugin
    amendments avoid by owning a separate tree.
@@ -128,7 +143,7 @@ projection, then `/api/kyber/*`.
   calls stays as it is. It is a known lossy approximation, and the per-call data that would
   remove it is tracked separately.
 - Where an organisation pins a telemetry endpoint, the native path is silently absent. KyberDash
-  reports what it observes — native spans arriving or not — and the plugin path is unaffected.
+  reports what it observes, and the plugin path is unaffected.
 - The live proof of capture is an owner-run check, like the OpenCode live gate: a live Droid
   turn calls a model and cannot be a CI gate. The recorded replay through the production
   pipeline proves what the dashboard renders from that replay, not that a live turn is captured.
