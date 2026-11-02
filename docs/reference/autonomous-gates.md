@@ -4,7 +4,7 @@ title: Autonomous gates inventory
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-24
+last-reviewed: 2026-10-27
 ---
 
 # Autonomous gates inventory
@@ -47,8 +47,9 @@ Each row names:
     `AUTONOMOUS_APPROVAL: <gate id>`; the owner records the approval in
     `## Decisions` with `autonomous: recommendation accepted`. The conductor
     never writes the row itself.
-  - `park` — work stops for that change or task, is recorded in the parked
-    list, and the run continues with unaffected work before delivery.
+  - `park` — stop reworking that one finding and list its id in the draft
+    pull request. Park never holds back delivery; the run continues with
+    unaffected work.
   - `hard-stop` — the run relays to the user and stops; nothing proceeds
     past the gate without a human answer.
 - **Disposition** — `keep` (stays human), `reduce` (stays but fires less
@@ -64,11 +65,12 @@ flowchart LR
     Tasks --> Exec["approve and execute"]
     Exec --> Mode["mode-change re-approval"]
     Mode --> TG["developer task-gate"]
-    TG --> Council["whole-change council"]
-    Council --> PrePush["pre-push self-review"]
+    TG --> Draft["draft PR pushed (no gate)"]
+    Draft --> Council["whole-change council"]
+    Council --> PrePush["pre-push self-review (name only; runs after the draft push)"]
     PrePush --> Val["docs validate / docs drift"]
     Val --> Verdict["verdict rules 1-6"]
-    Verdict --> Delivery["delivery: draft PR only"]
+    Verdict --> Delivery["verdict in PR description<br/>ready once required CI passes"]
 ```
 
 ## 1. Intake and promotion
@@ -104,22 +106,26 @@ flowchart LR
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Developer `task-gate` — `TASK_GATE: PASS \| FAIL \| NONE_DECLARED \| NONE_APPLICABLE \| UNAVAILABLE` per `review.task-gates` | Owning developer (`csharp-dev`, `test-dev`, `react-dev`, `tauri-dev`, `github-devops`, and others) | `auto-approve with provenance` on `PASS` / `NONE_DECLARED` / `NONE_APPLICABLE`; `park`-and-rework on `FAIL` or missing line (rework to the same worker session, circuit-breaker after 2 reworks per key) | keep | **Irreversible-action justification:** the deterministic exit gate is the only evidence a task is done. No agent audits a single task; removing this gate would let unbuilt or unformatted code reach the council. `code-reviewer` remains the single whole-change council, never a per-task reviewer. |
+| Developer `task-gate` — `TASK_GATE: PASS \| FAIL \| NONE_DECLARED \| NONE_APPLICABLE \| UNAVAILABLE` per `review.task-gates` | Owning developer (`csharp-dev`, `test-dev`, `react-dev`, `tauri-dev`, `github-devops`, and others) | `auto-approve with provenance` on `PASS` / `NONE_DECLARED` / `NONE_APPLICABLE`; rework on `FAIL` or missing line, to the same worker session (circuit-breaker after 2 reworks per key) | keep | **Irreversible-action justification:** the deterministic exit gate is the only evidence a task is done. No agent audits a single task; removing this gate would let unbuilt or unformatted code reach the council. `code-reviewer` remains the single whole-change council, never a per-task reviewer. |
 | Iteration circuit-breaker (`ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`), `STATUS: ESCALATION` | `conductor`, `architect` (mediation) | `park` — halt rework for that cluster, record `ESCALATION: circuit-breaker`, continue unaffected work | keep | Prevents thrash loops from consuming the run. Keep: unbounded retry would spend execution without converging. |
-| `NEEDS_HUMAN` from `code-reviewer` and unresolved circuit-breakers | `conductor` | `park` — park that change or task, finish every unaffected task and closeout, list the parked item in the draft pull request and final report | keep | Non-fatal by design. Parking preserves the run while keeping the human decision where it belongs. |
+| `NEEDS_HUMAN` from `code-reviewer` (including `KW-REVIEW-008` and `KW-REVIEW-009`) and unresolved circuit-breakers | `conductor` | `report` — never blocks or parks anything. Listed in the draft pull request and final report as pending human review; delivery continues. An unresolved circuit-breaker keeps rework on its cluster halted and is listed in the PR as an open finding | reduce (supervised mode keeps `NEEDS_HUMAN` terminal) | Non-fatal in autonomous mode by design: the draft pull request is the human review. Supervised mode is unchanged. |
 
 ## 5. Whole-change council gate
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Whole-change `council` — `code-reviewer` once over the accumulated diff (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; `park` on `NEEDS_HUMAN` or exhausted `REQUEST_CHANGES`; never deliver on open `REQUEST_CHANGES` | keep | **Irreversible-action justification:** the last gate before the change leaves the machine. Nothing is committed, pushed, or opened as a pull request until this returns `APPROVE` (or the parked delivery path below). `REQUEST_CHANGES` follows the bounded remediation loop; the second verdict governs. |
+| Whole-change `council` — `code-reviewer` once over the accumulated diff (procedure steps 1–5, adversarial confirm, adjudication, `review verdict`) | `code-reviewer` (orchestrator and adjudicator), `review-lens` / `review-triage` seats | `auto-approve with provenance` on `APPROVE`; `NEEDS_HUMAN` and exhausted `REQUEST_CHANGES` are reported in the PR description, and delivery continues | reduce | The draft pull request is pushed before this runs. The verdict goes in the PR description and does not gate ready-for-review; required CI does. `REQUEST_CHANGES` follows the bounded remediation loop, and any finding still open is listed by id in the PR. Council findings are reported rather than stopping delivery. |
 | Per-task council invocation (without a human asking) | — | Refused: the reviewer says the routing is wrong rather than proceeding | keep (as a ban) | Per-task LLM review was removed by #424 and is not reinstated; the `task-gate` owns per-task evidence. Running fifteen lenses per task is cost without coverage gain. |
 
 ## 6. Pre-push self-review gate
 
 | Gate id / trigger | Owning specialist | Autonomous behavior | Disposition | Notes / irreversible-action justification |
 |---|---|---|---|---|
-| Pre-push `self-review` — sync + whole-change council re-run over the final diff + defect-class checklist + evidence | `code-reviewer` skill procedure run by the delivery agent | `hard-stop` on failure: if the re-run returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or report | keep | **Irreversible-action justification:** pushing publishes the change to CI and reviewers and spends minutes. The gate requires fixing every major-or-worse finding, re-running steps 1–5, and using the second verdict. A verdict computed before a fix is void. |
+| Pre-push `self-review` — sync + whole-change council re-run over the final diff + defect-class checklist + evidence | `code-reviewer` skill procedure run by the delivery agent | `report` — the re-run verdict and any open major-or-worse finding go in the PR description; the push is not stopped | reduce | The gate still fixes what has a bounded fix, re-runs steps 1–5, and uses the second verdict. A verdict computed before a fix is void. It no longer blocks the push: the draft pull request is pushed and required CI decides readiness. |
+
+"Pre-push" is the name of this gate, kept for its heading and its references. It does not mean the
+gate runs before the push. The draft pull request is pushed first, and a draft push never waits for
+this gate. Required CI decides readiness.
 
 ## 7. Docs gates
 
@@ -136,8 +142,8 @@ before rules 4–5; coverage is reported, never decisive.
 
 | # | Rule | Verdict | Autonomous behavior | Disposition |
 |---|---|---|---|---|
-| 1 | A changed path matches `review.policy.always-human` → `KW-REVIEW-008` | `NEEDS_HUMAN` | `park` (reserved-path escalation, before any finding is weighed) | keep — see §10 |
-| 2 | Diff exceeds `max-reviewable-lines` (`20000`) → `KW-REVIEW-009` | `NEEDS_HUMAN` | `park` (size escalation; never subdivide to slip under) | keep — reduce scope via exclusion only for lockfiles/scratch (plan item C), never by splitting |
+| 1 | A changed path matches `review.policy.always-human` → `KW-REVIEW-008` | `NEEDS_HUMAN` | `report` — listed in the draft PR as pending human review; delivery continues (reserved-path escalation, before any finding is weighed) | keep — see §10 |
+| 2 | Diff exceeds `max-reviewable-lines` (`20000`) → `KW-REVIEW-009` | `NEEDS_HUMAN` | `report` — listed in the draft PR as pending human review; delivery continues (size escalation; never subdivide to slip under) | keep — reduce scope via exclusion only for lockfiles/scratch (plan item C), never by splitting |
 | 3 | A blocking gate failed → `KW-REVIEW-005` (includes `docs validate`, `docs drift`, build, test, analyzers, and every other `blocking: true` gate) | `REQUEST_CHANGES` | `hard-stop` — cannot be approved past; fix, re-run, second verdict governs | keep — **irreversible-action justification:** a failing blocking gate is failed evidence; approving past it would ship unverified claims |
 | 4 | Any surviving `critical` finding → `KW-REVIEW-006` | `REQUEST_CHANGES` | Bounded remediation before park (plan item B); Minor/Info never block here | reduce — gate only on Critical and Major per owner decision Q3; Minor/Info are reported, never blocking |
 | 5 | Surviving `major` findings reach `major-count-blocks` (`3`) → `KW-REVIEW-007` | `REQUEST_CHANGES` | Same remediation loop as rule 4 | reduce — same Q3 scope as rule 4 |
@@ -169,11 +175,16 @@ conductor returns `STATUS: NEEDS_DECISION`.
   `autonomous: low-confidence, no authoritative source`, not relayed.
 - **Blocking-gate failure → `REQUEST_CHANGES`** (verdict rule 3) — a failing
   blocking gate cannot be approved past.
-- **Always-human paths** (§10) and **`KW-REVIEW-008`** — reserved-path
-  escalation is by design before any finding is weighed.
 - **Always-human procedure** — the `code-reviewer` per-task ban, the
   whole-change council, and the pre-push self-review sync/council/checklist/
   evidence steps stay as written; only finding-severity gating changes per Q3.
+
+The opt-in operator channel ([ADR 0045](../adr/0045-conductor-operator-channel-opt-in.md)) supplements
+these hard stops; it never replaces them. When it is on, an unattended run may send a hard-block
+question to the operator and wait for one reply. The MCP server that carries it is named by the
+operator, through `KYBER_SQUAD_OPERATOR_CHANNEL_SERVER`, so the product does not fix a name. That
+reply answers that question only and cannot clear any hard stop above. The channel exists only on
+Copilot CLI at global scope, so on every other target the hard stops work exactly as before.
 
 ## 10. Always-human paths
 
@@ -187,8 +198,11 @@ any finding is weighed. No task narrows or removes this list.
 - `**/*credential*`
 
 Rationale: the artifacts that decide what agents may do, and any secret or
-credential material, are not approvable by an agent. A change widening a
-capability profile or editing an instruction surface escalates on path alone.
+credential material, are not approvable by an agent. The engine therefore still
+returns `NEEDS_HUMAN` on them, and autonomous delivery reports them as pending human
+review rather than approving them. In autonomous runs the human judgement happens on the
+draft pull request, and merge stays human. A change widening a capability profile or editing
+an instruction surface escalates on path alone.
 `KW-REVIEW-008` itself always stays human.
 
 `KW-REVIEW-009` (size ceiling `max-reviewable-lines: 20000`) is the companion
@@ -199,23 +213,24 @@ remediation pass already in flight.
 
 ## 11. Push rule (Q5)
 
-Autonomous delivery follows the current `autonomy.md` contract verbatim. The
-2026-10-22 "always push regardless of risk" direction is **not** adopted.
+Autonomous delivery follows the current `autonomy.md` contract verbatim. This
+replaces the earlier rule that held an unapproved change back from the remote.
 
-- Push a **draft** pull request on `APPROVE`, or on parked
-  (`NEEDS_HUMAN` or an exhausted `REQUEST_CHANGES` loop whose change was
-  parked).
-- **Never** push with open `REQUEST_CHANGES` — leave the change unpushed and
-  report it.
-- **Never** mark the pull request ready for review.
-- **Never** merge. Assign the draft to the invoking user, include every
-  `autonomous: low-confidence` decision, the auto-approved gate count, and the
-  parked list in the description.
+- Push a **draft** pull request whatever the council verdict. The draft is
+  pushed before the council runs, so the council reviews a pull request that
+  already exists.
+- Mark it ready once required CI passes. Its wait is at most 60 minutes. If CI
+  fails or is not done, it stays draft and the report says what it is waiting for.
+- The council verdict, every `autonomous: low-confidence` decision, the
+  auto-approved gate count, and every pending human review item (`NEEDS_HUMAN`,
+  an unresolved circuit-breaker) go in the PR description. None of them blocks
+  delivery.
+- **Never** merge. Assign the PR to the invoking user.
 
-Pre-push order: sync the remote head and base branch (merge, never rebase,
-never force-push), run the full self-review council over the whole
-accumulated diff, fix every major-or-worse finding, re-run, and use the
-second verdict. A pre-fix verdict is void.
+Before the push, sync the remote head and base branch (merge, never rebase,
+never force-push). After the push, run the self-review council over the whole
+accumulated diff, fix what has a bounded fix, re-run, and use the second
+verdict in the PR description. A pre-fix verdict is void.
 
 ## 12. Removed by #424 — not reinstated
 
@@ -236,17 +251,21 @@ inventory.
 - **keep** — intake choice, defect-diagnosis ordering, promotion mechanics,
   plan Draft decisions, plan `PLAN_READY` verification, plan and spec
   **approve and execute**, mode-change re-approval, per-phase
-  `READY_FOR_REVIEW`, `task-gate`, circuit-breaker and `NEEDS_HUMAN` parking,
-  whole-change council, per-task council ban, pre-push self-review, `docs
-  validate`, `docs drift`, verdict rules 1–3 and 6, hard stops, always-human
-  paths, `KW-REVIEW-008`, `KW-REVIEW-009`, blocking gates, and the Q5 push
-  rule. Every keep above carries its irreversible-action justification:
-  without the gate, the run would execute, publish, or approve past missing
-  evidence, reserved paths, unreviewable size, or failed blocking gates.
+  `READY_FOR_REVIEW`, `task-gate`, per-task council ban, `docs validate`,
+  `docs drift`, verdict rules 1–3 and 6, hard stops, always-human paths,
+  `KW-REVIEW-008` and `KW-REVIEW-009` (the engine still returns
+  `NEEDS_HUMAN`), and blocking gates. Every keep above carries its
+  irreversible-action justification: without the gate, the run would execute,
+  publish, or approve past missing evidence, reserved paths, unreviewable
+  size, or failed blocking gates.
 - **reduce** — verdict rules 4–5: gate only on Critical and Major findings;
   Minor/Info are reported but never block, never force remediation loops, and
-  never force `NEEDS_HUMAN`. Blocking gates, `KW-REVIEW-008`, and
-  `KW-REVIEW-009` still decide per the verdict table.
+  never force `NEEDS_HUMAN`. Autonomous `NEEDS_HUMAN` from the council,
+  `KW-REVIEW-008`/`KW-REVIEW-009` escalations, and unresolved circuit-breakers
+  are reported in the draft pull request and no longer hold back delivery.
+  Circuit-breaker and `NEEDS_HUMAN` items, the whole-change council, and
+  pre-push self-review report into the PR description rather than gating the
+  push. A failing blocking gate still forces `REQUEST_CHANGES` in the verdict.
 - **collapse** — `tasks approval` + **approve and execute** merge into one
   consolidated presentation (max 2 gates total in the happy spec path) when
   there are no gaps and no open questions; any gap or question reopens

@@ -4,7 +4,7 @@ title: KyberDash requirements and invariants contract
 doc-type: requirements
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-29
 status: current
 decided-by:
   - adr/0008-kyberdash-single-canonical-store
@@ -72,6 +72,66 @@ dropping the requirement would reproduce it.
   `CanonStore.setCosts` in one transaction, which is itself re-derivable on the next pass.
 
 ---
+
+---
+
+## How the requirements govern the analysis MCP surface
+
+`kyberdash mcp` introduces no new measurement semantics: it is the same engine behind
+eight additive routes, so the requirements above govern it without a new `KD-*` row.
+The durable local read-only analytics boundary is decided in
+[ADR 0043](../adr/0043-kyberdash-analysis-mcp-read-only-boundary.md) (attach-only
+adapter; direct-SQL analytics and engine auto-start rejected):
+
+- **KD-004, KD-005, KD-006** are the query contract. Token classes stay disjoint, cost
+  keeps its basis and currency partitions (never blended, never repriced silently), and
+  an unexported dimension answers `not_measurable` with a reason — never a coerced `0`.
+  A genuine measured zero stays `0`, and per-session ratios are never averaged.
+- **KD-007, KD-008, KD-009** are the findings contract. No composite score is computed
+  or rendered, relocation precedes any removal suggestion, and every finding carries at
+  least two evidence rows, an outcome-risk caveat, and waste-ranked ordering with the
+  comparison kept descriptive, never causal.
+- **KD-010** is the content contract. Search is metadata-only; `dash_inspect` and
+  `POST /api/kyber/analytics/inspect` share one body — `mode: 'manifest' | 'content'`
+  plus an explicit `target` (`run` / `session` / `turn`) — and content needs no
+  additional flag or approval. `mode: 'manifest'` discovers without returning text
+  bodies (run executions with parent/child/session linkage and `isSubagent`, turn
+  identities, part/block identities with `role` and `origin`); `mode: 'content'`
+  returns `chunks` (`partId`, `blockId`, `sessionId`, `turnIndex`, `spanId`, `origin`,
+  `text`, `byteOffset`, `complete`, `role`, `order`, `resident`) paged by
+  `pagination.nextCursor` / `hasMore`, following continuations to reach all retained
+  context. `limit` (manifest only; default 25, max 100) and `byteLimit` (content only;
+  default and max 16384) bound a page and working memory, never the total retrievable
+  transcript. At most 100 live multi-page traversals are held, each evicted after two
+  minutes idle; past the cap a new traversal answers `budget_exceeded` rather than
+  evicting a live reader. Content pages fill to 60,000 bytes of chunk text (each chunk
+  capped at 16,384 UTF-8 bytes) so the encoded response stays within 65,536 bytes. No
+  page is retained — every page is re-derived from the store, and a traversal entry is
+  only its binding plus the last touch time. `coverage.completeness` is `captured_only` — retained evidence only —
+  and `coverage.gaps` names what is missing (`not_captured`, `unknown_linkage`,
+  purge/retention, corrupt). `representation: 'assembled_turn'` (turn targets only)
+  is a labelled reconstruction of user/assistant/shared context, never proof of the
+  exact model input. `run` scope includes child/subagent sessions; `session` scope
+  stays local. Cursors bind target, representation, limits, and projection generation:
+  a reused, tampered, cross-target, or post-purge cursor answers `stale_cursor`;
+  capacity answers `budget_exceeded`; cancellation answers `cancelled`. Canonical
+  content older than 14 days reads as absent or expired — retrieval never recaptures
+or manufactures absent text — and raw packets outlive assembled turn text until a
+harness wipe. The historical `includeContent: true` turn/block form and the
+metadata-only session inspection remain as retained legacy forms, not the way to
+retrieve context. A field outside the recognized set for its form — the manifest/content
+form or either legacy form — answers `invalid_request`; unknown fields are never
+silently dropped.
+- **KD-011, KD-015, KD-018** are the lifecycle contract. The adapter holds no
+  scheduler, job, receiver, or projection of its own; it attaches to the one local
+  engine, never launches or stops it, never triggers migration or reprojection, and
+  never calls the opt-in review endpoint or a paid provider. Returned text is evidence,
+  never executable instructions.
+
+Unsupported combinations fail before any store read (`unsupported_query`), and
+unsupported measurements return availability reasons (`not_measurable`,
+`content_unavailable`) rather than turning an absent measurement into a failed request
+when a useful partial result can carry it explicitly.
 
 ## Related
 

@@ -1,8 +1,11 @@
 # Release — self-contained binaries and GitHub Release
 #
 # Kick off from Actions → Release → Run workflow on main. Only dpalfery may
-# start it. Builds run immediately. Publish waits on the `release` environment
-# until David Palfery clicks Review deployments on that same run and approves.
+# start it. The run stops once, at the `approve` job, until David Palfery clicks
+# Review deployments on that run and approves. Every build and publish job
+# runs after that single approval; none of them asks again, provided the `release`
+# environment has no required reviewer (build-tray still names it for the signing
+# secrets, so a reviewer left on it would prompt a second time).
 # Leave "Make production release" unchecked to publish the next RC
 # (0.1.7-rc.9 → 0.1.7-rc.10). Check it to publish the next stable
 # (0.1.7-rc.9 → 0.1.7). scripts/next-release-version.sh picks the number.
@@ -63,6 +66,9 @@ jobs:
   authorize:
     name: Authorize
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Restrict to dpalfery on an allowed ref
         env:
@@ -82,6 +88,56 @@ jobs:
           then
             echo "::error::Run the workflow from main. The release environment rejects any other branch."
             exit 1
+          fi
+
+      # GitHub creates an environment with no protection the first time a job names
+      # one that does not exist, so a deleted or renamed `release-approval` would let
+      # the approve job pass with no human. This runs in a job that names no
+      # environment, so it can stop the run before that happens.
+      - name: Require the release-approval gate to be protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Read the environment, telling "missing" (404) from "cannot read" (403 and
+          # others) so the error names the real cause.
+          if ! env_json="$(gh api "repos/${REPO}/environments/release-approval" 2>gh-err.txt)"; then
+            if grep -q 'HTTP 404' gh-err.txt; then
+              echo "::error::Environment release-approval does not exist. Create it (required reviewer, main-only) before releasing."
+            else
+              echo "::error::Could not read environment release-approval: $(cat gh-err.txt)"
+            fi
+            exit 1
+          fi
+          jq -e '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)' \
+            <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval has no required reviewer, so approve would pass with no approval."
+            exit 1
+          }
+          # The toggle alone is not enough: the allowed branch list must be exactly main.
+          jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"${env_json}" >/dev/null || {
+            echo "::error::Environment release-approval does not use a custom deployment branch list."
+            exit 1
+          }
+          if ! policies="$(gh api "repos/${REPO}/environments/release-approval/deployment-branch-policies" \
+            --jq '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(",")' 2>gh-err.txt)"; then
+            echo "::error::Could not read the deployment branch list of release-approval: $(cat gh-err.txt)"
+            exit 1
+          fi
+          if [ "${policies}" != "branch:main" ]; then
+            echo "::error::Environment release-approval must allow only the branch main (found: ${policies:-none})."
+            exit 1
+          fi
+          # Advisory only. build-tray still names `release` for the signing secrets, so a
+          # reviewer left there is a second prompt, not a missing gate. Never fail the run
+          # on this read.
+          if release_json="$(gh api "repos/${REPO}/environments/release" 2>/dev/null)"; then
+            if jq -e '[.protection_rules[] | select(.type == "required_reviewers")] | length > 0' <<<"${release_json}" >/dev/null; then
+              echo "::warning::Environment release still has a required reviewer; build-tray will prompt a second time. Remove it to get one approval."
+            fi
+          else
+            echo "::warning::Could not read environment release to check for a second reviewer prompt."
           fi
 
   version:
@@ -138,10 +194,10 @@ jobs:
               fi
               echo
               echo "### David Palfery — approve here"
-              echo "Builds run first. When they finish, this run waits."
+              echo "This run waits at the **Approve release** job before anything builds."
               echo "On **this same workflow run page**, click **Review deployments**"
-              echo "(top right, yellow banner). Tick \`release\` → **Approve and deploy**."
-              echo "Nobody else can approve. That click publishes \`${TAG}\`."
+              echo "(top right, yellow banner). Tick \`release-approval\` → **Approve and deploy**."
+              echo "Nobody else can approve. That one click builds and publishes \`${TAG}\`."
               echo
               echo "Release notes compare \`${TAG}\` with \`${NOTES_START_TAG:-<no earlier release>}\`."
             } >> "${GITHUB_STEP_SUMMARY}"
@@ -164,9 +220,27 @@ jobs:
           echo "notes_start_tag=${NOTES_START_TAG}" >> "${GITHUB_OUTPUT}"
           echo "Release version=${VERSION} tag=${TAG} create_release=${CREATE_RELEASE} notes_start_tag=${NOTES_START_TAG:-none}"
 
+  # The one human approval for the whole run. It lives on its own environment,
+  # `release-approval` (required reviewer + main-only branch policy), so the
+  # `release` environment, which holds the signing secrets, can have no reviewers
+  # and the later jobs that use it do not prompt again. Do not point any other job
+  # at `release-approval`: each job that names an environment with reviewers is a
+  # separate approval.
+  approve:
+    name: Approve release (David Palfery must approve)
+    needs: version
+    if: needs.version.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    environment: release-approval
+    steps:
+      - name: Approved
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: echo "Release ${VERSION} approved to build and publish."
+
   build:
     name: Publish ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -260,7 +334,7 @@ jobs:
     # docs/plans/2026-09-28-kyberdash-sea-release-integrity.md carries the
     # design; scripts/release-local.sh mirrors these same steps.
     name: Build KyberDash ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -436,6 +510,11 @@ jobs:
               # the --version check just above.
               node scripts/sea-web-smoke.mjs "${FINAL_BIN}"
               echo "dashboard smoke test passed for ${RID}"
+              # The MCP command is a second released-shape entry point. It must load the
+              # SDK from the SEA rather than a checkout's node_modules, and its fixture
+              # stays on loopback with an isolated HOME/state directory.
+              node scripts/sea-mcp-smoke.mjs "${FINAL_BIN}"
+              echo "mcp smoke test passed for ${RID}"
           else
               echo "skipping smoke test: ${RID} is cross-built on ${HOST_OS}-${HOST_ARCH}"
           fi
@@ -464,7 +543,7 @@ jobs:
 
   pack-squad:
     name: Package Kyber-Squad
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -512,7 +591,7 @@ jobs:
     # closed would publish an unnotarized app, so the presence check below runs
     # first and the assertions after the build check the result independently.
     name: Build tray ${{ matrix.rid }}
-    needs: version
+    needs: [version, approve]
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:
@@ -576,7 +655,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: dash/tray/src-tauri
 
@@ -726,7 +805,7 @@ jobs:
     # packages.lock.json files, which under-report .NET because
     # src/KyberWeave.Mcp has no lock file.
     name: Generate SBOM
-    needs: version
+    needs: [version, approve]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -776,12 +855,239 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  artifact-sboms:
+    # One SBOM per published archive (issue #417, decision D1): <archive-stem>.cdx.json
+    # next to the archive (see artifact_sbom_name in scripts/syft-bootstrap.sh).
+    # Runs after the builds so every archive exists, before `release` and
+    # `attest-sbom` so the manifest carries the SBOMs and each one is attested.
+    #
+    # WHY separate from `sbom`: the aggregate covers the dependency closure across
+    # npm/cargo/nuget; these cover each archive's bytes (file catalogue, plus a
+    # not-measured marker where the runtime closure is opaque). The aggregate keeps
+    # its versioned name and is built by scripts/generate-sbom.sh instead (D2).
+    name: Generate per-artifact SBOMs
+    needs: [version, build, build-kyberdash, build-tray, pack-squad]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # The generator caches the pinned Syft tarball under the documented cache root
+      # and re-verifies its SHA-256 on every run, so a restored cache is checked
+      # before it is used rather than trusted (same as the `sbom` job).
+      - name: Cache the pinned Syft tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kyber-weave
+          key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
+
+      # Download only the build outputs, not the aggregate SBOM: the per-artifact
+      # generator scans *.tar.gz/*.zip/*.exe and ignores anything else, and an
+      # explicit pattern avoids racing the parallel `sbom` job's upload.
+      - name: Download CLI/MCP/KyberDash archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: binaries-*
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Download tray archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: tray-*
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Download Squad archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: squad-archives
+          path: per-artifact-assets
+          merge-multiple: true
+
+      - name: Generate per-artifact SBOMs
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash scripts/generate-artifact-sboms.sh per-artifact-assets "${VERSION}"
+          echo
+          echo "=== Per-artifact SBOMs ==="
+          ls -la per-artifact-assets/
+
+      - name: Upload per-artifact SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: artifact-sboms
+          path: per-artifact-assets/*.cdx.json
+          retention-days: 14
+          if-no-files-found: error
+
+  attest-sbom:
+    # Attest every SBOM via actions/attest in SBOM mode (issue #417, decisions
+    # D6/D7 — not the deprecated attest-sbom action). Each per-artifact SBOM is
+    # attested with its archive as the subject (predicate=SBOM); the aggregate
+    # SBOM is attested once against all archives. Runs after both SBOM jobs so
+    # every predicate file exists, before `release` so nothing publishes unattested.
+    #
+    # WHY these permissions: id-token mints the OIDC token for the Sigstore signing
+    # certificate, attestations persists the attestation, artifact-metadata creates
+    # the storage record, contents:read lets the action read the repo context.
+    name: Attest SBOMs
+    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      contents: read
+    steps:
+      # All needs are complete here, so a full download races nothing: the subjects
+      # (archives) and the predicates (aggregate + per-artifact SBOMs) arrive together.
+      - name: Download all release assets and SBOMs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: "*"
+          path: attest-assets
+          merge-multiple: true
+
+      - name: Attest kyber-weave-linux-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
+
+      - name: Attest kyber-weave-linux-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-linux-arm64.cdx.json
+
+      - name: Attest kyber-weave-osx-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-osx-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-osx-x64.cdx.json
+
+      - name: Attest kyber-weave-osx-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-osx-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-osx-arm64.cdx.json
+
+      - name: Attest kyber-weave-win-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-win-x64.zip
+          sbom-path: attest-assets/kyber-weave-win-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-linux-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-linux-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-linux-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-linux-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-linux-arm64.cdx.json
+
+      - name: Attest kyber-weave-mcp-osx-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-osx-x64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-osx-x64.cdx.json
+
+      - name: Attest kyber-weave-mcp-osx-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-osx-arm64.tar.gz
+          sbom-path: attest-assets/kyber-weave-mcp-osx-arm64.cdx.json
+
+      - name: Attest kyber-weave-mcp-win-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-weave-mcp-win-x64.zip
+          sbom-path: attest-assets/kyber-weave-mcp-win-x64.cdx.json
+
+      - name: Attest kyberdash-darwin-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-darwin-arm64.tar.gz
+          sbom-path: attest-assets/kyberdash-darwin-arm64.cdx.json
+
+      - name: Attest kyberdash-darwin-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-darwin-x64.tar.gz
+          sbom-path: attest-assets/kyberdash-darwin-x64.cdx.json
+
+      - name: Attest kyberdash-linux-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-linux-arm64.tar.gz
+          sbom-path: attest-assets/kyberdash-linux-arm64.cdx.json
+
+      - name: Attest kyberdash-linux-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-linux-x64.tar.gz
+          sbom-path: attest-assets/kyberdash-linux-x64.cdx.json
+
+      - name: Attest kyberdash-win-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-win-x64.zip
+          sbom-path: attest-assets/kyberdash-win-x64.cdx.json
+
+      - name: Attest kyberdash-tray-darwin-arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-tray-darwin-arm64.zip
+          sbom-path: attest-assets/kyberdash-tray-darwin-arm64.cdx.json
+
+      - name: Attest kyberdash-tray-darwin-x64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-tray-darwin-x64.zip
+          sbom-path: attest-assets/kyberdash-tray-darwin-x64.cdx.json
+
+      - name: Attest kyberdash-tray-win-x64-setup SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyberdash-tray-win-x64-setup.exe
+          sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json
+
+      - name: Attest kyber-squad SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.zip
+          sbom-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.cdx.json
+
+      - name: Attest kyber-squad-plugin SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.zip
+          sbom-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.cdx.json
+
+      # The aggregate covers the whole dependency closure, so it is attested once
+      # against every published archive (D7): one attestation, all archives as subjects.
+      # The glob matches only archives (*.tar.gz/*.zip/*.exe), never the *.cdx.json
+      # predicates beside them.
+      - name: Attest aggregate SBOM against all archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
+          sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
+
   release:
-    name: Publish GitHub Release (David Palfery must approve)
-    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom]
+    name: Publish GitHub Release
+    needs: [version, build, build-kyberdash, build-tray, pack-squad, sbom, artifact-sboms, attest-sbom]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: write
     steps:
@@ -790,6 +1096,9 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pattern "*" downloads every build output plus both SBOM artifacts (`sbom`
+      # and `artifact-sboms`): the checksum manifest covers all 41, and the
+      # attestation verify step below checks each archive against its SBOM.
       - name: Download all release assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1005,7 +1314,7 @@ jobs:
           done <<< "$ASSETS_JSON"
 
           # Compare expected vs. published as sorted sets: both must contain
-          # exactly the 21 expected assets plus SHA256SUMS.txt (22 total).
+          # exactly the 41 expected assets plus SHA256SUMS.txt (42 total).
           # Sort and compare to catch both missing and extra assets.
           echo "Performing asset inventory verification..."
           declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")
@@ -1038,12 +1347,48 @@ jobs:
           echo "Asset inventory verification passed: all ${#expected_assets[@]} expected assets + manifest present"
           echo "Manifest byte-comparison verification passed"
 
+      - name: Verify SBOM attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Every published archive carries a CycloneDX SBOM attestation created by
+          # the attest-sbom job (subject=archive, predicate=SBOM). Verify each one
+          # against the bytes just published, failing closed on the first miss.
+          # WHY --predicate-type https://cyclonedx.org/bom: SBOM attestations use the
+          # CycloneDX predicate type; pinning it rejects a provenance attestation
+          # masquerading as an SBOM.
+          # WHY bounded retry: Sigstore propagation lag can make a just-created
+          # attestation briefly invisible to `gh attestation verify`. Each archive
+          # gets 3 attempts with a short sleep; a persistent miss still exits 1,
+          # so the step stays fail-closed and the inventory checks above are unchanged.
+          for archive in release-assets/*.tar.gz release-assets/*.zip release-assets/*.exe; do
+            [[ -f "$archive" ]] || continue
+            echo "Verifying SBOM attestation for ${archive}"
+            verified=false
+            for attempt in 1 2 3; do
+              if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://cyclonedx.org/bom"; then
+                verified=true
+                break
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                echo "::warning::SBOM attestation not yet visible for ${archive} (attempt ${attempt}/3); retrying after Sigstore propagation delay"
+                sleep 15
+              fi
+            done
+            if [[ "${verified}" != "true" ]]; then
+              echo "::error::no verified CycloneDX SBOM attestation for ${archive} after 3 attempts" >&2
+              exit 1
+            fi
+          done
+          echo "All published archives carry a verified CycloneDX SBOM attestation"
+
   gh-packages:
-    name: Publish GitHub Packages (David Palfery must approve)
+    name: Publish GitHub Packages
     needs: [version, build]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
-    environment: release
     permissions:
       contents: read
       packages: write

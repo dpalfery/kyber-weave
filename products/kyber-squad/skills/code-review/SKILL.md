@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change (the gate is named pre-push; a draft push never waits for it). Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
 ---
 
@@ -32,6 +32,15 @@ Two things fall out of this and govern everything after it: **which lenses can p
 apply**, and **whether the change is reviewable at all**. A diff past the host's
 `review.policy.max-reviewable-lines` ceiling is not made safe by reviewing it harder; it
 escalates.
+
+**Load the review guidance.** Read the host's review guidance declared as
+**<review-guidance>** in the root `AGENTS.md` registry (`REVIEW.md`) before any lens runs. Its
+ground rules and the sections that match the changed technologies are the host's own standard
+for this change. Each seat receives its assigned sections and the ground rules in its
+invocation, and every seat must apply them. The same guidance binds the pre-push self-review
+gate, the refutation pass in step 3, and any in-process council fallback in step 2: none of
+them reviews against a generic standard instead. If the file is missing or no path is
+declared, the report says so in one line rather than reviewing without notice.
 
 ### 2. Start the gates and the council together
 
@@ -66,10 +75,18 @@ If the host has declared no gates, the command says so. Record that: a review wi
 executed evidence is a weaker review, and the report must not read as though everything
 passed.
 
-**Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
-lens file and the review scope. Every lens declares an applicability predicate and returns
-`SKIPPED` with a reason when the diff holds nothing it owns — auto-skipping is what makes
-fifteen lenses affordable.
+**Council.** Before lens fan-out, `code-reviewer` materializes the unified diff `git diff <base>...<head>` to `.agent_scratchpad/<task-id>/review-diff.patch`, passes `.agent_scratchpad/<task-id>/review-diff.patch` in every `review-lens` and `review-triage` invocation packet so read-only seats inspect the diff via `view_file` without running git commands, and removes it after the review council completes (including on failure).
+Invoke one seat per applicable lens, all in flight at once, each named with its
+lens file, the review scope, and its assigned review-guidance sections. Every lens declares an
+applicability predicate and returns `SKIPPED` with a reason when the diff holds nothing it
+owns — auto-skipping is what makes seventeen lenses affordable. Every seat given guidance sections
+ends its output with one attestation line, `REVIEW.md sections checked: [<ids>]`, on both its
+findings form and its `NO FINDINGS` form (a `review-triage` seat lists `Ground rules`). A
+findings or `NO FINDINGS` seat without that line has not shown it applied the guidance; the
+report records that as a coverage gap under Council coverage. `SKIPPED` seats return no
+attestation, and a missing attestation is never a verdict input. Where the harness cannot start
+separate seats, the reviewer applies each lens in turn with the same guidance sections and
+returns the same attestation line.
 
 The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
 takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
@@ -89,6 +106,8 @@ premium for attribution.
 | [duplicate-implementation](references/lenses/duplicate-implementation.md) | **`review-triage`** | Bodies duplicated across the tree, attributed from the duplicates gate |
 | [test-adequacy](references/lenses/test-adequacy.md) | `review-lens` | Would the tests catch this breaking? Behaviour over implementation |
 | [static-analysis-triage](references/lenses/static-analysis-triage.md) | **`review-triage`** | Analyzer output, attributed and reported by rule id |
+| [test-infrastructure](references/lenses/test-infrastructure.md) | `review-lens` | Is the shared test machinery sound: isolation, caches, fixtures, global state? |
+| [documentation-accuracy](references/lenses/documentation-accuracy.md) | `review-lens` | Is every factual claim in the changed docs, plans and doc comments true of the code? |
 | [performance](references/lenses/performance.md) | `review-lens` | Cost at scale, with a named growth dimension |
 | [blast-radius-revertibility](references/lenses/blast-radius-revertibility.md) | `review-lens` | What else it reaches, and whether it can be undone |
 | [supportability](references/lenses/supportability.md) | `review-lens` | Diagnosability, correlation, what leaks to the caller |
@@ -116,21 +135,34 @@ quoting the counterpart it found. Neither may report the other's unit.
 **Technology checklists.** The per-technology references —
 [C#](references/csharp.md), [Python](references/python.md), [React](references/react.md),
 [SQL](references/sql.md), [Pulumi](references/pulumi.md), [Azure](references/azure.md),
-[GitHub Actions](references/github-actions.md) — are lens modifiers, not lenses. A lens loads
+[GitHub Actions](references/github-actions.md), [TypeScript](references/typescript.md),
+[Rust](references/rust.md), [Tauri](references/tauri.md), [Go](references/go.md) — are lens
+modifiers, not lenses. A lens loads
 the checklists for the technologies actually present in the diff. Each checklist points at the
 host's declared `<technology>-coding-standard` and states no rule of its own; an undeclared or
-draft standard is reported, never replaced with a built-in checklist.
+draft standard is reported, never replaced with a built-in checklist. A checklist's Review traps
+section, where it has one, is a set of non-authoritative detection prompts: they are not rules,
+they do not substitute for the declared standard, and a finding raised from one needs quoted
+evidence like any other.
 
 ### 3. Confirm before believing
 
 For every `major` or `critical` finding, spend one more `review-lens` invocation trying to
 **refute** it. Say so explicitly in the invocation: the confirming instance argues the
-finding is wrong and defaults to refuted when it cannot establish otherwise.
+finding is wrong and defaults to refuted when it cannot establish otherwise. Pass it the same
+review-guidance sections, and have it test the finding's `guidance:` rule id against them: a
+finding that misapplies the rule it names is refuted.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability
 candidates, generalized to every lens and for the same reason — a confident wrong finding
 costs more trust than a missed finding costs safety. A refuted finding is dropped, not
 downgraded.
+
+**Refutation guardrails.** The refutation pass is an adversarial check on validity, not an excuse to dismiss findings. Refuters are strictly forbidden from dismissing:
+- Contract assertion rigor findings under `R14` (vacuous contract assertions, bare keywords, unguarded boolean `||`, or non-contiguous multi-line loops).
+- Cross-document or prompt-to-prompt schema contradictions under `R16`.
+- Missing operational lifecycle cleanup paths (unpruned worktree, orphaned temp-path, leaked concurrency lock).
+Refuters must adhere to Ground Rule 1: every finding describing a concrete failure scenario must be refuted with concrete evidence proving the failure cannot occur, never an opinion or intuition. Refuters cannot dismiss findings under 'repo-idiom' excuses or familiarity arguments: if a concrete failure exists in the lifecycle, prompt schema, or test contract, the finding stands.
 
 ### 4. Adjudicate
 
@@ -168,11 +200,19 @@ Findings whose `confidence` is **below** `review.policy.min-confidence` are excl
 the critical and major blocking rules. Equal to the threshold is kept; above it is kept.
 Below it is dropped. The engine compares `Confidence < MinConfidence`.
 
+**Strictness.** `review.policy.strictness` is a named preset over those two numbers, not a
+third mechanism. `balanced` (the default) is `min-confidence: 7`, `major-count-blocks: 3`;
+`lenient` is `8` and `5`; `strict` is `5` and `1`, so one surviving major requests changes. A
+host that also declares `min-confidence` or `major-count-blocks` overrides the preset for that
+number. Minor findings never block at any level. Pass the strictness and the effective
+`min-confidence` to **every seat** in its invocation, so a strict host hears lower-confidence
+findings instead of having them dropped at the source and a lenient host is not flooded.
+
 The two escalation rules run **before** any finding is weighed, because a reserved path and
 an unreviewable diff both say the same thing: this change is not the engine's to settle,
 however clean or filthy the council's report was.
 
-**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids. Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
+**Remediation pass note.** A `REQUEST_CHANGES` verdict on actionable Critical/Major findings earns one bounded remediation pass through the conductor (same session, same file scope, fresh task-gate re-run) before any park flag; Unactionable or second-failure findings park immediately with their finding ids (stop reworking each and list the ids in the PR; park never holds back delivery). Minor/Info findings never trigger a remediation loop and are reported without blocking: the `major-count-blocks` threshold and the table above still decide the verdict, and the fixed rules are not rewritten by this note.
 
 **Risk** (`LOW` / `MEDIUM` / `HIGH`) is graded from what was found and what was touched,
 never from diff size. A twelve-line migration dropping a column outranks a three-thousand-line
@@ -186,21 +226,25 @@ say so alongside it with the finding that should have changed it.
 
 ## Pre-push self-review gate
 
-Run this gate on your own finished change before pushing. It works the same in any
+"Pre-push" is the name of this gate, kept for its heading and its references. It does not mean the gate runs before the push: the draft pull request is pushed first, and a draft push never waits for this gate. Required CI decides readiness.
+
+Run this gate on your own finished change. Its verdict is evidence for the pull request description; it does not block the push or the ready step. It works the same in any
 harness — Claude, Pi, OpenCode, Antigravity, or others — because it uses only the
 Procedure above and the host's declared gates.
 
-1. **Sync.** Refresh the remote head and the base branch before pushing. If another
+1. **Sync.** Refresh the remote head and the base branch before the draft push. If another
    actor advanced either, reconcile their changes into your branch and revalidate the
    affected work. Merge, never rebase, never force-push. Confirm the refreshed remote
-   head and base branch are reachable from your local `HEAD` before pushing.
-2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
-   accumulated diff against its base, not just the last files touched. Fix every
-   major-or-worse finding before pushing — Minor/Info findings never block the push gate; only major-or-worse block — then re-run steps 1–5 over the updated
-   diff and use that second verdict. A verdict computed before a fix is void. If the
-   re-run still returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or
-   report the blocker.
-3. **Defect-class checklist.** Walk each class explicitly before pushing:
+   head and base branch are reachable from your local `HEAD` before the draft push.
+2. **Council over the whole change.** Push first: the change goes up as a draft pull
+   request before the council runs, so the council reviews a pull request that already
+   exists. Then run full Procedure steps 1–5 over the whole accumulated diff against its
+   base, not just the last files touched. Fix major-or-worse findings where a bounded fix
+   exists, re-run steps 1–5 over the updated diff, and use that second verdict in the pull
+   request description. A verdict computed before a fix is void. List any major-or-worse
+   finding still open by id in the pull request description. Minor/Info findings never
+   block. Required CI decides readiness; the verdict does not gate the push or the ready step.
+3. **Defect-class checklist.** Walk each class explicitly over the whole change, as part of this pre-push gate (the draft push does not wait for it):
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
    c. Parity: guard added in one place not every caller/branch (store vs direct-DB, harness vs run scope, API vs UI, producer vs consumer).
@@ -230,12 +274,15 @@ Most severe first:
   - **Claim:** what is wrong.
   - **Evidence:** how it is known — a path and line read, or a gate result id.
   - **Failure:** the concrete scenario.
+  - **Guidance:** the review-guidance rule id (or section, for an untagged bullet) applied, when the finding applies one.
   - **Suggestion:** the specific fix.
 
 ### Council coverage
 Every lens, and its outcome: findings, `NO FINDINGS`, or `SKIPPED` with the reason. This
 section is not optional. It is the difference between a dimension that was reviewed and one
-that was quietly never looked at.
+that was quietly never looked at. A findings or `NO FINDINGS` outcome also carries its
+attestation line, which lists the review-guidance sections it checked. A seat with no attestation
+line is listed here as a coverage gap.
 
 ### Dropped
 What was reported and removed, with the `KW-REVIEW-*` rule that removed it. A review that
@@ -260,10 +307,11 @@ review:
   duplicates:
     minimum-lines: 4                       # normalized lines, signature and braces excluded
   policy:
+    strictness: balanced                  # lenient | balanced | strict; explicit keys below override it
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000
-    major-count-blocks: 3
-    min-confidence: 7
+    # major-count-blocks: 3               # optional; overrides the strictness preset
+    # min-confidence: 7                    # optional; overrides the strictness preset
     suppressions:
       - id: correctness/generated-nullable
         reason: Regenerated client, tracked separately.

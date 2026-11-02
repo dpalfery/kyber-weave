@@ -9,11 +9,12 @@
 // crash or a long import cannot take the web server down, and so the refresh lock
 // inside the child keeps arbitrating with terminal-started refreshes.
 
-import { spawn } from 'child_process'
+import type { ChildProcess } from 'child_process'
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { CanonStore } from '../canon/store.js'
+import { defaultSpawn, guardedSpawn, type SpawnFn } from '../process/spawn-guard.js'
 import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
 import { runTranscriptSync } from '../sync/transcript-sync.js'
 import type { TranscriptSyncOutcome } from '../sync/transcript-sync.js'
@@ -98,6 +99,12 @@ export type JobHostOptions = {
   readonly tickIntervalMs?: number
   readonly maintenance: () => void | Promise<void>
   readonly sync?: () => void | TranscriptSyncOutcome | Promise<void | TranscriptSyncOutcome>
+  /**
+   * Why `resolveJobSpawnTarget` refused this process's entry. When set the host never calls its
+   * spawner: a scheduled refresh is recorded as failed with this reason and a manual run
+   * answers `failed` with it.
+   */
+  readonly spawnRefusal?: string
 }
 
 const DEFAULT_TICK_INTERVAL_MS = 30_000
@@ -118,21 +125,31 @@ const realClock: JobClock = {
  * summary needs, and the artifact that records the failure keeps the same
  * bounded tail.
  */
-export const nodeSpawner: JobSpawner = {
-  spawn(program, args) {
-    const child = spawn(program, [...args], { stdio: ['ignore', 'ignore', 'pipe'] })
-    let stderr = ''
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString('utf-8')).slice(-STDERR_CAP)
-    })
-    const exited = new Promise<ChildResult>((resolve) => {
-      // 'error' (e.g. ENOENT) means the child never ran; report it as the reason.
-      child.once('error', (err) => { resolve({ code: null, stderr: err.message }) })
-      child.once('close', (code) => { resolve({ code, stderr }) })
-    })
-    return { exited, kill: () => { child.kill() } }
-  },
+export function createNodeSpawner(spawnFn: SpawnFn<ChildProcess | undefined> = defaultSpawn): JobSpawner {
+  return {
+    spawn(program, args) {
+      const child = guardedSpawn(spawnFn, {
+        kind: 'job',
+        program,
+        args,
+        options: { stdio: ['ignore', 'ignore', 'pipe'] },
+      })
+      if (child === undefined) throw new Error(`spawning ${program} returned no child process`)
+      let stderr = ''
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString('utf-8')).slice(-STDERR_CAP)
+      })
+      const exited = new Promise<ChildResult>((resolve) => {
+        // 'error' (e.g. ENOENT) means the child never ran; report it as the reason.
+        child.once('error', (err) => { resolve({ code: null, stderr: err.message }) })
+        child.once('close', (code) => { resolve({ code, stderr }) })
+      })
+      return { exited, kill: () => { child.kill() } }
+    },
+  }
 }
+
+export const nodeSpawner: JobSpawner = createNodeSpawner()
 
 /**
  * Whether a stderr line names an error.
@@ -180,6 +197,7 @@ export class JobHost {
   private readonly tickIntervalMs: number
   private readonly maintenance: () => void | Promise<void>
   private readonly sync?: () => void | TranscriptSyncOutcome | Promise<void | TranscriptSyncOutcome>
+  private readonly spawnRefusal: string | undefined
 
   private lease: JobsLease | null = null
   private intervalId: unknown = null
@@ -210,6 +228,7 @@ export class JobHost {
     this.tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS
     this.maintenance = options.maintenance
     this.sync = options.sync
+    this.spawnRefusal = options.spawnRefusal
   }
 
   /** Runs the first tick (which is the start-up refresh) and arms the interval. */
@@ -316,6 +335,11 @@ export class JobHost {
     if (!reserved) {
       if (this.busy) return Promise.resolve({ outcome: 'declined' })
       this.busy = true
+    }
+    if (this.spawnRefusal !== undefined) {
+      // Fail closed: the target was refused, so nothing is spawned and the reason is the failure.
+      this.busy = false
+      return Promise.resolve(this.record(kind, { code: null, stderr: this.spawnRefusal }))
     }
     let child: JobChild
     try {

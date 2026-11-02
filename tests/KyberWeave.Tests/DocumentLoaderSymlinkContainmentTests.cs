@@ -289,6 +289,52 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         Assert.Contains("OutsideOwner", result.Owners);
     }
 
+    /// <summary>
+    /// The narrow archived-entry read refuses a symlink by type: a file-level link at the
+    /// requested path fails closed as a symbolic-link crossing instead of following the
+    /// target. The gate classifies that type, so a reword of the message cannot turn the
+    /// refusal into an unhandled error.
+    /// </summary>
+    [Fact]
+    public void LoadArchivedDocumentThroughSymlinkIsRefused()
+    {
+        WriteDocument("docs/archive/evil.md", """
+            ---
+            id: evil
+            title: Evil
+            doc-type: plan
+            status: superseded
+            ---
+            # Evil
+            """);
+        WriteDocument("target.md", OutsideCatalog, root: "outside");
+        string linkPath = Path.Combine(_repoRoot.Path, "docs", "archive", "linked.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        File.CreateSymbolicLink(linkPath, Path.Combine(_outside.Path, "target.md"));
+
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        DocumentLoader loader = new(_repoRoot.Path, config);
+
+        ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
+            () => loader.LoadArchivedDocument("docs/archive/linked.md"));
+        Assert.Equal(ArchivedEntryRefusalReason.CrossesSymbolicLink, exception.Reason);
+    }
+
+    /// <summary>
+    /// The narrow archived-entry read refuses a path that escapes the repository root,
+    /// again by type rather than by the wording of the refusal.
+    /// </summary>
+    [Fact]
+    public void LoadArchivedDocumentOutsideRepoRootIsRefused()
+    {
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        DocumentLoader loader = new(_repoRoot.Path, config);
+
+        ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
+            () => loader.LoadArchivedDocument("../outside.md"));
+        Assert.Equal(ArchivedEntryRefusalReason.EscapesRepositoryRoot, exception.Reason);
+    }
+
     private const string OutsideCatalog = """
         ---
         id: catalog

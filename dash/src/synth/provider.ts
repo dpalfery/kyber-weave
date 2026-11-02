@@ -38,7 +38,6 @@ import { copilotVscodeReader } from './readers/copilot-vscode.js'
 import { loadClaudeCalls } from './readers/claude.js'
 import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
-import { opencodeReader } from './readers/opencode.js'
 import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import { antigravityReader } from './readers/antigravity.js'
@@ -110,7 +109,6 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['codex-cli', codexReader],
   ['codex-desktop', codexReader],
   ['codex-unclassified', codexReader],
-  ['opencode', opencodeReader],
   ['kilo', kiloReader],
   ['kilo-code', kiloReader],
   ['kilo-shared-runtime', kiloReader],

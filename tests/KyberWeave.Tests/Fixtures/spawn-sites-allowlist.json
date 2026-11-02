@@ -1,0 +1,1097 @@
+{
+  "note": "Spawn-site allow-list read by ProcessSpawnSitesTests. file is the path relative to the repository root, prefixed by its scan root: tests/KyberWeave.Tests/... or src/.... Each entry keys one or more identical source lines by file and normalized text. count is how many such lines the file may contain. bound must say what stops the process: a timeout, a kill in finally, a self-exiting command, or a fake that starts nothing.",
+  "entries": [
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "if (ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60)).ExitCode != 0)",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git --version."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "Process process = Process.Start(startInfo)",
+      "count": 1,
+      "bound": "Self-exiting on stdin EOF: the child is a sqlite3 that holds BEGIN IMMEDIATE and reads SQL from stdin. RequireLock's finally writes ROLLBACK, closes stdin and waits 5 s (AnalysisPersistenceTests.cs:433-437). The acquire loop in StartSqliteLock is capped at 30 s, and its failure path closes stdin before WaitForExit."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 -batch -bail reads SQL on stdin and exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArchiveCloseoutScopeTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 67: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ArchiveCloseoutScopeTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Run at line 67: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/CodeGraphFixtureDb.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 executes one SQL argument against a per-test database and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/CodeGraphFixtureDb.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 executes one SQL argument against a per-test database and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 536: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only (`init --quiet`), in a temp repository the fixture created."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Run at line 536: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only (`init --quiet`), in a temp repository the fixture created."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 495: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Run at line 495: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"cargo\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry, so a stalled rustup proxy cannot hang the suite. Runs `cargo --version` only."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30)).ExitCode == 0;",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry, so a stalled rustup proxy cannot hang the suite. Runs `cargo --version` only."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fakes/TestGitRepositoryTemplate.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fakes/TestGitRepositoryTemplate.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/FastLoopScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at line 149: ProcessRunner timeout 30 s kills the child tree on expiry. PATH starts with fake-bin stubs for dotnet, npm and cargo (FastLoopScriptTests.cs:157-185), so the npm/dotnet/cargo calls resolve to stubs. The only real child is python3 running the timings heredoc."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/FastLoopScriptTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The fixture touches only dash/tray/ui, so the npm call is the stub and no vitest or tsx starts."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/FastLoopScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 274: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/FastLoopScriptTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The fixture touches only dash/tray/ui, so the npm call is the stub and no vitest or tsx starts."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-dotnet-servers-node-orphan.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-dotnet-servers.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-node-3.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-orphan.sh",
+      "text": "printf '%s %s %s %s %s\\n' 2147483003 1 \"$(id -un)\" sh \"sh -c ${root}/dash/node_modules/.bin/vitest run\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` inside a printf of fake ps rows. The vitest text on this line is printf data for the fake table, never executed."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-orphan-two.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-tree-2.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"npm\")",
+      "count": 1,
+      "bound": "Started by the Run at line 236: ProcessRunner timeout 10 min kills the tree. Runs `npm ci` only, in a temp copy of a typescript gate-catalogue fixture. Its package.json declares no preinstall, install, postinstall or prepare hook, so no dashboard, vitest, playwright or tsx starts."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMinutes(10));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 10 min kills the tree. Runs `npm ci` only: the fixture package.json has no install or prepare hook, so no dashboard, vitest, playwright or tsx starts."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 429: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateRunnerOutcomeTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/GateRunnerOutcomeTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpRepositoryRootTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the Run at line 233: ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly run as `dotnet <dll> --repo-root`, with stdin closed by ProcessRunner so it exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpRepositoryRootTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, with stdin closed by ProcessRunner so it exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpStdioTransportTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the Run at line 93: ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/McpStdioTransportTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, ExecutableRequests, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardDotnetServersTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The wrapped command is sh -c \"exit 0\", which exits at once; the guard's process table is a fixture (KW_PROC_GUARD_PS) and dotnet is a fake (KW_PROC_GUARD_DOTNET) that starts nothing."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardDotnetServersTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command exits at once; the process table is a fixture and dotnet is a fake that starts nothing."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardSinceTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by RunCheckLeftovers: GuardTimeout (20 s) kills the tree. The guard's process table and elapsed-time lookup are fixtures (KW_PROC_GUARD_PS, KW_PROC_GUARD_ETIME) and its clock is fixed (KW_PROC_GUARD_NOW); no real process is examined."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardSinceTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (20 s) kills the tree. The guard's process table, elapsed-time lookup, and clock are fixtures, so the guard can never examine or signal a live process."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at line 273: GuardTimeout (20 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS), not the real process table."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (20 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS), not the real process table."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"pgrep\")",
+      "count": 1,
+      "bound": "Started by the Run at line 297: 10 s timeout; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 10 s kills the tree; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"kill\")",
+      "count": 1,
+      "bound": "Started by the Run at line 350: 5 s timeout; kill -KILL of a pid this test created, result ignored."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
+      "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a pid this test created, result ignored."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"/bin/sh\")",
+      "count": 1,
+      "bound": "Started by the Run calls at lines 50 and 69 (30 s timeout each, tree killed on expiry), line 144 (child is `exec 0<&-; exit 0`, exits at once) and line 159 (200 ms timeout). Lines 95, 110 and 128 never start a child."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": ".Run(() => ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(TimeoutSeconds)))",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; /bin/sh drains 300 KB on each stream and exits 11."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(TimeoutSeconds));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; a one-line printf child that exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));",
+      "count": 1,
+      "bound": "No child starts: ProcessRunner.Run throws ArgumentException for an unredirected stream (ProcessRunner.cs:41-48) before Process.Start."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
+      "count": 1,
+      "bound": "Never started: the Run call at line 110 rejects the Arguments string before Process.Start."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ArgumentException exception = Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));",
+      "count": 1,
+      "bound": "No child starts: ProcessRunner.Run throws ArgumentException for an unredirected stream (ProcessRunner.cs:41-48) before Process.Start."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(missingExecutable)",
+      "count": 1,
+      "bound": "Never started: the path does not exist, so Process.Start throws at line 128 and no child exists."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "Assert.Throws<Win32Exception>(() => ProcessRunner.Run(startInfo, string.Empty));",
+      "count": 1,
+      "bound": "No child starts: the executable path does not exist, so Process.Start throws Win32Exception and no child exists."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": ".Run(() => ProcessRunner.Run(startInfo, input))",
+      "count": 1,
+      "bound": "Self-exiting, no timeout argument by design: the child is `exec 0<&-; exit 0`, which exits at once and closes its pipes, so the call cannot hang. A timeout would change the IOException this test asserts, because Task.Wait wraps faults in AggregateException."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerInputTests.cs",
+      "text": "ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMilliseconds(200)));",
+      "count": 1,
+      "bound": "200 ms timeout kills the tree; the child is `sleep 2`, the subject of the timeout test."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerTests.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"/bin/sh\")",
+      "count": 1,
+      "bound": "Started by StartTalkativeChild; CaptureWithinTimeout (30 s) kills the process tree if ReadToEnd has not returned. The child is a fixed talkative /bin/sh script that exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcessRunnerTests.cs",
+      "text": "return Process.Start(startInfo)",
+      "count": 1,
+      "bound": "Raw start by design (ReadToEnd is the subject under test). CaptureWithinTimeout (30 s) kills the tree if the drain does not return. The child is a fixed /bin/sh script that exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProjectRootDetectorTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProjectRootDetectorTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseNotesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 419: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseNotesTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Run at line 419: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseNotesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at line 444: ProcessRunner timeout 60 s kills the child tree on expiry. The child is scripts/next-release-version.sh run in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseNotesTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; scripts/next-release-version.sh in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/sh\")",
+      "count": 3,
+      "bound": "Each start has a ProcessRunner timeout: 60 s on the install.sh helper calls (lines 90-480, 2274-2329), 60 s on RunFullInstall (2808, which runs install.sh against a local origin), and 10 s on TryResolveExecutable (2945). Helpers never reach the network: install.sh runs in library mode, or a stub downloader is first on PATH (InvokeFetch, PrependDownloader)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 32,
+      "bound": "ProcessRunner timeout 60 s kills the child tree. Children are install.sh helper calls under /bin/sh (KYBER_WEAVE_INSTALL_LIB=1 returns before any download) calling a pure helper or a stub, or verify-release-checksums.sh over sandbox files under /bin/bash, or a stub recorder (lines 2274-2329)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, listed, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; install.sh library-mode pure helper over stub input."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 14,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo startInfo2 = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; verify-release-checksums.sh over sandbox files."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo resolveInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; `command -v <tool>` only."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo normalInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; verify-release-checksums.sh over sandbox archives."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo fallbackInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; verify-release-checksums.sh under a hermetic PATH holding only the symlinked tools."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo verifySha256sumAbsent = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; `command -v sha256sum` under the hermetic PATH."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo verifyShasumPresent = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Each start's ProcessRunner.Run (same lines, 60 s) runs verify-release-checksums.sh over sandbox files; the timeout kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; `command -v shasum` under the hermetic PATH."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree. Child is a CurrentInstallRid/InvokeFetch shell call: install.sh helper or stub downloader on PATH."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; install.sh full install against a local origin (RunFullInstall) or a stub."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree. Child is a CurrentInstallRid/InvokeFetch shell call: install.sh helper or stub downloader on PATH."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 10 s kills the tree; `command -v <name>` only."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo tar = new(ResolveExecutable(\"tar\"))",
+      "count": 1,
+      "bound": "Started by the Run at line 3085: ProcessRunner timeout 30 s kills the child tree on expiry; tar -czf of one staged file."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree. Child is a CurrentInstallRid/InvokeFetch shell call: install.sh helper or stub downloader on PATH."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReleaseTests.cs",
+      "text": "ProcessStartInfo startInfo = new(ResolveExecutable(\"python3\"))",
+      "count": 1,
+      "bound": "ListeningServer: a python3 local-release-server.py that serves until disposed. Dispose kills the tree (ReleaseTests.cs KillAndRead, 3172-3194), the start waits at most 10 s for its port line and kills on failure, and callers dispose it (using at 2654; try/catch in PublishedRelease at 3097-3110)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewCatalogueCommandTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 230: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewCatalogueCommandTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesAgentCommandTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 882: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesAgentCommandTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesCouncilCommandTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 517: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesCouncilCommandTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"python3\")",
+      "count": 1,
+      "bound": "Started by the Run at line 181: ProcessRunner timeout 60 s kills the child tree on expiry; python3 validate-sbom.py on one SBOM file."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 2,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; validate-sbom.py or verify-release-checksums.sh --list, neither of which starts a service."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 2,
+      "bound": "Each start's Run has a timeout: 300 s on generate-artifact-sboms.sh (line 645; it may download syft when none is cached, which the timeout bounds) and 60 s on verify-release-checksums.sh --list (line 901)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(300));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 300 s kills the tree. generate-artifact-sboms.sh over fixture archives; it may download syft when none is cached, which the timeout bounds."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessStartInfo tar = new(\"tar\")",
+      "count": 1,
+      "bound": "Started by the Run at line 750: ProcessRunner timeout 60 s kills the child tree on expiry; tar -czf of one payload."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; validate-sbom.py or verify-release-checksums.sh --list, neither of which starts a service."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessStartInfo zip = new(\"zip\")",
+      "count": 1,
+      "bound": "Started by the Run at line 750: ProcessRunner timeout 60 s kills the child tree on expiry; tar -czf of one payload."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SbomTests.cs",
+      "text": "ProcessResult zipResult = ProcessRunner.Run(zip, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; validate-sbom.py or verify-release-checksums.sh --list, neither of which starts a service."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SqliteTestFixture.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 --version."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SqliteTestFixture.cs",
+      "text": "return ProcessRunner.Run(startInfo, sql, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 -batch -bail reads SQL on stdin and exits at EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/CopilotMcpServerProbeTests.cs",
+      "text": "ProcessStartInfo info = new(\"mkfifo\")",
+      "count": 1,
+      "bound": "Started by the Run at line 55: ProcessRunner timeout 30 s kills the child tree on expiry; mkfifo of one path the test creates."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/CopilotMcpServerProbeTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(info, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; mkfifo of one path the test creates."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"fsutil.exe\")",
+      "count": 1,
+      "bound": "Windows only (guarded by OperatingSystem.IsWindows). Started by the Run at line 5440: ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Windows only (guarded by OperatingSystem.IsWindows). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
+      "text": "ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(",
+      "count": 8,
+      "bound": "Builds only: SquadHarnessLauncher.BuildStartInfo returns a ProcessStartInfo, and this file never starts it (no Process.Start, RunInteractive or ProcessRunner call)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
+      "text": "SquadHarnessLauncher.BuildStartInfo(",
+      "count": 9,
+      "bound": "Builds only: SquadHarnessLauncher.BuildStartInfo returns a ProcessStartInfo, and this file never starts it (no Process.Start, RunInteractive or ProcessRunner call)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadPresetCliTests.cs",
+      "text": "ProcessStartInfo startInfo = new(host)",
+      "count": 1,
+      "bound": "Started by the Run at line 1040: ProcessRunner timeout 30 s kills the child tree on expiry; the built CLI host in an isolated home."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/SquadPresetCliTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; the built CLI host in an isolated home."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs",
+      "text": "ProcessStartInfo start = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 185: ProcessRunner timeout 60 s kills the child tree on expiry; git ls-files -z in the repository root."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git ls-files -z in the repository root."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
+      "text": "ProcessStartInfo startInfo = new(CliHostPath())",
+      "count": 1,
+      "bound": "Started by the Run at line 589: CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesCliCommandTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, CliTimeout);",
+      "count": 1,
+      "bound": "CliTimeout (60 s) kills the tree; the built CLI host with an isolated HOME."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "The caller's timeout, default 30 s, kills the tree on expiry (RunVariant callers pass 15 s at line 445)."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
+      "text": "ProcessStartInfo startInfo = new(interpreter)",
+      "count": 1,
+      "bound": "Started by the Run at line 1008: ProcessRunner timeout 30 s kills the child tree on expiry; bash or python3 runs one status-line script from products/kyber-utilities/statusline against a fixture."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; bash or python3 runs one status-line script from products/kyber-utilities/statusline against a fixture."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
+      "text": "ProcessStartInfo startInfo = new(node)",
+      "count": 2,
+      "bound": "Started by the Run at lines 1086 and 1120 (30 s, tree killed on expiry). Each start is `node --test <generated harness>.mjs`. The harness imports one extension (pi/statusbar.ts or commandcode/statusbar.ts), which contains no child_process, spawn or exec call; the CommandCode exec is an injected stub. The harness runs in process and exits when its node:test cases finish."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/UtilitiesStatusLineArtifactTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 2,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. Runs `node --test <generated harness>.mjs`, which imports one status-line extension with no child process; see the ProcessStartInfo entry for the full description."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/VersionRetrievalTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Started by the Run at line 180: ProcessRunner timeout 30 s kills the child tree on expiry; the product assembly run as `dotnet <dll> --version`, which prints and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/VersionRetrievalTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; the product assembly run as `dotnet <dll> --version`, which prints and exits."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"apm\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at DocsInitCommand.cs:200 with ApmInstallTimeout = 5 min; the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs",
+      "text": "ProcessStartInfo start = new(kyberdash)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started through a ProcessExecutor built with WithTimeout(PluginVerbTimeout) = 120 s (KyberDashCapturePluginStep.cs:60); the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/ProcessProbes.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(executable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started through IProcessExecutor.Run; every ProcessExecutor is bounded (DefaultTimeout 60 s, or the WithTimeout value) at IProcessExecutor.cs:45."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
+      "text": "startInfo = SquadHarnessLauncher.BuildStartInfo(",
+      "count": 1,
+      "bound": "Builds only; nothing starts here. The default runner is ProcessRunner.RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Utilities/UtilitiesStatusLineCommandComposition.cs",
+      "text": "return static (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput, VersionProbeTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with VersionProbeTimeout = 5 s (UtilitiesStatusLineCommandComposition.cs:15); the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Utilities/UtilitiesStatusLineToolProbe.cs",
+      "text": "ProcessStartInfo startInfo = new(executable)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to ResolveProcessRunner (5 s, UtilitiesStatusLineCommandComposition.cs:42)."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/BinaryInstaller.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"xattr\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started at BinaryInstaller.cs:123 with XattrTimeout = 30 s."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "ProcessStartInfo start = new(fileName)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by RunCapture (SelfUpdater.cs:546) with CaptureVerbTimeout = 120 s."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "ProcessStartInfo start = new(fileName) { UseShellExecute = false };",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by RunProcess (Process.Start at SelfUpdater.cs:611), whose wait is bounded at TrayUpdateTimeout = 5 min with a tree kill."
+    },
+    {
+      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
+    },
+    {
+      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at AnalysisCacheSafety.cs:119 with GitTimeout = 60 s."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "text": "using Process process = Process.Start(CreateSafeStartInfo(startInfo))",
+      "count": 1,
+      "bound": "CONDITIONAL: bounded only when the caller passes a timeout to ProcessRunner.Run. On expiry the process tree is killed and the post-kill wait is capped at 5 s. Every production caller now passes a timeout except RunInteractive (ProcessRunner.cs:177), which is unbounded by design and listed there."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "text": "ProcessStartInfo safe = new(startInfo.FileName)",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. The copy is started by Process.Start at ProcessRunner.cs:59."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started at ProjectRootDetector.cs:252 with GitTimeout = 60 s."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/Catalogue/ProjectRootDetector.cs",
+      "text": "result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s (ProjectRootDetector.cs:33); the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/ChangedFiles.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started at ChangedFiles.cs:204 with GitTimeout = 60 s."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/ChangedFiles.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s (ChangedFiles.cs:29); the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
+      "text": "ProcessStartInfo startInfo = new(argv[0])",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started at GateRunner.cs:171 with the gate's timeout-seconds."
+    },
+    {
+      "file": "src/KyberWeave.Core/Review/GateRunner.cs",
+      "text": "ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the gate's timeout-seconds (review.gates; ReviewConfigLoader defaults it to 900 s and rejects values <= 0). The process tree is killed on expiry and the TimeoutException is reported as TimedOut (GateRunner.cs:185)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "text": "public static ProcessStartInfo BuildStartInfo(",
+      "count": 2,
+      "bound": "Method definitions (two overloads). They start nothing; they return a ProcessStartInfo."
+    },
+    {
+      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "text": "ProcessStartInfo startInfo = new()",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Squad/Instances/SquadHarnessLauncher.cs",
+      "text": "return BuildStartInfo(",
+      "count": 1,
+      "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
+    },
+    {
+      "file": "src/KyberWeave.Mcp/CorpusProvenance.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started at CorpusProvenance.cs:133 with GitTimeout = 5 s."
+    },
+    {
+      "file": "src/KyberWeave.Mcp/CorpusProvenance.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 5 s (CorpusProvenance.cs:31); the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, ApmInstallTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with ApmInstallTimeout = 5 min (DocsInitCommand.cs:28); the process tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/IProcessExecutor.cs",
+      "text": "ProcessRunner.Run(startInfo, standardInput, _timeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with the executor's timeout: 60 s for ProcessExecutor.Instance (DefaultTimeout), or the WithTimeout value (120 s for the KyberDash plugin verb). WithTimeout rejects non-positive values. The tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/BinaryInstaller.cs",
+      "text": "ProcessRunner.Run(startInfo, string.Empty, XattrTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with XattrTimeout = 30 s (BinaryInstaller.cs:14); best-effort, so a timeout is caught as a failure to clear the attribute and the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "return ProcessRunner.Run(start, string.Empty, CaptureVerbTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with CaptureVerbTimeout = 120 s (SelfUpdater.cs:51); the tree is killed on expiry and TimeoutException is raised (SelfUpdater.cs:531)."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Update/SelfUpdater.cs",
+      "text": "using Process? process = Process.Start(start);",
+      "count": 1,
+      "bound": "Process.Start for `kyberdash menubar --update`. RunProcess waits TrayUpdateTimeout = 5 min (SelfUpdater.cs:56); on expiry it kills the tree, waits 5 s, and throws TimeoutException (SelfUpdater.cs:617-632)."
+    },
+    {
+      "file": "src/KyberWeave.Core/CodeGraph/CodeGraphResolverAdapter.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s (CodeGraphResolverAdapter.cs:36); the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with GitTimeout = 60 s (AnalysisCacheSafety.cs:16); the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "text": "result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);",
+      "count": 1,
+      "bound": "ProcessRunner.Run with SqliteBatchTimeout = 120 s (SqliteAnalysisPersistence.cs:35); the tree is killed on expiry. sqlite's own busy timeout is separate and does not bound the process."
+    },
+    {
+      "file": "src/KyberWeave.Core/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;",
+      "count": 1,
+      "bound": "ProcessRunner.Run with SqliteVersionProbeTimeout = 30 s (SqliteAnalysisPersistence.cs:38); the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/ProcessRunner.cs",
+      "text": "using Process process = Process.Start(startInfo)",
+      "count": 1,
+      "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-linked.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-sibling.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
+      "text": "next=\"$(ps -o ppid= -p \"${cur}\" | tr -d ' ')\"",
+      "count": 1,
+      "bound": "Fixture-only: ps -o ppid= prints one parent pid and exits, inside a loop capped at 8 iterations; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
+      "text": "if ps -o args= -p \"${next}\" | grep -q 'proc-guard\\.sh'; then",
+      "count": 1,
+      "bound": "Fixture-only: ps -o args= prints one command line and exits; grep -q reads it and exits. Inside a loop capped at 8 iterations."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
+      "text": "parent=\"$(ps -o ppid= -p \"${next}\" | tr -d ' ')\"",
+      "count": 1,
+      "bound": "Fixture-only: ps -o ppid= prints one parent pid and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-kill-scope-unlinked.sh",
+      "text": "break",
+      "count": 1,
+      "bound": "Shell loop keyword in the capped parent walk; starts nothing."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardKillScopeTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The wrapped command is sh -c \"exit 0\", which exits at once; the process table is a fixture (KW_PROC_GUARD_PS) and signals go to a recording fake (KW_PROC_GUARD_KILL) that signals nothing."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardKillScopeTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command exits at once; the process table is a fixture and kill is a recording fake."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/SquadPackResponsePreferencesTests.cs",
+      "text": "ProcessStartInfo startInfo = new(CliHostPath())",
+      "count": 1,
+      "bound": "Builds the start info for the single bounded ProcessRunner.Run below; no process starts here."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Squad/SquadPackResponsePreferencesTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(120));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 120 s kills the child tree on expiry; one self-exiting kyber-weave CLI pack invocation in a temp directory."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/ps-node-family-3.sh",
+      "text": "user=\"$(id -un)\"",
+      "count": 1,
+      "bound": "Fixture-only: `id -un` prints the account name and exits. This file is a fake process table that proc-guard.sh reads through KW_PROC_GUARD_PS; it starts nothing else."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The only child is the guard, whose wrapped command is sleep 5 (self-exiting, killed by the guard at the first poll) or none; the process table is a fixture."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "return ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The wrapped command is sleep 5, which exits by itself; the process table is a fixture."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/SquadRunCommand.cs",
+      "text": "Func<ProcessStartInfo, int> runner = _runner ?? ProcessRunner.RunInteractive;",
+      "count": 1,
+      "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardTtyTests.cs",
+      "text": "ProcessStartInfo startInfo = new(scriptPath)",
+      "count": 1,
+      "bound": "Started by the Run below: HarnessTimeout (60 s) kills the tree. The child is script, which runs proc-guard.sh with --timeout 20 around sh -c 'read x; echo done'; the inner command exits by itself on EOF."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardTtyTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, HarnessTimeout);",
+      "count": 1,
+      "bound": "HarnessTimeout (60 s) kills the tree; the guard's own --timeout 20 kills the wrapped read; the inner command exits by itself."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Fixtures/proc-guard/fake-date-fails-after-marker.sh",
+      "text": "exec /bin/date \"$@\"",
+      "count": 1,
+      "bound": "Fixture-only: /bin/date prints the epoch seconds and exits at once; the script fails before it when the marker file exists."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"pgrep\")",
+      "count": 1,
+      "bound": "Started by the Run below: 10 s timeout; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 10 s kills the tree; pgrep -f lists pids and exits."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"kill\")",
+      "count": 1,
+      "bound": "Started by the Run below: 5 s timeout; kill -KILL of a sleep 7 this test caused, in finally, result ignored."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardReviewTests.cs",
+      "text": "_ = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(5));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 5 s kills the tree; kill -KILL of a sleep 7 this test caused, result ignored."
+    },
+    {
+      "file": "src/KyberWeave.Core/Doctor/CodeGraphProvisioner.cs",
+      "text": "ProcessStartInfo startInfo = new(fileName)",
+      "count": 1,
+      "bound": "Builds the codegraph start info only; every run goes through IProcessExecutor, bounded by DoctorOptions.IndexTimeout (ProcessExecutor.WithTimeout kills the tree on expiry)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Doctor/RepositoryDoctor.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Builds the git rev-parse start info only; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "text": "ProcessStartInfo startInfo = new(fileName)",
+      "count": 1,
+      "bound": "The session's own start info, passed through ProcessRunner.CreateSafeStartInfo; the child is bounded by the session budget and killed in Dispose on every path."
+    },
+    {
+      "file": "src/KyberWeave.Core/Processes/StdioSession.cs",
+      "text": "_process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))",
+      "count": 1,
+      "bound": "The only Process.Start for the stdio session; the child is killed through ProcessRunner.TryKillTree in Dispose on every path, and its reads are bounded by the session budget."
+    }
+  ]
+}

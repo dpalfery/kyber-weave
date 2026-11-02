@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -37,8 +38,8 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void PlatformRidDetectRejectsWinArm64()
     {
-        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
-            () => PlatformRid.Detect(windows: true, linux: false, macos: false, Architecture.Arm64));
+        SelfUpdateException ex =
+            Assert.Throws<SelfUpdateException>(() => PlatformRid.Detect(true, false, false, Architecture.Arm64));
         Assert.Contains("win-arm64", ex.Message, StringComparison.Ordinal);
     }
 
@@ -105,9 +106,9 @@ public sealed class UpdateCommandTests : IDisposable
     public void ChecksumVerifierExpectedHexMatchesExactFileNameOnly()
     {
         string sums = """
-            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-linux-x64.tar.gz
-            bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  kyber-weave-linux-arm64.tar.gz
-            """;
+                      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-linux-x64.tar.gz
+                      bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  kyber-weave-linux-arm64.tar.gz
+                      """;
 
         Assert.Equal(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -120,7 +121,8 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void ChecksumVerifierExpectedHexAcceptsStarAndPathPrefix()
     {
-        string sums = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *dist/kyber-weave-osx-arm64.tar.gz";
+        string sums =
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *dist/kyber-weave-osx-arm64.tar.gz";
         Assert.Equal(
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             ChecksumVerifier.ExpectedHex(sums, "kyber-weave-osx-arm64.tar.gz"));
@@ -129,8 +131,8 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void ChecksumVerifierExpectedHexMissingEntryThrows()
     {
-        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
-            () => ChecksumVerifier.ExpectedHex("deadbeef  other.tar.gz\n", "kyber-weave-osx-arm64.tar.gz"));
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(() =>
+            ChecksumVerifier.ExpectedHex("deadbeef  other.tar.gz\n", "kyber-weave-osx-arm64.tar.gz"));
         Assert.Contains("no entry", ex.Message, StringComparison.Ordinal);
     }
 
@@ -138,19 +140,19 @@ public sealed class UpdateCommandTests : IDisposable
     public void ChecksumVerifierVerifyMismatchThrows()
     {
         byte[] actual = SHA256.HashData("nope"u8.ToArray());
-        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
-            () => ChecksumVerifier.Verify(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                actual,
-                "kyber-weave-osx-arm64.tar.gz"));
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(() => ChecksumVerifier.Verify(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            actual,
+            "kyber-weave-osx-arm64.tar.gz"));
         Assert.Contains("SHA256 mismatch", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void EnsureHttpsRejectsHttp()
     {
-        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
-            () => GitHubReleaseClient.EnsureHttps(new Uri("http://example.com/file")));
+        SelfUpdateException ex =
+            Assert.Throws<SelfUpdateException>(() =>
+                GitHubReleaseClient.EnsureHttps(new Uri("http://example.com/file")));
         Assert.Contains("non-HTTPS", ex.Message, StringComparison.Ordinal);
     }
 
@@ -158,7 +160,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
@@ -183,7 +185,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
     {
-        using MapHandler handler = MapRelease("0.2.0-rc.1", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0-rc.1", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
             """
@@ -195,11 +197,12 @@ public sealed class UpdateCommandTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0-rc.1", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains(GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri, handler.Uris, StringComparer.Ordinal);
+        Assert.Contains(GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri, handler.Uris,
+            StringComparer.Ordinal);
         Assert.DoesNotContain(GitHubReleaseClient.LatestApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
     }
 
@@ -207,7 +210,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunPinnedVersionSkipsApiAndStripsVPrefix()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("v0.2.0", false, false));
@@ -226,7 +229,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReleaseCandidateTakesHighestVersionNotFirstListed()
     {
-        using MapHandler handler = MapRelease("0.1.7-rc.10", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.1.7-rc.10", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
             """
@@ -238,7 +241,7 @@ public sealed class UpdateCommandTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.6", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.1.7-rc.10", outcome.Message, StringComparison.Ordinal);
@@ -251,7 +254,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReleaseCandidateReadsEveryReleasesPage()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         string fullPage = "[" + string.Join(
             ",",
             Enumerable.Range(1, GitHubReleaseClient.ReleasesPerPage)
@@ -262,7 +265,7 @@ public sealed class UpdateCommandTests : IDisposable
             """[{"tag_name":"v0.2.0","draft":false,"prerelease":false}]""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
@@ -279,7 +282,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReleaseCandidateSkipsTagsThatAreNotReleaseVersions()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
             """
@@ -290,7 +293,7 @@ public sealed class UpdateCommandTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
@@ -299,10 +302,10 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReleaseCandidateWithVersionFailsWithoutHttp()
     {
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", true, false));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("--release-candidate", outcome.Message, StringComparison.Ordinal);
@@ -312,13 +315,14 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunChecksumMismatchLeavesExistingBinary()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
         handler.MapFile(
             GitHubReleaseClient.AssetUri("v0.2.0", "SHA256SUMS.txt").AbsoluteUri,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-osx-arm64.tar.gz\n"u8.ToArray());
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-osx-arm64.tar.gz\n"u8
+                .ToArray());
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
@@ -331,7 +335,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunAlreadyCurrentIsNoOp()
     {
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.1.1","draft":false}""");
@@ -350,13 +354,13 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunNoMcpDoesNotInstallMcp()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, false, NoMcp: true));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, false, true));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
@@ -369,11 +373,11 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunWindowsZipReplacesExeNames()
     {
-        using MapHandler handler = MapRelease("0.2.0", "win-x64", windows: true);
+        using MapHandler handler = MapRelease("0.2.0", "win-x64", true);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
-        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", true);
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
@@ -387,15 +391,15 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunDotnetHostIsRefused()
     {
-        SelfUpdateHost host = new SelfUpdateHost(
+        SelfUpdateHost host = new(
             Path.Combine(_install.Path, "dotnet"),
             "0.1.0",
             "osx-arm64",
-            IsWindows: false,
-            IsMacOs: false);
+            false,
+            false);
         File.WriteAllText(host.ProcessPath, "shim");
 
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
@@ -409,9 +413,9 @@ public sealed class UpdateCommandTests : IDisposable
         Directory.CreateDirectory(tools);
         string processPath = Path.Combine(tools, "kyber-weave");
         File.WriteAllText(processPath, "shim");
-        SelfUpdateHost host = new SelfUpdateHost(processPath, "0.1.0", "osx-arm64", false, false);
+        SelfUpdateHost host = new(processPath, "0.1.0", "osx-arm64", false, false);
 
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
@@ -425,7 +429,7 @@ public sealed class UpdateCommandTests : IDisposable
         // write through a read-only mode, so a mode-based test could never run there.
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> probed = [];
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
 
         SelfUpdateOutcome outcome = Run(
             handler,
@@ -458,7 +462,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunGitHubTokenIsSentAsBearerAndNotMentionedOnFailure()
     {
-        using MapHandler handler = new MapHandler();
+        using MapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         const string token = "not-a-real-token";
 
@@ -476,20 +480,20 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void ExecuteWritesHumanOutput()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
-        UpdateCommand command = new UpdateCommand
+        UpdateCommand command = new()
         {
             Host = host,
             Handler = handler,
             ReadEnvironment = _ => null
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => command.Execute(null!, new UpdateSettings()));
+        CapturedConsoleExecution<int> execution =
+            ProcessConsoleCapture.Run(() => command.Execute(null!, new UpdateSettings()));
 
         Assert.Equal(0, execution.Result);
         Assert.Contains("updated kyber-weave 0.2.0", execution.Output, StringComparison.Ordinal);
@@ -506,13 +510,14 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunWhenMcpStagingFailsRestoresOriginalCliBinary()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         string tag = "v0.2.0";
         string cliName = BinaryInstaller.ArchiveName("kyber-weave", "osx-arm64");
         string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", "osx-arm64");
         string cliArchive = Path.Combine(_assets.Path, cliName);
         byte[] cliBytes = File.ReadAllBytes(cliArchive);
-        string corruptSums = $"{Sha(cliBytes)}  {cliName}\n0000000000000000000000000000000000000000000000000000000000000000  {mcpName}\n";
+        string corruptSums =
+            $"{Sha(cliBytes)}  {cliName}\n0000000000000000000000000000000000000000000000000000000000000000  {mcpName}\n";
         handler.MapFile(
             GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(corruptSums));
@@ -530,11 +535,11 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunCommitsTheRunningImageLast()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
 
-        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        using SelfUpdater updater = new(handler, host, log.Add, _ => null, captureProcess: (_, _) => QuietSuccess);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -544,14 +549,14 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.True(
             mcpIndex < cliIndex,
             "The running kyber-weave image must be replaced after every other binary: "
-                + "overwriting it first leaves the rollback path unable to load assemblies "
-                + "the single-file host has not already read out of the old executable.");
+            + "overwriting it first leaves the rollback path unable to load assemblies "
+            + "the single-file host has not already read out of the old executable.");
     }
 
     [Fact]
     public void RunWhenMcpCommitFailsLeavesTheRunningImageUntouched()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         // A directory at the MCP destination fails the commit, not the staging that
@@ -559,7 +564,7 @@ public sealed class UpdateCommandTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_install.Path, "kyber-weave-mcp"));
         List<string> log = [];
 
-        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        using SelfUpdater updater = new(handler, host, log.Add, _ => null, captureProcess: (_, _) => QuietSuccess);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -578,7 +583,7 @@ public sealed class UpdateCommandTests : IDisposable
         // is that the macOS path still installs, so the quarantine call cannot regress into
         // something that throws past BinaryInstaller and aborts the update.
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64") with { IsMacOs = true };
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
@@ -593,7 +598,7 @@ public sealed class UpdateCommandTests : IDisposable
     public void RunReplacesInstalledKyberDashFromTheNodeSeaAsset()
     {
         string installed = InstallKyberDash();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withKyberDash: true);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
@@ -607,7 +612,7 @@ public sealed class UpdateCommandTests : IDisposable
     {
         // No kyberdash on disk, and the release map carries no kyberdash asset:
         // an update that tried to fetch one would fail on the unmapped URI.
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
@@ -622,7 +627,7 @@ public sealed class UpdateCommandTests : IDisposable
         // 0.1.7-rc.8 sorts below the floor, so no release at that tag carries the
         // asset. The unmapped URI is the assertion: asking for it would fail here.
         string installed = InstallKyberDash();
-        using MapHandler handler = MapRelease("0.1.7-rc.8", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.1.7-rc.8", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.1.7-rc.8", false, false));
@@ -635,13 +640,13 @@ public sealed class UpdateCommandTests : IDisposable
     public void RunLeavesKyberDashUntouchedUnderNoKyberDash()
     {
         string installed = InstallKyberDash();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(
             handler,
             host,
-            new SelfUpdateOptions("0.2.0", false, false, NoKyberDash: true));
+            new SelfUpdateOptions("0.2.0", false, false, true));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("old-kyberdash", File.ReadAllText(installed));
@@ -650,9 +655,9 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReplacesInstalledKyberDashOnWindows()
     {
-        string installed = InstallKyberDash(windows: true);
-        using MapHandler handler = MapRelease("0.2.0", "win-x64", windows: true, withKyberDash: true);
-        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
+        string installed = InstallKyberDash(true);
+        using MapHandler handler = MapRelease("0.2.0", "win-x64", true, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", true);
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
@@ -687,7 +692,7 @@ public sealed class UpdateCommandTests : IDisposable
         {
             "HOME" => home,
             "USERPROFILE" => home,
-            _ => null,
+            _ => null
         };
     }
 
@@ -700,7 +705,7 @@ public sealed class UpdateCommandTests : IDisposable
         bool trayRecorded = true,
         int trayExitCode = 0)
     {
-        using SelfUpdater updater = new SelfUpdater(
+        using SelfUpdater updater = new(
             handler,
             host,
             log.Add,
@@ -709,7 +714,8 @@ public sealed class UpdateCommandTests : IDisposable
             {
                 spawned.Add((file, args));
                 return trayExitCode;
-            });
+            },
+            captureProcess: (_, _) => QuietSuccess);
         return updater.Run(options);
     }
 
@@ -718,7 +724,7 @@ public sealed class UpdateCommandTests : IDisposable
     public void RunDelegatesToKyberdashMenubarUpdate()
     {
         InstallKyberDash();
-        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", windows: false, withKyberDash: true);
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
@@ -741,7 +747,7 @@ public sealed class UpdateCommandTests : IDisposable
     public void RunReportsANonZeroTrayExitAsANamedFailure()
     {
         InstallKyberDash();
-        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", windows: false, withKyberDash: true);
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
@@ -780,7 +786,7 @@ public sealed class UpdateCommandTests : IDisposable
         string expectedLogFragment)
     {
         InstallKyberDash();
-        using MapHandler handler = MapRelease(version, "osx-arm64", windows: false, withKyberDash: true);
+        using MapHandler handler = MapRelease(version, "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
@@ -788,14 +794,514 @@ public sealed class UpdateCommandTests : IDisposable
         SelfUpdateOutcome outcome = RunWithTray(
             handler,
             host,
-            new SelfUpdateOptions(version, false, false, NoKyberDash: noKyberDash, NoMenubar: noMenubar),
+            new SelfUpdateOptions(version, false, false, noKyberDash, noMenubar),
             log,
             spawned,
-            trayRecorded: trayRecorded);
+            trayRecorded);
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Empty(spawned);
         Assert.Contains(log, line => line.Contains(expectedLogFragment, StringComparison.Ordinal));
+    }
+
+    // ---- restart reconciliation (T10: D12, D13, D14, update side) ----
+
+    /// <summary>One process the update started after the binaries were committed.</summary>
+    private sealed record ReconcileStep(string Name, string File, IReadOnlyList<string> Args);
+
+    private static readonly ProcessResult QuietSuccess = new(0, string.Empty, string.Empty);
+
+    /// <summary>
+    /// Runs an update with the tray, engine and plugin seams recorded in one ordered list, so a test can
+    /// assert the order the reconciliation runs in. The tray is the existing runner; engine and plugin
+    /// calls are dispatched on their first argument through the capture seam.
+    /// </summary>
+    private SelfUpdateOutcome RunReconciling(
+        HttpMessageHandler handler,
+        SelfUpdateHost host,
+        SelfUpdateOptions options,
+        List<string> log,
+        List<ReconcileStep> steps,
+        string? trayVersion = "0.9.23",
+        ProcessResult? engineResult = null,
+        ProcessResult? pluginResult = null,
+        Exception? trayException = null,
+        Exception? engineException = null,
+        Exception? pluginException = null)
+    {
+        ProcessResult engine = engineResult ?? new ProcessResult(0, "engine: not-running\n", string.Empty);
+        ProcessResult plugin = pluginResult ?? new ProcessResult(0, string.Empty, string.Empty);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            log.Add,
+            HomeWithTrayVersion(trayVersion),
+            (file, args) =>
+            {
+                steps.Add(new ReconcileStep("tray", file, args));
+                if (trayException is not null)
+                    throw trayException;
+                return 0;
+            },
+            captureProcess: (file, args) =>
+            {
+                bool engineCall = args.Count > 0 && args[0] == "engine";
+                steps.Add(new ReconcileStep(engineCall ? "engine" : "plugin", file, args));
+                if (engineCall && engineException is not null)
+                    throw engineException;
+                if (!engineCall && pluginException is not null)
+                    throw pluginException;
+                return engineCall ? engine : plugin;
+            });
+        return updater.Run(options);
+    }
+
+    /// <summary>A home with a recorded tray at the given version, or with no record when <paramref name="version"/> is null.</summary>
+    private Func<string, string?> HomeWithTrayVersion(string? version)
+    {
+        string home = Path.Combine(_install.Path, "home");
+        Directory.CreateDirectory(home);
+        if (version is not null)
+        {
+            string config = Path.Combine(home, ".kyberdash");
+            Directory.CreateDirectory(config);
+            File.WriteAllText(
+                Path.Combine(config, "tray.json"),
+                $$"""{"path":"/Applications/KyberDash.app","version":"{{version}}"}""");
+        }
+
+        return name => name switch
+        {
+            "HOME" => home,
+            "USERPROFILE" => home,
+            _ => null
+        };
+    }
+
+    private static readonly string[] EngineArgs = ["engine", "ensure", "--if-running"];
+
+    private static readonly string[] PluginArgs =
+    [
+        "kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--if-installed"
+    ];
+
+    // The plugin verb's guidance lines are every stdout line that starts with this prefix (D22). The copy after the
+    // prefix belongs to kyberDash, so these tests use neutral text and never pin its wording.
+    private const string HarnessPrefix = "harness opencode: ";
+    private const string GuidanceAlpha = "guidance from the verb, line alpha";
+    private const string GuidanceBeta = "guidance from the verb, line beta";
+
+    /// <summary>The plugin verb's stdout: one verdict line, then each given line.</summary>
+    private static ProcessResult PluginVerbStdout(string verdict, params string[] lines)
+    {
+        string stdout = $"opencode plugin: {verdict} /x/kyberdash-opencode.js\n" +
+                        string.Concat(lines.Select(line => line + "\n"));
+        return new ProcessResult(0, stdout, string.Empty);
+    }
+
+    /// <summary>After the binaries commit, the engine runs first, then the tray, then the plugin.</summary>
+    [Fact]
+    public void RunReconcilesAfterCommitInEngineTrayPluginOrder()
+    {
+        string kyberdash = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.All(steps.Where(step => step.Name != "tray"), step => Assert.Equal(kyberdash, step.File));
+        Assert.Equal(EngineArgs, steps[0].Args);
+        Assert.Equal(["menubar", "--update", "--version", "0.10.0"], steps[1].Args);
+        Assert.Equal(PluginArgs, steps[2].Args);
+    }
+
+    /// <summary>The "already on" path still runs the engine, tray and plugin reconciliation, and still does not download.</summary>
+    [Fact]
+    public void RunAlreadyCurrentStillReconcilesEngineTrayAndPlugin()
+    {
+        InstallKyberDash();
+        using MapHandler handler = new();
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi.AbsoluteUri,
+            """{"tag_name":"v0.10.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.10.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(handler, host, new SelfUpdateOptions(), log, steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("already on 0.10.0", outcome.Message);
+        Assert.Equal<string>(["engine", "tray", "plugin"], steps.Select(step => step.Name));
+        Assert.DoesNotContain(handler.Uris, uri => uri.Contains("SHA256SUMS.txt", StringComparison.Ordinal));
+    }
+
+    /// <summary>With no release change, a tray recorded older than the installed KyberDash is relaunched.</summary>
+    [Fact]
+    public void RunRelaunchesAStaleTrayEvenWhenTheReleaseDidNotChange()
+    {
+        InstallKyberDash();
+        using MapHandler handler = new();
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi.AbsoluteUri,
+            """{"tag_name":"v0.10.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.10.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler, host, new SelfUpdateOptions(), log, steps, "0.9.23");
+
+        Assert.Equal(0, outcome.ExitCode);
+        ReconcileStep tray = Assert.Single(steps, step => step.Name == "tray");
+        Assert.Equal(["menubar", "--update", "--version", "0.10.0"], tray.Args);
+    }
+
+    /// <summary>A tray already at the installed version is left running on the no-change path.</summary>
+    [Fact]
+    public void RunLeavesACurrentTrayAloneWhenTheReleaseDidNotChange()
+    {
+        InstallKyberDash();
+        using MapHandler handler = new();
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi.AbsoluteUri,
+            """{"tag_name":"v0.10.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.10.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler, host, new SelfUpdateOptions(), log, steps, "0.10.0");
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(steps, step => step.Name == "tray");
+        Assert.Contains(log, line => line.Contains("already on 0.10.0", StringComparison.Ordinal));
+    }
+
+    /// <summary>--no-restart skips the engine and the tray, but the plugin still upgrades when it is installed.</summary>
+    [Fact]
+    public void RunWithNoRestartSkipsEngineAndTrayButStillUpdatesThePlugin()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false, NoRestart: true),
+            log,
+            steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal<string>(["plugin"], steps.Select(step => step.Name));
+    }
+
+    /// <summary>--no-kyberdash skips the engine, the tray and the plugin together.</summary>
+    [Fact]
+    public void RunWithNoKyberDashSkipsEngineTrayAndPlugin()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false, true),
+            log,
+            steps);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Empty(steps);
+    }
+
+    /// <summary>
+    /// The --no-kyberdash skip is logged with its exact wording. The CI update loop greps for this sentence, so a
+    /// change here must change scripts/update-loop.sh in the same commit.
+    /// </summary>
+    [Fact]
+    public void RunWithNoKyberDashLogsTheSkipWithItsExactWording()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false, true),
+            log,
+            steps);
+
+        Assert.Contains(
+            log,
+            line => line.Contains(
+                "--no-kyberdash given; leaving the KyberDash engine, tray and capture plugin unchanged",
+                StringComparison.Ordinal));
+    }
+
+    /// <summary>A failed engine step is named, and the binaries committed before it are kept.</summary>
+    [Fact]
+    public void RunWhenTheEngineStepFailsNamesItAndKeepsTheCommittedBinaries()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            engineResult: new ProcessResult(2, string.Empty, "engine did not answer"));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash engine step", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 2", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>
+    /// The update relays the plugin verb's own guidance line for every verdict, including a kept one when the verb
+    /// sends one. The wording is kyberDash's (ADR 0031); the updater must not print its own.
+    /// </summary>
+    [Theory]
+    [InlineData("upgraded")]
+    [InlineData("installed")]
+    [InlineData("kept-edited")]
+    public void RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string token)
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout(token, HarnessPrefix + GuidanceAlpha));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains(GuidanceAlpha, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Every harness line the plugin verb prints is relayed, not only the verdict. The updater used to log the first
+    /// line of stdout and then its own restart line, so a second guidance line was lost.
+    /// </summary>
+    [Fact]
+    public void RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout("installed", HarnessPrefix + GuidanceAlpha, HarnessPrefix + GuidanceBeta));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains(GuidanceAlpha, StringComparison.Ordinal));
+        Assert.Contains(log, line => line.Contains(GuidanceBeta, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The hard-coded "Restart OpenCode to load the upgraded capture plugin." was the updater's own wording, and it
+    /// drifted from kyberDash's. No logged line may begin with it, whatever the verdict.
+    /// </summary>
+    [Theory]
+    [InlineData("upgraded")]
+    [InlineData("installed")]
+    [InlineData("kept-edited")]
+    public void RunNeverPrintsAHardCodedRestartOpenCodeLine(string token)
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout(token, HarnessPrefix + GuidanceAlpha));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(log, line => line.StartsWith("Restart OpenCode", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Only lines that start with the harness prefix are guidance. Verb chatter, and a line that merely mentions the
+    /// prefix, are not relayed. An updater that dumped all of stdout would fail this.
+    /// </summary>
+    [Fact]
+    public void RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: PluginVerbStdout(
+                "upgraded",
+                HarnessPrefix + GuidanceAlpha,
+                "verb chatter that is not guidance",
+                "verb note: harness opencode: mid-line mention"));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.DoesNotContain(log,
+            line => line.Contains("verb chatter that is not guidance", StringComparison.Ordinal));
+        Assert.DoesNotContain(log, line => line.Contains("mid-line mention", StringComparison.Ordinal));
+    }
+
+    /// <summary>A KyberDash that predates the engine verb is a named skip, not a failed update.</summary>
+    [Fact]
+    public void RunNamesAPreVerbKyberDashAsASkipForTheEngineAndThePlugin()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+        ProcessResult unknown = new(1, string.Empty, "error: unknown command 'engine'");
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            engineResult: unknown,
+            pluginResult: new ProcessResult(1, string.Empty, "error: unknown command 'capture'"));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("predates", StringComparison.Ordinal));
+    }
+
+    /// <summary>A plugin step that fails is a warning: the update still exits 0.</summary>
+    [Fact]
+    public void RunPluginFailureIsAWarningAndTheUpdateStillSucceeds()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginResult: new ProcessResult(3, string.Empty, "plugin write failed"));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("capture plugin step failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>An engine step whose kyberdash cannot be started (not executable) is a named failure; the committed binaries stay.</summary>
+    [Fact]
+    public void RunWhenTheEngineStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            engineException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash engine step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>A tray step whose kyberdash cannot be started is a named failure; the committed binaries stay.</summary>
+    [Fact]
+    public void RunWhenTheTrayStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            trayException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash tray step could not start", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    /// <summary>A plugin step whose kyberdash cannot be started is a warning: the update still exits 0.</summary>
+    [Fact]
+    public void RunWhenThePluginStepCannotBeExecutedIsAWarningAndTheUpdateStillSucceeds()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunReconciling(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            pluginException: new UnauthorizedAccessException("Access to the path kyberdash is denied."));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains(log, line => line.Contains("could not run KyberDash", StringComparison.Ordinal));
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
     }
 
     private SelfUpdateOutcome Run(
@@ -805,7 +1311,7 @@ public sealed class UpdateCommandTests : IDisposable
         Func<string, string?>? env = null,
         Func<string, bool>? canWriteDirectory = null)
     {
-        using SelfUpdater updater = new SelfUpdater(
+        using SelfUpdater updater = new(
             handler,
             host,
             _ => { },
@@ -813,9 +1319,10 @@ public sealed class UpdateCommandTests : IDisposable
             {
                 "HOME" => _install.Path,
                 "USERPROFILE" => _install.Path,
-                _ => null,
+                _ => null
             }),
-            canWriteDirectory: canWriteDirectory);
+            canWriteDirectory: canWriteDirectory,
+            captureProcess: (_, _) => QuietSuccess);
         return updater.Run(options);
     }
 
@@ -824,7 +1331,7 @@ public sealed class UpdateCommandTests : IDisposable
         string name = BinaryInstaller.InstalledFileName("kyber-weave", windows);
         string path = Path.Combine(_install.Path, name);
         File.WriteAllText(path, "old-cli");
-        return new SelfUpdateHost(path, currentVersion, rid, windows, IsMacOs: false);
+        return new SelfUpdateHost(path, currentVersion, rid, windows, false);
     }
 
     private MapHandler MapRelease(
@@ -833,7 +1340,7 @@ public sealed class UpdateCommandTests : IDisposable
         bool windows,
         bool withKyberDash = false)
     {
-        MapHandler handler = new MapHandler();
+        MapHandler handler = new();
         string tag = "v" + version;
         string cliName = BinaryInstaller.ArchiveName("kyber-weave", rid);
         string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", rid);
@@ -892,9 +1399,9 @@ public sealed class UpdateCommandTests : IDisposable
         }
 
         using FileStream file = File.Create(archivePath);
-        using GZipStream gzip = new GZipStream(file, CompressionLevel.Fastest);
-        using TarWriter writer = new TarWriter(gzip);
-        using MemoryStream data = new MemoryStream(content);
+        using GZipStream gzip = new(file, CompressionLevel.Fastest);
+        using TarWriter writer = new(gzip);
+        using MemoryStream data = new(content);
         writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName)
         {
             DataStream = data
@@ -904,13 +1411,18 @@ public sealed class UpdateCommandTests : IDisposable
     [SuppressMessage(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
-        Justification = "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
-    private static string Sha(byte[] bytes) =>
-        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        Justification =
+            "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
+    private static string Sha(byte[] bytes)
+    {
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
 
     /// <summary>True for any page of the Releases list, but not for <c>releases/latest</c>.</summary>
-    private static bool IsReleasesListRequest(string uri) =>
-        uri.StartsWith(GitHubReleaseClient.ReleasesApi.AbsoluteUri + "?", StringComparison.Ordinal);
+    private static bool IsReleasesListRequest(string uri)
+    {
+        return uri.StartsWith(GitHubReleaseClient.ReleasesApi.AbsoluteUri + "?", StringComparison.Ordinal);
+    }
 
     private sealed class MapHandler : HttpMessageHandler
     {
@@ -920,23 +1432,30 @@ public sealed class UpdateCommandTests : IDisposable
 
         public List<string?> Authorizations { get; } = [];
 
-        public void MapJson(string uri, string json) =>
+        public void MapJson(string uri, string json)
+        {
             Map(uri, () => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             });
+        }
 
-        public void MapFile(string uri, byte[] bytes) =>
+        public void MapFile(string uri, byte[] bytes)
+        {
             Map(uri, () =>
             {
-                HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
+                HttpResponseMessage response = new(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent(bytes)
                 };
                 return response;
             });
+        }
 
-        private void Map(string uri, Func<HttpResponseMessage> factory) => _map[uri] = factory;
+        private void Map(string uri, Func<HttpResponseMessage> factory)
+        {
+            _map[uri] = factory;
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,

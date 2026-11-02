@@ -329,7 +329,7 @@ fn runtime_dependencies(app: AppHandle, leading_args: Vec<String>) -> Result<Run
     Ok(RuntimeDependencies {
         server_spawner: Box::new(SystemServerSpawner::new(leading_args)),
         fetcher: Box::new(LoopbackFetcher::new().context("creating the loopback client")?),
-        clock: Box::new(ThreadClock),
+        clock: Box::new(ThreadClock::default()),
         event_sink: Box::new(TauriEventSink { app: app.clone() }),
         opener: Box::new(TauriOpener { app }),
     })

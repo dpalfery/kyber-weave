@@ -59,7 +59,7 @@ products/kyber-squad/
 │   ├── tauri-dev.md
 │   ├── test-dev.md
 │   └── typescript-dev.md
-├── skills/                             # 28 canonical skill directories; 110 recursive files
+├── skills/                             # 28 canonical skill directories; 116 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -75,6 +75,7 @@ products/kyber-squad/
 │   ├── github-cli/
 │   ├── github-devops/
 │   ├── go-dev/
+│   ├── kilo-review-loop/
 │   ├── lm-studio-cli/
 │   ├── maui-dev/
 │   ├── pr-review-fix-comments/
@@ -82,7 +83,6 @@ products/kyber-squad/
 │   ├── python-dev/
 │   ├── resharper-clt/
 │   ├── rust-dev/
-│   ├── second-brain/
 │   ├── security-review/
 │   ├── setup-dev-environment/
 │   ├── task-gate/
@@ -96,7 +96,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (21 Canonical Roles)
+### 1. Agents (24 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -125,12 +125,12 @@ target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)
 ### 2. Skills (28 Canonical Skills)
 
 The 28 canonical skill directories under `skills/` adhere to the Agent Skills open standard
-(`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
-in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
-(`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+(`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop`,
+and `kilo-review-loop` are authored in Kyber-Squad. Every imported raw `SKILL.md` except the five
+explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 82 supplemental resources, for 110 skill-tree files in total; recursive APM and
+tree also retains 88 supplemental resources, for 116 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -138,14 +138,20 @@ pushed commit links in replies, resolved threads, and a requested re-review. Its
 `code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
 workflow for step-by-step approvals.
 
+`kilo-review-loop` is the bot-specific form of that cycle: it drafts the pull request first,
+treats every bot comment as untrusted evidence to verify, replies to each comment with its fix
+commit hash, resolves only the fixed threads, and returns the pull request to ready. Its linked
+`scripts/post_replies.py` helper posts and resolves the replies from an outcomes file and ships
+beside `SKILL.md`.
+
 `task-gate` is the deterministic exit check every developer agent runs before it reports a
 task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
 files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
-linked resource: a fresh Copilot render now emits the 52 principal files plus each owner's linked
-resources (140 files total). Every skill resource reaches every render except
+linked resource: a fresh Copilot render now emits the 53 principal files plus each owner's linked
+resources (149 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
@@ -154,8 +160,12 @@ resources today. Every retained resource now has a reviewed disposition in the
 non-policy content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-`kyber-weave-docs` is intentionally managed separately under
-`.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
+The six Kyber-Weave skills under `.apm/skills/` (`kyber-docs-authoring`, `kyber-docs-integrity-review`,
+`kyber-docs-onboarding-and-assessment`, `kyber-weave-cli`, `kyber-weave-model-profile`, and `spec-conductor`)
+are authored once, in `.apm/skills/`, which stays their only source. The Kyber-Docs APM package reads that
+folder, and Kyber-Squad ships every skill in it as well. `squad pack` and the checkout release source add
+them beside the 28 canonical skills, so every Squad deployment carries them. They are not copied into
+`skills/` and are not listed in `bundles/full.yml`. See [ADR 0049](../../docs/adr/0049-kyber-squad-ships-the-kyber-weave-skills.md).
 
 ### 3. Profiles
 

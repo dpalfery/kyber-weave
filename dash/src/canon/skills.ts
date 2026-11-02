@@ -18,6 +18,7 @@
 //     (VS Code Copilot): the listing is read from that block.
 //   - Everything else: the listing is not measurable, with a reason.
 
+import { parseAvailableSkills } from '../capture/harnesses/opencode-plugin/skills-block.js'
 import { harnessFamily } from './measurability.js'
 import { SKILLS_INVOKED_KEY, SKILLS_LISTED_KEY, isNotMeasurable, notMeasurable } from './types.js'
 import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from './types.js'
@@ -28,6 +29,7 @@ const COPILOT_LISTING_KEY = 'github.copilot.context.skills'
 const ANTIGRAVITY_LISTING_KEY = 'gen_ai.skills'
 /** OpenCode's listing: a JSON-array string of skill names on the context span (plan 2026-10-23 §5-T5, D6). */
 const OPENCODE_LISTING_KEY = 'opencode.context.skills'
+const OPENCODE_FAMILY = 'opencode'
 const ANTIGRAVITY_LISTING_PREFIX = 'Active Skills: '
 /** Harness per-turn resident skill-token counter; never summed, never split across skills. */
 const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
@@ -135,7 +137,16 @@ export function readListingOf(
   if (raw[SKILLS_LISTED_KEY] !== undefined) return readClaudeListing(record, raw[SKILLS_LISTED_KEY])
   if (raw[COPILOT_LISTING_KEY] !== undefined) return readCopilotListing(record, raw[COPILOT_LISTING_KEY], parts)
   if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
-  if (raw[OPENCODE_LISTING_KEY] !== undefined) return readOpencodeListing(record, raw[OPENCODE_LISTING_KEY])
+  if (raw[OPENCODE_LISTING_KEY] !== undefined) {
+    const fromKey = readOpencodeListing(record, raw[OPENCODE_LISTING_KEY])
+    // An empty key listing carries no evidence of its own: the system prompt's
+    // block (R1) still says what the model was given.
+    if (!('measurable' in fromKey) || fromKey.skills.length > 0) return fromKey
+  }
+  if (harnessFamily(record.harness) === OPENCODE_FAMILY) {
+    const fromBlock = readOpencodeBlockListing(record, parts)
+    if (fromBlock !== undefined) return fromBlock
+  }
   const fromPrompt = readSystemPromptListing(record, parts)
   if (fromPrompt !== undefined) return fromPrompt
   const fromBody = readRequestBodyListing(record, parts)
@@ -488,6 +499,27 @@ function readOpencodeListing(record: CanonicalRecord, value: unknown): ListingRe
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 
+/**
+ * OpenCode 2.1.4 lists skills as an `<available_skills>` block in the assembled
+ * system prompt (R1, G2). A readable block is the measured listing by skill id;
+ * a malformed one is a named failure, never an empty list. No block returns
+ * undefined so the generic system-prompt reader can still try.
+ */
+function readOpencodeBlockListing(
+  record: CanonicalRecord,
+  parts: readonly ContentPart[] | undefined,
+): ListingResult | undefined {
+  const text = parts !== undefined ? partsSystemPrompt(parts) : systemPromptText(record, parts)
+  const parsed = parseAvailableSkills(text)
+  if (!parsed.ok) {
+    if (parsed.reason === 'no-block') return undefined
+    return notMeasurable(
+      'The <available_skills> block in the OpenCode system prompt is malformed, so the opencode skill listing is not measurable.',
+    )
+  }
+  return { measurable: true, isInitial: true, skills: uniqueByName(parsed.ids.map((id) => listedSkill(record, id))) }
+}
+
 function readAntigravityListing(record: CanonicalRecord, value: unknown): ListingResult {
   if (typeof value !== 'string' || !value.startsWith(ANTIGRAVITY_LISTING_PREFIX)) {
     return notMeasurable(
@@ -537,6 +569,9 @@ function readRequestBodyListing(
   for (const part of parts) {
     const eligible = part.part === 'system_prompt' || (part.part === 'conversation_history' && part.role === 'system')
     if (!eligible) continue
+    // Malformed bytes can leave a non-string where text belongs; skip it
+    // rather than crashing on `.indexOf` inside `parseBodyListing`.
+    if (typeof part.text !== 'string') continue
     const skills = parseBodyListing(record, part.text)
     if (skills.length > 0) return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
   }
@@ -552,6 +587,9 @@ function readRequestBodyListing(
  * unindented non-entry line ends the listing.
  */
 function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] {
+  // Malformed bytes can carry a number where prompt text belongs; that is
+  // unmeasured, never a crash on `.indexOf`.
+  if (typeof text !== 'string') return []
   const at = text.indexOf(BODY_LISTING_MARKER)
   if (at < 0) return []
   const entries: Array<{ name: string; description: string }> = []
@@ -579,6 +617,9 @@ function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] 
 /** Skill names and optional descriptions from the system prompt's `<skill>` XML blocks. */
 function xmlDescriptions(text: string): Map<string, string | undefined> {
   const found = new Map<string, string | undefined>()
+  // Malformed bytes can carry a non-string prompt; that is unmeasured,
+  // never a crash on `.matchAll`.
+  if (typeof text !== 'string') return found
   for (const match of text.matchAll(/<skill\b[^>]*>([\s\S]*?)<\/skill>/gi)) {
     const block = match[1] ?? ''
     const nameMatch = block.match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)
@@ -596,7 +637,7 @@ function xmlDescriptions(text: string): Map<string, string | undefined> {
 /** The system prompt text: the `system_prompt` parts when present, else the flat bucket. */
 function partsSystemPrompt(parts: readonly ContentPart[]): string {
   return parts
-    .filter((part) => part.part === 'system_prompt')
+    .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string')
     .map((part) => part.text)
     .join('\n')
 }

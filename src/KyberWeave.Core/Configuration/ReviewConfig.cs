@@ -7,6 +7,10 @@ namespace KyberWeave.Core.Configuration;
 /// <param name="Run">The command and its arguments, already split into argv.</param>
 /// <param name="Blocking">Whether failing this gate blocks the change.</param>
 /// <param name="TimeoutSeconds">Seconds to wait before the runner kills the process tree.</param>
+/// <param name="Os"><c>windows</c> or <c>unix</c> to run only on that platform; null to run everywhere.</param>
+/// <param name="WorkingDirectory">
+/// Repository-relative directory the gate runs in; null means the repository root.
+/// </param>
 /// <remarks>
 /// <see cref="Run"/> is a list, never a command line, because
 /// <see cref="Processes.ProcessRunner"/> refuses a concatenated argument string and refuses
@@ -15,7 +19,23 @@ namespace KyberWeave.Core.Configuration;
 /// vocabulary is exactly "run this program with these arguments", which is the whole
 /// injection surface closed at the point the value is written.
 /// </remarks>
-public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true, int TimeoutSeconds = 900);
+public sealed record ReviewGate(
+    string Id,
+    IReadOnlyList<string> Run,
+    bool Blocking = true,
+    int TimeoutSeconds = 900,
+    string? Os = null,
+    string? WorkingDirectory = null)
+{
+    /// <summary>Glob patterns selecting the changed files the gate applies to; empty for every change.</summary>
+    public IReadOnlyList<string> Include { get; init; } = [];
+
+    /// <summary>
+    /// Whether the gate also fails when its command exits zero but writes anything other than whitespace to
+    /// standard output. For tools that report a problem by listing it and still exit zero, such as <c>gofmt -l</c>.
+    /// </summary>
+    public bool FailOnOutput { get; init; }
+}
 
 /// <summary>
 /// One gate a developer agent runs against its own working tree before a reviewer sees the change.
@@ -29,6 +49,9 @@ public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Block
 /// <param name="Fix">The command that applies the fix, as argv, with the same token rules as <see cref="Run"/>.</param>
 /// <param name="Blocking">Whether a failing gate blocks the change.</param>
 /// <param name="TimeoutSeconds">Seconds before the runner kills the process tree.</param>
+/// <param name="WorkingDirectory">
+/// Repository-relative directory the gate runs in; null means the repository root.
+/// </param>
 /// <remarks>
 /// Like <see cref="ReviewGate"/>, both commands are argv lists and never a command line. The
 /// runner expands the <c>{changed}</c> and <c>{task}</c> tokens; this record only carries them,
@@ -41,7 +64,15 @@ public sealed record ReviewTaskGate(
     IReadOnlyList<string> Run,
     IReadOnlyList<string> Fix,
     bool Blocking = true,
-    int TimeoutSeconds = 900);
+    int TimeoutSeconds = 900,
+    string? WorkingDirectory = null)
+{
+    /// <summary>
+    /// Whether the gate also fails when its command exits zero but writes anything other than whitespace to
+    /// standard output. For tools that report a problem by listing it and still exit zero, such as <c>gofmt -l</c>.
+    /// </summary>
+    public bool FailOnOutput { get; init; }
+}
 
 /// <summary>The unit-coverage floor a change must clear.</summary>
 /// <param name="FileLinePercent">Minimum line coverage across files.</param>
@@ -76,9 +107,32 @@ public sealed record ReviewDuplicates(int MinimumLines = 4)
 /// </remarks>
 public sealed record ReviewSuppression(string Id, string Reason, DateOnly Expires);
 
+/// <summary>How hard the council and the verdict engine lean on a change.</summary>
+/// <remarks>
+/// A named preset over two thresholds, not a third mechanism: <see cref="ReviewPolicy.MinConfidence"/>
+/// and <see cref="ReviewPolicy.MajorCountBlocks"/> remain the only numbers the engine reads, and a
+/// host that declares either explicitly overrides the preset. Minor findings never block
+/// at any level; strictness changes how many findings are heard and how few majors it takes to
+/// request changes.
+/// </remarks>
+public enum ReviewStrictness
+{
+    /// <summary>Only high-confidence findings count, and several majors are needed to block.</summary>
+    Lenient,
+
+    /// <summary>The product default.</summary>
+    Balanced,
+
+    /// <summary>Lower-confidence findings count, and a single surviving major blocks.</summary>
+    Strict
+}
+
 /// <summary>The rules the verdict engine may not decide for itself.</summary>
 public sealed class ReviewPolicy
 {
+    /// <summary>The preset these thresholds came from.</summary>
+    public ReviewStrictness Strictness { get; init; } = ReviewStrictness.Balanced;
+
     /// <summary>Glob patterns whose paths always escalate to a human reviewer.</summary>
     public IReadOnlyList<string> AlwaysHuman { get; init; } = [];
 
@@ -102,6 +156,16 @@ public sealed class ReviewPolicy
 
     /// <summary>Product defaults for a host that declares no policy.</summary>
     public static ReviewPolicy ProductDefaults { get; } = new();
+
+    /// <summary>The thresholds a strictness preset stands for.</summary>
+    /// <param name="strictness">The preset.</param>
+    public static ReviewPolicy ForStrictness(ReviewStrictness strictness) => strictness switch
+    {
+        ReviewStrictness.Lenient => new ReviewPolicy { Strictness = strictness, MinConfidence = 8, MajorCountBlocks = 5 },
+        ReviewStrictness.Balanced => new ReviewPolicy { Strictness = strictness, MinConfidence = 7, MajorCountBlocks = 3 },
+        ReviewStrictness.Strict => new ReviewPolicy { Strictness = strictness, MinConfidence = 5, MajorCountBlocks = 1 },
+        _ => throw new ArgumentOutOfRangeException(nameof(strictness), strictness, "Unknown strictness.")
+    };
 }
 
 /// <summary>The <c>review:</c> host configuration.</summary>
@@ -134,6 +198,12 @@ public sealed class ReviewConfig
 
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;
+
+    /// <summary>
+    /// Non-fatal problems in the <c>review:</c> section, such as a key the loader does not know.
+    /// The config still loads; the CLI reports each entry as a warning.
+    /// </summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
 
     /// <summary>Product defaults for an unconfigured host.</summary>
     public static ReviewConfig ProductDefaults { get; } = new();

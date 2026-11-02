@@ -60,8 +60,8 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
     expect([...SURVEYED_HARNESSES].sort()).toEqual(expected.sort())
   })
 
-  it('declares verified cache counter support for Copilot, Claude Code, Roo Code, Cline, and Codex', () => {
-    const verifiedSupported = ['copilot', 'claude-code', 'roo-code', 'cline', 'codex']
+  it('declares verified cache counter support for Copilot, Claude Code, Roo Code, Cline, Codex, and OpenCode', () => {
+    const verifiedSupported = ['copilot', 'claude-code', 'roo-code', 'cline', 'codex', 'opencode']
     for (const harness of verifiedSupported) {
       const cache = cacheAvailability(harness)
       expect(cache.status).toBe('supported')
@@ -69,11 +69,12 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
       expect(cache.cacheRead).toBe(true)
     }
 
-    // Claude Code, Roo Code, Cline, Copilot support both cacheRead and cacheCreation
+    // Claude Code, Roo Code, Cline, Copilot, OpenCode support both cacheRead and cacheCreation
     expect(cacheAvailability('claude-code').cacheCreation).toBe(true)
     expect(cacheAvailability('roo-code').cacheCreation).toBe(true)
     expect(cacheAvailability('cline').cacheCreation).toBe(true)
     expect(cacheAvailability('copilot').cacheCreation).toBe(true)
+    expect(cacheAvailability('opencode').cacheCreation).toBe(true)
 
     // Codex has implicit cache creation without a separate counter
     expect(cacheAvailability('codex').cacheCreation).toBe(false)
@@ -97,9 +98,6 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
 
     expect(cacheAvailability('aider').status).toBe('unsupported')
     expect(cacheAvailability('aider').confidence).toBe('documented')
-
-    expect(cacheAvailability('opencode').status).toBe('not_measurable')
-    expect(cacheAvailability('opencode').confidence).toBe('documented')
   })
 
   it('declares prefix byte availability and fallback accurately per harness', () => {
@@ -146,7 +144,7 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
   it('runs auditCachePrefixCoverage across all harnesses producing typed parity audit report', () => {
     const report: CachePrefixCoverageReport = auditCachePrefixCoverage()
     expect(report.surveyedCount).toBe(SURVEYED_HARNESSES.length)
-    expect(report.supportedCacheCount).toBe(7) // 5 supported + 2 partial (gemini, antigravity)
+    expect(report.supportedCacheCount).toBe(8) // 6 supported (incl. opencode) + 2 partial (gemini, antigravity)
     expect(report.supportedPrefixCount).toBe(2) // copilot, codex
     expect(report.fallbackPrefixCount).toBe(6) // copilot, claude-code, roo-code, cline, gemini, antigravity
 

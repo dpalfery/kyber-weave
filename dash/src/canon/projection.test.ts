@@ -69,7 +69,7 @@ function claimableSpan(): OtlpSpan {
 }
 
 /** A pass-shaped return value for projectors whose purpose is timing, not derivation. */
-const NO_OP_REPORT: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
+const NO_OP_REPORT: BuildSessionsReport = { built: 0, skipped: 0, derivationDegraded: 0, pruned: 0, rollups: 0, findings: 0 }
 
 type Deferred = { resolve: () => void; promise: Promise<void> }
 
@@ -682,6 +682,68 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
       expect(JSON.stringify(cost)).not.toContain('COST_BASIS_MISMATCH')
       expect(cost.value).toBeCloseTo(priced.value!, 10)
     } finally {
+      store.close()
+    }
+  })
+})
+
+describe('CanonicalProjectionScheduler shared cycle completion (F7)', () => {
+  it('shares one completion promise across requests in a cycle instead of retaining one waiter per request', async () => {
+    const store = new CanonStore(':memory:')
+    const seen: Array<Promise<void>> = []
+    let passes = 0
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: async () => {
+        passes += 1
+        // Sustained mid-pass traffic: every pass but the last arrives with
+        // two more requests while the pass is in flight.
+        if (passes <= 3) seen.push(scheduler.request(), scheduler.request())
+        return { ...NO_OP_REPORT }
+      },
+      idleMs: 0,
+      maxWaitMs: 0,
+      minIntervalMs: 0,
+    })
+    try {
+      seen.push(scheduler.request())
+      await scheduler.drain()
+      await Promise.all(seen)
+      expect(passes).toBe(4)
+      // Seven requests across four passes, one shared completion promise:
+      // waiter state is O(1) per cycle, not O(requests).
+      expect(new Set(seen).size).toBe(1)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('keeps request promises shared and settling across many passes of mid-pass traffic', async () => {
+    const store = new CanonStore(':memory:')
+    let passes = 0
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: async () => {
+        passes += 1
+        return { ...NO_OP_REPORT }
+      },
+      idleMs: 0,
+      maxWaitMs: 0,
+      minIntervalMs: 0,
+    })
+    try {
+      for (let cycle = 0; cycle < 200; cycle++) {
+        const first = scheduler.request()
+        const second = scheduler.request()
+        await scheduler.drain()
+        // Quiet settles with both requests resolved on the same promise.
+        expect(first).toBe(second)
+        await Promise.all([first, second])
+      }
+      expect(passes).toBe(200)
+    } finally {
+      await scheduler.close()
       store.close()
     }
   })

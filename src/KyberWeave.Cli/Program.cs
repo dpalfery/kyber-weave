@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
+using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
@@ -12,7 +13,7 @@ using Spectre.Console.Cli;
 
 ConsoleWidth.EnsureUsable(AnsiConsole.Console);
 
-CommandApp app = new CommandApp();
+CommandApp app = new();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
@@ -90,7 +91,8 @@ app.Configure(config =>
         docs.SetDescription("Validate documentation frontmatter and its joins to the code graph.");
 
         docs.AddCommand<DocsInitCommand>("init")
-            .WithDescription("Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
+            .WithDescription(
+                "Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
             .WithExample("docs", "init", ".")
             .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
 
@@ -110,6 +112,17 @@ app.Configure(config =>
         docs.AddCommand<DocsCatalogCommand>("catalog")
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
+
+        docs.AddCommand<DocsMcpWireCommand>("mcp-wire")
+            .WithDescription("Write the declared MCP servers into the named harnesses' repository-scope configuration.")
+            .WithExample("docs", "mcp-wire", ".")
+            .WithExample("docs", "mcp-wire", ".", "--target", "claude-code,opencode")
+            .WithExample("docs", "mcp-wire", ".", "--target", "factory", "--dry-run");
+
+        docs.AddCommand<DocsMcpUnwireCommand>("mcp-unwire")
+            .WithDescription("Remove the MCP entries a previous mcp-wire wrote, refusing over any later edit.")
+            .WithExample("docs", "mcp-unwire", ".")
+            .WithExample("docs", "mcp-unwire", ".", "--target", "claude-code,opencode");
 
         docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
             .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
@@ -177,6 +190,43 @@ app.Configure(config =>
         squad.AddCommand<SquadPackCommand>("pack")
             .WithDescription("Package canonical agents and skills into APM and plugin distribution archives.")
             .WithExample("squad", "pack", "--format", "all", "--out", "./dist");
+
+        squad.AddCommand<SquadRunCommand>("run")
+            .WithDescription("Launch an isolated harness instance configured with the active project preset.")
+            .WithExample("squad", "run", "claude")
+            .WithExample("squad", "run", "codex", "--", "--model", "custom-model");
+
+        squad.AddBranch("instance", instance =>
+        {
+            instance.SetDescription("Manage harness preset instance folders.");
+
+            instance.AddCommand<SquadInstanceRemoveCommand>("remove")
+                .WithDescription("Remove an instance folder and its recorded state.")
+                .WithExample("squad", "instance", "remove", "--target", "claude", "--preset", "fast");
+        });
+
+        squad.AddBranch("preset", preset =>
+        {
+            preset.SetDescription("Manage model preset profiles for harness deployments.");
+
+            preset.AddCommand<SquadPresetUseCommand>("use")
+                .WithDescription("Apply a model preset profile to target harnesses.")
+                .WithExample("squad", "preset", "use", "fast", "--target", "claude")
+                .WithExample("squad", "preset", "use", "fast", "--global");
+
+            preset.AddCommand<SquadPresetClearCommand>("clear")
+                .WithDescription("Clear model preset overrides and restore bundled models.")
+                .WithExample("squad", "preset", "clear", "--target", "claude")
+                .WithExample("squad", "preset", "clear", "--global");
+
+            preset.AddCommand<SquadPresetListCommand>("list")
+                .WithDescription("List available model preset profiles and their active usages.")
+                .WithExample("squad", "preset", "list");
+
+            preset.AddCommand<SquadPresetShowCommand>("show")
+                .WithDescription("Show resolved model profiles for a preset and target harness.")
+                .WithExample("squad", "preset", "show", "fast", "--target", "claude");
+        });
     });
 
     // Kyber Utilities Command Branch — deploys Kyber-owned per-harness utility artifacts to
@@ -220,6 +270,11 @@ app.Configure(config =>
             .WithExample("review", "gates", ".")
             .WithExample("review", "gates", ".", "--out", "gates.json");
 
+        review.AddCommand<ReviewCatalogueCommand>("catalogue")
+            .WithDescription("Print the catalogue review: block for the declared technologies without writing any file.")
+            .WithExample("review", "catalogue", ".")
+            .WithExample("review", "catalogue", ".", "--technology", "go");
+
         review.AddCommand<ReviewDuplicatesCommand>("duplicates")
             .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
             .WithExample("review", "duplicates", ".")
@@ -229,6 +284,14 @@ app.Configure(config =>
             .WithDescription("Compute approve / request-changes / needs-human from findings and gates.")
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
     });
+
+    // Repository documentation tooling: the CodeGraph index and the live docs MCP server. Repository-scoped, so it
+    // is a top-level verb rather than a squad or docs subcommand; `squad doctor` diagnoses a deployment instead.
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Check the repository's CodeGraph index and docs MCP server, and provision the index.")
+        .WithExample("doctor", "--check")
+        .WithExample("doctor", "--provision")
+        .WithExample("doctor", ".", "--provision", "--index-timeout", "1200");
 
     // Distribution: replace the running Release binaries. Not an artifact-class branch.
     config.AddCommand<UpdateCommand>("update")
@@ -252,10 +315,7 @@ static string GetVersion()
     }
 
     Version? nameVersion = assembly.GetName().Version;
-    if (nameVersion is not null)
-    {
-        return nameVersion.ToString();
-    }
+    if (nameVersion is not null) return nameVersion.ToString();
 
     return "0.0.0";
 }

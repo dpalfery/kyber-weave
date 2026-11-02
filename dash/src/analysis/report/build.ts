@@ -431,6 +431,16 @@ function buildLatestSession(
     buckets: Object.fromEntries(
       BUCKET_KEYS.map((key) => {
         const value = context.turn.buckets?.[key]
+        // D8: a part that was never observed has no figure to report; the 0 in the
+        // row is the projection's default, not a measurement.
+        if (context.observedParts !== undefined && !context.observedParts.has(key)) {
+          return [
+            key,
+            unmeasurable<number>(
+              context.bucketReasons[key] ?? `no ${key} part was observed in this session's captured messages`,
+            ),
+          ]
+        }
         return [
           key,
           context.measurable && typeof value === 'number' && Number.isFinite(value)
@@ -488,6 +498,11 @@ type LatestContext = {
   measurable: boolean
   unavailableReason: string
   bucketReasons: Partial<Record<BucketKey, string>>
+  /**
+   * The bucket parts the analysis observed. `undefined` is a row projected before
+   * the evidence existed: unknown, which is not the same as "none observed".
+   */
+  observedParts?: ReadonlySet<BucketKey>
   turn: {
     index: number
     pressure?: number
@@ -561,6 +576,9 @@ function extractContext(context: unknown, lastTurnIndex: number | undefined): La
         )
   const residual = asObject(turn?.residual)
   const residualTokens = finiteNumber(residual?.tokens)
+  const observedParts = Array.isArray(block.observedParts)
+    ? new Set(BUCKET_KEYS.filter((key) => (block.observedParts as unknown[]).includes(key)))
+    : undefined
 
   return {
     contextLimit: contextLimit !== undefined && contextLimit > 0 ? contextLimit : undefined,
@@ -568,6 +586,7 @@ function extractContext(context: unknown, lastTurnIndex: number | undefined): La
     measurable: block.measurable === true,
     unavailableReason,
     bucketReasons,
+    ...(observedParts === undefined ? {} : { observedParts }),
     turn: {
       index: turnIndex,
       pressure,

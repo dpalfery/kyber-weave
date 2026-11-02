@@ -48,9 +48,18 @@ import {
   type CaptureExporterResolution,
   type CaptureFileFormat,
   type CaptureHarnessWriter,
+  type ManagedFilePlugin,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
+import type { EngineEnsureResult } from '../engine/ensure.js'
+import { engineStatusLines, formatEnsureOutcome, type EngineProbeResult } from '../engine/outcome.js'
 import { classifyFsError, type FsErrorReason } from './errno.js'
+import {
+  legacyOpencodeFlagRecord,
+  migrateLegacyOpencodeFlag,
+  OPENCODE_LEGACY_OTEL_FLAG_KEY,
+  type LegacyKeyMigration,
+} from './harnesses/opencode.js'
 import type { PathEnv } from './paths.js'
 
 export { SUPPORTED_CAPTURE_HARNESS_IDS }
@@ -106,6 +115,26 @@ export type CaptureRunOptions = {
    * restored, so a profile removed since enable cannot strand its keys.
    */
   fileFilter?: CaptureFileFilter
+  /**
+   * Engine seams, supplied by the CLI only (the Settings server is the engine and passes none).
+   * `probe` + `cliVersion` add the engine-version lines to `status` (D5); `ensure` is called
+   * once after a successful, non-dry-run `enable` that includes OpenCode.
+   */
+  engine?: CaptureEngineSeams
+  /**
+   * OpenCode config root override for the whole-file plugin (`capture enable`,
+   * `disable` and `status`): `--config-dir`, else `$OPENCODE_CONFIG_DIR`, else
+   * `~/.config/opencode` — the same precedence `capture plugin install` and
+   * Squad use. The key writers never need it; only the OpenCode file plugin
+   * reads it.
+   */
+  opencodeConfigDir?: string
+}
+
+export type CaptureEngineSeams = {
+  cliVersion: string
+  probe: () => Promise<EngineProbeResult>
+  ensure?: () => Promise<EngineEnsureResult>
 }
 
 export type CaptureFileFilter = (file: {
@@ -236,17 +265,59 @@ export function fileIdFor(harnessId: string): string {
   return SINGLE_FILE_IDS[harnessId] ?? `${harnessId}-config`
 }
 
+export type PluginOnlyWriter = ManagedHarnessWriter & { filePlugin: ManagedFilePlugin }
+
+/**
+ * A managed writer that owns a plugin file and declares no config key (OpenCode). The engine
+ * reads, writes and receipts nothing in its config file: enable is the plugin install plus
+ * consent, disable is consent off plus the plugin removal.
+ */
+export function isPluginOnly(writer: CaptureHarnessWriter): writer is PluginOnlyWriter {
+  return (
+    writer.kind === 'managed' &&
+    writer.filePlugin !== undefined &&
+    (writer.configFiles?.length ?? 0) === 0 &&
+    Object.keys(writer.desiredKeys(DEFAULT_CAPTURE_ENDPOINT)).length === 0 &&
+    Object.keys(writer.ensureIfAbsentKeys?.(DEFAULT_CAPTURE_ENDPOINT) ?? {}).length === 0
+  )
+}
+
+/**
+ * The one-time cleanup of config keys an older KyberDash wrote for a plugin-only writer,
+ * keyed by harness id. Runs on enable and on disable; see `migrateLegacyOpencodeFlag`.
+ */
+const LEGACY_KEY_MIGRATIONS: Readonly<
+  Record<
+    string,
+    (home: string, env: PathEnv, receipt: CaptureReceipt | null, dryRun: boolean) => LegacyKeyMigration
+  >
+> = { opencode: migrateLegacyOpencodeFlag }
+
+function migrateLegacyKeys(
+  writer: PluginOnlyWriter,
+  home: string,
+  env: PathEnv,
+  receipt: CaptureReceipt | null,
+  dryRun: boolean,
+): LegacyKeyMigration {
+  const migrate = LEGACY_KEY_MIGRATIONS[writer.id]
+  return migrate === undefined
+    ? { out: [], err: [], events: [], receiptChanged: false }
+    : migrate(home, env, receipt, dryRun)
+}
+
 /**
  * Files this declaration owns. `configFiles` wins when it is set: the
  * top-level `desiredKeys` on a multi-file writer is the legacy string
  * surface, and using it would turn boolean `true` into the string `"true"`
- * and would skip every file after the first.
+ * and would skip every file after the first. A plugin-only writer owns none.
  */
 export function declaredFiles(
   writer: ManagedHarnessWriter,
   home: string,
   env: PathEnv,
 ): ResolvedConfigFile[] {
+  if (isPluginOnly(writer)) return []
   if (writer.configFiles !== undefined && writer.configFiles.length > 0) {
     return writer.configFiles.map((file) => ({
       id: file.fileId,
@@ -380,9 +451,12 @@ export async function runCapture(
     probeReceiver(endpoint, options.fetchHealth, options.probeTimeoutMs))
 
   if (action === 'status') {
-    out.push(...statusLines(selected, home, pathEnv, endpoint))
+    out.push(...statusLines(selected, home, pathEnv, endpoint, options.opencodeConfigDir))
     out.push(`receiver: ${probe.state}`, `  ${probe.detail}`)
     if (probe.state === 'none') out.push(RECEIVER_DOWN_REMEDY)
+    if (options.engine !== undefined) {
+      out.push(...engineStatusLines(await options.engine.probe(), options.engine.cliVersion))
+    }
     return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [] }
   }
 
@@ -392,7 +466,7 @@ export async function runCapture(
   const events: CaptureEvent[] = []
   try {
     if (action === 'enable') {
-      return await runEnable(
+      const enabled = await runEnable(
         events,
         selected,
         home,
@@ -402,7 +476,9 @@ export async function runCapture(
         probe.detail,
         options.dryRun ?? false,
         options.fileFilter,
+        options.opencodeConfigDir,
       )
+      return await ensureEngineAfterEnable(enabled, selected, options)
     }
     return await runDisable(
       events,
@@ -413,6 +489,7 @@ export async function runCapture(
       options.fileFilter,
       endpoint,
       options.removeUnreceiptedKeys ?? false,
+      options.opencodeConfigDir,
     )
   } catch (error) {
     if (typeof error === 'object' && error !== null) {
@@ -422,11 +499,27 @@ export async function runCapture(
   }
 }
 
+/** OpenCode's plugin reports to the receiver, so enabling it makes sure an engine of this version runs. */
+async function ensureEngineAfterEnable(
+  enabled: CaptureRunResult,
+  selected: readonly CaptureHarnessWriter[],
+  options: CaptureRunOptions,
+): Promise<CaptureRunResult> {
+  const ensure = options.engine?.ensure
+  if (ensure === undefined || options.dryRun === true || enabled.exitCode !== 0) return enabled
+  if (!selected.some((writer) => writer.id === 'opencode')) return enabled
+  const outcome = formatEnsureOutcome(await ensure())
+  return outcome.stream === 'stdout'
+    ? { ...enabled, stdout: `${enabled.stdout}${outcome.line}\n` }
+    : { ...enabled, stderr: `${enabled.stderr}${outcome.line}\n` }
+}
+
 function statusLines(
   writers: readonly CaptureHarnessWriter[],
   home: string,
   env: PathEnv,
   endpoint: string,
+  configDir: string | undefined,
 ): string[] {
   const lines: string[] = []
   const receipt = loadReceiptLenient(home)
@@ -454,6 +547,9 @@ function statusLines(
       }
       continue
     }
+    if (isPluginOnly(writer)) {
+      lines.push(...pluginOnlyConfigLines(writer, home, env, receipt))
+    }
     for (const file of declaredFiles(writer, home, env)) {
       appendFileStatus(lines, file, endpoint, receipt)
     }
@@ -461,6 +557,34 @@ function statusLines(
     // `enable` writes, so they never enter the receipt.
     lines.push(...statusWarningLines(writer, home, env))
     lines.push(...statusEnvSnippetLines(writer))
+    if (writer.filePlugin !== undefined) {
+      for (const line of writer.filePlugin.describeStatus(home, env, ...(configDir !== undefined ? [{ configDir }] : []))) lines.push(`  ${line}`)
+    }
+  }
+  return lines
+}
+
+/**
+ * A plugin-only writer's config file is only the migration target: name where it is, and
+ * say so when an older KyberDash's recorded key is still waiting to be put back.
+ */
+function pluginOnlyConfigLines(
+  writer: PluginOnlyWriter,
+  home: string,
+  env: PathEnv,
+  receipt: CaptureReceipt | null,
+): string[] {
+  const path = writer.resolvePath(home, env)
+  const read = readTextIfPresent(path)
+  const lines = [
+    read.error !== undefined
+      ? `  config: ${path} (unreadable: ${read.error})`
+      : `  config: ${path} (${read.found ? 'found' : 'missing'})`,
+  ]
+  if (writer.id === 'opencode' && legacyOpencodeFlagRecord(receipt, path) !== undefined) {
+    lines.push(
+      `  legacy: ${OPENCODE_LEGACY_OTEL_FLAG_KEY} was written by an earlier KyberDash; enable or disable puts your previous value back`,
+    )
   }
   return lines
 }
@@ -795,6 +919,65 @@ function dryRunLines(
   return lines
 }
 
+/**
+ * A managed harness's whole-file plugin on `enable`: strict install, then the consent
+ * switch on. A refused install leaves consent alone, so content is never opted in
+ * without the plugin that would send it.
+ */
+function enableFilePlugin(
+  harness: string,
+  plugin: ManagedFilePlugin,
+  home: string,
+  env: PathEnv,
+  dryRun: boolean,
+  configDir: string | undefined,
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
+  const installed = plugin.install(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
+  const out = [...installed.out]
+  // A noop adds nothing beside the config file's own event, so it stays in the text only.
+  const events: CaptureEvent[] =
+    installed.outcome === 'noop' || installed.outcome === 'restored' || installed.outcome === 'would-restore'
+      ? []
+      : [
+          {
+            kind: installed.outcome,
+            harness,
+            fileId: 'plugin',
+            path: plugin.path(home, env, ...(configDir !== undefined ? [{ configDir }] : [])),
+            ...(installed.reason !== undefined ? { reason: installed.reason } : {}),
+          },
+        ]
+  if (installed.exitCode === 0) out.push(...plugin.consent.set(home, env, true, { dryRun }).out)
+  return { exitCode: installed.exitCode, out, err: [...installed.err], events }
+}
+
+/** `disable`: consent off first (so content stops even if the file is kept), then uninstall. */
+function disableFilePlugin(
+  harness: string,
+  plugin: ManagedFilePlugin,
+  home: string,
+  env: PathEnv,
+  dryRun: boolean,
+  configDir: string | undefined,
+): { exitCode: number; out: string[]; err: string[]; events: CaptureEvent[] } {
+  const out = [...plugin.consent.set(home, env, false, { dryRun }).out]
+  const removed = plugin.uninstall(home, env, { dryRun, ...(configDir !== undefined ? { configDir } : {}) })
+  out.push(...removed.out)
+  const events: CaptureEvent[] =
+    removed.outcome === 'wrote' || removed.outcome === 'would-write' || removed.outcome === 'noop'
+      ? []
+      : [
+          {
+            kind: removed.outcome,
+            harness,
+            fileId: 'plugin',
+            path: plugin.path(home, env, ...(configDir !== undefined ? [{ configDir }] : [])),
+            ...(removed.reason !== undefined ? { reason: removed.reason } : {}),
+          },
+        ]
+  return { exitCode: removed.exitCode, out, err: [...removed.err], events }
+}
+
 async function runEnable(
   events: CaptureEvent[],
   writers: readonly CaptureHarnessWriter[],
@@ -805,6 +988,7 @@ async function runEnable(
   probeDetail: string,
   dryRun: boolean,
   fileFilter: CaptureFileFilter | undefined,
+  configDir: string | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -826,7 +1010,7 @@ async function runEnable(
     }
   }
   const receipt = loaded.receipt ?? { version: 1 as const, files: [] }
-  let wroteAny = false
+  let receiptChanged = false
 
   try {
     for (const writer of writers) {
@@ -850,13 +1034,17 @@ async function runEnable(
         out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
         continue
       }
+      let writerFailed = false
       for (const file of declaredFiles(writer, home, env)) {
         if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path: file.path }) === false) continue
         const enabled = enableFile(writer, file, endpoint, dryRun)
         out.push(...enabled.out)
         err.push(...enabled.err)
         events.push(...enabled.events)
-        if (enabled.exitCode !== 0) exitCode = enabled.exitCode
+        if (enabled.exitCode !== 0) {
+          exitCode = enabled.exitCode
+          writerFailed = true
+        }
         if (enabled.record === undefined) continue
         const existing = receipt.files.find((entry) => entry.path === file.path)
         const ensure =
@@ -873,13 +1061,29 @@ async function runEnable(
           enabled.record.preSha,
           enabled.record.postSha,
         )
-        wroteAny = true
+        receiptChanged = true
+      }
+      if (isPluginOnly(writer)) {
+        // The one-time cleanup of a key an older KyberDash wrote. It only warns, so it never
+        // blocks the plugin install below.
+        const migrated = migrateLegacyKeys(writer, home, env, receipt, dryRun)
+        out.push(...migrated.out)
+        err.push(...migrated.err)
+        events.push(...migrated.events)
+        if (migrated.receiptChanged) receiptChanged = true
+      }
+      if (writer.filePlugin !== undefined && !writerFailed) {
+        const plugin = enableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
+        out.push(...plugin.out)
+        err.push(...plugin.err)
+        events.push(...plugin.events)
+        if (plugin.exitCode !== 0) exitCode = plugin.exitCode
       }
     }
 
   } finally {
     // A write that throws on a later file must not strand earlier files without a record.
-    if (wroteAny && !dryRun) saveCaptureReceipt(home, receipt)
+    if (receiptChanged && !dryRun) saveCaptureReceipt(home, receipt)
   }
 
   out.push(`receiver: ${probeState}`)
@@ -1231,6 +1435,7 @@ async function runDisable(
   fileFilter: CaptureFileFilter | undefined,
   endpoint: string,
   removeUnreceiptedKeys: boolean,
+  configDir: string | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
@@ -1249,6 +1454,7 @@ async function runDisable(
   }
   const receipt = receiptState.receipt
   const revertedPaths: string[] = []
+  let receiptChanged = false
 
   for (const writer of writers) {
     if (writer.kind === 'pending') {
@@ -1270,6 +1476,20 @@ async function runDisable(
       }
       out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
       continue
+    }
+    if (writer.filePlugin !== undefined) {
+      const plugin = disableFilePlugin(writer.id, writer.filePlugin, home, env, dryRun, configDir)
+      out.push(...plugin.out)
+      err.push(...plugin.err)
+      events.push(...plugin.events)
+      if (plugin.exitCode !== 0) exitCode = plugin.exitCode
+    }
+    if (isPluginOnly(writer)) {
+      const migrated = migrateLegacyKeys(writer, home, env, receipt, dryRun)
+      out.push(...migrated.out)
+      err.push(...migrated.err)
+      events.push(...migrated.events)
+      if (migrated.receiptChanged) receiptChanged = true
     }
     const files = declaredFiles(writer, home, env)
     // Drift is decided for every file before any revert is written. One
@@ -1439,7 +1659,7 @@ async function runDisable(
     }
   }
 
-  if (!dryRun && receipt !== null && revertedPaths.length > 0) {
+  if (!dryRun && receipt !== null && (revertedPaths.length > 0 || receiptChanged)) {
     receipt.files = receipt.files.filter((file) => !revertedPaths.includes(file.path))
     saveCaptureReceipt(home, receipt)
   }

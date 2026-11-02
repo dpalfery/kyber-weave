@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using KyberWeave.Core.Review;
 using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -14,7 +16,27 @@ public static class ReviewConfigLoader
     /// </summary>
     private static readonly string[] KnownTokens = ["changed", "task"];
 
-    internal static ReviewConfig Merge(ReviewConfig defaults, ReviewYamlSection? section)
+    /// <summary>Keys the typed reader maps on a <c>review.gates</c> entry. Any other key is ignored and reported.</summary>
+    private static readonly string[] CouncilGateKeys =
+        ["id", "run", "blocking", "timeout-seconds", "include", "os", "working-directory", "fail-on-output"];
+
+    /// <summary>Keys the typed reader maps on a <c>review.task-gates</c> entry. Any other key is ignored and reported.</summary>
+    private static readonly string[] TaskGateKeys =
+        ["id", "include", "os", "run", "fix", "blocking", "timeout", "working-directory", "fail-on-output"];
+
+    /// <summary>Merges the parsed <c>review:</c> section over the defaults.</summary>
+    /// <param name="defaults">The configuration a host gets when a key is absent.</param>
+    /// <param name="section">The parsed section, or null when the host declares none.</param>
+    /// <param name="repositoryRoot">
+    /// The directory a <c>working-directory</c> is resolved against. Null when the configuration was not read
+    /// from a repository; a gate that sets <c>working-directory</c> is then refused, because it cannot be checked.
+    /// </param>
+    /// <param name="warnings">Non-fatal findings from <see cref="UnknownKeyWarnings"/>.</param>
+    internal static ReviewConfig Merge(
+        ReviewConfig defaults,
+        ReviewYamlSection? section,
+        string? repositoryRoot = null,
+        IReadOnlyList<string>? warnings = null)
     {
         ArgumentNullException.ThrowIfNull(defaults);
         if (section is null)
@@ -22,17 +44,20 @@ public static class ReviewConfigLoader
 
         return new ReviewConfig
         {
-            Gates = section.Gates is null ? defaults.Gates : ParseGates(section.Gates),
-            TaskGates = section.TaskGates is null ? defaults.TaskGates : ParseTaskGates(section.TaskGates),
+            Gates = section.Gates is null ? defaults.Gates : ParseGates(section.Gates, repositoryRoot),
+            TaskGates = section.TaskGates is null
+                ? defaults.TaskGates
+                : ParseTaskGates(section.TaskGates, repositoryRoot),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
             MaxConcurrentWorkers =
                 ParseMaxConcurrentWorkers(section.MaxConcurrentWorkers, defaults.MaxConcurrentWorkers),
-            Policy = ParsePolicy(section.Policy, defaults.Policy)
+            Policy = ParsePolicy(section.Policy, defaults.Policy),
+            Warnings = warnings ?? defaults.Warnings
         };
     }
 
-    private static IReadOnlyList<ReviewGate> ParseGates(List<ReviewGateYaml> gates)
+    private static IReadOnlyList<ReviewGate> ParseGates(List<ReviewGateYaml> gates, string? repositoryRoot)
     {
         List<ReviewGate> parsed = new(gates.Count);
         HashSet<string> seen = new(StringComparer.Ordinal);
@@ -68,7 +93,23 @@ public static class ReviewConfigLoader
                     $"review.gates '{gate.Id}' timeout-seconds must be greater than zero.");
             }
 
-            parsed.Add(new ReviewGate(gate.Id!, [.. gate.Run], gate.Blocking ?? true, timeoutSeconds));
+            string gateWhere = $"review.gates '{gate.Id}'";
+            IReadOnlyList<string> include = ParseInclude(gate.Include, gateWhere);
+            string? os = ParseOs(gate.Os, gateWhere);
+            string? workingDirectory = ParseWorkingDirectory(
+                gate.WorkingDirectory, gateWhere, repositoryRoot, [gate.Run]);
+
+            parsed.Add(new ReviewGate(
+                gate.Id!,
+                [.. gate.Run],
+                gate.Blocking ?? true,
+                timeoutSeconds,
+                os,
+                workingDirectory)
+            {
+                Include = include,
+                FailOnOutput = gate.FailOnOutput ?? false
+            });
         }
 
         return parsed;
@@ -80,7 +121,8 @@ public static class ReviewConfigLoader
     /// of someone else's task.
     /// </summary>
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> ParseTaskGates(
-        Dictionary<string, List<ReviewTaskGateYaml>?> taskGates)
+        Dictionary<string, List<ReviewTaskGateYaml>?> taskGates,
+        string? repositoryRoot)
     {
         Dictionary<string, IReadOnlyList<ReviewTaskGate>> parsed = new(taskGates.Count, StringComparer.Ordinal);
 
@@ -102,13 +144,16 @@ public static class ReviewConfigLoader
                     "or remove the agent.");
             }
 
-            parsed[entry.Key] = ParseAgentTaskGates(entry.Key, entry.Value);
+            parsed[entry.Key] = ParseAgentTaskGates(entry.Key, entry.Value, repositoryRoot);
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
     }
 
-    private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(string agent, List<ReviewTaskGateYaml> gates)
+    private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(
+        string agent,
+        List<ReviewTaskGateYaml> gates,
+        string? repositoryRoot)
     {
         List<ReviewTaskGate> parsed = new(gates.Count);
         HashSet<string> seen = new(StringComparer.Ordinal);
@@ -146,26 +191,226 @@ public static class ReviewConfigLoader
             IReadOnlyList<string> run = ParseArgv(gate.Run, "run", gateWhere, true);
             IReadOnlyList<string> fix = ParseArgv(gate.Fix, "fix", gateWhere, false);
 
-            if (gate.Include is not null && gate.Include.Exists(string.IsNullOrWhiteSpace))
-                throw new YamlException($"{gateWhere} has an empty include pattern. Name a glob such as \"**/*.cs\".");
-
-            if (gate.Os is not null && gate.Os is not ("windows" or "unix"))
-            {
-                throw new YamlException(
-                    $"{gateWhere} os '{gate.Os}' is not recognised. Use 'windows' or 'unix', or omit os to " +
-                    "run the gate on every platform.");
-            }
+            IReadOnlyList<string> include = ParseInclude(gate.Include, gateWhere);
+            string? os = ParseOs(gate.Os, gateWhere);
 
             int timeoutSeconds = gate.Timeout ?? 900;
             if (timeoutSeconds <= 0)
                 throw new YamlException($"{gateWhere} timeout must be greater than zero seconds.");
 
-            IReadOnlyList<string> include = gate.Include is null ? [] : [.. gate.Include];
-            parsed.Add(new ReviewTaskGate(id, include, gate.Os, run, fix, gate.Blocking ?? true, timeoutSeconds));
+            string? workingDirectory = ParseWorkingDirectory(gate.WorkingDirectory, gateWhere, repositoryRoot, [run, fix]);
+
+            parsed.Add(new ReviewTaskGate(
+                id, include, os, run, fix, gate.Blocking ?? true, timeoutSeconds, workingDirectory)
+            {
+                FailOnOutput = gate.FailOnOutput ?? false
+            });
         }
 
         return parsed;
     }
+
+    /// <summary>Validates a gate's <c>include</c> globs. Council and task gates share this rule.</summary>
+    private static IReadOnlyList<string> ParseInclude(List<string>? include, string gateWhere)
+    {
+        if (include is null)
+            return [];
+
+        if (include.Exists(string.IsNullOrWhiteSpace))
+            throw new YamlException($"{gateWhere} has an empty include pattern. Name a glob such as \"**/*.cs\".");
+
+        return [.. include];
+    }
+
+    /// <summary>Validates a gate's <c>os</c>. Council and task gates share this rule.</summary>
+    private static string? ParseOs(string? os, string gateWhere)
+    {
+        if (os is null)
+            return null;
+
+        if (os is not ("windows" or "unix"))
+        {
+            throw new YamlException(
+                $"{gateWhere} os '{os}' is not recognised. Use 'windows' or 'unix', or omit os to " +
+                "run the gate on every platform.");
+        }
+
+        return os;
+    }
+
+    /// <summary>
+    /// Validates a gate's <c>working-directory</c> and returns it normalized and repository-relative, or null
+    /// for the repository root. A refusal is raised here, where the operator wrote the gate, because a gate
+    /// that runs in the wrong directory fails in the middle of someone else's work.
+    /// </summary>
+    /// <param name="declared">The <c>working-directory</c> as written, or null when absent.</param>
+    /// <param name="gateWhere">The gate's name for diagnostics.</param>
+    /// <param name="repositoryRoot">The repository root, or null when there is none.</param>
+    /// <param name="commands">The gate's argv lists, checked for <c>{changed}</c>.</param>
+    private static string? ParseWorkingDirectory(
+        string? declared,
+        string gateWhere,
+        string? repositoryRoot,
+        IReadOnlyList<IReadOnlyList<string>> commands)
+    {
+        if (declared is null)
+            return null;
+
+        string where = $"{gateWhere} working-directory";
+        if (string.IsNullOrWhiteSpace(declared))
+        {
+            throw new YamlException(
+                $"{where} is empty. Name a directory relative to the repository root, or remove the key.");
+        }
+
+        // Both separators are accepted on every host; the stored form uses '/' only.
+        string spelled = declared.Replace('\\', '/');
+        if (spelled.StartsWith('/') || Path.IsPathRooted(declared))
+        {
+            throw new YamlException(
+                $"{where} '{declared}' is absolute. Name a directory relative to the repository root, such as 'web'.");
+        }
+
+        List<string> segments = [];
+        foreach (string segment in spelled.Split('/'))
+        {
+            if (segment is "" or ".")
+                continue;
+
+            if (segment == "..")
+            {
+                throw new YamlException(
+                    $"{where} '{declared}' contains '..' and would leave the repository root. Name a directory inside it.");
+            }
+
+            segments.Add(segment);
+        }
+
+        // Nothing left means the repository root itself, which is what an absent key already means.
+        if (segments.Count == 0)
+            return null;
+
+        if (commands.Any(argv => argv.Any(element => element.Contains("{changed}", StringComparison.Ordinal))))
+        {
+            throw new YamlException(
+                $"{gateWhere} sets working-directory and uses {{changed}}. Changed paths are repository-relative, " +
+                $"so they would be wrong inside '{declared}'. Remove the working-directory or the {{changed}} argument.");
+        }
+
+        if (repositoryRoot is null)
+        {
+            throw new YamlException(
+                $"{where} '{declared}' cannot be checked because the configuration was not read from a repository.");
+        }
+
+        string root = Path.GetFullPath(repositoryRoot);
+        string normalized = string.Join('/', segments);
+        string full = Path.GetFullPath(Path.Combine(root, normalized));
+
+        if (!TaskGateSelection.IsWithin(root, full))
+        {
+            throw new YamlException(
+                $"{where} '{declared}' leaves the repository root. Name a directory inside the repository.");
+        }
+
+        if (TaskGateSelection.LeadsOutsideThroughSymlink(root, normalized))
+        {
+            throw new YamlException(
+                $"{where} '{declared}' passes through a symbolic link that leads outside the repository root.");
+        }
+
+        if (!Directory.Exists(full))
+        {
+            throw new YamlException(
+                $"{where} '{declared}' does not exist in the repository. Create the directory or correct the path.");
+        }
+
+        return normalized;
+    }
+
+    /// <summary>Keys a gate mapping carries that the typed reader does not map. Each is reported, not dropped.</summary>
+    /// <remarks>
+    /// A second pass over the raw YAML, because the typed reader ignores unknown keys by design, so that no host
+    /// breaks on them. The load still succeeds; the operator is told the key does nothing.
+    /// </remarks>
+    internal static IReadOnlyList<string> UnknownKeyWarnings(string yaml)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+
+        YamlStream stream = new();
+        stream.Load(new StringReader(yaml));
+        if (stream.Documents.Count == 0 || stream.Documents[0].RootNode is not YamlMappingNode root)
+            return [];
+
+        if (ChildOf(root, "review") is not YamlMappingNode review)
+            return [];
+
+        List<string> warnings = [];
+
+        if (ChildOf(review, "gates") is YamlSequenceNode gates)
+        {
+            foreach (YamlNode entry in gates.Children)
+            {
+                if (entry is not YamlMappingNode gate)
+                    continue;
+
+                string id = ScalarOf(ChildOf(gate, "id"));
+                string where = id.Length == 0 ? "review.gates" : $"review.gates '{id}'";
+                AddUnknownKeys(gate, CouncilGateKeys, where, warnings);
+            }
+        }
+
+        if (ChildOf(review, "task-gates") is YamlMappingNode taskGates)
+        {
+            foreach (KeyValuePair<YamlNode, YamlNode> agentEntry in taskGates.Children)
+            {
+                if (agentEntry.Value is not YamlSequenceNode agentGates)
+                    continue;
+
+                string agent = ScalarOf(agentEntry.Key);
+                foreach (YamlNode entry in agentGates.Children)
+                {
+                    if (entry is not YamlMappingNode gate)
+                        continue;
+
+                    string id = ScalarOf(ChildOf(gate, "id"));
+                    string where = id.Length == 0
+                        ? $"review.task-gates '{agent}' gate"
+                        : $"review.task-gates '{agent}' gate '{id}'";
+                    AddUnknownKeys(gate, TaskGateKeys, where, warnings);
+                }
+            }
+        }
+
+        return warnings;
+    }
+
+    private static void AddUnknownKeys(
+        YamlMappingNode mapping,
+        string[] knownKeys,
+        string where,
+        List<string> warnings)
+    {
+        foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+        {
+            string key = ScalarOf(pair.Key);
+            if (key.Length > 0 && !knownKeys.Contains(key, StringComparer.Ordinal))
+                warnings.Add($"{where} has unknown key '{key}'; it is ignored.");
+        }
+    }
+
+    private static YamlNode? ChildOf(YamlMappingNode mapping, string name)
+    {
+        foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+        {
+            if (ScalarOf(pair.Key) == name)
+                return pair.Value;
+        }
+
+        return null;
+    }
+
+    private static string ScalarOf(YamlNode? node) => node is YamlScalarNode scalar ? scalar.Value ?? string.Empty : string.Empty;
 
     /// <summary>
     /// Validates one argv list. A required list must exist and name a command; an optional one may be
@@ -329,20 +574,35 @@ public static class ReviewConfigLoader
         if (policy is null)
             return defaults;
 
+        // A declared strictness replaces the inherited thresholds with its preset; an explicit
+        // threshold in the same block still wins over the preset, so a host can say "strict,
+        // but a floor of 6".
+        ReviewStrictness strictness = defaults.Strictness;
+        int baseMajorBlocks = defaults.MajorCountBlocks;
+        int baseMinConfidence = defaults.MinConfidence;
+        if (policy.Strictness is not null)
+        {
+            strictness = ParseStrictness(policy.Strictness);
+            ReviewPolicy preset = ReviewPolicy.ForStrictness(strictness);
+            baseMajorBlocks = preset.MajorCountBlocks;
+            baseMinConfidence = preset.MinConfidence;
+        }
+
         int maxLines = policy.MaxReviewableLines ?? defaults.MaxReviewableLines;
         if (maxLines <= 0)
             throw new YamlException("review.policy.max-reviewable-lines must be greater than zero.");
 
-        int majorBlocks = policy.MajorCountBlocks ?? defaults.MajorCountBlocks;
+        int majorBlocks = policy.MajorCountBlocks ?? baseMajorBlocks;
         if (majorBlocks <= 0)
             throw new YamlException("review.policy.major-count-blocks must be greater than zero.");
 
-        int minConfidence = policy.MinConfidence ?? defaults.MinConfidence;
+        int minConfidence = policy.MinConfidence ?? baseMinConfidence;
         if (minConfidence is < 1 or > 10)
             throw new YamlException("review.policy.min-confidence must be between 1 and 10.");
 
         return new ReviewPolicy
         {
+            Strictness = strictness,
             AlwaysHuman = policy.AlwaysHuman is null ? defaults.AlwaysHuman : [.. policy.AlwaysHuman],
             MaxReviewableLines = maxLines,
             MajorCountBlocks = majorBlocks,
@@ -352,6 +612,14 @@ public static class ReviewConfigLoader
                 : ParseSuppressions(policy.Suppressions)
         };
     }
+
+    private static ReviewStrictness ParseStrictness(string value) =>
+        value.Trim() is { Length: > 0 } trimmed && char.IsLetter(trimmed[0]) &&
+        Enum.TryParse(trimmed, ignoreCase: true, out ReviewStrictness parsed) &&
+        Enum.IsDefined(parsed)
+            ? parsed
+            : throw new YamlException(
+                $"review.policy.strictness '{value}' is not recognised; use lenient, balanced, or strict.");
 
     private static IReadOnlyList<ReviewSuppression> ParseSuppressions(List<ReviewSuppressionYaml> suppressions)
     {

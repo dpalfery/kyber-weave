@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { opencodeAdapter } from './adapters/opencode.js'
+import { rawSpan } from './adapters/testing.js'
+import { SPAN_NAMES } from '../capture/harnesses/opencode-plugin/contract.js'
 import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability, measurabilityFor } from './measurability.js'
 import { CanonStore } from './store.js'
@@ -298,10 +301,32 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
-  // Review re-review #2 (Kilo 7): OpenCode is catalogued `not_measurable`
-  // with documented confidence — a verified negative, not an uncatalogued
-  // gap — so its cache figures stay absent like any unsupported harness.
+  // Review re-review #2 (Kilo 7): Windsurf is catalogued as a documented
+  // negative (cache `unsupported`, prefix `not_measurable`, both documented) —
+  // a verified negative, not an uncatalogued gap — so its cache figures stay
+  // absent like any unsupported harness. OpenCode moved off this list when the
+  // capture plugin began exporting cache counters (see the next test).
   it('omits cache figures for a documented-unmeasurable harness', () => {
+    const row = buildSessionRow(
+      'sess-windsurf-cache',
+      [
+        turn('w1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'windsurf',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Rule 6 (OpenCode capture survey): the KyberDash capture plugin exports
+  // cache read and cache write counters, so an OpenCode session carries a
+  // cache ratio. A stored cache read of 0 is a measured 0%, not an absence.
+  it('emits the cache hit ratio for OpenCode, which exports cache counters', () => {
     const row = buildSessionRow(
       'sess-opencode-cache',
       [
@@ -314,8 +339,7 @@ describe('buildSessionRow', () => {
     )
     const summary = sessionPayload(row).summary as Record<string, unknown>
     expect(summary.total_input).toBe(1200)
-    expect('cache_hit_ratio' in summary).toBe(false)
-    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(summary.cache_hit_ratio).toBe(0)
   })
 
   // Review re-review (Kilo 1): Codex is `supported` yet exports no
@@ -376,6 +400,34 @@ describe('buildSessionRow', () => {
     expect(summary.total_input).toBe(1200)
     expect('cache_hit_ratio' in summary).toBe(false)
     expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review (Kilo 2/K3): the harness vocabulary says which counters CAN be
+  // exported; the record's declaration says which ones this turn DID export.
+  // Reading `totals.cacheRead` behind only the vocabulary check published a
+  // stored 0 as a 0% ratio, and counted "on 0 turns" coverage, for a turn whose
+  // adapter had already declared the counter not measurable.
+  it('omits cache figures when the record declares its cache counters unmeasurable', () => {
+    const absent = (reason: string) => ({ availability: 'not_measurable' as const, reason })
+    const row = buildSessionRow(
+      'sess-cache-declared-absent',
+      [
+        turn('cd1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+          measurability: {
+            cache_read: absent('The span exported no cache read counter.'),
+            cache_creation: absent('The span exported no cache creation counter.'),
+          },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
   // Issue #187: the engine's measured per-turn input never reached the wire —
@@ -1014,6 +1066,134 @@ describe('what counts as a session', () => {
     ])
 
     expect((await buildSessions(store)).built).toBe(1)
+    store.close()
+  })
+
+  it('builds a session from a counter-less, content-less opencode model call rather than skipping it', async () => {
+    // The dash-managed opencode plugin observes request assembly, not
+    // completion usage: its `llm.invoke` spans name a session and a model but
+    // carry no token counters, and with consent off no content either. 1,390
+    // such records were ingested on the live store and none projected, so the
+    // dashboard showed no opencode data at all. A recognized model call is a
+    // session; what the record cannot say is published as not measurable,
+    // never as a silent skip.
+    // Normalize through the adapter, not a hand-built record: the absence of
+    // a counter is a fact the adapter reads from the span's vocabulary, and
+    // the projection must consume that declaration rather than the stored 0.
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'oc-1',
+        name: SPAN_NAMES.step,
+        source: 'opencode',
+        attributes: {
+          'opencode.contract_version': '3',
+          'opencode.span.kind': 'step',
+          'opencode.model.id': 'claude-opus-4-6',
+          'opencode.session.id': 'ses_t0_opencode',
+        },
+      }),
+    )
+    const store = new CanonStore(':memory:')
+    store.upsertMany([record])
+
+    const report = await buildSessions(store)
+
+    // Before the projection fix the evidence clause skipped the whole group.
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    const payload = sessionPayload({ payload: store.getSessionPayload('ses_t0_opencode') })
+    expect(payload.harness).toBe('opencode')
+    // No measured context: the record carried no parts or counters, so the
+    // analysis says so and states the one turn it could not chart.
+    expect(payload.context.measurable).toBe(false)
+    expect(payload.context.reason).toBe('no_message_structure')
+    expect(payload.context.unmeasuredTurns).toBe(1)
+    // The absent content is published as not measurable with a reason, not as
+    // an empty or zero-filled composition.
+    const firstBuckets = payload.context.first.buckets as Record<
+      string,
+      { availability?: string; reason?: string } | number
+    >
+    expect(firstBuckets.system_prompt).toMatchObject({ availability: 'not_measurable' })
+    expect((firstBuckets.system_prompt as { reason?: string }).reason).toContain(
+      'did not capture system_prompt',
+    )
+    // The absent counters are published the same way: every token dimension
+    // this span could not report is `not_measurable` with a reason, never the
+    // stored zero. The per-turn identity keeps its 0s; only the aggregate
+    // claims a measurement.
+    const tokenDimensions = [
+      payload.summary.total_input,
+      payload.summary.total_output,
+      payload.summary.total_cache_read,
+      payload.summary.total_cache_creation,
+      payload.context.first.reported_input,
+    ]
+    for (const value of tokenDimensions) {
+      expect(value).toMatchObject({ availability: 'not_measurable' })
+      expect((value as { reason?: unknown }).reason).toEqual(expect.any(String))
+      expect((value as { reason: string }).reason.length).toBeGreaterThan(0)
+    }
+    const serialized = JSON.stringify(payload)
+    for (const key of [
+      'total_input',
+      'total_output',
+      'total_cache_read',
+      'total_cache_creation',
+      'reported_input',
+    ]) {
+      expect(serialized, `${key} must not be published as a measured zero`).not.toContain(
+        `"${key}":0`,
+      )
+    }
+    store.close()
+  })
+
+  it('still builds an unattributed legacy turn that carries measured counters', async () => {
+    // The legacy collector stamped `llm.invoke` on spans no adapter claimed
+    // and labelled the group `unattributed`. Those with real counters are a
+    // session and must not disappear with the bare ambient spans.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('legacy-1', [], {
+        sessionId: 'sess-legacy',
+        harness: 'unattributed',
+        tokens: tokens({
+          freshInput: 1200,
+          output: 80,
+          reportedInput: 1200,
+          reportedOutput: 80,
+        }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 1, skipped: 0 })
+    const payload = sessionPayload({ payload: store.getSessionPayload('sess-legacy') })
+    // Not merely "some payload exists": the legacy turn's own figures have to
+    // survive the evidence test that admitted it.
+    expect(payload.harness).toBe('unattributed')
+    expect(payload.summary.total_input).toBe(1200)
+    store.close()
+  })
+
+  // Review (Kilo 8): a parts ARRAY is not content. Counting `hasParts` admitted
+  // an unattributed record whose parts carried no text, which is ambient
+  // telemetry the evidence rule exists to keep out; only a bucket with
+  // non-empty text is evidence.
+  it('does not count empty parts as content evidence for an unattributed record', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('ambient-1', [{ part: 'system_prompt', text: '' }], {
+        sessionId: 'sess-ambient',
+        harness: 'unattributed',
+        tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect({ built: report.built, skipped: report.skipped }).toEqual({ built: 0, skipped: 1 })
     store.close()
   })
 })
@@ -1723,5 +1903,143 @@ describe('buildSessionRow — Claude Code and Copilot CLI skills are unchanged b
 
     expect(skillsTurnsOf(row)[0]).not.toHaveProperty('skills_invoked')
     expect(skillsViewOf(row)).not.toHaveProperty('invocationsCoverage')
+  })
+})
+
+// Numeric part text (refresh crash): untrusted payloads can carry a non-string
+// `text` despite the type, and the refresh must survive it rather than throw.
+// RED without the fix: the numeric text reached `countTokens`/`cacheKey`
+// (`createHash.update` throws on a non-string) and the tool-def catalogue
+// parse read `.trim()` off a number, so `buildSessionRow` threw instead of
+// building. The fix filters non-string text in `partsOf` and skips non-string
+// definitions before the catalogue parse, and `taskSummaryOf` skips
+// non-string history before `.trim()`.
+describe('buildSessionRow — numeric part text is dropped, never counted', () => {
+  it('drops a numeric tool_definitions part while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-tooldef',
+      [
+        turn('num-1', [
+          { part: 'tool_definitions', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+    const payload = sessionPayload(row)
+
+    // The build itself is the no-throw assertion; the outcomes pin the drop.
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    // The numeric blob is not a catalogue: no names, no offered catalogue.
+    expect(payload.summary.tools_offered).toBeUndefined()
+    expect(payload.tools.some((tool) => String(tool.name ?? '').includes('28'))).toBe(false)
+  })
+
+  it('drops numeric conversation_history while keeping its string sibling', () => {
+    const row = buildSessionRow(
+      'sess-numeric-history',
+      [
+        turn('num-2', [
+          { part: 'conversation_history', text: 28 as unknown as string },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.conversation_history ?? 0).toBe(0)
+  })
+
+  it('keeps the measured count of a numeric-text part', () => {
+    // Kilo review: dropping the whole part discarded a count the harness did
+    // measure, so direct `analyzeContext` read 123 while `buildSessionRow` read
+    // 0 for the same payload. The text is dropped; the measurement is not.
+    const row = buildSessionRow(
+      'sess-numeric-measured',
+      [
+        turn('num-3', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: 123 },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions).toBe(123)
+    expect(context.observedParts).toContain('tool_definitions')
+  })
+
+  it('does not keep a numeric-text part whose measured count is not finite', () => {
+    const row = buildSessionRow(
+      'sess-numeric-nonfinite',
+      [
+        turn('num-4', [
+          { part: 'tool_definitions', text: 28 as unknown as string, tokens: Number.NaN },
+          { part: 'system_prompt', text: 'hello', tokens: 10 },
+        ]),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+
+    expect(context.turns?.[0]?.buckets?.system_prompt).toBe(10)
+    expect(context.turns?.[0]?.buckets?.tool_definitions ?? 0).toBe(0)
+    expect(context.observedParts ?? []).not.toContain('tool_definitions')
+  })
+})
+
+// T4 — one bad session must not fail the refresh (numeric-part-text crash):
+// the per-session try/catch in `buildSessions` isolates a derivation throw,
+// records it as a `derivation_failed` problem, and continues with the next
+// session. RED without the fix: the throw propagated out of `buildSessions`,
+// so the healthy sibling never built and the refresh failed outright.
+describe('buildSessions — a failing session degrades the build instead of failing it', () => {
+  it('builds the healthy session while the failed one is skipped, degraded, and recorded', async () => {
+    // The numeric-part-text refresh crash: one malformed session must not
+    // fail the refresh. RED without the per-session try/catch: the throw
+    // propagated out of `buildSessions`, so the healthy sibling never built.
+    // The failure is injected at the persistence seam rather than through
+    // malformed bytes because a genuinely malformed record (e.g. numeric
+    // part text) currently also throws later in the findings phase
+    // (`extractListedSkills` → `parseBodyListing`), outside the guarded
+    // region — tracked as a follow-up gap — while this test pins the
+    // isolation contract itself: skip, degrade, record, continue.
+    const store = new CanonStore(':memory:')
+    try {
+      const healthy = turn('good-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-healthy',
+        traceId: 'trace-healthy',
+      })
+      const failing = turn('bad-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], {
+        sessionId: 'sess-bad',
+        traceId: 'trace-bad',
+      })
+      store.upsertMany([healthy, failing])
+      const persisted = store.upsertSession.bind(store)
+      const upsert = vi.spyOn(store, 'upsertSession').mockImplementation((row) => {
+        if (row.sessionId === 'sess-bad') throw new Error('session derivation failed (fixture)')
+        persisted(row)
+      })
+      try {
+        const report = await buildSessions(store)
+
+        expect(report.built).toBe(1)
+        expect(report.skipped).toBe(1)
+        expect(report.derivationDegraded).toBe(1)
+        expect(store.getSessionPayload('sess-healthy')).toBeDefined()
+        expect(store.getSessionPayload('sess-bad')).toBeUndefined()
+        expect(store.getProblems('sess-bad').some((problem) => problem.code === 'derivation_failed')).toBe(true)
+      } finally {
+        upsert.mockRestore()
+      }
+    } finally {
+      store.close()
+    }
   })
 })

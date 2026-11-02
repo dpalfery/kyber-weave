@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/test-dev.agent.md
 sources:
   .github/agents/test-dev.agent.md: b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-final-body-sha256: 2b61f36043acbf9fe0d91dcb8b1f420246ecbcf04f39cdd337052b0b274dd407
+final-body-sha256: 8cf4d91932f4c118f132524fd8d8ac199fcf8750fd5feabb3a013d435c843e0e
 ---
 # test-dev migration
 
@@ -15,6 +15,10 @@ The canonical agent description and instruction body were synchronized from `.gi
 Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
+
+The body has since evolved: test execution with `--no-build` and `dotnet test`, the task-gate
+exit gate, and `path.agent_scratchpad` worktree isolation. `final-body-sha256` covers that
+evolved body.
 
 ## Canonical projection
 

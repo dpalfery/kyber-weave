@@ -21,10 +21,13 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
     private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly Func<string, string?>? _environmentReader;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
     {
+        _capturePluginStep = KyberDashCapturePluginStep.CreateDefault();
     }
 
     /// <summary>Creates a new install command using injectable dependencies.</summary>
@@ -41,7 +44,9 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ISquadRenderer? renderer = null,
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        KyberDashCapturePluginStep? capturePluginStep = null,
+        Func<string, string?>? environmentReader = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -50,14 +55,18 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
         _globalRoots = globalRoots;
+        _capturePluginStep = capturePluginStep;
+        _environmentReader = environmentReader;
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadInstallSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadStateStore stateStore =
+            _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths, _environmentReader);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
@@ -90,8 +99,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
-            dryRun: settings.DryRun);
+            scope == SquadDeploymentScope.Project ? projectRoot : null,
+            settings.DryRun);
         SquadCommandComposition.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
@@ -101,12 +110,16 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // A --global install is anchored at the home directory whatever the working directory is, or at the
         // recorded root of a legacy single-root receipt the migration has just copied. Chosen after the migration.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
-        // Load configuration if present
+        // Load configuration if present. A project that cannot be read — no config file,
+        // or one that does not parse — still installs: the squad config falls back to product
+        // defaults and the task-gate hint below says where review gates come from. Only a
+        // global run, which has no project whose gates could be missing, keeps the load
+        // failure fatal.
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
-        if (!configResult.Success)
+        if (!configResult.Success && scope != SquadDeploymentScope.Project)
         {
             SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
             return 1;
@@ -115,7 +128,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
 
         // Perform target resolution
-        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
+        SquadTargetResolutionRequest request = new()
         {
             RootPath = targetRoot,
             Operation = SquadTargetOperation.Install,
@@ -143,22 +156,23 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // names the roots, so the confirmation shows the real destinations.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots, _environmentReader)
                 : null;
 
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
-            userPaths: _userPaths,
-            stateStore: stateStore,
-            releaseSource: _releaseSource,
-            renderer: _renderer,
-            globalRoots: _globalRoots);
+            _userPaths,
+            stateStore,
+            _releaseSource,
+            _renderer,
+            globalRoots: _globalRoots,
+            environmentReader: _environmentReader);
 
         SquadInstallRequest installRequest = new(
-            TargetRoot: targetRoot,
-            Scope: scope,
-            Targets: decision.Targets,
-            Exclusions: settings.Exclusions,
-            Version: pinnedVersion,
+            targetRoot,
+            scope,
+            decision.Targets,
+            settings.Exclusions,
+            pinnedVersion,
             Adopt: settings.Adopt,
             DryRun: settings.DryRun);
 
@@ -169,10 +183,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 targetRoot,
                 scope,
                 "install",
-                isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
-                yes: settings.Yes,
-                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
-                globalTargetRoots: globalTargetRoots))
+                _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                settings.Yes,
+                _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
@@ -180,7 +194,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest, cancellationToken).GetAwaiter().GetResult();
+            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest, cancellationToken).GetAwaiter()
+                .GetResult();
             if (result.Success)
             {
                 if (settings.DryRun)
@@ -196,6 +211,23 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 }
 
                 SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
+
+                // A project with no task gates learns where they come from. Squad writes no
+                // configuration itself, and the hint never changes this exit code.
+                if (scope == SquadDeploymentScope.Project)
+                {
+                    SquadTaskGateHint.WriteIfNoTaskGates(targetRoot);
+                }
+
+                // The capture plugin is global, so only a global deployment reaches it. It runs after the
+                // deployment has succeeded and cannot change this command's exit code.
+                if (scope == SquadDeploymentScope.Global)
+                    KyberDashCapturePluginStep.RunForGlobal(
+                        _capturePluginStep,
+                        decision.Targets,
+                        settings.NoCapturePlugin,
+                        settings.DryRun,
+                        _globalRoots);
                 return 0;
             }
 
@@ -221,5 +253,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
     }
 
-    public int Execute(CommandContext context, SquadInstallSettings settings) => Execute(context, settings, CancellationToken.None);
+    public int Execute(CommandContext context, SquadInstallSettings settings)
+    {
+        return Execute(context, settings, CancellationToken.None);
+    }
 }

@@ -8,6 +8,7 @@ import {
   AgentSessionLoader,
   type AgentSessionPayload,
   type DrawerContent,
+  type SessionRequestItem,
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
@@ -132,8 +133,8 @@ const sampleSession: AgentSessionPayload = {
     'Tokens computed with o200k_base tokenizer.',
   ],
   requests: [
-    { request: 'Analyze the recursion bug in ast.ts', turns: 3, model: 'claude-3-5-sonnet' },
-    { request: 'Apply the patch and verify tests pass', turns: 2, model: 'claude-3-5-sonnet' },
+    { request: 'Analyze the recursion bug in ast.ts', prompt: 'Analyze the recursion bug in ast.ts', turns: 3, model: 'claude-3-5-sonnet' },
+    { request: 'Apply the patch and verify tests pass', prompt: 'Apply the patch and verify tests pass', turns: 2, model: 'claude-3-5-sonnet' },
   ],
   reconciliation: [
     {
@@ -744,6 +745,42 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('$0.85')
     expect(html).toContain('reported')
     expect(html).toContain('reported by harness')
+  })
+
+  // The engine stamps a harness-reported cost as basis `harness`; `harness_reported` is the
+  // legacy spelling. Before the fix the tile read only the legacy one, so a `harness` cost was
+  // labelled "published rates". Both must read as reported.
+  const costTile = (html: string) =>
+    html.slice(html.indexOf('data-testid="metric-cost"'), html.indexOf('Cache Hit Ratio'))
+
+  it.each(['harness', 'harness_reported'])('labels cost basis %s as reported by the harness', (basis) => {
+    const reportedSession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'pi',
+      summary: {
+        ...sampleSession.summary,
+        cost: { usd: 0.85, basis, status: 'ok' },
+      },
+    }
+    const tile = costTile(renderHtml(<AgentSessionDashboard session={reportedSession} />))
+    expect(tile).toContain('>reported<')
+    expect(tile).toContain('reported by harness')
+    expect(tile).not.toContain('published rates')
+  })
+
+  it('labels a published cost basis as published rates, not reported', () => {
+    const publishedSession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'pi',
+      summary: {
+        ...sampleSession.summary,
+        cost: { usd: 0.85, basis: 'published', status: 'ok' },
+      },
+    }
+    const tile = costTile(renderHtml(<AgentSessionDashboard session={publishedSession} />))
+    expect(tile).toContain('>published<')
+    expect(tile).toContain('published rates')
+    expect(tile).not.toContain('reported by harness')
   })
 
   it('keeps session.timeline[0] in children so invoke_agent is not swallowed when timeline has 1 element', () => {
@@ -2163,5 +2200,96 @@ describe('AgentSessionDashboard: Copilot CLI tool definitions reason', () => {
     expect(visibleTextOf(renderHtml(<>{props.children as React.ReactNode}</>))).toContain(
       COPILOT_TOOL_DEFINITIONS_REASON,
     )
+  })
+})
+
+/**
+ * One request item as the API serves it. `request` names the request by its span id;
+ * `prompt` previews the user's prompt, and is null or absent when content capture is
+ * off; `turns` is the request's real turn count.
+ */
+type RequestFixture = SessionRequestItem
+
+function sessionWithRequests(requests: RequestFixture[]): AgentSessionPayload {
+  return { ...sampleSession, requests }
+}
+
+/**
+ * The markup of the `<div>` carrying `testId`. Open and close tags are balanced, so
+ * markup nested inside the element cannot cut it short.
+ */
+function divMarkupByTestId(html: string, testId: string): string {
+  const open = html.indexOf(`data-testid="${testId}"`)
+  expect(open, `a rendered element with data-testid="${testId}"`).toBeGreaterThan(-1)
+  const start = html.lastIndexOf('<div', open)
+  const tags = /<(\/?)div[\s>]/g
+  tags.lastIndex = start
+  let depth = 0
+  for (let m = tags.exec(html); m !== null; m = tags.exec(html)) {
+    depth += m[1] ? -1 : 1
+    if (depth === 0) return html.slice(start, m.index + m[0].length)
+  }
+  throw new Error(`the <div> for data-testid="${testId}" never closes`)
+}
+
+/**
+ * Each user request in the list is labelled by its prompt preview, or `Request N` by its
+ * position when it has none, and shows its own turn count. A span id identifies the
+ * request; it is never its label.
+ */
+describe('AgentSessionDashboard: user request labels', () => {
+  const flakyRetry = 'Trace the flaky ingest retry'
+  const verifyFix = 'Verify the fix against the retry suite'
+  const spanIds = ['span-7f3a9c21b0d4e5f6', 'span-18c2d9e0a4b7f355', 'span-c04e11d7a9b26f08'] as const
+
+  function requestListText(session: AgentSessionPayload): string {
+    return visibleTextOf(divMarkupByTestId(renderHtml(<AgentSessionDashboard session={session} />), 'user-requests'))
+  }
+
+  it('labels each request with its prompt preview followed by its own turn count', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: verifyFix, turns: 2 },
+      ]),
+    )
+    expect(list).toContain(`${flakyRetry} (3 turns)`)
+    expect(list).toContain(`${verifyFix} (2 turns)`)
+  })
+
+  it('labels a request whose prompt is null or absent as Request N, by its 1-based position', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: null, turns: 2 },
+        { request: spanIds[2], turns: 4 },
+      ]),
+    )
+    expect(list).toContain('Request 2 (2 turns)')
+    expect(list).toContain('Request 3 (4 turns)')
+  })
+
+  it('labels a request whose prompt is a not_measurable object as Request N, never rendering the object', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: { availability: 'not_measurable', reason: 'content capture off' }, turns: 2 },
+        { request: spanIds[1], prompt: flakyRetry, turns: 1 },
+      ]),
+    )
+    expect(list).toContain('Request 1 (2 turns)')
+    expect(list).not.toContain('not_measurable')
+  })
+
+  it('never shows a raw span id as a request label', () => {
+    const list = requestListText(
+      sessionWithRequests([
+        { request: spanIds[0], prompt: flakyRetry, turns: 3 },
+        { request: spanIds[1], prompt: null, turns: 2 },
+        { request: spanIds[2], turns: 4 },
+      ]),
+    )
+    for (const spanId of spanIds) {
+      expect(list, `span id ${spanId} shown as a label`).not.toContain(spanId)
+    }
   })
 })

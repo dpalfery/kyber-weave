@@ -99,7 +99,10 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['claude', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['claude-code', ['schema_cost', 'system_prompt', 'tool_definitions']],
   ['codex', ['schema_cost', 'tool_definitions']],
-  ['opencode', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  // OpenCode has no entry: it has no transcript reader. Its sessions come from the capture
+  // plugin, which supplies content per turn (with the user's consent), so no bucket is
+  // declared unmeasurable up front. `measurabilityFor` still falls back to
+  // FILE_SOURCE_UNMEASURABLE for a file-sourced OpenCode record.
   ['kilo', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
   ['kilo-code', ['schema_cost', 'system_prompt', 'tool_definitions', 'instruction_context']],
   // The shared-runtime harness reads the same kilo.db store as its provider,
@@ -708,6 +711,24 @@ export const SURVEYED_HARNESSES = [
 
 export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
 
+/**
+ * Why an OpenCode dimension is unmeasurable when no session evidence lifts it (D7).
+ * OpenCode exports no telemetry of its own; its sessions are recorded only by the
+ * KyberDash capture plugin, so the refusal names that condition rather than a
+ * setting of the harness.
+ */
+const OPENCODE_NO_CAPTURE_REASON =
+  'OpenCode exports no session telemetry unless the KyberDash capture plugin has recorded sessions; none carrying this counter were observed.'
+
+/**
+ * What the capture plugin adds once it is installed: counters always, content only with
+ * the user's consent. Appended to the prefix survey's reason, which is about content.
+ * The base reason above is also pinned verbatim by the dimension answers, so the consent
+ * condition rides beside it rather than inside it.
+ */
+const OPENCODE_CONTENT_CONSENT_NOTE =
+  'Even with the capture plugin, prompt and conversation content is recorded only with content consent, and no prefix bytes are exported.'
+
 const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
   [
     'copilot',
@@ -822,12 +843,12 @@ const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability,
   [
     'opencode',
     {
-      status: 'not_measurable',
-      confidence: 'documented',
-      cacheRead: false,
-      cacheCreation: false,
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
       reason:
-        'OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.',
+        'The KyberDash capture plugin exports cache read and cache write counters on every OpenCode model call it records; OpenCode itself exports no session telemetry, so a session the plugin did not record carries none.',
     },
   ],
 ])
@@ -951,7 +972,7 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
       prefixBytes: false,
       fallback: 'none',
       reason:
-        'OpenCode OpenTelemetry is disabled; no prefix bytes or transcript telemetry are available.',
+        `${OPENCODE_NO_CAPTURE_REASON} ${OPENCODE_CONTENT_CONSENT_NOTE}`,
     },
   ],
 ])
@@ -974,8 +995,8 @@ export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'c
   // Only an uncatalogued harness (`not_measurable` with `assumed`
   // confidence) falls back to the data — a documented negative is a
   // verified record even when its status is not literally `unsupported`
-  // (re-review #2: Kilo 7 — OpenCode is catalogued `not_measurable` with
-  // documented confidence, and its absent counters are absence, not data).
+  // (re-review #2: Kilo 7 — a documented negative is a catalogued record, and
+  // its absent counters are absence, not data).
   if (availability.confidence === 'assumed') return true
   if (availability.status === 'unsupported') return false
   // The per-counter flags are the record for every other catalogued
@@ -1043,9 +1064,16 @@ export type DimensionEvidence = {
   bucketParts?: Iterable<string>
   /** Provenance of each window the sessions' pressures were measured against. */
   windowSources?: Iterable<ContextLimitSource>
+  /** Sessions carried observed, positive token counters (input or output). */
+  tokenUsage?: boolean
+  /** Sessions carried an observed, positive cache-read counter. */
+  cacheRead?: boolean
+  /** Sessions carried a priced cost figure. */
+  cost?: boolean
 }
 
 const TOOL_DIMENSIONS = new Set(['tool_yield', 'tool_definitions', 'schema_cost'])
+const CACHE_DIMENSIONS = new Set(['cache_hit_rate', 'cache_efficiency', 'cache'])
 const PRESSURE_DIMENSIONS = new Set([
   'context_pressure',
   'context_pressure_median',
@@ -1080,6 +1108,10 @@ function evidencedAvailability(dim: string, evidence: DimensionEvidence | undefi
     }
     return declared ? 'derived' : undefined
   }
+  // Counters are measured; a cost is priced from them, so it is derived (D7).
+  if (dim === 'token_usage') return evidence.tokenUsage === true ? 'measured' : undefined
+  if (CACHE_DIMENSIONS.has(dim)) return evidence.cacheRead === true ? 'measured' : undefined
+  if (dim === 'cost') return evidence.cost === true || evidence.tokenUsage === true ? 'derived' : undefined
   return undefined
 }
 
@@ -1108,6 +1140,12 @@ export function harnessDimensionAvailability(
 
   // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
   if (dim === 'cache_hit_rate' || dim === 'cache_efficiency' || dim === 'cache') {
+    if (normalized === 'opencode') {
+      // The survey says the capture plugin exports the counters; that is a capability, not
+      // a finding. With no recorded session carrying them, the static answer is still the
+      // no-capture refusal, and the evidence above is what lifts it (D7).
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
+    }
     const cache = cacheAvailability(normalized)
     if (cache.status === 'unsupported' || cache.status === 'not_measurable') {
       return unavailable(cache.reason)
@@ -1133,7 +1171,7 @@ export function harnessDimensionAvailability(
     dim === 'pressure'
   ) {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal metrics via LiteLLM but records no structured context window or per-turn token usage.')
@@ -1153,7 +1191,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf Cascade telemetry exports non-model metadata without tool definition schemas.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'claude-code') {
       return unavailable('Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.')
@@ -1179,7 +1217,7 @@ export function harnessDimensionAvailability(
       return unavailable('Windsurf does not export execution hierarchy or subagent delegation linkage.')
     }
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (family === 'codex') {
       return unavailable('Codex session files record standalone sessions without execution hierarchy.')
@@ -1195,7 +1233,7 @@ export function harnessDimensionAvailability(
   // 7. Cost: billing basis (derived from token usage or reported)
   if (dim === 'cost') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     return 'derived'
   }
@@ -1203,7 +1241,7 @@ export function harnessDimensionAvailability(
   // 8. Token usage: basic token counters
   if (dim === 'token_usage') {
     if (normalized === 'opencode') {
-      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+      return unavailable(OPENCODE_NO_CAPTURE_REASON)
     }
     if (normalized === 'aider') {
       return unavailable('Aider displays terminal output via LiteLLM without structured token counters.')

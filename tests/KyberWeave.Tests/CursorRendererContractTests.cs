@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -106,7 +107,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -313,11 +314,22 @@ public sealed class CursorRendererContractTests
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "architect", expectedReadOnly: false);
 
+        // Cursor has no tools allow-list, so the documentation grant reaches the rendered output
+        // only through the readonly boolean. Either filesystem.write or process.execute being
+        // allowed omits readonly, so the rendered effect alone cannot distinguish process.execute
+        // Allow from Ask here. The grant is therefore pinned on the loaded profile, as the Claude
+        // and OpenCode renderer contracts do; the artifact assertions below check the rendered output.
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
-        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.True(
+            docProfile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision docExecuteDecision),
+            "The 'documentation' capability profile must declare process.execute.");
+        Assert.True(
+            docExecuteDecision == SquadPermissionDecision.Allow,
+            $"The 'documentation' capability profile must grant process.execute Allow, but declares {docExecuteDecision}.");
+        Assert.Single(result.Files, f => f.RelativePath == ".cursor/agents/docs-dev.md");
         AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
@@ -431,7 +443,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_LowersThePrimaryAgentToASkillOnly()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -520,7 +532,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_LoweredPrimarySkillUsesGlobalScopePaths()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -560,7 +572,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_NoPrimaryAgentValueSwitchesOnlyTheLoweredSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         SquadRendererRegistry registry = new([new CursorRenderer()]);
@@ -619,7 +631,7 @@ public sealed class CursorRendererContractTests
     [Fact]
     public async Task RenderAsync_Cursor_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
-        SquadSource baselineSource = SquadSourceLoader.Load(ProductRoot);
+        SquadSource baselineSource = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, agent => agent.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);

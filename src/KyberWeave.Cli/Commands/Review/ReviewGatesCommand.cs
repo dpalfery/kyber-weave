@@ -8,8 +8,8 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Review;
 
 /// <summary>
-/// Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
-/// one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
+///     Runs the deterministic gates the host declares under <c>review.gates</c>, or, with <c>--agent</c>,
+///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
 public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 {
@@ -19,6 +19,9 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string NoGatesForAgent = "KW-REVIEW-027";
     private const string InvalidInput = "KW-REVIEW-028";
     private const string FixFailed = "KW-REVIEW-029";
+    private const string GateNotStarted = "KW-REVIEW-033";
+    private const string ChangedSetUnknown = "KW-REVIEW-034";
+    private const string CouncilDefaultBase = "origin/HEAD";
     private const int ClientInputExitCode = 2;
 
     /// <inheritdoc />
@@ -27,12 +30,20 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        if (settings.All && (settings.Agent is not null || settings.BaseRef is not null || settings.Paths.Length > 0))
+        {
+            WriteClientInputError(
+                $"{InvalidInput}: --all runs all declared repository gates unscoped and cannot be combined with " +
+                "--agent, --base, or --paths.");
+            return ClientInputExitCode;
+        }
+
         if (settings.Agent is null)
         {
             if (settings.HasAgentOnlyOptions)
             {
                 WriteClientInputError(
-                    "--paths, --base, --task and --fix apply only with --agent. Name the agent whose task " +
+                    "--task and --fix apply only with --agent. Name the agent whose task " +
                     "gates to run, or drop those options.");
                 return ClientInputExitCode;
             }
@@ -54,6 +65,19 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return 1;
         }
 
+        // Inputs are checked before any gate is considered, so an unsafe path or base is refused the same
+        // way whether or not the host declares a gate that uses it.
+        List<string> refusals = [];
+        if (settings.BaseRef is not null && ChangedFiles.ValidateBase(settings.BaseRef) is { } baseProblem)
+            refusals.Add(baseProblem);
+
+        foreach (string path in settings.Paths)
+            if (TaskGateSelection.ValidatePath(root, path) is { } pathProblem)
+                refusals.Add(pathProblem);
+
+        if (refusals.Count > 0)
+            return RefuseInput(report, settings, refusals);
+
         if (config.Review.Gates.Count == 0)
         {
             // Not an error, and deliberately not silent. A review that runs no gates is a
@@ -70,16 +94,48 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return 0;
         }
 
-        GateReport gates = GateRunner.Run(config.Review, root, settings.StopOnFailure);
+        // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
+        IReadOnlyList<string>? changed = null;
+        string? unknownReason = null;
+        if (!settings.All && config.Review.Gates.Any(gate => gate.Include.Count > 0))
+        {
+            (changed, unknownReason) = ResolveCouncilChangedSet(root, settings);
+            if (changed is null)
+            {
+                // Fail closed: every gate runs, and the report says why none was skipped for include.
+                report.Add(new Diagnostic(
+                    ChangedSetUnknown,
+                    Severity.Info,
+                    $"changed set unknown ({unknownReason}); gates with include ran unscoped.",
+                    "review.gates",
+                    Hint: "Fetch the full history, or name a base that exists with --base."));
+            }
+            else
+            {
+                List<string> changedRefusals = [];
+                foreach (string path in changed)
+                    if (TaskGateSelection.ValidatePath(root, path) is { } changedProblem)
+                        changedRefusals.Add(changedProblem);
+
+                if (changedRefusals.Count > 0)
+                    return RefuseInput(report, settings, changedRefusals);
+            }
+        }
+
+        CouncilGatePlan plan = CouncilGateSelection.Plan(config.Review.Gates, changed, CurrentOs());
+        foreach (SkippedTaskGate skip in plan.Skipped)
+            report.Add(new Diagnostic(
+                GateSkipped,
+                Severity.Info,
+                $"{skip.Id}: skipped, {skip.Reason}.",
+                skip.Id));
+
+        // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
+        // configuration of their own and the runner itself stays unchanged.
+        GateReport gates = GateRunner.Run(new ReviewConfig { Gates = plan.Run }, root, settings.StopOnFailure);
 
         foreach (GateResult gate in gates.Gates)
-        {
-            report.Add(new Diagnostic(
-                gate.Passed ? ReviewGateOutcome.Passed : ReviewGateOutcome.Failed,
-                gate.Passed ? Severity.Info : gate.Blocking ? Severity.Error : Severity.Warning,
-                $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)",
-                gate.Id));
-        }
+            AddGateDiagnostic(report, gate);
 
         report.AddMetric("gates", gates.Gates.Count);
         report.AddMetric("failed", gates.Gates.Count(g => !g.Passed));
@@ -114,10 +170,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             refusals.Add(taskProblem);
 
         foreach (string path in settings.Paths)
-        {
             if (TaskGateSelection.ValidatePath(root, path) is { } pathProblem)
                 refusals.Add(pathProblem);
-        }
 
         if (refusals.Count > 0)
             return RefuseInput(report, settings, refusals);
@@ -160,10 +214,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             // Paths git reports are checked with the same rules as --paths, because they reach argv the same way.
             List<string> gitRefusals = [];
             foreach (string path in changed)
-            {
                 if (TaskGateSelection.ValidatePath(root, path) is { } gitProblem)
                     gitRefusals.Add(gitProblem);
-            }
 
             if (gitRefusals.Count > 0)
                 return RefuseInput(report, settings, gitRefusals);
@@ -174,33 +226,23 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
             return RefuseInput(report, settings, plan.Refusals);
 
         foreach (SkippedTaskGate skip in plan.Skipped)
-        {
             report.Add(new Diagnostic(
                 GateSkipped,
                 Severity.Info,
                 $"{skip.Id}: skipped, {skip.Reason}.",
                 skip.Id));
-        }
 
         TaskGateRun run = GateRunner.RunTaskGates(plan.Gates, root, settings.Fix, settings.StopOnFailure);
 
         foreach (GateResult gate in run.Report.Gates)
-        {
-            report.Add(new Diagnostic(
-                gate.Passed ? ReviewGateOutcome.Passed : ReviewGateOutcome.Failed,
-                gate.Passed ? Severity.Info : gate.Blocking ? Severity.Error : Severity.Warning,
-                $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)",
-                gate.Id));
-        }
+            AddGateDiagnostic(report, gate);
 
         foreach (GateResult fix in run.FixFailures)
-        {
             report.Add(new Diagnostic(
                 FixFailed,
                 Severity.Warning,
                 $"{fix.Id}: fix did not succeed ({fix.Summary}). The verify step still decides.",
                 fix.Id));
-        }
 
         report.AddMetric("gates", run.Report.Gates.Count);
         report.AddMetric("failed", run.Report.Gates.Count(g => !g.Passed));
@@ -215,7 +257,6 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private static int RefuseInput(DiagnosticReport report, ReviewGatesSettings settings, IEnumerable<string> reasons)
     {
         foreach (string reason in reasons)
-        {
             report.Add(new Diagnostic(
                 InvalidInput,
                 Severity.Error,
@@ -223,10 +264,59 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
                 "review gates",
                 Hint: "Refused before any gate started. Pass repository-relative paths, and a task slug " +
                       "made of lowercase alphanumerics and single hyphens."));
-        }
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
         return 1;
+    }
+
+    /// <summary>
+    ///     The paths the council's include patterns are matched against: the <c>--paths</c> given, else the diff from
+    ///     the merge base of <c>--base</c> (default <c>origin/HEAD</c>) to the working tree. When git cannot list the
+    ///     changes, the set is null and the reason is returned, so the caller can run every gate and say why.
+    /// </summary>
+    private static (IReadOnlyList<string>? Changed, string? UnknownReason) ResolveCouncilChangedSet(
+        string root, ReviewGatesSettings settings)
+    {
+        if (settings.Paths is { Length: > 0 })
+            return (settings.Paths.Distinct(StringComparer.Ordinal).ToArray(), null);
+
+        try
+        {
+            IReadOnlyList<string> changed = ChangedFiles
+                .ResolveSinceMergeBase(root, settings.BaseRef ?? CouncilDefaultBase)
+                .Select(change => change.Path)
+                .ToArray();
+            return (changed, null);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
+        {
+            return (null, ex.Message.Trim());
+        }
+    }
+
+    /// <summary>
+    ///     Reports one gate. A gate whose program never started is <see cref="GateNotStarted" />, kept apart from a
+    ///     check that ran and failed (<see cref="ReviewGateOutcome.Failed" />), because they are fixed in different places.
+    /// </summary>
+    private static void AddGateDiagnostic(DiagnosticReport report, GateResult gate)
+    {
+        string detail = $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)";
+
+        if (gate.Outcome == GateOutcome.NotStarted)
+        {
+            report.Add(new Diagnostic(
+                GateNotStarted,
+                gate.Blocking ? Severity.Error : Severity.Warning,
+                detail,
+                gate.Id));
+            return;
+        }
+
+        report.Add(new Diagnostic(
+            gate.Passed ? ReviewGateOutcome.Passed : ReviewGateOutcome.Failed,
+            gate.Passed ? Severity.Info : gate.Blocking ? Severity.Error : Severity.Warning,
+            detail,
+            gate.Id));
     }
 
     private static void WriteClientInputError(string message)

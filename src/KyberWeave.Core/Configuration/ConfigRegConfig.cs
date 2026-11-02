@@ -1,9 +1,33 @@
 namespace KyberWeave.Core.Configuration;
 
+/// <summary>What the value of a registry entry means.</summary>
+/// <remarks>
+/// The distinction exists because the registry's guarantee is "every path value resolves",
+/// and a setting is not a path. Carrying the kind on the entry keeps that guarantee intact
+/// for paths: a validator can skip the one kind whose value is not meant to be found on
+/// disk, instead of learning which property names are special.
+/// </remarks>
+public enum ConfigRegEntryKind
+{
+    /// <summary>A repository-relative path that must resolve to a file or directory.</summary>
+    Path,
+
+    /// <summary>A mode word describing configuration state; nothing on disk answers to it.</summary>
+    Mode
+}
+
 /// <summary>One property of the configuration registry.</summary>
 /// <param name="Name">Lookup name, without the angle brackets it is written in.</param>
-/// <param name="Path">Repository-relative path, forward-slashed.</param>
-public sealed record ConfigRegEntry(string Name, string Path);
+/// <param name="Path">
+/// For <see cref="ConfigRegEntryKind.Path"/>, the repository-relative path, forward-slashed.
+/// For <see cref="ConfigRegEntryKind.Mode"/>, the mode word the property publishes — the
+/// field is named for its usual occupant and is not a path in that case.
+/// </param>
+/// <param name="Kind">Whether <paramref name="Path"/> is a path or a mode word.</param>
+public sealed record ConfigRegEntry(
+    string Name,
+    string Path,
+    ConfigRegEntryKind Kind = ConfigRegEntryKind.Path);
 
 /// <summary>
 /// The repository's configuration registry: named paths that portable agents and skills look
@@ -23,6 +47,12 @@ public sealed record ConfigRegEntry(string Name, string Path);
 /// because a skill written against the registry resolves properties by name and a missing one
 /// is indistinguishable from a typo.
 /// </para>
+/// <para>
+/// A reserved name is the exception to that replacement: a <em>mode</em> property carries a
+/// setting rather than a path, so declaring one under <c>config-reg:</c> is refused rather
+/// than allowed to replace the derived entry with a path. The registry's promise survives —
+/// every path value resolves — because only the entry kind that is not a path is exempt.
+/// </para>
 /// </remarks>
 public sealed class ConfigRegConfig
 {
@@ -36,14 +66,27 @@ public sealed class ConfigRegConfig
     public const string SpecificationIndexProperty = "specification-index";
 
     /// <summary>
-    /// Registry property carrying the repository's autonomy setting. Reserved: unlike every
-    /// other property it holds a value, not a path, so a host may not declare it under
-    /// <c>config-reg:</c>.
+    /// Registry property carrying the repository's autonomy setting. Reserved: it holds a mode
+    /// word, not a path, so a host may not declare it under <c>config-reg:</c>.
     /// </summary>
     public const string AutonomyProperty = "autonomy";
 
     public const string SupervisedAutonomy = "supervised";
     public const string AutonomousAutonomy = "autonomous";
+
+    /// <summary>
+    /// Registry property reporting whether this repository opted in to the intake assessment.
+    /// A <see cref="ConfigRegEntryKind.Mode"/> entry, published from <c>ontology.intake:</c>
+    /// and reserved: a host may not declare it under <c>config-reg:</c>.
+    /// </summary>
+    public const string IntakeAssessmentProperty = "intake-assessment";
+
+    /// <summary>
+    /// The value <see cref="IntakeAssessmentProperty"/> carries when the assessment is on.
+    /// Absence of the property is the off state, so there is no word for it: a skill that
+    /// finds no property skips the assessment, and one that finds <em>a</em> value runs it.
+    /// </summary>
+    public const string IntakeAssessmentEnabled = "enabled";
 
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
@@ -80,8 +123,16 @@ public sealed class ConfigRegConfig
 
     /// <summary>
     /// The whole registry: the derived entries for what <c>docs init</c> creates, followed by
-    /// the host's additions, with an addition replacing a built-in of the same name in place.
+    /// the host's additions, with an addition replacing a built-in of the same name in place,
+    /// then any mode properties the configuration publishes.
     /// </summary>
+    /// <remarks>
+    /// Mode properties come last, beside the <c>&lt;autonomy&gt;</c> line the renderer appends,
+    /// so the generated block reads as one list of paths and then the settings that describe
+    /// the repository. A host cannot shadow one with an addition: the configuration loader
+    /// refuses a reserved name under <c>config-reg:</c>, which is what keeps the append here
+    /// from producing a second entry of a name already in the list.
+    /// </remarks>
     public IReadOnlyList<ConfigRegEntry> Resolve(OntologyConfig ontology)
     {
         ArgumentNullException.ThrowIfNull(ontology);
@@ -115,6 +166,17 @@ public sealed class ConfigRegConfig
                 entries[existing] = addition;
             else
                 entries.Add(addition);
+        }
+
+        // Opt-in only: publishing 'enabled' for a repository that never set the flag would
+        // claim a behaviour it did not ask for, and the skills reading the registry would run
+        // an assessment nobody wanted.
+        if (ontology.Intake)
+        {
+            entries.Add(new ConfigRegEntry(
+                IntakeAssessmentProperty,
+                IntakeAssessmentEnabled,
+                ConfigRegEntryKind.Mode));
         }
 
         return entries;

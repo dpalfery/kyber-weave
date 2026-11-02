@@ -76,7 +76,7 @@ public static class SquadTargetRootConfirmation
         // the lines exist for — a copy-pastable, log-greppable path. The width is
         // restored immediately; rendering is single-threaded here (a CLI run, and the
         // tests serialize their console captures), so nothing renders inside the window.
-        SquadCommandComposition.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(() =>
         {
             AnsiConsole.MarkupLine(
                 $"[bold]kyber-weave squad {Markup.Escape(verb)}[/]: target root [bold]{Markup.Escape(root)}[/] ({scopeWord} scope).");

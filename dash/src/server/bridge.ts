@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { resolveCanonDbPath } from '../canon/paths.js'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
@@ -21,6 +22,7 @@ import {
   problemsHarnessWhere,
   quarantineHarnessWhere,
   readSessionSummaryFigures,
+  releaseRecordParts,
   systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
@@ -36,7 +38,8 @@ import {
   type QuarantineEntryDetail,
   type SessionSummaryFigureRow,
 } from '../canon/store.js'
-import { decompressColumn } from '../canon/compressed-column.js'
+import { decompressColumn, decompressColumnBounded } from '../canon/compressed-column.js'
+import { StreamingJsonError, StreamingJsonReader, type ColumnChunkReader, type JsonStringEvent } from '../canon/streaming-json.js'
 import {
   SESSION_PAYLOAD_FRAGMENTS_SELECT,
   SESSION_PAYLOAD_SELECT,
@@ -57,9 +60,10 @@ import {
   type PredictionRecord,
 } from '../analysis/calibration.js'
 import {
-  compareHarnesses,
+  compareIterableRecords,
   compareRuns as compareStoredRuns,
   type ComparisonSummary,
+  type ComparisonTable,
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
@@ -424,6 +428,26 @@ export type SessionSummaryFigures = Map<
     costPartial?: true
   }
 >
+
+/** Narrow projection row consumed by the read-only analytics service. */
+export type AnalyticsSessionProjection = {
+  id: string
+  runId: null
+  label: string | null
+  startedAt: string | null
+  harness: string
+  repository: string | null
+  branch: string | null
+  isSubagent: boolean
+  includedInParent: boolean
+  inputTokens: number | null
+  freshInputTokens: number | null
+  cacheReadTokens: number | null
+  cacheCreationTokens: number | null
+  outputTokens: number | null
+  durationMs: number | null
+  costs: readonly { amount: number; currency: string; basis: string; status: string }[]
+}
 
 /**
  * Adapt streamed session payloads for the digest without retaining them:
@@ -1717,11 +1741,182 @@ function computeSessionRollup(session: SessionSummary, visiting: Set<string> = n
   }
 }
 
+/**
+ * Complete captured-context traversal budget (plan defaults): at most 100
+ * live traversals, each evicted after two minutes idle. A new traversal past
+ * the cap answers `budget_exceeded` rather than evicting a live reader out
+ * from under its cursor.
+ */
+const CAPTURED_CONTEXT_MAX_TRAVERSALS = 100
+const CAPTURED_CONTEXT_TRAVERSAL_TTL_MS = 120_000
+/**
+ * Page fill target for captured-context content pages. Each chunk text is
+ * capped at 16,384 UTF-8 bytes, so filling to 60,000 leaves headroom for the
+ * chunk metadata plus the service envelope wrapped around the page — the
+ * whole encoded response stays within 65,536 bytes.
+ */
+const CAPTURED_CONTEXT_PAGE_BUDGET = 60_000
+/** Per-chunk text ceiling, in UTF-8 bytes (validated by the inspect seam; re-clamped here). */
+const CAPTURED_CONTEXT_BYTE_LIMIT = 16_384
+/** Manifest page bounds (validated by the inspect seam; re-clamped here). */
+const CAPTURED_CONTEXT_MANIFEST_DEFAULT_LIMIT = 25
+const CAPTURED_CONTEXT_MANIFEST_MAX_LIMIT = 100
+/** Placeholder cursor length assumed while filling a page, so the sealed cursor cannot push it over budget. */
+const CAPTURED_CONTEXT_CURSOR_PLACEHOLDER = '0'.repeat(256)
+
+type CapturedContextOrigin = 'turn' | 'session_shared'
+
+type CapturedContextUnit = {
+  sessionId: string
+  turnIndex?: number
+  spanId: string
+  origin: CapturedContextOrigin
+}
+
+type CapturedContextPart = {
+  kind: string
+  role: string | null
+  order: number | null
+  resident: boolean
+  text: string
+}
+
+type CapturedContextChunk = {
+  partId: string
+  blockId: string
+  sessionId: string
+  turnIndex?: number
+  spanId: string
+  origin: CapturedContextOrigin
+  text: string
+  byteOffset: number
+  complete: boolean
+  role: string | null
+  order: number
+  resident: boolean
+}
+
+type CapturedContextTraversal = {
+  binding: string
+  touchedAt: number
+}
+
+type CapturedContextTarget =
+  | { kind: 'run'; runId: string }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'turn'; sessionId: string; turnIndex: number }
+
+/** Canonical block identity for a captured part kind; unknown kinds keep their own name. */
+function capturedBlockIdOf(kind: string): string {
+  if (kind === 'user_messages' || kind === 'assistant_turns') return 'conversation_history'
+  if (
+    kind === 'system_prompt' ||
+    kind === 'tool_definitions' ||
+    kind === 'instruction_context' ||
+    kind === 'conversation_history' ||
+    kind === 'tool_result_content'
+  ) {
+    return kind
+  }
+  return kind
+}
+
+/**
+ * A part's role, from what the harness stored or — only for the two
+ * unambiguous legacy buckets — the bucket itself. Anything else stays
+ * absent rather than guessed, so a reconstructed view never invents
+ * provenance.
+ */
+function capturedRoleOf(kind: string, stored: unknown): string | null {
+  if (stored === 'system' || stored === 'user' || stored === 'assistant') return stored
+  if (kind === 'system_prompt') return 'system'
+  if (kind === 'user_messages') return 'user'
+  if (kind === 'assistant_turns') return 'assistant'
+  return null
+}
+
+/**
+ * Split text into pieces of at most `byteLimit` UTF-8 bytes without splitting
+ * a multi-byte code point across pages: the cut backs up over continuation
+ * bytes, exactly like the turn-block reader. A single code point wider than
+ * the page is kept whole rather than split or dropped, so pagination can
+ * neither lose bytes nor duplicate them.
+ *
+ * WHY byte cuts, not character iteration: cutting the encoded bytes and
+ * backing over continuation bytes lands on exactly the same greedy
+ * character boundaries, without a per-character byte-length call — the
+ * scan cost that dominates multi-megabyte page splits.
+ */
+function splitUtf8Text(text: string, byteLimit: number): string[] {
+  if (text === '') return []
+  const bytes = Buffer.from(text, 'utf8')
+  if (bytes.byteLength <= byteLimit) return [text]
+  const pieces: string[] = []
+  let start = 0
+  while (start < bytes.byteLength) {
+    let end = Math.min(start + byteLimit, bytes.byteLength)
+    while (end > start && (bytes[end] & 0xc0) === 0x80) end -= 1
+    if (end === start) {
+      end = start + 1
+      while (end < bytes.byteLength && (bytes[end] & 0xc0) === 0x80) end += 1
+    }
+    pieces.push(bytes.subarray(start, end).toString('utf8'))
+    start = end
+  }
+  return pieces
+}
+
+/**
+ * A normalized captured-context target, or null when the request names no
+ * usable one. Normalization keeps key order fixed, so the cursor binding
+ * seals the same target the same way on every replay.
+ */
+function capturedContextTargetOf(value: unknown): CapturedContextTarget | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (record.kind === 'run' && typeof record.runId === 'string' && record.runId.length > 0) {
+    return { kind: 'run', runId: record.runId }
+  }
+  if (record.kind === 'session' && typeof record.sessionId === 'string' && record.sessionId.length > 0) {
+    return { kind: 'session', sessionId: record.sessionId }
+  }
+  if (
+    record.kind === 'turn' &&
+    typeof record.sessionId === 'string' &&
+    record.sessionId.length > 0 &&
+    typeof record.turnIndex === 'number' &&
+    Number.isSafeInteger(record.turnIndex) &&
+    record.turnIndex >= 0
+  ) {
+    return { kind: 'turn', sessionId: record.sessionId, turnIndex: record.turnIndex }
+  }
+  return null
+}
+
 export class KyberBridge {
   private canonDb?: DatabaseSync
   private readonly store?: CanonStore
   readonly canonPath: string
   readonly ratesPath: string | undefined
+
+  /**
+   * Live complete-context traversals: one entry per multi-page scope, keyed
+   * by the binding each resumption cursor is sealed against.
+   *
+   * Why no retained pages: every page is re-derived from the store on
+   * demand — re-streamed through the bounded column reader and re-split by
+   * the same greedy fill, so replays stay byte-exact without holding the
+   * transcript. A traversal entry is only its binding plus the last touch
+   * time, so entries neither grow with the pages served nor outlive two
+   * idle minutes; they are capped at
+   * {@link CAPTURED_CONTEXT_MAX_TRAVERSALS} live traversals and drain when
+   * the last page is served. Cursors stay process-local opaque HMACs over
+   * the binding: they carry no transcript bytes and cannot be forged or
+   * moved across requests.
+   */
+  private readonly capturedContextTraversals = new Map<string, CapturedContextTraversal>()
+  /** Per-process HMAC key sealing captured-context cursors to their binding. */
+  private readonly capturedContextKey = randomUUID()
 
   /**
    * `true` only for a handle this bridge opened itself from `canonPath`: no
@@ -1760,7 +1955,6 @@ export class KyberBridge {
    * cleared when the owned handle closes.
    */
   private readonly warnedShareDrops = new Set<string>()
-
   constructor(options?: KyberBridgeOptions) {
     // The shared resolver, so the server can only ever read the store the CLI
     // and the receiver write (src/canon/paths.ts).
@@ -3838,64 +4032,83 @@ export class KyberBridge {
 
   /**
    * Return cross-harness comparison matrix across all active harnesses.
+   *
+   * WHY streaming, not `listAll`: the comparison folds every canonical
+   * record, including compressed payload columns. `listAll` roots the whole
+   * corpus (every raw/parts payload live at once) while the aggregate runs.
+   * The streaming walk below holds one live record plus bounded counters:
+   * the store's `iterateAll` yields timestamp-ordered records one at a
+   * time, and the direct-DB walk pages the same way without selecting the
+   * `raw` column at all. Each record's parts are released before the next
+   * arrives, so peak working set never grows with corpus size. Figures match
+   * the batch path exactly via `compareIterableRecords`.
    */
-  private canonicalRecords(): CanonicalRecord[] {
-    if (this.store) return this.store.listAll()
-    const db = this.getDb()
-    if (!this.hasTable(db, 'records')) return []
+  getComparisonTable(): ComparisonTableResult {
     try {
-      const rows = db!
-        .prepare('SELECT * FROM records ORDER BY timestamp')
-        .all() as unknown as import('../canon/store.js').RecordRow[]
-      return rows.map(toRecord)
-    } catch {
-      return []
+      const table =
+        this.store !== undefined
+          ? compareIterableRecords(
+              this.store.iterateAll(),
+              {},
+              (record) => releaseRecordParts(record),
+            )
+          : this.compareDirectDb()
+      if (table.harnesses.length === 0) {
+        return { harnesses: [], rows: [], problems: [] }
+      }
+      return {
+        harnesses: table.harnesses,
+        problems: table.problems,
+        rows: table.rows.map((row) => ({
+          ...row,
+          cells: Object.fromEntries(
+            Object.entries(row.cells).map(([harness, cell]) => [
+              harness,
+              {
+                ...cell,
+                availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
+              },
+            ]),
+          ),
+        })),
+      }
+    } catch (err) {
+      if (this.store !== undefined) throw err
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
   /**
-   * Return cross-harness comparison matrix derived only from canonical records.
+   * Direct-DB streaming walk for bridges without an injected store: the same
+   * one-record-at-a-time fold as the store path, over a cursor that never
+   * selects the `raw` column (comparison never reads it) and never buffers
+   * the corpus. Any read or decode failure yields the empty table, matching
+   * the previous `SELECT *` path's catch-all.
    */
-  getComparisonTable(): ComparisonTableResult {
-    const canonicalRecords = this.canonicalRecords()
-    if (canonicalRecords.length === 0) {
+  private compareDirectDb(): ComparisonTable {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) {
       return { harnesses: [], rows: [], problems: [] }
     }
-
-    const byHarness = new Map<string, CanonicalRecord[]>()
-    for (const record of canonicalRecords) {
-      const records = byHarness.get(record.harness) ?? []
-      records.push(record)
-      byHarness.set(record.harness, records)
-    }
-
-    const preferredOrder = ['copilot', 'gemini', 'pi']
-    const availableHarnesses = [...byHarness.keys()]
-    const harnesses = [
-      ...preferredOrder.filter((harness) => byHarness.has(harness)),
-      ...availableHarnesses
-        .filter((harness) => !preferredOrder.includes(harness))
-        .sort(),
-    ]
-    const table = compareHarnesses(
-      harnesses.map((harness) => byHarness.get(harness) ?? []),
-      harnesses,
-    )
-    return {
-      harnesses: table.harnesses,
-      problems: table.problems,
-      rows: table.rows.map((row) => ({
-        ...row,
-        cells: Object.fromEntries(
-          Object.entries(row.cells).map(([harness, cell]) => [
-            harness,
-            {
-              ...cell,
-              availability: typeof cell.availability === 'object' ? cell.availability.availability : cell.availability,
-            },
-          ]),
-        ),
-      })),
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, trace_id, parent_span_id, source, harness, session_id, name, op, kind, timestamp, duration_ms, status, tokens_json, content_json, cost_json, measurability_json, parts_json FROM records ORDER BY timestamp',
+        )
+        .iterate() as unknown as IterableIterator<import('../canon/store.js').RecordRow>
+      const records = (function* (): Generator<CanonicalRecord> {
+        for (const row of rows) {
+          const record = toRecord(row)
+          try {
+            yield record
+          } finally {
+            releaseRecordParts(record)
+          }
+        }
+      })()
+      return compareIterableRecords(records, {}, (record) => releaseRecordParts(record))
+    } catch {
+      return { harnesses: [], rows: [], problems: [] }
     }
   }
 
@@ -5020,6 +5233,1369 @@ export class KyberBridge {
       })
     }
     return out
+  }
+
+  /**
+   * Bounded session identifiers for analytics admission. This is deliberately
+   * a projection-only read: loading `listSessions` here would parse every
+   * payload before the service can reject an oversized scope.
+   */
+  analyticsSessionIds(scope: { from?: string; to?: string; harness?: string; repository?: string; branch?: string; sessionId?: string }, cap: number): string[] {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session') || !Number.isInteger(cap) || cap < 1) return []
+    const where: string[] = []
+    const params: string[] = []
+    if (scope.from !== undefined) { where.push('started >= ?'); params.push(scope.from) }
+    if (scope.to !== undefined) { where.push('started < ?'); params.push(scope.to) }
+    if (scope.harness !== undefined) { where.push('harness = ?'); params.push(scope.harness) }
+    if (scope.repository !== undefined) { where.push('repo = ?'); params.push(scope.repository) }
+    if (scope.branch !== undefined) { where.push('branch = ?'); params.push(scope.branch) }
+    if (scope.sessionId !== undefined) { where.push('session_id = ?'); params.push(scope.sessionId) }
+    const predicate = where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`
+    const rows = db!.prepare(`SELECT session_id FROM session${predicate} ORDER BY started DESC, session_id ASC LIMIT ?`).all(...params, cap) as Array<{ session_id: unknown }>
+    return rows.map((row) => row.session_id).filter((id): id is string => typeof id === 'string')
+  }
+
+  /**
+   * Metadata plus materialized summary figures for one bounded analytics batch.
+   * The query never selects `payload`; legacy figure fallback remains centralized
+   * in `sessionSummaryFigures`, preserving the existing compressed/materialized path.
+   */
+  analyticsSessionProjections(sessionIds: readonly string[]): AnalyticsSessionProjection[] {
+    const ids = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    if (ids.length === 0) return []
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = db!.prepare(`SELECT session_id, label, started, harness, repo, branch, is_subagent, parent_session FROM session WHERE session_id IN (${placeholders})`).all(...ids) as Array<Record<string, unknown>>
+    // The full figure rows — not the collapsed `sessionSummaryFigures` map —
+    // so token classes, duration and the cost block's own basis/currency/
+    // status survive into the analytics summaries. A figure that is missing
+    // stays missing; fresh input is derived only when every class measured.
+    const finite = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    const figureById = new Map(this.readSessionSummaryFigureRows(ids).map((figure) => [figure.sessionId, figure]))
+    return rows.flatMap((row) => {
+      if (typeof row.session_id !== 'string' || typeof row.harness !== 'string') return []
+      const figure = figureById.get(row.session_id)
+      const inputTokens = finite(figure?.totalInput) ?? null
+      const cacheReadTokens = finite(figure?.totalCacheRead) ?? null
+      const cacheCreationTokens = finite(figure?.totalCacheCreation) ?? null
+      const freshInputTokens =
+        inputTokens !== null && cacheReadTokens !== null && cacheCreationTokens !== null
+          ? inputTokens - cacheReadTokens - cacheCreationTokens
+          : null
+      const outputTokens = finite(figure?.totalOutput) ?? null
+      const durationMs = finite(figure?.durationMs) ?? null
+      const amount = finite(figure?.costValue) ?? finite(figure?.costUsdLegacy)
+      return [{
+        id: row.session_id,
+        runId: null,
+        label: typeof row.label === 'string' ? row.label : null,
+        startedAt: typeof row.started === 'string' ? row.started : null,
+        harness: row.harness,
+        repository: typeof row.repo === 'string' ? row.repo : null,
+        branch: typeof row.branch === 'string' ? row.branch : null,
+        isSubagent: row.is_subagent === 1 || row.is_subagent === true,
+        includedInParent: figure?.includedInParent === true,
+        inputTokens,
+        freshInputTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
+        outputTokens,
+        durationMs,
+        costs: amount === undefined
+          ? []
+          : [{
+            amount,
+            currency: typeof figure?.costCurrency === 'string' ? figure.costCurrency : 'USD',
+            basis: typeof figure?.costBasis === 'string' ? figure.costBasis : 'unknown',
+            status: typeof figure?.costStatus === 'string' ? figure.costStatus : 'measured',
+          }],
+      }]
+    })
+  }
+
+  /**
+   * One canonical content block from one exact turn, streamed through the
+   * bounded captured-context column reader instead of a whole-column decode.
+   *
+   * <remarks>
+   * The turn descriptor stays a small bounded decode, but the retained text
+   * is never inflated whole behind a hard cap: `capturedSpanParts` walks the
+   * column through bounded `substr` reads plus the streaming JSON decoder,
+   * so a block larger than 64 KiB decoded pages instead of refusing. A
+   * corrupt column still reads as unavailable, never as a neighboring turn.
+   * When the column carries only the legacy content object, its buckets page
+   * the same way — previously that shape was unavailable on this path.
+   * </remarks>
+   */
+  async analyticsTurnBlock(request: { sessionId: string; turnIndex: number; blockKey: string; byteLimit: number; offset?: number }): Promise<{ text: string; byteLength: number; nextOffset: number | null } | undefined> {
+    const { sessionId, turnIndex, blockKey, byteLimit, offset = 0 } = request
+    if (!sessionId || !Number.isInteger(turnIndex) || turnIndex < 0 || !Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > 16_384 || !Number.isSafeInteger(offset) || offset < 0) return undefined
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session_turn') || !this.hasTable(db, 'records')) return undefined
+    const turnRow = db!.prepare('SELECT turn_json FROM session_turn WHERE session_id = ? AND turn_index = ? LIMIT 1').get(sessionId, turnIndex) as { turn_json?: unknown } | undefined
+    const turn = turnRow === undefined ? undefined : decompressColumnBounded(turnRow.turn_json, 65_536)
+    if (typeof turn !== 'object' || turn === null || Array.isArray(turn)) return undefined
+    const spanId = (turn as Record<string, unknown>).spanId
+    if (typeof spanId !== 'string' || spanId.length === 0) return undefined
+    const outcome = await this.capturedSpanParts(db!, spanId)
+    if ('corrupt' in outcome || outcome.parts.length === 0) return undefined
+    // WHY streamed order: parts arrive in canonical order, so joining the
+    // block's pieces reproduces the retained text exactly, the way the
+    // legacy whole-column decode did for well-formed rows.
+    const text = outcome.parts
+      .filter((part) => part.kind === blockKey && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join('\n')
+    if (text === '') return undefined
+    const bytes = Buffer.from(text, 'utf8')
+    if (offset >= bytes.byteLength) return undefined
+    const end = Math.min(offset + byteLimit, bytes.byteLength)
+    let safeEnd = end
+    while (safeEnd > offset && (bytes[safeEnd] & 0xc0) === 0x80) safeEnd -= 1
+    if (safeEnd === offset) return undefined
+    return { text: bytes.subarray(offset, safeEnd).toString('utf8'), byteLength: safeEnd - offset, nextOffset: safeEnd < bytes.byteLength ? safeEnd : null }
+  }
+
+  /**
+   * Complete captured-context traversal. The implementation is intentionally
+   * asynchronous at the query seam: a request can span a retained compressed
+   * column without making the synchronous SQLite handle pretend it can be
+   * interrupted by a JavaScript timer.
+   */
+  private capturedColumnReader(
+    db: DatabaseSync,
+    table: 'records' | 'session_turn',
+    column: 'parts_json' | 'content_json' | 'turn_json',
+    identity: string | number,
+  ): ColumnChunkReader | undefined {
+    const supported =
+      (table === 'records' && (column === 'parts_json' || column === 'content_json')) ||
+      (table === 'session_turn' && column === 'turn_json')
+    if (!supported) return undefined
+    const predicate = table === 'records' ? 'span_id = ?' : 'rowid = ?'
+    const storage = db.prepare(`SELECT typeof(${column}) AS storage FROM ${table} WHERE ${predicate} LIMIT 1`).get(identity) as { storage?: unknown } | undefined
+    if (storage?.storage !== 'blob' && storage?.storage !== 'text') return undefined
+    const read = db.prepare(`SELECT substr(CAST(${column} AS BLOB), ?, ?) AS chunk FROM ${table} WHERE ${predicate} LIMIT 1`)
+    return {
+      storage: storage.storage,
+      read: (offset, length) => {
+        if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 16_384) return null
+        const row = read.get(offset + 1, length, identity) as { chunk?: unknown } | undefined
+        const chunk = row?.chunk
+        // An empty slice is the end of the column, not a zero-byte page:
+        // the streaming decoder treats a zero-length read as a corrupt
+        // column, so EOF must read as absent here.
+        return chunk instanceof Uint8Array && chunk.byteLength > 0 ? chunk : null
+      },
+    }
+  }
+
+  private pruneCapturedContextTraversals(): void {
+    const now = this.now()
+    for (const [binding, traversal] of this.capturedContextTraversals) {
+      if (now - traversal.touchedAt > CAPTURED_CONTEXT_TRAVERSAL_TTL_MS) {
+        this.capturedContextTraversals.delete(binding)
+      }
+    }
+  }
+
+  /**
+   * Retained traversal bookkeeping for tests: live entry count plus the
+   * retained bytes across live entries. Page content is re-derived from the
+   * store per request, so entries hold only their binding — this stays flat
+   * no matter how many pages are served.
+   */
+  capturedContextTraversalStats(): { liveTraversals: number; retainedBytes: number } {
+    let retainedBytes = 0
+    for (const binding of this.capturedContextTraversals.keys()) {
+      retainedBytes += Buffer.byteLength(binding, 'utf8')
+    }
+    return { liveTraversals: this.capturedContextTraversals.size, retainedBytes }
+  }
+
+  async analyticsCapturedContext(request: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<Record<string, unknown>> {
+    // Complete captured-context traversal over the retained canonical
+    // columns. Every content byte served here is streamed through bounded
+    // `substr` reads plus the streaming JSON decoder — never a full-column
+    // `decompressColumn`, never `assembleTurnContent(..., Infinity)`, and
+    // never a whole-session record walk for content.
+    this.pruneCapturedContextTraversals()
+    const target = capturedContextTargetOf(request.target)
+    if (target === null) return { error: 'content_unavailable' }
+    const representation = request.representation === 'assembled_turn' ? 'assembled_turn' : 'captured_parts'
+    if (representation === 'assembled_turn' && target.kind !== 'turn') return { error: 'content_unavailable' }
+    const byteLimit =
+      typeof request.byteLimit === 'number' && Number.isSafeInteger(request.byteLimit) && request.byteLimit >= 1
+        ? Math.min(request.byteLimit, CAPTURED_CONTEXT_BYTE_LIMIT)
+        : CAPTURED_CONTEXT_BYTE_LIMIT
+    const limit =
+      typeof request.limit === 'number' && Number.isSafeInteger(request.limit) && request.limit >= 1
+        ? Math.min(request.limit, CAPTURED_CONTEXT_MANIFEST_MAX_LIMIT)
+        : CAPTURED_CONTEXT_MANIFEST_DEFAULT_LIMIT
+    const generation =
+      typeof request.projectionGeneration === 'string' && request.projectionGeneration.length > 0
+        ? request.projectionGeneration
+        : 'unversioned'
+    const cursor = typeof request.cursor === 'string' ? request.cursor : undefined
+    if (request.mode === 'manifest' || request.mode === 'content') {
+      try {
+        return request.mode === 'manifest'
+          ? await this.capturedContextManifest(target, representation, limit, cursor, generation, options?.signal)
+          : await this.capturedContextContent(target, representation, byteLimit, cursor, generation, options?.signal)
+      } catch (error: unknown) {
+        // WHY cancelled is not a corrupt gap: the streaming decoder reports
+        // an aborted read with the same error class as a torn column. Only
+        // the corrupt code becomes a gap; cancellation answers cancelled
+        // with no data, so a caller can tell stopping apart from damage.
+        if (error instanceof StreamingJsonError && error.code === 'cancelled') return { error: 'cancelled' }
+        throw error
+      }
+    }
+    return { error: 'content_unavailable' }
+  }
+
+  /**
+   * The canonical binding a captured-context cursor is sealed against: the
+   * request shape plus the retained-content fingerprint. Any replay against
+   * a different target, representation, byte or manifest limit, projection
+   * generation, or changed retained bytes reseals differently, so the old
+   * cursor reads as stale instead of serving the wrong page.
+   */
+  private capturedContextBinding(
+    mode: 'manifest' | 'content',
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    byteLimit: number,
+    limit: number,
+    generation: string,
+    fingerprint: string,
+  ): string {
+    return JSON.stringify({ mode, target, representation, byteLimit, limit, generation, fingerprint })
+  }
+
+  private capturedContextSeal(binding: string): string {
+    return createHash('sha256').update(this.capturedContextKey).update('\0').update(binding).digest('hex')
+  }
+
+  private capturedContextCursor(binding: string, generation: string, offset: number): string {
+    return Buffer.from(JSON.stringify({ v: 1, g: generation, h: this.capturedContextSeal(binding), o: offset }), 'utf8').toString('base64url')
+  }
+
+  /** A resumption offset, or null when the cursor is foreign, tampered, rebound, or regenerated. */
+  private capturedContextOffset(cursor: string, binding: string, generation: string): number | null {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+    } catch {
+      return null
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    if (record.v !== 1 || record.g !== generation) return null
+    if (typeof record.o !== 'number' || !Number.isSafeInteger(record.o) || record.o < 0) return null
+    if (record.h !== this.capturedContextSeal(binding)) return null
+    return record.o
+  }
+
+  /** Declared turn identities for one session, from the captured turn table — never a synthesized range. */
+  private capturedTurnEntries(db: DatabaseSync, sessionId: string): Array<{ turnIndex: number; spanId: string | null }> | undefined {
+    if (!this.hasTable(db, 'session_turn')) return undefined
+    try {
+      const rows = db
+        .prepare('SELECT turn_index, turn_json FROM session_turn WHERE session_id = ? ORDER BY turn_index')
+        .all(sessionId) as Array<{ turn_index?: unknown; turn_json?: unknown }>
+      const entries: Array<{ turnIndex: number; spanId: string | null }> = []
+      for (const row of rows) {
+        if (typeof row.turn_index !== 'number' || !Number.isSafeInteger(row.turn_index) || row.turn_index < 0) continue
+        // Turn rows are small descriptors; the bounded decode caps them well
+        // above any descriptor while refusing a corrupt oversized blob.
+        const decoded = decompressColumnBounded(row.turn_json, 65_536)
+        let spanId: string | null = null
+        if (typeof decoded === 'object' && decoded !== null && !Array.isArray(decoded)) {
+          const candidate = (decoded as Record<string, unknown>).spanId
+          if (typeof candidate === 'string' && candidate.length > 0) spanId = candidate
+        }
+        entries.push({ turnIndex: row.turn_index, spanId })
+      }
+      return entries
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Non-turn session-scope spans in capture order. Turn spans are excluded
+   * by their resolved span set as well as by their canonical operation, so
+   * a turn span missing from the turn table never masquerades as an
+   * unindexed duplicate — identity is never inferred from text.
+   */
+  private capturedSharedSpans(
+    db: DatabaseSync,
+    sessionId: string,
+    exclude: ReadonlySet<string>,
+    beforeOrAt?: string,
+  ): Array<{ spanId: string }> {
+    if (!this.hasTable(db, 'records')) return []
+    try {
+      const rows = db
+        .prepare('SELECT span_id, op, timestamp FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
+        .all(sessionId) as Array<{ span_id?: unknown; op?: unknown; timestamp?: unknown }>
+      const spans: Array<{ spanId: string }> = []
+      for (const row of rows) {
+        if (typeof row.span_id !== 'string' || row.span_id.length === 0 || exclude.has(row.span_id)) continue
+        if (row.op === 'llm.invoke') continue
+        const timestamp = typeof row.timestamp === 'string' ? row.timestamp : undefined
+        if (beforeOrAt !== undefined && !sessionPromptAtOrBefore(timestamp, beforeOrAt)) continue
+        spans.push({ spanId: row.span_id })
+      }
+      return spans
+    } catch {
+      return []
+    }
+  }
+
+  private capturedRecordTimestamp(db: DatabaseSync, spanId: string): string | undefined {
+    if (!this.hasTable(db, 'records')) return undefined
+    try {
+      const row = db.prepare('SELECT timestamp FROM records WHERE span_id = ? LIMIT 1').get(spanId) as { timestamp?: unknown } | undefined
+      return typeof row?.timestamp === 'string' ? row.timestamp : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private capturedRecordExists(db: DatabaseSync, spanId: string): boolean {
+    try {
+      return db.prepare('SELECT 1 FROM records WHERE span_id = ? LIMIT 1').get(spanId) !== undefined
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Cheap retained-content fingerprint: per-span `length()` of both content
+   * columns, without reading any bytes. A purge (`parts_json` nulled) moves
+   * the lengths, so a cursor sealed before the purge no longer matches.
+   */
+  private capturedColumnLengths(db: DatabaseSync, spanIds: readonly string[]): Map<string, string> {
+    const lengths = new Map<string, string>()
+    if (!this.hasTable(db, 'records')) return lengths
+    try {
+      for (let start = 0; start < spanIds.length; start += 500) {
+        const chunk = spanIds.slice(start, start + 500)
+        if (chunk.length === 0) continue
+        const rows = db
+          .prepare(`SELECT span_id, length(parts_json) AS parts, length(content_json) AS content FROM records WHERE span_id IN (${chunk.map(() => '?').join(',')})`)
+          .all(...chunk) as Array<{ span_id?: unknown; parts?: unknown; content?: unknown }>
+        for (const row of rows) {
+          if (typeof row.span_id !== 'string') continue
+          const parts = typeof row.parts === 'number' ? String(row.parts) : 'null'
+          const content = typeof row.content === 'number' ? String(row.content) : 'null'
+          lengths.set(row.span_id, `${parts}/${content}`)
+        }
+      }
+    } catch {
+      // A failed probe invalidates nothing by itself: spans absent from the
+      // map fingerprint as unknown, which still fails a pre-probe binding.
+    }
+    return lengths
+  }
+
+  private capturedParentSession(db: DatabaseSync, sessionId: string): string | null {
+    if (!this.hasTable(db, 'session')) return null
+    try {
+      const row = db.prepare('SELECT parent_session FROM session WHERE session_id = ? LIMIT 1').get(sessionId) as { parent_session?: unknown } | undefined
+      return typeof row?.parent_session === 'string' && row.parent_session.length > 0 ? row.parent_session : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * One session's turn and session-shared units. Sparse turns — declared in
+   * the turn table but without a captured record — contribute an explicit
+   * `not_captured` gap, never a neighboring turn's span.
+   */
+  private appendSessionUnits(
+    db: DatabaseSync,
+    sessionId: string,
+    units: CapturedContextUnit[],
+    gaps: Array<Record<string, unknown>>,
+    turnDescriptors: string[],
+    declared: Array<{ sessionId: string; turnIndex: number; spanId: string | null }>,
+    onlyTurnIndex?: number,
+  ): void {
+    const entries = this.capturedTurnEntries(db, sessionId)
+    if (entries === undefined) {
+      gaps.push({ code: 'unsupported_legacy', reason: 'The store does not expose split turn rows.', sessionId })
+      return
+    }
+    const wanted = onlyTurnIndex === undefined ? entries : entries.filter((entry) => entry.turnIndex === onlyTurnIndex)
+    if (onlyTurnIndex !== undefined && wanted.length === 0) {
+      gaps.push({ code: 'not_captured', reason: 'The turn has no captured record.', sessionId, turnIndex: onlyTurnIndex })
+      return
+    }
+    const exclude = new Set<string>()
+    for (const entry of entries) {
+      if (entry.spanId !== null) exclude.add(entry.spanId)
+    }
+    // Shared session context heads the scope — it is the preamble a reader
+    // meets before the turn bulk, so a bounded first page still carries it.
+    // A turn-scoped read whose own turn is uncaptured carries nothing at
+    // all: shared context without its turn would read as a neighboring
+    // turn's content under a sparse index.
+    const turnUnits: CapturedContextUnit[] = []
+    let gate: string | undefined
+    for (const entry of wanted) {
+      turnDescriptors.push(`${sessionId}:${entry.turnIndex}=${entry.spanId ?? ''}`)
+      declared.push({ sessionId, turnIndex: entry.turnIndex, spanId: entry.spanId })
+      if (entry.spanId === null) {
+        gaps.push({ code: 'not_captured', reason: 'The declared turn names no captured span.', sessionId, turnIndex: entry.turnIndex })
+        continue
+      }
+      if (!this.capturedRecordExists(db, entry.spanId)) {
+        gaps.push({ code: 'not_captured', reason: 'The turn has no captured record.', sessionId, turnIndex: entry.turnIndex, spanId: entry.spanId })
+        continue
+      }
+      turnUnits.push({ sessionId, turnIndex: entry.turnIndex, spanId: entry.spanId, origin: 'turn' })
+      if (onlyTurnIndex !== undefined) gate = this.capturedRecordTimestamp(db, entry.spanId)
+    }
+    if (onlyTurnIndex === undefined || turnUnits.length > 0) {
+      for (const shared of this.capturedSharedSpans(db, sessionId, exclude, gate)) {
+        units.push({ sessionId, spanId: shared.spanId, origin: 'session_shared' })
+      }
+    }
+    for (const turnUnit of turnUnits) units.push(turnUnit)
+  }
+
+  /** Ordered in-scope units plus the fingerprint sealing their retained bytes. */
+  private resolveCapturedScope(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+  ): {
+    units: CapturedContextUnit[]
+    gaps: Array<Record<string, unknown>>
+    fingerprint: string
+    declared: Array<{ sessionId: string; turnIndex: number; spanId: string | null }>
+  } {
+    const units: CapturedContextUnit[] = []
+    const gaps: Array<Record<string, unknown>> = []
+    const turnDescriptors: string[] = []
+    const declared: Array<{ sessionId: string; turnIndex: number; spanId: string | null }> = []
+    const executionDescriptors: string[] = []
+    if (target.kind === 'run') {
+      const executions = this.listExecutions(target.runId)
+      if (executions.length === 0) {
+        gaps.push({ code: 'not_captured', reason: 'The run has no captured executions.', runId: target.runId })
+      }
+      const seenSessions = new Set<string>()
+      for (const execution of executions) {
+        executionDescriptors.push(`${execution.executionId}=${execution.sessionId ?? ''}`)
+        if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) {
+          gaps.push({ code: 'unknown_linkage', reason: 'The execution has no captured session identity.', executionId: execution.executionId })
+          continue
+        }
+        if (seenSessions.has(execution.sessionId)) continue
+        seenSessions.add(execution.sessionId)
+        this.appendSessionUnits(db, execution.sessionId, units, gaps, turnDescriptors, declared)
+      }
+    } else if (target.kind === 'session') {
+      this.appendSessionUnits(db, target.sessionId, units, gaps, turnDescriptors, declared)
+    } else {
+      this.appendSessionUnits(db, target.sessionId, units, gaps, turnDescriptors, declared, target.turnIndex)
+    }
+    const lengths = this.capturedColumnLengths(db, units.map((unit) => unit.spanId))
+    const fingerprint = JSON.stringify({
+      target,
+      units: units.map((unit) => [unit.sessionId, unit.turnIndex ?? null, unit.spanId, unit.origin]),
+      columns: units.map((unit) => lengths.get(unit.spanId) ?? 'unknown'),
+      turns: turnDescriptors,
+      executions: executionDescriptors,
+    })
+    return { units, gaps, fingerprint, declared }
+  }
+
+  /**
+   * Stream one span's captured parts through bounded `substr` reads. Large
+   * unrelated fields are parsed past, never accumulated; only the part
+   * texts the caller retains cross the memory boundary. Legacy rows whose
+   * content lives only in `content_json` fall back to that column, mirroring
+   * the record reader's parts-when-present rule.
+   */
+  private async capturedSpanParts(
+    db: DatabaseSync,
+    spanId: string,
+    signal?: AbortSignal,
+  ): Promise<{ parts: CapturedContextPart[]; purged: boolean } | { corrupt: true }> {
+    const partsReader = this.capturedColumnReader(db, 'records', 'parts_json', spanId)
+    if (partsReader !== undefined) {
+      const streamed = await this.streamPartsColumn(partsReader, signal)
+      if (streamed === 'corrupt') return { corrupt: true }
+      if (streamed !== null && streamed.length > 0) return { parts: streamed, purged: false }
+    }
+    const contentReader = this.capturedColumnReader(db, 'records', 'content_json', spanId)
+    if (contentReader === undefined) return { parts: [], purged: partsReader === undefined }
+    const legacy = await this.streamContentColumn(contentReader, signal)
+    if (legacy === 'corrupt') return { corrupt: true }
+    if (legacy.length > 0) return { parts: legacy, purged: false }
+    return { parts: [], purged: partsReader === undefined }
+  }
+
+  /** Stream a `parts_json` array, collecting per-element identity, role, order, and text. */
+  private async streamPartsColumn(reader: ColumnChunkReader, signal?: AbortSignal): Promise<'corrupt' | CapturedContextPart[] | null> {
+    type Slot = { kind: string; role: string; order: unknown; resident: unknown; texts: string[] }
+    const slots = new Map<number, Slot>()
+    const slotFor = (index: number): Slot => {
+      const existing = slots.get(index)
+      if (existing !== undefined) return existing
+      const slot: Slot = { kind: '', role: '', order: undefined, resident: undefined, texts: [] }
+      slots.set(index, slot)
+      return slot
+    }
+    let sawIndexed = false
+    // WHY full-width reads: the reader caps substr at 16 KiB, and fewer
+    // round-trips per scan is pure pacing — the decoded bytes are identical.
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          const head = event.path[0]
+          if (typeof head === 'number') sawIndexed = true
+          if (event.type === 'string-chunk') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'text') slot.texts.push(event.text)
+              else if (event.path[1] === 'part') slot.kind += event.text
+              else if (event.path[1] === 'role') slot.role += event.text
+            }
+          } else if (event.type === 'scalar') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'order' && typeof event.value === 'number') slot.order = event.value
+              else if (event.path[1] === 'resident' && typeof event.value === 'boolean') slot.resident = event.value
+            }
+          }
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      // WHY cancelled propagates: an aborted read is not a damaged column.
+      // Only the corrupt code becomes a gap; cancellation must answer
+      // cancelled with no data so the two stay distinguishable.
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    // A non-array root is not a parts list: the caller falls back to
+    // `content_json`, the same rule the record reader applies.
+    if (!sawIndexed) return null
+    const ordered: CapturedContextPart[] = []
+    for (const index of [...slots.keys()].sort((a, b) => a - b)) {
+      const slot = slots.get(index)
+      if (slot === undefined) continue
+      const kind = slot.kind === '' ? 'unknown' : slot.kind
+      ordered.push({
+        kind,
+        role: capturedRoleOf(kind, slot.role === '' ? null : slot.role),
+        order: typeof slot.order === 'number' && Number.isFinite(slot.order) ? slot.order : null,
+        resident: slot.resident === false ? false : true,
+        text: slot.texts.join(''),
+      })
+    }
+    ordered.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    return ordered
+  }
+
+  /** Stream a legacy `content_json` object, collecting the canonical buckets in key order. */
+  private async streamContentColumn(reader: ColumnChunkReader, signal?: AbortSignal): Promise<'corrupt' | CapturedContextPart[]> {
+    const texts = new Map<string, string[]>()
+    // WHY full-width reads: the reader caps substr at 16 KiB, and fewer
+    // round-trips per scan is pure pacing — the decoded bytes are identical.
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          if (event.type !== 'string-chunk' || event.path.length !== 1) return
+          const key = event.path[0]
+          if (typeof key !== 'string' || !(CANONICAL_CONTENT_KEYS as readonly string[]).includes(key)) return
+          const list = texts.get(key)
+          if (list === undefined) texts.set(key, [event.text])
+          else list.push(event.text)
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      // WHY cancelled propagates: an aborted read is not a damaged column.
+      // Only the corrupt code becomes a gap; cancellation must answer
+      // cancelled with no data so the two stay distinguishable.
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    const parts: CapturedContextPart[] = []
+    for (const [position, key] of CANONICAL_CONTENT_KEYS.entries()) {
+      const text = (texts.get(key) ?? []).join('')
+      if (text === '') continue
+      parts.push({ kind: key, role: key === 'system_prompt' ? 'system' : null, order: position, resident: true, text })
+    }
+    return parts
+  }
+
+  /** Stream every in-scope unit's parts; spans yielding nothing become explicit gaps. */
+  private async streamScopeParts(
+    db: DatabaseSync,
+    units: readonly CapturedContextUnit[],
+    signal?: AbortSignal,
+  ): Promise<{ streamed: Array<{ unit: CapturedContextUnit; parts: CapturedContextPart[] }>; gaps: Array<Record<string, unknown>> }> {
+    const streamed: Array<{ unit: CapturedContextUnit; parts: CapturedContextPart[] }> = []
+    const gaps: Array<Record<string, unknown>> = []
+    for (const unit of units) {
+      const outcome = await this.capturedSpanParts(db, unit.spanId, signal)
+      if ('corrupt' in outcome) {
+        gaps.push({
+          code: 'corrupt_column',
+          reason: 'A retained column could not be decoded.',
+          sessionId: unit.sessionId,
+          ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+          spanId: unit.spanId,
+        })
+        continue
+      }
+      if (outcome.parts.length === 0) {
+        gaps.push(
+          outcome.purged
+            ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
+            : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId },
+        )
+        continue
+      }
+      streamed.push({ unit, parts: outcome.parts })
+    }
+    return { streamed, gaps }
+  }
+
+  /**
+   * Identity-only scan of a `parts_json` array: kind/role/order/resident
+   * without retaining any text bodies. The streaming decoder still walks the
+   * column (inflation + parse), but text chunks are dropped on arrival, so
+   * peak retention is identities only — never the multi-megabyte bodies the
+   * manifest previously materialized to emit the same ids.
+   */
+  private async streamPartsIdentities(
+    reader: ColumnChunkReader,
+    signal?: AbortSignal,
+  ): Promise<'corrupt' | Array<{ kind: string; role: string | null; order: number | null; resident: boolean }> | null> {
+    type Slot = { kind: string; role: string; order: unknown; resident: unknown }
+    const slots = new Map<number, Slot>()
+    const slotFor = (index: number): Slot => {
+      const existing = slots.get(index)
+      if (existing !== undefined) return existing
+      const slot: Slot = { kind: '', role: '', order: undefined, resident: undefined }
+      slots.set(index, slot)
+      return slot
+    }
+    let sawIndexed = false
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          const head = event.path[0]
+          if (typeof head === 'number') sawIndexed = true
+          if (event.type === 'string-chunk') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'part') slot.kind += event.text
+              else if (event.path[1] === 'role') slot.role += event.text
+              // Text bodies are intentionally dropped: identities never
+              // retain them, so manifests stay bounded no matter the size.
+            }
+          } else if (event.type === 'scalar') {
+            if (event.path.length === 2 && typeof head === 'number') {
+              const slot = slotFor(head)
+              if (event.path[1] === 'order' && typeof event.value === 'number') slot.order = event.value
+              else if (event.path[1] === 'resident' && typeof event.value === 'boolean') slot.resident = event.value
+            }
+          }
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    if (!sawIndexed) return null
+    const ordered: Array<{ kind: string; role: string | null; order: number | null; resident: boolean }> = []
+    for (const index of [...slots.keys()].sort((a, b) => a - b)) {
+      const slot = slots.get(index)
+      if (slot === undefined) continue
+      const kind = slot.kind === '' ? 'unknown' : slot.kind
+      ordered.push({
+        kind,
+        role: capturedRoleOf(kind, slot.role === '' ? null : slot.role),
+        order: typeof slot.order === 'number' && Number.isFinite(slot.order) ? slot.order : null,
+        resident: slot.resident === false ? false : true,
+      })
+    }
+    ordered.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    return ordered
+  }
+
+  /**
+   * Identity-only scan of a legacy `content_json` object: which canonical
+   * buckets carry any text, without retaining the text. Presence is a byte
+   * count, not a body, so the manifest learns the same part list the content
+   * pages chunk under while holding only counters.
+   */
+  private async streamContentIdentities(
+    reader: ColumnChunkReader,
+    signal?: AbortSignal,
+  ): Promise<'corrupt' | Array<{ kind: string; role: string | null; order: number | null }>> {
+    const lengths = new Map<string, number>()
+    const stream = new StreamingJsonReader(reader, { inputChunkBytes: 16_384 })
+    try {
+      for (;;) {
+        const result = await stream.pump((event: JsonStringEvent) => {
+          if (event.type !== 'string-chunk' || event.path.length !== 1) return
+          const key = event.path[0]
+          if (typeof key !== 'string' || !(CANONICAL_CONTENT_KEYS as readonly string[]).includes(key)) return
+          lengths.set(key, (lengths.get(key) ?? 0) + event.text.length)
+        }, signal)
+        if (result.kind === 'eof') break
+      }
+    } catch (error: unknown) {
+      if (error instanceof StreamingJsonError) {
+        if (error.code === 'cancelled') throw error
+        return 'corrupt'
+      }
+      throw error
+    } finally {
+      stream.dispose()
+    }
+    const identities: Array<{ kind: string; role: string | null; order: number | null }> = []
+    for (const [position, key] of CANONICAL_CONTENT_KEYS.entries()) {
+      if ((lengths.get(key) ?? 0) === 0) continue
+      identities.push({ kind: key, role: key === 'system_prompt' ? 'system' : null, order: position })
+    }
+    return identities
+  }
+
+  /**
+   * Identity-only counterpart of `capturedSpanParts` for manifests: part
+   * identities without text bodies, plus the same purged/corrupt signals so
+   * a purged span stays absent from the part list rather than inventing an
+   * identity. Never calls the text-retaining column readers.
+   */
+  private async capturedSpanIdentities(
+    db: DatabaseSync,
+    spanId: string,
+    signal?: AbortSignal,
+  ): Promise<{ identities: Array<{ kind: string; role: string | null; order: number | null }>; purged: boolean } | { corrupt: true }> {
+    const partsReader = this.capturedColumnReader(db, 'records', 'parts_json', spanId)
+    if (partsReader !== undefined) {
+      const streamed = await this.streamPartsIdentities(partsReader, signal)
+      if (streamed === 'corrupt') return { corrupt: true }
+      if (streamed !== null && streamed.length > 0) {
+        return {
+          identities: streamed.map((entry) => ({ kind: entry.kind, role: entry.role, order: entry.order })),
+          purged: false,
+        }
+      }
+    }
+    const contentReader = this.capturedColumnReader(db, 'records', 'content_json', spanId)
+    if (contentReader === undefined) return { identities: [], purged: partsReader === undefined }
+    const legacy = await this.streamContentIdentities(contentReader, signal)
+    if (legacy === 'corrupt') return { corrupt: true }
+    if (legacy.length > 0) return { identities: legacy, purged: false }
+    return { identities: [], purged: partsReader === undefined }
+  }
+
+  /** Identity-only scope walk for manifests; corrupt/purged spans are omitted, never fabricated. */
+  private async streamScopeIdentities(
+    db: DatabaseSync,
+    units: readonly CapturedContextUnit[],
+    signal?: AbortSignal,
+  ): Promise<Array<{ unit: CapturedContextUnit; identities: Array<{ kind: string; role: string | null; order: number | null }> }>> {
+    const streamed: Array<{ unit: CapturedContextUnit; identities: Array<{ kind: string; role: string | null; order: number | null }> }> = []
+    for (const unit of units) {
+      const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+      if ('corrupt' in outcome) continue
+      if (outcome.identities.length === 0) continue
+      streamed.push({ unit, identities: outcome.identities })
+    }
+    return streamed
+  }
+
+  /**
+   * Split streamed parts into page-sized chunks. Part identity is the span
+   * plus the streamed position, so the manifest and the content pages agree;
+   * repeated identical texts stay repeated — one chunk per occurrence — and
+   * concatenating every page reproduces exactly the retained bytes.
+   */
+  private splitCapturedParts(
+    streamed: ReadonlyArray<{ unit: CapturedContextUnit; parts: CapturedContextPart[] }>,
+    byteLimit: number,
+  ): CapturedContextChunk[] {
+    const chunks: CapturedContextChunk[] = []
+    for (const { unit, parts } of streamed) {
+      parts.forEach((part, position) => {
+        const pieces = splitUtf8Text(part.text, byteLimit)
+        let byteOffset = 0
+        pieces.forEach((text, pieceIndex) => {
+          chunks.push({
+            partId: `${unit.spanId}:part:${position}`,
+            blockId: capturedBlockIdOf(part.kind),
+            sessionId: unit.sessionId,
+            ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+            spanId: unit.spanId,
+            origin: unit.origin,
+            text,
+            byteOffset,
+            complete: pieceIndex === pieces.length - 1,
+            role: part.role,
+            order: part.order ?? position,
+            resident: part.resident,
+          })
+          byteOffset += Buffer.byteLength(text, 'utf8')
+        })
+      })
+    }
+    return chunks
+  }
+
+  /**
+   * A labelled reconstruction of one turn's retained parts, grouped
+   * shared/user/assistant and headed as a reconstruction — never presented
+   * as the exact model input. System and session-shared context head the
+   * view, mirroring request order, so a bounded first page still labels
+   * every group it had room to name.
+   */
+  private assembleCapturedTurn(
+    sessionId: string,
+    turnIndex: number,
+    spanId: string,
+    streamed: ReadonlyArray<{ unit: CapturedContextUnit; parts: CapturedContextPart[] }>,
+    byteLimit: number,
+  ): CapturedContextChunk[] {
+    const user: string[] = []
+    const assistant: string[] = []
+    const shared: string[] = []
+    for (const { unit, parts } of streamed) {
+      for (const part of parts) {
+        if (part.text === '') continue
+        if (unit.origin === 'session_shared') shared.push(part.text)
+        else if (part.role === 'user') user.push(part.text)
+        else if (part.role === 'assistant') assistant.push(part.text)
+        else shared.push(part.text)
+      }
+    }
+    const sections: Array<[string, string[]]> = [['SHARED', shared], ['USER', user], ['ASSISTANT', assistant]]
+    const bodies = sections
+      .filter((section) => section[1].length > 0)
+      .map((section) => `=== ${section[0]} ===\n${section[1].join('\n\n')}`)
+    const full = ['Assembled turn view: a labelled reconstruction of retained captured parts, not the exact model input.', ...bodies].join('\n\n')
+    const pieces = splitUtf8Text(full, byteLimit)
+    if (pieces.length === 0) return []
+    const chunks: CapturedContextChunk[] = []
+    let byteOffset = 0
+    pieces.forEach((text, pieceIndex) => {
+      chunks.push({
+        partId: `assembled:turn:${pieceIndex}`,
+        blockId: 'assembled_turn',
+        sessionId,
+        turnIndex,
+        spanId,
+        origin: 'turn',
+        text,
+        byteOffset,
+        complete: pieceIndex === pieces.length - 1,
+        role: null,
+        order: pieceIndex,
+        resident: true,
+      })
+      byteOffset += Buffer.byteLength(text, 'utf8')
+    })
+    return chunks
+  }
+
+  /** Greedily fill 60 KB pages; a single chunk always fits, so progress is guaranteed. */
+  private splitContentPages(
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    chunks: readonly CapturedContextChunk[],
+    gaps: readonly Record<string, unknown>[],
+  ): CapturedContextChunk[][] {
+    // WHY incremental accounting: re-stringifying the growing page per
+    // chunk is quadratic in page count. Prefix/suffix lengths plus per-chunk
+    // JSON lengths reproduce the same encoded size exactly — same key order,
+    // same sealed placeholder cursor — without the repeated re-encode.
+    const prefixLength = Buffer.byteLength(
+      `{"data":{"target":${JSON.stringify(target)},"representation":${JSON.stringify(representation)},"chunks":[`,
+      'utf8',
+    )
+    const suffixLength = Buffer.byteLength(
+      `],"coverage":${JSON.stringify({ completeness: 'captured_only', gaps })},"pagination":${JSON.stringify({ nextCursor: CAPTURED_CONTEXT_CURSOR_PLACEHOLDER, hasMore: true })}}`,
+      'utf8',
+    )
+    const pages: CapturedContextChunk[][] = []
+    let current: CapturedContextChunk[] = []
+    let currentBytes = prefixLength + suffixLength
+    for (const chunk of chunks) {
+      const chunkBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8')
+      if (current.length > 0 && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+        pages.push(current)
+        current = []
+        currentBytes = prefixLength + suffixLength
+      }
+      current.push(chunk)
+      currentBytes += (current.length > 1 ? 1 : 0) + chunkBytes
+    }
+    if (current.length > 0) pages.push(current)
+    return pages.length === 0 ? [[]] : pages
+  }
+
+  private serveContentPage(
+    binding: string,
+    generation: string,
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    gaps: ReadonlyArray<Record<string, unknown>>,
+    page: CapturedContextChunk[],
+    offset: number,
+    last: boolean,
+  ): Record<string, unknown> {
+    if (last) this.capturedContextTraversals.delete(binding)
+    return {
+      data: { target, representation, chunks: page },
+      coverage: { completeness: 'captured_only', gaps: [...gaps] },
+      pagination: { nextCursor: last ? null : this.capturedContextCursor(binding, generation, offset + 1), hasMore: !last },
+    }
+  }
+
+  private async capturedContextContent(
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    byteLimit: number,
+    cursor: string | undefined,
+    generation: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+      throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+    }
+    const db = this.sessionHandle()
+    if (db === undefined) return { error: 'content_unavailable' }
+    const resolved = this.resolveCapturedScope(db, target)
+    const binding = this.capturedContextBinding('content', target, representation, byteLimit, CAPTURED_CONTEXT_MANIFEST_DEFAULT_LIMIT, generation, resolved.fingerprint)
+    let offset = 0
+    if (cursor !== undefined) {
+      const parsed = this.capturedContextOffset(cursor, binding, generation)
+      const traversal = parsed === null ? undefined : this.capturedContextTraversals.get(binding)
+      if (parsed === null || traversal === undefined) return { error: 'stale_cursor' }
+      traversal.touchedAt = this.now()
+      offset = parsed
+    }
+    // Assembled turn views are single-turn reconstructions; their scope is at
+    // most one turn plus shared context, so the bounded prefix walk below
+    // would add complexity without corpus-scale benefit. Keep the existing
+    // full derivation for them to preserve byte-exact labels.
+    if (representation === 'assembled_turn' && target.kind === 'turn') {
+      // WHY re-derived, not retained: the page list below is transient working
+      // memory, dropped on return. The registry keeps only the binding's
+      // liveness, so serving page N of a large transcript never holds pages
+      // 0..N — retention stays flat no matter how many pages are served.
+      const { streamed, gaps: streamGaps } = await this.streamScopeParts(db, resolved.units, signal)
+      const gaps = [...resolved.gaps, ...streamGaps]
+      const chunks = this.assembleCapturedTurn(target.sessionId, target.turnIndex, streamed.find((entry) => entry.unit.origin === 'turn')?.unit.spanId ?? '', streamed, byteLimit)
+      const pages = this.splitContentPages(target, representation, chunks, gaps)
+      const page = pages[offset]
+      if (page === undefined) return { error: 'stale_cursor' }
+      const last = offset === pages.length - 1
+      if (pages.length > 1) {
+        if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
+          return { error: 'budget_exceeded' }
+        }
+        this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      }
+      return this.serveContentPage(binding, generation, target, representation, gaps, page, offset, last)
+    }
+    // WHY cursor-driven, not materialized: units stream in scope order and
+    // stop once the requested page plus one proving chunk is known. Only the
+    // target page is retained; prefix pages are counted and dropped, and tail
+    // units are never decoded. Packing uses the resolved gaps for its budget
+    // so every page partitions the same way whether or not later stream gaps
+    // exist — stream gaps are small, and the happy path (no stream gaps) packs
+    // byte-identically to the full walk it replaces.
+    const prefix = await this.collectCapturedPartsPrefix(db, target, representation, resolved.units, [...resolved.gaps], byteLimit, offset, signal)
+    const gaps = [...resolved.gaps, ...prefix.streamGaps]
+    if (prefix.page === undefined) return { error: 'stale_cursor' }
+    const last = !prefix.hasMore
+    if (!last || offset > 0) {
+      if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
+        return { error: 'budget_exceeded' }
+      }
+      if (!last) this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      else this.capturedContextTraversals.delete(binding)
+    }
+    return this.serveContentPage(binding, generation, target, representation, gaps, prefix.page, offset, last)
+  }
+
+  /**
+   * Prefix-bounded content walk for `captured_parts`: decodes units in scope
+   * order, splits each unit's parts into byte-limited chunks, and greedily
+   * packs 60 KB pages exactly like `splitContentPages` — but retains only the
+   * requested page, counts prefix pages, and stops once the next page proves
+   * more content exists or the scope ends. Tail units are never touched, so a
+   * first page never pays for a late multi-megabyte block. Gaps surface on
+   * the page whose units produced them and never ride later pages, so every
+   * sealed envelope holds the page budget no matter how gap-heavy the scope
+   * is; undecoded tail gaps surface on their own pages, keeping eventual
+   * traversal complete without holding the corpus.
+   */
+  private async collectCapturedPartsPrefix(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    units: readonly CapturedContextUnit[],
+    resolvedGaps: ReadonlyArray<Record<string, unknown>>,
+    byteLimit: number,
+    offset: number,
+    signal?: AbortSignal,
+  ): Promise<{ page: CapturedContextChunk[] | undefined; streamGaps: Array<Record<string, unknown>>; hasMore: boolean }> {
+    const prefixLength = Buffer.byteLength(
+      `{"data":{"target":${JSON.stringify(target)},"representation":${JSON.stringify(representation)},"chunks":[`,
+      'utf8',
+    )
+    const suffixLength = Buffer.byteLength(
+      `],"coverage":${JSON.stringify({ completeness: 'captured_only', gaps: [...resolvedGaps] })},"pagination":${JSON.stringify({ nextCursor: CAPTURED_CONTEXT_CURSOR_PLACEHOLDER, hasMore: true })}}`,
+      'utf8',
+    )
+    // Gaps of the requested page only: earlier pages were already served
+    // theirs, and later pages re-walk to their own. Counting stays global
+    // so page boundaries never depend on the requested offset.
+    let targetGaps: Array<Record<string, unknown>> = []
+    let pageGaps: Array<Record<string, unknown>> = []
+    // Gaps counted on the page being filled, on every offset — unlike the
+    // retained pageGaps above, which stay empty off-target. Seal decisions
+    // must read this, or gap-only prefix pages never split when offset > 0
+    // and page boundaries diverge across offsets.
+    let pageGapCount = 0
+    let pageIndex = 0
+    let currentCount = 0
+    let currentBytes = prefixLength + suffixLength
+    let current: CapturedContextChunk[] = []
+    let targetPage: CapturedContextChunk[] | undefined = undefined
+    const pageHasContent = (): boolean => currentCount > 0 || pageGapCount > 0
+    const sealPage = (): void => {
+      if (pageIndex === offset) {
+        targetPage = current
+        targetGaps = pageGaps
+      }
+      pageIndex += 1
+      currentCount = 0
+      currentBytes = prefixLength + suffixLength
+      current = []
+      pageGaps = []
+      pageGapCount = 0
+    }
+    const pushGap = (gap: Record<string, unknown>): boolean => {
+      const gapBytes = Buffer.byteLength(JSON.stringify(gap), 'utf8') + 1
+      // A page that already holds content seals before a gap would push it
+      // past the budget — gaps alone can fill a page, so a part-less-heavy
+      // scope still pages instead of serving one unbounded envelope. An
+      // empty page keeps the gap: gaps are indivisible. The seal reads
+      // counted content, not retained content, so prefix pages split exactly
+      // as the target walk would split them.
+      if (pageHasContent() && currentBytes + gapBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+        sealPage()
+      }
+      if (pageIndex === offset) {
+        pageGaps.push(gap)
+      }
+      pageGapCount += 1
+      currentBytes += gapBytes
+      // Past the target means the sealed target plus proof of more — the
+      // pushed gap itself proves the walk continues.
+      return pageIndex > offset
+    }
+    for (const unit of units) {
+      if (signal?.aborted) {
+        throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+      }
+      const outcome = await this.capturedSpanParts(db, unit.spanId, signal)
+      if ('corrupt' in outcome) {
+        const gap = {
+          code: 'corrupt_column',
+          reason: 'A retained column could not be decoded.',
+          sessionId: unit.sessionId,
+          ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+          spanId: unit.spanId,
+        }
+        // The pushed gap proves more content when the sealed target is
+        // behind us — stop without touching the tail.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+        continue
+      }
+      if (outcome.parts.length === 0) {
+        const gap = outcome.purged
+          ? { code: 'content_purged', reason: 'Retained content was purged after capture.', sessionId: unit.sessionId, spanId: unit.spanId }
+          : { code: 'not_captured', reason: 'The span has no retained parts.', sessionId: unit.sessionId, spanId: unit.spanId }
+        // Same early stop as the corrupt-column gap above.
+        if (pushGap(gap)) {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+        continue
+      }
+      const chunks = this.splitCapturedParts([{ unit, parts: outcome.parts }], byteLimit)
+      for (const chunk of chunks) {
+        const chunkBytes = Buffer.byteLength(JSON.stringify(chunk), 'utf8')
+        // The first content of a page joins unconditionally; once the page
+        // holds chunks or gaps, a further chunk that would push it past the
+        // budget seals it first — including the first chunk after a
+        // gap-heavy run, which the old count-only gate let through.
+        if (pageHasContent() && currentBytes + 1 + chunkBytes > CAPTURED_CONTEXT_PAGE_BUDGET) {
+          // Current page is full: seal it, then start the next with this chunk.
+          sealPage()
+          // The overflow chunk is the first of the next page. If that next
+          // page is past the target, the target is sealed and more is proven
+          // — stop without touching the tail.
+          if (pageIndex > offset) {
+            return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+          }
+        }
+        if (pageIndex === offset) {
+          current.push(chunk)
+          currentBytes += (currentCount > 0 ? 1 : 0) + chunkBytes
+          currentCount += 1
+        } else if (pageIndex < offset) {
+          currentBytes += (currentCount > 0 ? 1 : 0) + chunkBytes
+          currentCount += 1
+        } else {
+          return { page: targetPage, streamGaps: targetGaps, hasMore: true }
+        }
+      }
+    }
+    // Scope ended: finalize the current page as the target or a prefix.
+    // Only the closing page's own gaps ride it — earlier pages already
+    // served theirs, so the envelope never re-pays them.
+    if (pageIndex === offset) {
+      targetPage = current
+      targetGaps = pageGaps
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
+    }
+    if (targetPage !== undefined) {
+      return { page: targetPage, streamGaps: targetGaps, hasMore: false }
+    }
+    return { page: undefined, streamGaps: targetGaps, hasMore: false }
+  }
+
+  private serveManifestPage(
+    binding: string,
+    generation: string,
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    gaps: ReadonlyArray<Record<string, unknown>>,
+    page: Array<Record<string, unknown>>,
+    offset: number,
+    last: boolean,
+  ): Record<string, unknown> {
+    if (last) this.capturedContextTraversals.delete(binding)
+    return {
+      data: { target, representation, items: page },
+      coverage: { completeness: 'captured_only', gaps: [...gaps] },
+      pagination: { nextCursor: last ? null : this.capturedContextCursor(binding, generation, offset + 1), hasMore: !last },
+    }
+  }
+
+  private async capturedContextManifest(
+    target: CapturedContextTarget,
+    representation: 'captured_parts' | 'assembled_turn',
+    limit: number,
+    cursor: string | undefined,
+    generation: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (signal?.aborted) {
+      throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+    }
+    const db = this.sessionHandle()
+    if (db === undefined) return { error: 'content_unavailable' }
+    const resolved = this.resolveCapturedScope(db, target)
+    const binding = this.capturedContextBinding('manifest', target, representation, CAPTURED_CONTEXT_BYTE_LIMIT, limit, generation, resolved.fingerprint)
+    let offset = 0
+    if (cursor !== undefined) {
+      const parsed = this.capturedContextOffset(cursor, binding, generation)
+      const traversal = parsed === null ? undefined : this.capturedContextTraversals.get(binding)
+      if (parsed === null || traversal === undefined) return { error: 'stale_cursor' }
+      traversal.touchedAt = this.now()
+      offset = parsed
+    }
+    const gaps = [...resolved.gaps]
+    // WHY cursor-driven, not materialized: part identities stream unit by
+    // unit and stop once the requested page plus one proving item is known.
+    // A run manifest previously decoded every retained text body to emit the
+    // same ids; it now holds only identities for the prefix it needs.
+    const needed = (offset + 1) * limit + 1
+    const items = await this.buildManifestPageItems(db, target, resolved.units, resolved.declared, needed, signal)
+    const hasMore = items.length > (offset + 1) * limit
+    const page = items.slice(offset * limit, offset * limit + limit)
+    if (offset > 0 && page.length === 0) return { error: 'stale_cursor' }
+    const last = !hasMore
+    if (!last || offset > 0) {
+      if (!this.capturedContextTraversals.has(binding) && this.capturedContextTraversals.size >= CAPTURED_CONTEXT_MAX_TRAVERSALS) {
+        return { error: 'budget_exceeded' }
+      }
+      if (!last) this.capturedContextTraversals.set(binding, { binding, touchedAt: this.now() })
+      else this.capturedContextTraversals.delete(binding)
+    }
+    // Preserve the previous empty-manifest paging contract: zero items is a
+    // single empty page, not a stale cursor.
+    if (items.length === 0 && offset === 0) {
+      return this.serveManifestPage(binding, generation, target, representation, gaps, [], 0, true)
+    }
+    if (page.length === 0 && items.length !== 0) return { error: 'stale_cursor' }
+    return this.serveManifestPage(binding, generation, target, representation, gaps, page, offset, last)
+  }
+
+  /**
+   * Manifest identities only — never captured text bodies. Turn items carry
+   * the session/turn/span identity; part items carry the streamed
+   * part/block/origin/role identity the content pages chunk under, so a
+   * caller can plan traversal from the manifest alone.
+   *
+   * WHY prefix-bounded: identities stream unit by unit and stop once `needed`
+   * items are known. A run manifest previously decoded every retained text
+   * body to emit the same ids; it now holds only the prefix identities it
+   * needs, so a first page never pays for the tail of the scope.
+   */
+  private async buildManifestPageItems(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+    units: readonly CapturedContextUnit[],
+    declared: ReadonlyArray<{ sessionId: string; turnIndex: number; spanId: string | null }>,
+    needed: number,
+    signal?: AbortSignal,
+  ): Promise<Array<Record<string, unknown>>> {
+    const items: Array<Record<string, unknown>> = []
+    const pushPart = (
+      unit: CapturedContextUnit,
+      kind: string,
+      role: string | null,
+      order: number | null,
+      position: number,
+    ): void => {
+      items.push({
+        kind: 'part',
+        partId: `${unit.spanId}:part:${position}`,
+        blockId: capturedBlockIdOf(kind),
+        sessionId: unit.sessionId,
+        ...(unit.turnIndex === undefined ? {} : { turnIndex: unit.turnIndex }),
+        spanId: unit.spanId,
+        origin: unit.origin,
+        role,
+        order: order ?? position,
+      })
+    }
+    if (target.kind === 'run') {
+      const executions = this.listExecutions(target.runId)
+      const sessionExecution = new Map<string, string>()
+      for (const execution of executions) {
+        const sessionId = typeof execution.sessionId === 'string' && execution.sessionId.length > 0 ? execution.sessionId : null
+        items.push({
+          kind: 'execution',
+          runId: execution.runId,
+          executionId: execution.executionId,
+          parentExecutionId: execution.parentExecutionId ?? null,
+          sessionId,
+          parentSessionId: sessionId === null ? null : this.capturedParentSession(db, sessionId),
+          isSubagent: !execution.isRoot,
+        })
+        if (sessionId !== null && !sessionExecution.has(sessionId)) sessionExecution.set(sessionId, execution.executionId)
+        if (items.length >= needed) return items
+      }
+      for (const turn of declared) {
+        items.push({
+          kind: 'turn',
+          runId: target.runId,
+          executionId: sessionExecution.get(turn.sessionId) ?? null,
+          sessionId: turn.sessionId,
+          turnIndex: turn.turnIndex,
+          spanId: turn.spanId,
+        })
+        if (items.length >= needed) return items
+      }
+      for (const unit of units) {
+        if (signal?.aborted) {
+          throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+        }
+        const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+        if ('corrupt' in outcome) continue
+        if (outcome.identities.length === 0) continue
+        outcome.identities.forEach((part, position) => {
+          pushPart(unit, part.kind, part.role, part.order, position)
+        })
+        if (items.length >= needed) return items
+      }
+      return items
+    }
+    if (target.kind === 'session') {
+      // Declared turn identities straight from the turn table — a declared
+      // but uncaptured turn stays a listed gap, never a neighbor's span.
+      for (const turn of declared) {
+        items.push({ kind: 'turn', sessionId: turn.sessionId, turnIndex: turn.turnIndex, spanId: turn.spanId })
+      }
+      for (const unit of units) {
+        if (unit.origin === 'session_shared') {
+          items.push({ kind: 'shared', sessionId: unit.sessionId, spanId: unit.spanId, origin: 'session_shared' })
+        }
+      }
+      return items
+    }
+    for (const unit of units) {
+      if (signal?.aborted) {
+        throw new StreamingJsonError('cancelled', 'streaming JSON reader was cancelled')
+      }
+      const outcome = await this.capturedSpanIdentities(db, unit.spanId, signal)
+      if ('corrupt' in outcome) continue
+      if (outcome.identities.length === 0) continue
+      outcome.identities.forEach((part, position) => {
+        pushPart(unit, part.kind, part.role, part.order, position)
+      })
+      if (items.length >= needed) return items
+    }
+    return items
+  }
+
+  /**
+   * Full manifest items retained for compatibility: delegates to the
+   * prefix-bounded walk with no bound. No production path calls this with
+   * large scopes; the manifest route always bounds by page.
+   */
+  private async buildManifestItems(
+    db: DatabaseSync,
+    target: CapturedContextTarget,
+    units: readonly CapturedContextUnit[],
+    declared: ReadonlyArray<{ sessionId: string; turnIndex: number; spanId: string | null }>,
+    signal?: AbortSignal,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.buildManifestPageItems(db, target, units, declared, Number.MAX_SAFE_INTEGER, signal)
   }
 
   /**

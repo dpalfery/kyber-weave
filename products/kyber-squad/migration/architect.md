@@ -6,7 +6,7 @@ selected-baseline: .github/agents/architect.agent.md
 sources:
   .github/agents/architect.agent.md: 16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
   .github/agents/architect-v3.agent.md: 5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
-final-body-sha256: 0222ee4ad0ca7491962e6bcbf6bdffffe6c0b1c916f1a026e0ebd541d8110787
+final-body-sha256: 958c2ba414ae63a5b46649056958f6e97e7f8d9299b68b9d1ca916638b06a012
 ---
 # architect migration
 

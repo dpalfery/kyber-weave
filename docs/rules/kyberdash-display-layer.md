@@ -106,7 +106,7 @@ found nothing". The one allowlisted timer is
 requires the same written argument. It runs under
 
 ```bash
-npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test
 ```
 
 A rule enforced only by a reviewer's memory is a rule that decays. If a change requires
@@ -126,7 +126,8 @@ written reason, never around the rule.
 4. Would the same answer have to be right in the CLI, the dashboard, and the tray? Put it
    in the engine once.
 5. Run `npm --prefix dash run typecheck lint test check:reachable`, plus the tray's
-   `cargo fmt --check && cargo clippy -- -D warnings && cargo test` when you touched Rust.
+   `cargo fmt --check && cargo clippy -- -D warnings && cargo test` when you touched Rust. Run each
+   through `scripts/proc-guard.sh run --` (see [dash/AGENTS.md](../../dash/AGENTS.md#tests-that-start-processes)).
 
 ## Related
 

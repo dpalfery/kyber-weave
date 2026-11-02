@@ -13,7 +13,14 @@ import {
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
 } from '../ingest/sqlite.js'
-import { buildAssistantCall, parseTimestamp, sanitize, type MessageData, type PartData } from './session-message.js'
+import {
+  buildAssistantCall,
+  parseTimestamp,
+  qualifyProviderModel,
+  sanitize,
+  type MessageData,
+  type PartData,
+} from './session-message.js'
 import type {
   SessionSource,
   SessionParser,
@@ -50,17 +57,38 @@ type SessionTokenRow = {
 }
 
 function parseSessionModel(value: Uint8Array | string | undefined): string | undefined {
+  const text = blobToText(value).trim()
+  if (!text) return undefined
   try {
-    const parsed: unknown = JSON.parse(blobToText(value))
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const parsed: unknown = JSON.parse(text)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      // A JSON scalar (e.g. a quoted model string) still names the model;
+      // anything else is not a model the fallback can price.
+      return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined
+    }
 
     const model = parsed as Record<string, unknown>
     const id = typeof model['id'] === 'string' ? model['id'].trim() : ''
     const providerID = typeof model['providerID'] === 'string' ? model['providerID'].trim() : ''
-    return id && providerID ? `${providerID}/${id}` : undefined
-  } catch {
+    if (id && providerID) return `${providerID}/${id}`
+    if (id) return id
     return undefined
+  } catch {
+    // Current-shape rows may store the model as a plain string rather than a
+    // JSON {id,providerID} object, and a bare token is not valid JSON. Only a
+    // token can take this branch: anything JSON-shaped that failed to parse is
+    // unparseable, and stays unknown rather than becoming a model name the
+    // rate table is then asked to price.
+    return /^[^\s{}[\]"]+$/.test(text) ? text : undefined
   }
+}
+
+// Current-shape assistant messages carry modelID alongside a separate
+// providerID (e.g. providerID 'opencode-go' + modelID 'muse-spark'). Qualify
+// the pair before the shared builder so pricing keys off the full identity
+// instead of a bare model that never matches the rate table.
+function withQualifiedModel(data: MessageData): MessageData {
+  return qualifyProviderModel(data)
 }
 
 function tryQuerySessionTokens(db: SqliteDatabase, sessionId: string): {
@@ -174,9 +202,10 @@ export type SqliteProviderConfig = {
    * reader pairs turns to calls by id rather than position. The call list
    * and the reader's turn list are different lengths wherever a zero-token
    * assistant message still yields a call, so index pairing would attach
-   * each turn's content to its neighbour. Off by default: providers whose
-   * parser output must stay byte-identical (OpenCode) do not set it, and the
-   * field stays pairing-only — `turnId` remains span identity (D6).
+   * each turn's content to its neighbour. Off by default: a provider whose
+   * parser output must stay byte-identical does not set it (Kilo Code, the
+   * only remaining user of this parser, sets it), and the field stays
+   * pairing-only — `turnId` remains span identity (D6).
    */
   pairingIdFromMessageId?: boolean
 }
@@ -316,7 +345,7 @@ export function createSqliteSessionParser(
             providerName: config.providerName,
             dedupKey,
             sessionId,
-            data,
+            data: withQualifiedModel(data),
             parts: partsByMsg.get(msg.id) ?? [],
             timeCreatedMs: msg.time_created,
             userMessage: currentUserMessageBySession.get(msg.session_id) ?? '',

@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-28
 ---
 
 # Kyber-Weave documentation
@@ -36,7 +36,7 @@ correct in a repository that arranges its documentation differently.
 
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
-- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a twelve-target harness catalog; twelve targets render today with rollback
+- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a thirteen-target harness catalog; thirteen targets render today with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
@@ -117,15 +117,16 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 ## Feature 3 — Kyber-Squad
 
 Unified multi-harness deployment and lifecycle control plane for 24 canonical agents and
-28 skills, each owner projecting a validated resource closure beside its rendered principal.
-The product declares twelve harness targets; all twelve are implemented and registered today
-(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
+29 skills, each owner projecting a validated resource closure beside its rendered principal.
+The product declares thirteen harness targets; all thirteen are implemented and registered today
+(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
 | Page | Covers |
 |---|---|
 | [Overview & Why Kyber-Squad](kyber-squad/README.md) | Value proposition, solving multi-harness fragmentation, capability lattices |
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
+| [Model profiles and presets](kyber-squad/model-profiles.md) | The six semantic profiles, per-harness token shapes, creating, applying, switching, and reverting presets |
 | [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine, conductor execution circuit-breaker |
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix, conductor circuit-breaker harvest |
 
@@ -133,7 +134,7 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 
 Parallel code review: a council of specialist lenses over the diff, the host's deterministic
 gate suite, and a rule-based verdict engine that decides from both.
-Start at the [Review council overview](code-review/README.md) for the idea and the three commands.
+Start at the [Review council overview](code-review/README.md) for the idea and the four commands.
 
 | Page | Covers |
 |---|---|

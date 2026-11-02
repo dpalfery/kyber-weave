@@ -2,16 +2,21 @@
 
 Standing guidance for every reviewer of a Kyber-Weave change: the
 `code-reviewer` council and its lenses, and automated PR reviewers. It is distilled from the
-findings Kilo and CodeRabbit raised across about 100 pull requests in two weeks (30 Sep – 14 Oct
-2026) and from the fixes that were accepted. It adds to — never replaces — the governing
-standards: [`AGENTS.md`](AGENTS.md), [`docs/standards/`](docs/standards/README.md) and
-[`docs/rules/`](docs/rules/README.md).
+findings Kilo and CodeRabbit raised across about 100 pull requests from 30 Sep to 14 Oct 2026, and from the 125 Kilo inline comments on PRs #407-#439 (mid to late October 2026), with the fixes that were accepted. It adds to — never replaces — the governing standards: [`AGENTS.md`](AGENTS.md), [`docs/standards/`](docs/standards/README.md) and [`docs/rules/`](docs/rules/README.md).
 
 ## How reviewers use this file
 
 - **`code-reviewer` council** — each lens takes the sections that match it
   ([lens map](#lens-map)). The adjudicator discards any finding that does not meet the
   *Ground rules*.
+- Each review-lens seat returns `guidance: [<section ids>]` on every finding, for example
+  `guidance: [R8, §1]`.
+- Rules tagged with an id (`R2`–`R16`) are cited by that id. Untagged bullets are cited by
+  section number (`§N`). Never invent an id for an untagged bullet.
+- A `NO FINDINGS` reply names the sections it checked.
+- A seat given guidance that returns no attestation is recorded as a council-coverage gap; its
+  findings are not dropped.
+- *(low evidence)* marks a rule that rests on one PR or a thin body of evidence.
 - **Never** cite `scripts/fast-loop.sh` as evidence; only the declared gate suite counts.
 
 ## Ground rules
@@ -51,22 +56,36 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
 
 ### 2. Untrusted numbers and shapes
 
-- `typeof x === 'number'` accepts `NaN` and `Infinity`; require `Number.isFinite`. Also
-  guard numeric DB columns (`NaN` from a non-numeric value) and divisions.
-- Wire and transcript data (`JSON.parse`, API casts, transcript fields such as `input`,
-  `arguments`) is `unknown` until validated. A TypeScript cast is not validation. Reject
-  `42`, `[]`, `true`, and `null` where an object is expected.
+- **R2** `typeof x === 'number'` accepts `NaN` and `Infinity`; require `Number.isFinite`. Also
+  guard numeric DB columns (`NaN` from a non-numeric value) and divisions. Read every number from
+  untrusted input through one guard: `Number.isFinite`; `>= 0` for counts; `Number.isSafeInteger`
+  for indexes. Never compare an unvalidated value with `>`. (#439, #435, #433, #422, #414)
+- **R3** Wire and transcript data (`JSON.parse`, API casts, transcript fields such as `input`,
+  `arguments`) is `unknown` until validated. A TypeScript cast is not validation. Reject `42`,
+  `[]`, `true`, and `null` where an object is expected. (#433, #425)
+- **R3** Validate every level of an untrusted payload: nested objects, field types, script inputs,
+  and API responses, including error responses with no data. (#439, #425)
+- **R3** Parsers reject invalid input. Decode strictly (`fatal: true`). Forward only allowlisted
+  keys. Never invent identity (for example, a fabricated `sessionId`). (#433, #425)
 - A flat fallback must not override a more specific field that is present (precedence order
   stated and tested).
-- In .NET, a deserialised value (`as T`, `JsonSerializer` result) must be null-checked and
-  shape-checked before use; `"maybe"` is not a valid enum-like string.
+- **R4** In .NET, a deserialised value (`as T`, `JsonSerializer` result) must be null-checked and
+  shape-checked before use; `"maybe"` is not a valid enum-like string. Don't use `!` on a value
+  that can be null at runtime (merged config, deserialised data, receipts, `TryGetValue` results);
+  guard it or reject it with a validation error. (#431)
 
 ### 3. Failure handling that hides the failure
 
-- **No empty or blanket `catch`.** Catch the specific errors you can act on and let the rest
-  propagate to a visible diagnostic. The accepted split for filesystem probes: `ENOENT` /
+- **R5** **No empty or blanket `catch`.** Catch the specific errors you can act on and let the
+  rest propagate to a visible diagnostic. The accepted split for filesystem probes: `ENOENT` /
   `ENOTDIR` mean *absent*; `EPERM` / `EACCES` / `EBUSY` / `IOException` / `UnauthorizedAccess`
-  mean *present but unusable* and must surface, not be treated as empty.
+  mean *present but unusable* and must surface, not be treated as empty. Examples to reject: a
+  Python `except OSError:` that publishes or skips, and coercing a wrong shape to empty
+  (`components = []`), which hides the failure. (#432, #434, #431, #433, #414)
+- **R6** Check a "never throws" or "fails closed" contract against every call inside it. Catch
+  filters must cover the documented failure set (IO, `UnauthorizedAccess`, Win32, timeout), not
+  only the one error seen. Every probe (`lstat`, or `existsSync` then a read) runs inside the
+  `try`. (#435, #434, #414, #422)
 - Promises are awaited or have a `.catch`. `void promise` on a clipboard, close, or flush call
   produces unhandled rejections. Fire-and-forget needs an explicit error sink.
 - A failed precondition must not report success: an invalid request returning `noop`, exit
@@ -77,12 +96,19 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
 - Reads that can fail on a locked or missing store (`getMetadata`, `prepare().get()`) are
   inside the `try`, including setup calls such as `PRAGMA`.
 - Ordering that matters for crash recovery (receipt then ledger, marker last) is stated in a
-  comment, and sibling code paths follow the same order or explain why not.
+  comment, and sibling code paths follow the same order or explain why not. A comment documenting
+  an ordering or crash-window rationale on one path needs its sibling paths to carry it or
+  reference it (see also [§11](#11-docs-plans-and-agent-files)).
 
 ### 4. Unbounded work and unbounded growth
 
-- Any query without `LIMIT`/paging that is materialised and JSON-parsed in full; any per-row
-  query inside a loop over all runs/sessions; any structure rebuilt per request.
+- Before flagging any unbounded-work finding, name the growth dimension: what grows, and with
+  what input (rows per run, sessions per day, requests per second, and so on).
+- Any query without `LIMIT`/paging that is materialised and JSON-parsed in full, where the named
+  dimension grows without bound.
+- Any per-row query inside a loop over all runs/sessions.
+- Any structure rebuilt per request, where the named dimension grows with the request count or
+  the dataset size.
 - UI work per render or per keystroke: `JSON.stringify` of large payloads, full-tree scans,
   spreading thousands of items into a constructor (`new X(...ranges)`), O(n²) membership
   checks. Large values stringify lazily (on click) and behind a size cap.
@@ -92,6 +118,9 @@ Governing rule: [honest unobservability](docs/rules/honest-unobservability.md).
   or reference it.
 - Time-window clustering must say whether it is chaining (single-linkage) or bounded; chaining
   silently merges distinct events across a long sequence.
+- **R7** *(low evidence)* Cap the serialized size of host-supplied payloads and every parser
+  token. Page through an external list until `hasNextPage` is false, or fail loudly at the page
+  limit. (#435, #433, #439)
 
 ### 5. Identity, dedup, and merge correctness
 
@@ -104,13 +133,18 @@ Most of the Major CodeRabbit findings were here.
 - Dedup passes are restricted to the sources that can actually produce twins; `isFileSource`
   is not evidence of a twin collector.
 - When merging counters, compare *every* dimension (including `reasoning`), not a subset.
-- Substring matching on identifiers (`codex-desktop` matching `desktop`) → explicit
-  equality or an explicit set.
+- **R8** A normalisation function exists once. A second copy of a predicate (`normalizeHarnessName`,
+  empty-vs-measured, token-total) is a finding; map keys built with it must be looked up with it
+  everywhere. Apply one sanitizer, validator, or normaliser per value on every sibling entry path,
+  and derive the same field the same way in every module. (#439, #435, #434, #431)
+- **R9** *(low evidence)* Substring or keyword matching is not identity. `codex-desktop` matching
+  `desktop` → explicit equality or an explicit set. Likewise `Contains("documentation waiver")`
+  and `.Contains(retired)` are not identity checks. (#434)
 - 0-based vs 1-based endpoints, and pagination `page` derived from the *applied* offset and
   limit, not the requested ones.
-- A normalisation function exists once. A second copy of a predicate (`normalizeHarnessName`,
-  empty-vs-measured, token-total) is a finding; map keys built with it must be looked up with
-  it everywhere.
+- *(low evidence)* Compare against the same root's receipt, not another root's, when checking
+  drift (see the *compare like with like* rule in [§9](#9-net--c-renderers-and-tool-catalogs)).
+  (#435)
 
 ### 6. Persistence and filesystem
 
@@ -122,13 +156,27 @@ Most of the Major CodeRabbit findings were here.
 - Zero-record checkpoints are not reused as proof that records were committed.
 - Case folding can change string length (`İ`); never reuse offsets from a lower-cased copy on
   the original string.
+- **R10** Contain every path that comes from a receipt, manifest, archive member, or caller:
+  resolve the canonical full path, check it against the root prefix, and reject rooted paths
+  and `..`. (#435, #434, #432, #431)
+- **R10** Refuse symlinks before writing or deleting (`lstat`; no-follow delete). A check-then-write
+  that follows a symlink is a finding. (#435, #431)
+- **R10** Write atomically through an unpredictable temp file (`wx`, `fsync`, rename), not a
+  predictable `<pid>.tmp`. (#435)
+- **R10** Tighten permissions on existing files, not only new ones. (#414)
 
-### 7. Cross-platform shell and paths
+### 7. Cross-platform shell, scripts, CI, and line endings
 
 The repo runs on macOS (BSD userland), Linux (GNU), and Windows.
 
 - `mktemp -t` / `sed -i` / `date` / `stat` flags differ between BSD and GNU. Scripts use
-  portable forms or branch explicitly, and clean up temp files on every exit path.
+  portable forms or branch explicitly, and clean up temp files on every exit path. **R11** On
+  failure, restore state (ownership, stale outputs) and log each retry. (#420, #432)
+- **R11** Workflow values that depend on the triggering event (for example `base_ref`, empty on
+  `push`) branch on the event and reach the shell through `env`, not interpolation. (#434)
+- **R11** A list used in two places lives in one place and is read from there. (#420)
+- **R11** *(low evidence)* Frontmatter and line slicing take the delimiter length from the matched
+  text (`\r\n` or `\n`), never a fixed offset. (#431)
 - Tests relying on POSIX permissions, symlinks, or path separators are skipped or isolated on
   Windows and the CI job must say so; a CI job that runs a subset must match the comment
   that describes it.
@@ -162,9 +210,7 @@ Governing rules: [display layer](docs/rules/kyberdash-display-layer.md),
 Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) and the
 `code-review` skill's C# reference.
 
-- Renderers must escape or quote values that can carry YAML/Markdown/JSON metacharacters
-  (model ids with spaces or suffixes, `[reasoningEffort=…]`, wildcards `server/*`) and be
-  tested for the *negative* ("coarse wildcard is **not** emitted in the granular render").
+- Escaping and interpolation: see [§12](#12-untrusted-values-reaching-an-interpreter-or-a-generated-document) (R13).
 - The tool catalog is an ordered, pinned list: changing it requires updating the exact-order
   test deliberately, and each tool's required capability (`filesystem.read`,
   `process.execute`) must be consistent with sibling tools doing the same thing.
@@ -184,6 +230,12 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 - Don't delete a guard assertion while the behaviour it guarded is still live.
 - Inputs used by tests should be derived from the contract, not copied from the
   implementation's constants.
+- **R14** Structural tests assert structure: scope checks to the job or `needs:` block; compare
+  sets, not strings or `IndexOf` order; assert a definition, not a mention. Derive expected counts
+  from the source. Helpers guard JSON `ValueKind` and `Assert.Fail` with the path. Enforce contract assertion rigor: flag bare single-word `Assert.Contains` checks that match common boilerplate; flag unguarded boolean `||` assertions where one branch matches unrelated text; flag non-contiguous `foreach` field checks over multi-line schemas (require contiguous schema assertions that verify multi-line block integrity). (#432, #422, #415, #408)
+- **R15** *(low evidence)* On fix PRs, every new guard or parser ships a malformed-input test
+  (wrong type, non-finite, negative, CRLF, empty) that fails with the fix reverted. (#439, #414,
+  #435)
 
 ### 11. Docs, plans, and agent files
 
@@ -193,13 +245,66 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   ([relocation over deletion](docs/rules/relocation-over-deletion.md)).
 - Doc comments describe what the code does, not what the author hoped: "keys **or** paths"
   when only paths are returned is wrong.
-- A comment documenting an ordering or crash-window rationale on one path needs its sibling
-  paths to carry it or reference it.
+- Ordering comments and sibling paths: see [§3](#3-failure-handling-that-hides-the-failure)
+  (crash-recovery ordering).
 - Agent and prompt files: guidance must not contradict itself (a "cap" bullet next to
   "no cap"), must name which tool/flag it means, and must not instruct a non-interactive
   agent to run an interactive command or confirm an unspecified thing.
+- **R16** Agent and skill prompts define every outcome, verdict, key, and rubric they refer to,
+  and change together with their sibling contracts. Require literal parsing of prompt instructions: prohibit charitable reading of prompts, as models interpret instructions literally. Flag any gate deadlock, ambiguity, or contradiction/self-contradiction across rules; enforce cross-document and prompt-to-prompt contract parity. (#424, #434, #429)
+- The reference for a document's claim is the code. Verify each count, size, list, procedure
+  and absolute ("once", "only", "always", "all") against the code, then search documents the
+  diff did not touch for the old value. An archived plan is corrected, not left false.
+- Every count, size, and file list a document gives for code ("~15 files", "creates once",
+  "copies the .git directory") is checked against the code it describes, not against the PR
+  description or another document. (#468)
+- **R16** Counts, status lines, claimed measurements, and links are updated everywhere they
+  appear. (#410, #419, #432)
+- **R16** *(low evidence)* Code examples in skill references obey the surrounding guidance. (#415)
 - Archived or completed plans are not edited except to correct them; open gates (e.g. a
   live-store acceptance owner gate) are recorded as open, not omitted.
+
+### 12. Untrusted values reaching an interpreter or a generated document
+
+- **R13** Renderers must escape or quote values that can carry YAML/Markdown/JSON metacharacters
+  (model ids with spaces or suffixes, `[reasoningEffort=…]`, wildcards `server/*`) and be tested
+  for the *negative* ("coarse wildcard is **not** emitted in the granular render").
+- **R13** Pass values as parameters (GraphQL variables, argv arrays, quoted YAML scalars), never
+  by string interpolation. (#431, #439)
+- **R13** Use an allowlist, not a denylist, for shell metacharacters. A denylist misses `&`, `|`,
+  `<`, `>`. (#431)
+- **R13** Match hosts and addresses by parsing, not by spelling. Forms such as `127.0.0.2`,
+  `[::1]`, and `2130706433` must all be recognised as loopback. (#435)
+
+### 13. TypeScript for Node (dash engine, capture plugins, MCP, statusline)
+
+- **R12** Keep module state per session or instance, and make every shutdown path clear it. Global
+  state such as an active TUI or a live-TUI list leaks across sessions. (#422)
+- **R12** Copy an object received from another component before mutating it. Do not `delete` a
+  field on a cached object. (#433)
+- **R12** For child processes, await only on live state, and attach a stdin error listener so
+  `EPIPE` is handled. (#433)
+- **R12** Derive a decision from one filesystem read, not two. A second read is a time-of-check
+  race. (#414)
+- **R12** *(low evidence)* Do not type host handlers as `never[]` or `any[]`. (#422)
+- Shared registrations across instances are covered in [§8](#8-react-and-typescript-ui-kyberdash).
+
+### 14. Test infrastructure: shared state, caches, and fixtures
+
+- A cached or shared fixture handed to parallel tests is immutable by construction (copy,
+  frozen type, read-only view), not by comment.
+- A cache of `Task`, `Lazy`, or computed results decides what a failure does; a faulted entry
+  is never kept for the life of the process.
+- Cache keys and directory names built by sanitising strings cannot collide and handle every
+  separator on every supported OS; prefer a hash over replacement.
+- Code that sets process-global state (environment, `Console.Out` and `Console.Error`, current
+  directory, statics) restores it, and no assertion reads such state as a precondition.
+- A capture scope outlives the work started inside it, or says plainly that it does not.
+- A regex or string rewrite that derives a fixture asserts that it matched, in every format the
+  source may use (inline or block list, LF or CRLF).
+- Removing a serialising collection or `DisableParallelization` comes with a search for every
+  remaining writer of the state it guarded.
+- A cache or temp root that grows per distinct key names its bound or its cleanup. (#468)
 
 ### Scope discipline
 
@@ -221,18 +326,54 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 
 ## Lens map
 
+Each seat gets its lens row, the technology rows that match the diff, and the *Ground rules*.
+A refuter gets the same sections as the seat it refutes. The three triage seats
+(duplicate-implementation, static-analysis-triage, dependency-supply-chain) get *Ground rules*
+and *What not to flag* only.
+
+### By lens
+
 | Lens | Take these sections |
 |---|---|
-| correctness | 1, 2, 3, 5, 6 |
-| performance / scalability | 4 |
-| security, authz-tenancy | 2, 3 (error disclosure), 6 (paths) |
-| test-adequacy | 10 |
 | intent-alignment | Scope discipline, 11 |
-| docs / agent-instruction | 11 |
-| react / UI | 8 |
-| csharp / renderers | 9 |
-| ci / scripts | 7 |
-| every other lens | Ground rules and *What not to flag* only; take a section only when the diff touches its pattern |
+| correctness | 1, 2, 3, 5, 6, 7, 13 |
+| security | 2, 4, 5, 6, 12 |
+| authz-tenancy | 6, 12 |
+| di-composition | Ground rules only |
+| model-placement | Ground rules only |
+| prior-art | 5 |
+| duplicate-implementation | Ground rules and *What not to flag* only |
+| test-adequacy | 10 |
+| test-infrastructure | 4, 10, 14 |
+| documentation-accuracy | 11, Scope discipline |
+| static-analysis-triage | Ground rules and *What not to flag* only |
+| performance | 4, 13 |
+| blast-radius-revertibility | 3, 6, 11 |
+| supportability | 3 |
+| dependency-supply-chain | Ground rules and *What not to flag* only |
+| infra-workflow | 7, 12 |
+
+## Technology map
+
+### By technology
+
+The sections named here are sections of this file. Only the technologies with a file under `references/` also have a standalone checklist; `shell` and `agent-prompts` use these sections alone.
+
+| Technology | Files | Take these sections |
+|---|---|---|
+| azure | Azure resource definitions | 12 |
+| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14 |
+| github-actions | `.github/workflows/*.yml`, `templates/github-actions/*.yml` | 7, 12 |
+| pulumi | Pulumi programs | 12 |
+| python | `*.py` and embedded Python | 2, 3, 4, 5, 12 |
+| react | `*.tsx`, `*.jsx`, React UI `.ts` | 1, 2, 8 |
+| sql | `*.sql`, migrations | 4, 6 |
+| typescript | Node `*.ts`, `*.mts`, `*.cts`, `*.mjs` outside a React UI | 1, 2, 3, 4, 5, 6, 10, 12, 13, 14 |
+| rust | `*.rs`, `Cargo.toml`, `build.rs` outside Tauri | 3, 6 (no Kilo evidence) |
+| tauri | `src-tauri/**`, IPC, capabilities | 6, 12 (no Kilo evidence; also load the rust and react rows) |
+| go | `*.go`, `go.mod` | 3, 6 (no Kilo evidence) |
+| shell | `*.sh`, `*.bash`, `scripts/**` | 3, 6, 7, 12 |
+| agent-prompts | `products/**/agents/**/*.md`, `**/SKILL.md`, skill `references/*.md`, `docs/plans/**`, `docs/archive/**` | 11, Scope discipline |
 
 Single tasks are not reviewed by an agent: the developer's deterministic `task-gate` covers the
 mechanical checks, and everything judgemental is council-owned.
@@ -245,9 +386,12 @@ WHERE     <file>:<line> — quoted excerpt
 CLASS     <section number and name>
 FAILS     <input or state> → <wrong behaviour>
 FIX       <exact change>; test: <what proves it>
+GUIDANCE  <section ids>
 ```
 
 ## Maintaining this file
 
-Add a rule here when the same class of finding appears in three or more reviews; delete one
-that stops recurring. Link the rule it derives from instead of restating it.
+Add a rule here when the same class of finding appears in three or more reviews across at least
+two PRs, or when it extends an existing rule. A class below that threshold becomes an example
+bullet under the nearest section. Delete one that stops recurring. Link the rule it derives from
+instead of restating it.

@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { KyberBridge } from './bridge.js'
 import { callRoute, makeDeps } from './testing.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // Same lock stub as clean-bridge.test.ts: a clean takes the store refresh lock, and the
 // tests must never touch the real ~/.kyberdash lock file.

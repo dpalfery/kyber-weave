@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-31
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -130,29 +130,46 @@ engine over different artifacts.
 
 ## Kyber-Weave ships a skill of its own
 
-`kyber-weave-docs`, at `.apm/skills/kyber-weave-docs/`, is the authoring skill
+`kyber-docs-authoring`, at `.apm/skills/kyber-docs-authoring/`, is the authoring skill
 [`docs init`](../docgraph/onboarding.md) deploys. It is governed by the gates on this
 page like any other — `skill validate` and `skill scan` clean, routing score 100/100 —
 which is the only honest way to ship a skill from a skill-governance tool.
 
-It is distributed as an [APM](https://microsoft.github.io/apm) package, so the harness
-layout for each runtime is APM's problem rather than a second copy of that mapping here.
+It is distributed as an [APM](https://microsoft.github.io/apm) package, so on the `docs init` path the
+harness layout for each runtime is APM's problem rather than a second copy of that mapping here. It
+also ships through [Kyber-Squad](../kyber-squad/architecture.md), beside the Squad skills, under
+[ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md). The five other Kyber-Weave
+skills in `.apm/skills/` ship the same two ways.
+
+### `codegraph`
+
+`codegraph`, at `.apm/skills/codegraph/`, makes the CodeGraph index usable in a repository. It
+is registered here as the second shipped skill.
+
+- **Trigger:** use when the CodeGraph index (`.codegraph/`) is missing or stale, when codegraph
+  tools report a project is not indexed, or when `docs drift` fails `KW-DOC-DRIFT-001`. Ordinary
+  code search is excluded: the skill says to call `codegraph_explore` directly.
+- **Behaviour:** runs `kyber-weave doctor --check`, and branches on the exit code. It never runs
+  `codegraph` itself. See the [`doctor` verb](../cli-command-surface.md#doctor--repository-documentation-tooling).
+- **Gates:** `skill-validate-codegraph`, `skill-lint-codegraph` (`--min-desc-score 70`), and
+  `skill-scan-codegraph` (`--fail-on critical`) in [`.kyber-weave/kyber-weave.yml`](../../.kyber-weave/kyber-weave.yml).
 
 ## Deployment control plane with Kyber-Squad
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 28 canonical skills
-(alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/` and
-manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
-harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
-`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
+(alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/`. It also
+deploys the six Kyber-Weave skills from `.apm/skills/` beside them, 34 skills in each release
+archive, and manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares thirteen
+harness targets. All thirteen renderers are implemented and registered (`copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`).
 
-Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
-`second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the canonical
+Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
+`create-pull-request`, and `pr-review-fix-comments`) matches the canonical
 bytes; the retired `create-pull-request-github` skill is folded into `create-pull-request`.
-Canonical storage and recursive Squad packages preserve 82 supplemental resources, for 110
-skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
+Canonical storage preserves 88 supplemental resources, for 116 skill-tree files. Each release archive
+adds the six `.apm/skills` skills and their three resource files, for 125 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
 skill-UI metadata. The tracked root `.github/` self-deployment predates resource delivery. Every

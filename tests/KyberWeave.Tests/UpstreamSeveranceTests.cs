@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -43,7 +45,7 @@ public sealed class UpstreamSeveranceTests
     {
         "getagentseal",
         "agentseal.org",
-        "codeburn.app",
+        "codeburn.app"
     };
 
     // Requirement 1.5: the attribution files are where the upstream notice is
@@ -57,16 +59,21 @@ public sealed class UpstreamSeveranceTests
     {
         "dash/LICENSE",
         "dash/THIRD_PARTY_NOTICES.md",
-        "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs",
+        "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs"
     };
 
     [Fact]
     public void NoTrackedFileOutsideDocsNamesTheUpstream()
     {
-        List<string> offenders = new();
-        foreach (string relativePath in ListTrackedFiles())
+        List<string> trackedFiles = ListTrackedFiles();
+        ConcurrentBag<string> offenders = new();
+
+        Parallel.ForEach(trackedFiles, relativePath =>
         {
-            if (IsExempt(relativePath)) continue;
+            if (IsExempt(relativePath))
+            {
+                return;
+            }
 
             string absolutePath = Path.Combine(RepoRoot, relativePath);
             byte[] bytes;
@@ -76,7 +83,7 @@ public sealed class UpstreamSeveranceTests
             }
             catch (IOException)
             {
-                continue; // deleted between listing and reading; not tracked content
+                return; // deleted between listing and reading; not tracked content
             }
 
             // Latin-1 maps every byte to a char, so the ASCII markers are
@@ -87,13 +94,14 @@ public sealed class UpstreamSeveranceTests
             {
                 offenders.Add(relativePath);
             }
-        }
+        });
 
+        List<string> sortedOffenders = offenders.OrderBy(static path => path, StringComparer.Ordinal).ToList();
         Assert.True(
-            offenders.Count == 0,
+            sortedOffenders.Count == 0,
             "Requirement 1.6: tracked files outside docs/ must not name the upstream. " +
             "Remove the reference, or move the record under docs/ where the fork's " +
-            $"history is allowed to name it:\n  {string.Join("\n  ", offenders)}");
+            $"history is allowed to name it:\n  {string.Join("\n  ", sortedOffenders)}");
     }
 
     /// <summary>
@@ -143,7 +151,7 @@ public sealed class UpstreamSeveranceTests
         {
             "cp THIRD_PARTY_NOTICES.md \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"",
             "tar -C \"${BIN_DIR}\" -czf \"${BIN_DIR}/kyberdash-${RID}.tar.gz\" \"kyberdash${EXE}\" THIRD_PARTY_NOTICES.md",
-            "zip -9 -j \"${BIN_DIR}/kyberdash-${RID}.zip\" \"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"",
+            "zip -9 -j \"${BIN_DIR}/kyberdash-${RID}.zip\" \"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\""
         };
         foreach (string fragment in requiredFragments)
         {
@@ -165,24 +173,21 @@ public sealed class UpstreamSeveranceTests
     {
         ProcessStartInfo start = new("git")
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            WorkingDirectory = RepoRoot,
+            WorkingDirectory = RepoRoot
         };
         start.ArgumentList.Add("ls-files");
         start.ArgumentList.Add("-z");
 
-        using Process process = Process.Start(start)
-            ?? throw new InvalidOperationException("git could not be started.");
-        string stdout = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-
-        Assert.True(process.ExitCode == 0, $"git ls-files failed: {process.StandardError.ReadToEnd()}");
+        ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));
+        Assert.True(result.ExitCode == 0, $"git ls-files failed: {result.StandardError}");
 
         // -z separates entries with NUL, so paths with spaces or quotes stay
         // one entry each.
-        return stdout
+        return result.StandardOutput
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .ToList();
     }

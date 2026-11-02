@@ -1,231 +1,376 @@
-// Opencode plugin span mapper (T3): T0 payloads onto the T1 envelope.
+// Wire mapping for the OpenCode V2 capture plugin (contract 3): finished request, step and tool
+// records onto OTLP spans.
 //
-// The dash-CLI-managed plugin observes session/turn/span hooks with the
-// shapes surveyed in T0 (`fixtures/span-payload-skeleton.json`: session id,
-// turn index, agent, model provider/id, prompt text, token counters, tool
-// call, error). Ingest only claims the T1 envelope
-// (`canon/adapters/opencode-envelope.ts`): the version key plus
-// `opencode.turn/model/tool/prompt/call/message/hook` markers, with the tool
-// marker winning the operation vote and a marker-less span quarantining as
-// non-model.
-//
-// The mapper is the bridge, and nothing else: it stamps the supported
-// contract version, carries the session identity verbatim (never
-// synthesized), writes the model/tool markers the adapter votes on, and
-// converts the T0 counters onto the OpenInference `llm.token_count.*` keys
-// the adapter already reads through the cache-EXCLUSIVE convention (pi's
-// shape, not Copilot's inclusive one — the live `llm.token_count.prompt`
-// 616 beside `prompt_details.cache_read` 159744 proves the prompt carries
-// fresh input alone). Timing and error status ride the OTLP span itself,
-// which `growWithReceiverTiming` stamps onto the record; no transport,
-// outbox, receiver, web, tray, resolver, or API change lives here.
+// This module is pure. The plugin (`plugin.ts`) decides WHAT happened and WHEN; this module only
+// says how a finished record looks on the wire. Every key, span name and id comes from
+// `contract.ts`, the one home of contract-3 strings. An absent measurement stays absent: a field
+// the record does not carry is never written as 0 or ''. Content (prompt text, session label,
+// system prompt, tool definitions, skills listing) is attached only when the caller hands it over,
+// and the caller decides consent.
 
 import {
-  OPENCODE_CONTEXT_SKILLS_KEY,
-  OPENCODE_CONTEXT_SYSTEM_KEY,
-  OPENCODE_CONTEXT_TOOLS_KEY,
   OPENCODE_CONTRACT_VERSION,
-  OPENCODE_CONTRACT_VERSION_KEY,
-} from '../../../canon/adapters/opencode-envelope.js'
-import type { OtlpSpan } from '../../../otel/receiver.js'
+  OPENCODE_KEYS,
+  SPAN_NAMES,
+  spanIdFor,
+  traceIdFor,
+  type SpanKind,
+} from './contract.js'
+import { MAX_FIELD_BYTES, capUtf8 } from './skills-block.js'
+import type { OtlpWireAttribute, OtlpWireSpan, OtlpWireStatus } from './transport/otlp-sender.js'
 
-/** Token counters as the hook payload carries them (T0 `tokens` bucket). */
-export type OpencodePluginSpanTokens = {
-  input_tokens: number
-  output_tokens: number
-  cache_read_tokens?: number
-  cache_creation_tokens?: number
-  reasoning_tokens?: number
-}
-
-/** Error detail as the hook payload carries it (T0 `errors` bucket). */
-export type OpencodePluginSpanError = {
-  type?: string | null
-  message?: string | null
-  status?: string | number | null
-  attempt?: number | null
-  retry_decision?: string | null
-}
+/** Prompt text on the request span is capped at this many UTF-8 bytes. */
+export const MAX_PROMPT_BYTES = 64 * 1024
 
 /**
- * A real-shaped plugin span payload: the T0 skeleton with its empty strings
- * filled in. Every field the skeleton surveys is present so the mapper test
- * pins the whole round trip; optional fields stay optional so a marker-less
- * app span (no model, no tool) is still expressible and still quarantines as
- * non-model per the T1 rules.
+ * Cap on each other content field (system prompt, tools JSON), in characters (UTF-16 units, at
+ * most 3 bytes each in UTF-8). A host prompt or tool catalogue can be megabytes; content past the
+ * cap is cut and ends with `CONTENT_TRUNCATION_MARKER`, never sent whole.
  */
-export type OpencodePluginSpanPayload = {
-  traceId: string
-  spanId: string
-  parentSpanId?: string | null
-  name?: string
-  kind?: string
-  sessionID: string
-  messageID?: string
-  callID?: string
-  turnIndex?: number
+export const MAX_CONTENT_CHARS = 262_144
+
+/** Appended to a field that hit the cap, so a reader can tell it was cut. */
+export const CONTENT_TRUNCATION_MARKER = '\n[kyberdash: truncated]'
+
+/** Latest event time accepted, in epoch milliseconds: 9999-12-31T23:59:59.999Z. */
+export const MAX_EPOCH_MS = 253_402_300_799_999
+
+// ---------------------------------------------------------------------------------------------
+// Records
+
+/** How a request ended. `unknown` means no terminal execution event was seen. */
+export type RequestOutcome = 'succeeded' | 'failed' | 'interrupted' | 'unknown'
+
+export type RequestRecord = {
+  sessionId: string
+  /** The execution-started event id: the request's span anchor. */
+  anchorId: string
+  startMs: number
+  endMs: number
+  outcome: RequestOutcome
+  /** The interrupt reason; only an interrupted request carries one. */
+  reason?: string
   agent?: string
-  model?: { providerID: string; modelID: string }
-  prompt_text?: string
-  tool?: string
-  /** Assembled system prompt (T4, T0 `SessionContext.system`); carried only when non-empty. */
-  systemPrompt?: string
-  /** JSON-serialized tool definitions (T4, T0 `SessionContext.tools`); carried only when non-empty. */
-  toolsText?: string
-  /** Skill names listed for the session (T4, T0 pin); serialized as a JSON array, carried only when non-empty. */
-  skills?: string[] | string
-  /** Plain model identity from a context event (T4); carried only when non-empty. */
-  modelId?: string
-  tokens?: OpencodePluginSpanTokens
-  errors?: OpencodePluginSpanError
-  startTimeUnixNano: string | number | bigint
-  endTimeUnixNano: string | number | bigint
-  hook?: string
+  version?: string
+  /** Prompts seen in the execution; absent when none was observed. */
+  promptCount?: number
+  /** Content. Present only when consent allowed it. */
+  promptText?: string
+  label?: string
 }
 
-function nonEmpty(value: unknown): value is string {
+export type StepUsage = {
+  input?: number
+  output?: number
+  reasoning?: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
+export type StepContent = {
+  system?: string
+  /** JSON array text of `[{name, description, input}]`. */
+  tools?: string
+  /** Skill ids listed in the system prompt's `<available_skills>` block. */
+  skills?: readonly string[]
+}
+
+export type StepRecord = {
+  sessionId: string
+  /** The step's assistant message id: its span anchor, and the key its tools point at. */
+  messageId: string
+  /** The execution-started event id of the request this step belongs to, when that was seen. */
+  requestAnchorId?: string
+  startMs: number
+  endMs: number
+  agent?: string
+  modelId?: string
+  modelProvider?: string
+  requestKind: string
+  finish?: string
+  usage: StepUsage
+  /** Reported cost; 0 is a reported value and absent means the host reported none. */
+  cost?: number
+  skills: readonly string[]
+  /** Content. Present only when consent allowed it. */
+  content?: StepContent
+}
+
+export type ToolRecord = {
+  sessionId: string
+  callId: string
+  /** The step's assistant message id; the tool's parent step is derived from it. */
+  messageId?: string
+  startMs: number
+  endMs: number
+  name?: string
+  status: 'completed' | 'error'
+  errorType?: string
+  inputBytes?: number
+  resultBytes?: number
+  /** `hook` when start and end are the plugin's own hook clock rather than the host's events. */
+  timing?: 'hook'
+  skillId?: string
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attribute helpers
+
+function str(key: string, value: string): OtlpWireAttribute {
+  return { key, value: { stringValue: value } }
+}
+
+function count(key: string, value: number): OtlpWireAttribute {
+  return { key, value: { intValue: String(Math.trunc(value)) } }
+}
+
+function strings(key: string, values: readonly string[]): OtlpWireAttribute {
+  return { key, value: { arrayValue: { values: values.map((stringValue) => ({ stringValue })) } } }
+}
+
+// One home for the guards on host values: the plugin narrows what the host sends with them and this
+// module re-checks what it writes, so a bound changed here changes both.
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/** A string that is not empty. */
+export function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value !== ''
 }
 
-function toNanoString(value: string | number | bigint): string {
-  return typeof value === 'bigint' ? value.toString() : String(value)
+/** A whole number from 0 up: a count or a byte size. */
+export function wholeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
+/** A reported cost: finite and not negative. Zero is a measurement. */
+export function nonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-// Best-effort harness clock: a junk timestamp must never throw away the
-// span+log evidence for the hook. Unparseable input falls back to now,
-// matching the installed pipeline's hook-anchored fallback.
-function nanoToMs(timestampNano: string | number | bigint): number {
-  try {
-    const ms = Number(BigInt(toNanoString(timestampNano)) / 1_000_000n)
-    return Number.isFinite(ms) ? ms : Date.now()
-  } catch {
-    return Date.now()
-  }
+/** An event time: epoch milliseconds from 1970 to the year 9999. */
+export function epochMs(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_EPOCH_MS
 }
 
-function isErrorPayload(errors: OpencodePluginSpanError | undefined): boolean {
-  if (errors === undefined) return false
-  if (typeof errors.status === 'string' && errors.status.toLowerCase() === 'error') return true
-  if (typeof errors.status === 'number' && errors.status !== 0) return true
-  return nonEmpty(errors.type) || nonEmpty(errors.message)
+/** The value when it is a non-empty string; otherwise absent. */
+export function textOf(value: unknown): string | undefined {
+  return nonEmpty(value) ? value : undefined
 }
 
-/**
- * Carry one hook payload onto envelope attributes. The version key is always
- * stamped (an envelope span names its contract); model, prompt, tool, call,
- * message, and hook markers are carried only when the payload names them, so
- * a marker-less app span stays marker-less and the adapter keeps it
- * `unspecified` for the non-model quarantine.
- */
-export function mapOpencodePayloadToAttributes(
-  payload: OpencodePluginSpanPayload,
-): Record<string, unknown> {
-  const attributes: Record<string, unknown> = {
-    [OPENCODE_CONTRACT_VERSION_KEY]: OPENCODE_CONTRACT_VERSION,
-    'opencode.session.id': payload.sessionID,
-  }
-  if (typeof payload.turnIndex === 'number' && Number.isFinite(payload.turnIndex)) {
-    attributes['opencode.turn.index'] = payload.turnIndex
-  }
-  if (nonEmpty(payload.agent)) attributes['opencode.agent'] = payload.agent
-  if (payload.model !== undefined) {
-    if (nonEmpty(payload.model.providerID)) {
-      attributes['opencode.model.provider'] = payload.model.providerID
-    }
-    if (nonEmpty(payload.model.modelID)) attributes['opencode.model.id'] = payload.model.modelID
-  }
-  if (nonEmpty(payload.prompt_text)) attributes['opencode.prompt.text'] = payload.prompt_text
-  // T4 context content (envelope v2): carried only when named, so absent
-  // fields stay absent — never empty-string padding.
-  if (nonEmpty(payload.systemPrompt)) attributes[OPENCODE_CONTEXT_SYSTEM_KEY] = payload.systemPrompt
-  if (nonEmpty(payload.toolsText)) attributes[OPENCODE_CONTEXT_TOOLS_KEY] = payload.toolsText
-  if (typeof payload.skills === 'string') {
-    if (nonEmpty(payload.skills)) {
-      // A serialized empty list measures the same none as an absent list:
-      // drop it so `[]` and `'[]'` stay one measurability. Malformed text
-      // stays stamped — the adapter reports it under its named reason.
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(payload.skills)
-      } catch {
-        parsed = undefined
-      }
-      if (!(Array.isArray(parsed) && parsed.length === 0)) {
-        attributes[OPENCODE_CONTEXT_SKILLS_KEY] = payload.skills
-      }
-    }
-  } else if (Array.isArray(payload.skills) && payload.skills.length > 0) {
-    attributes[OPENCODE_CONTEXT_SKILLS_KEY] = JSON.stringify(payload.skills)
-  }
-  if (nonEmpty(payload.modelId)) attributes['opencode.model.id'] = payload.modelId
-  if (nonEmpty(payload.tool)) attributes['opencode.tool.name'] = payload.tool
-  if (nonEmpty(payload.messageID)) attributes['opencode.message.id'] = payload.messageID
-  if (nonEmpty(payload.callID)) {
-    attributes['opencode.call.id'] = payload.callID
-    if (nonEmpty(payload.tool)) attributes['opencode.tool.call.id'] = payload.callID
-  }
-  if (nonEmpty(payload.hook)) attributes['opencode.hook'] = payload.hook
-  if (payload.tokens !== undefined) {
-    // Non-finite counters are omitted, never stamped: NaN/Infinity would
-    // otherwise land as a confident measured value downstream.
-    if (finiteNumber(payload.tokens.input_tokens)) {
-      attributes['llm.token_count.prompt'] = payload.tokens.input_tokens
-    }
-    if (finiteNumber(payload.tokens.output_tokens)) {
-      attributes['llm.token_count.completion'] = payload.tokens.output_tokens
-    }
-    if (finiteNumber(payload.tokens.cache_read_tokens)) {
-      attributes['llm.token_count.prompt_details.cache_read'] = payload.tokens.cache_read_tokens
-    }
-    if (finiteNumber(payload.tokens.cache_creation_tokens)) {
-      attributes['llm.token_count.prompt_details.cache_write'] = payload.tokens.cache_creation_tokens
-    }
-    if (finiteNumber(payload.tokens.reasoning_tokens)) {
-      attributes['llm.token_count.completion_details.reasoning'] = payload.tokens.reasoning_tokens
-    }
-  }
-  if (payload.errors !== undefined) {
-    if (nonEmpty(payload.errors.type)) attributes['opencode.error.type'] = payload.errors.type
-    if (nonEmpty(payload.errors.message)) attributes['opencode.error.message'] = payload.errors.message
-  }
-  return attributes
+/** `textOf` cut to `MAX_FIELD_BYTES`: for a host string that is retained or sent as a label. */
+export function labelOf(value: unknown): string | undefined {
+  return nonEmpty(value) ? capUtf8(value, MAX_FIELD_BYTES) : undefined
 }
 
-/**
- * Carry one hook payload onto a decoded OTLP span ready for `ingestBatch`.
- * Timing is the harness clock verbatim (nanoseconds to ISO + duration); the
- * error status is the harness verdict verbatim (error stays error, anything
- * else stays ok). The adapter seam grows the record from exactly these
- * fields, so a mapper change here is what a round-trip test would catch.
- */
-export function mapOpencodePayloadToOtlpSpan(payload: OpencodePluginSpanPayload): OtlpSpan {
-  const attributes = mapOpencodePayloadToAttributes(payload)
-  const startMs = nanoToMs(payload.startTimeUnixNano)
-  const endMs = nanoToMs(payload.endTimeUnixNano)
-  const error = isErrorPayload(payload.errors)
-  const errorMessage =
-    payload.errors !== undefined && nonEmpty(payload.errors.message)
-      ? payload.errors.message
-      : payload.errors !== undefined && nonEmpty(payload.errors.type)
-        ? payload.errors.type
-        : undefined
+/** The value when it is a whole number from 0 up; otherwise absent. */
+export function wholeOf(value: unknown): number | undefined {
+  return wholeNumber(value) ? value : undefined
+}
+
+/** The value when it is a valid cost; otherwise absent. */
+export function costOf(value: unknown): number | undefined {
+  return nonNegativeNumber(value) ? value : undefined
+}
+
+function nanos(ms: number): string {
+  return (BigInt(Math.trunc(ms)) * 1_000_000n).toString()
+}
+
+function identity(sessionId: string, kind: SpanKind): OtlpWireAttribute[] {
+  return [
+    str(OPENCODE_KEYS.contractVersion, OPENCODE_CONTRACT_VERSION),
+    str(OPENCODE_KEYS.sessionId, sessionId),
+    str(OPENCODE_KEYS.spanKind, kind),
+  ]
+}
+
+function span(
+  sessionId: string,
+  kind: SpanKind,
+  anchor: string,
+  startMs: number,
+  endMs: number,
+  attributes: OtlpWireAttribute[],
+  extra: { parent?: string; status?: OtlpWireStatus } = {},
+): OtlpWireSpan {
   return {
-    traceId: payload.traceId,
-    spanId: payload.spanId,
-    parentSpanId: payload.parentSpanId ?? null,
-    name: payload.name ?? 'opencode.turn',
-    kind: payload.kind ?? 'internal',
-    startTimeUnixNano: toNanoString(payload.startTimeUnixNano),
-    endTimeUnixNano: toNanoString(payload.endTimeUnixNano),
-    timestamp: new Date(startMs).toISOString(),
-    durationMs: Math.max(0, endMs - startMs),
-    status: error ? { code: 'error', ...(errorMessage !== undefined ? { message: errorMessage } : {}) } : { code: 'ok' },
+    traceId: traceIdFor(sessionId),
+    spanId: spanIdFor(kind, sessionId, anchor),
+    ...(extra.parent !== undefined ? { parentSpanId: extra.parent } : {}),
+    name: SPAN_NAMES[kind],
+    kind: 'SPAN_KIND_INTERNAL',
+    startTimeUnixNano: nanos(startMs),
+    // A span never ends before it starts, whatever the two clocks said.
+    endTimeUnixNano: nanos(Math.max(startMs, endMs)),
     attributes,
-    resource: { 'service.name': 'opencode' },
-    scope: {},
+    ...(extra.status !== undefined ? { status: extra.status } : {}),
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Spans
+
+/**
+ * The request span's status. `unknown` means no terminal event was seen, which is not a failure,
+ * so it carries no status (OTLP unset) instead of an error.
+ */
+function requestStatus(outcome: RequestOutcome): OtlpWireStatus | undefined {
+  if (outcome === 'unknown') return undefined
+  return { code: outcome === 'succeeded' ? 'STATUS_CODE_OK' : 'STATUS_CODE_ERROR' }
+}
+
+/** The request span: parentless, covering one execution. */
+export function mapRequestSpan(record: RequestRecord): OtlpWireSpan {
+  const attributes = identity(record.sessionId, 'request')
+  if (nonEmpty(record.agent)) attributes.push(str(OPENCODE_KEYS.agent, record.agent))
+  if (nonEmpty(record.version)) attributes.push(str(OPENCODE_KEYS.version, record.version))
+  if (wholeNumber(record.promptCount)) attributes.push(count(OPENCODE_KEYS.promptCount, record.promptCount))
+  if (record.outcome !== 'succeeded') attributes.push(str(OPENCODE_KEYS.executionOutcome, record.outcome))
+  if (record.outcome === 'interrupted' && nonEmpty(record.reason)) {
+    attributes.push(str(OPENCODE_KEYS.executionReason, record.reason))
+  }
+  if (nonEmpty(record.promptText)) attributes.push(str(OPENCODE_KEYS.promptText, record.promptText))
+  if (nonEmpty(record.label)) attributes.push(str(OPENCODE_KEYS.sessionLabel, record.label))
+  const status = requestStatus(record.outcome)
+  return span(record.sessionId, 'request', record.anchorId, record.startMs, record.endMs, attributes, {
+    ...(status !== undefined ? { status } : {}),
+  })
+}
+
+/** The step span: one model call, child of its request when the request was seen. */
+export function mapStepSpan(record: StepRecord): OtlpWireSpan {
+  const attributes = identity(record.sessionId, 'step')
+  attributes.push(str(OPENCODE_KEYS.messageId, record.messageId))
+  if (nonEmpty(record.agent)) attributes.push(str(OPENCODE_KEYS.agent, record.agent))
+  if (nonEmpty(record.modelId)) attributes.push(str(OPENCODE_KEYS.modelId, record.modelId))
+  if (nonEmpty(record.modelProvider)) attributes.push(str(OPENCODE_KEYS.modelProvider, record.modelProvider))
+  attributes.push(str(OPENCODE_KEYS.requestKind, record.requestKind))
+  if (nonEmpty(record.finish)) attributes.push(str(OPENCODE_KEYS.stepFinish, record.finish))
+  const { usage } = record
+  if (wholeNumber(usage.input)) attributes.push(count(OPENCODE_KEYS.usageInput, usage.input))
+  if (wholeNumber(usage.output)) attributes.push(count(OPENCODE_KEYS.usageOutput, usage.output))
+  if (wholeNumber(usage.reasoning)) attributes.push(count(OPENCODE_KEYS.usageReasoning, usage.reasoning))
+  if (wholeNumber(usage.cacheRead)) attributes.push(count(OPENCODE_KEYS.usageCacheRead, usage.cacheRead))
+  if (wholeNumber(usage.cacheWrite)) attributes.push(count(OPENCODE_KEYS.usageCacheWrite, usage.cacheWrite))
+  // A reported zero cost is a measurement; an absent cost is not one.
+  if (nonNegativeNumber(record.cost)) {
+    attributes.push({ key: OPENCODE_KEYS.cost, value: { doubleValue: record.cost } })
+  }
+  if (record.skills.length > 0) attributes.push(strings(OPENCODE_KEYS.skillsInvoked, record.skills))
+  const content = record.content
+  if (content !== undefined) {
+    if (nonEmpty(content.system)) attributes.push(str(OPENCODE_KEYS.contextSystem, content.system))
+    if (nonEmpty(content.tools)) attributes.push(str(OPENCODE_KEYS.contextTools, content.tools))
+    if (content.skills !== undefined && content.skills.length > 0) {
+      attributes.push(str(OPENCODE_KEYS.contextSkills, JSON.stringify(content.skills)))
+    }
+  }
+  return span(record.sessionId, 'step', record.messageId, record.startMs, record.endMs, attributes, {
+    ...(record.requestAnchorId !== undefined
+      ? { parent: spanIdFor('request', record.sessionId, record.requestAnchorId) }
+      : {}),
+  })
+}
+
+/** The tool span: one tool call, child of the step named by its message id. */
+export function mapToolSpan(record: ToolRecord): OtlpWireSpan {
+  const attributes = identity(record.sessionId, 'tool')
+  if (nonEmpty(record.name)) attributes.push(str(OPENCODE_KEYS.toolName, record.name))
+  attributes.push(str(OPENCODE_KEYS.toolCallId, record.callId))
+  if (nonEmpty(record.messageId)) attributes.push(str(OPENCODE_KEYS.messageId, record.messageId))
+  attributes.push(str(OPENCODE_KEYS.toolStatus, record.status))
+  if (nonEmpty(record.errorType)) attributes.push(str(OPENCODE_KEYS.toolErrorType, record.errorType))
+  if (wholeNumber(record.inputBytes)) attributes.push(count(OPENCODE_KEYS.toolInputBytes, record.inputBytes))
+  if (wholeNumber(record.resultBytes)) attributes.push(count(OPENCODE_KEYS.toolResultBytes, record.resultBytes))
+  if (record.timing !== undefined) attributes.push(str(OPENCODE_KEYS.toolTiming, record.timing))
+  if (nonEmpty(record.skillId)) attributes.push(str(OPENCODE_KEYS.skillId, record.skillId))
+  return span(record.sessionId, 'tool', record.callId, record.startMs, record.endMs, attributes, {
+    ...(nonEmpty(record.messageId) ? { parent: spanIdFor('step', record.sessionId, record.messageId) } : {}),
+  })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Content shaping
+
+/**
+ * Copy a string into independent storage. `slice` on a long string keeps the parent's backing
+ * allocation alive (a V8 SlicedString), so a retained capped value can pin megabytes behind a short
+ * length. A JSON round-trip allocates a fresh string with identical UTF-16 code units, including
+ * lone surrogates, which a UTF-8 round-trip would replace.
+ */
+export function detachedCopy(text: string): string {
+  return JSON.parse(JSON.stringify(text)) as string
+}
+
+/** `text` limited to `MAX_CONTENT_CHARS`, marked when cut. Always an independent copy. */
+export function capContent(text: string): string {
+  if (text.length <= MAX_CONTENT_CHARS) return detachedCopy(text)
+  return `${detachedCopy(text.slice(0, MAX_CONTENT_CHARS))}${CONTENT_TRUNCATION_MARKER}`
+}
+
+/** Joined `system[n].text` (blank line between parts); undefined when the host sent none. */
+export function systemTextOf(system: unknown): string | undefined {
+  if (!Array.isArray(system)) return undefined
+  const parts = (system as unknown[])
+    .map((part) => (isRecord(part) && typeof part['text'] === 'string' ? part['text'] : ''))
+    .filter((part) => part !== '')
+  return parts.length > 0 ? parts.join('\n\n') : undefined
+}
+
+/**
+ * The tools object (keyed by tool name) as JSON text of `[{name, description, input}]`; undefined
+ * when empty or not serializable. Entries are serialized one at a time and the walk stops once the
+ * cap is passed, so a huge catalogue is never stringified whole; a cut result is marked, not valid
+ * JSON.
+ */
+export function toolsJsonOf(tools: unknown): string | undefined {
+  if (!isRecord(tools) || Array.isArray(tools)) return undefined
+  const names = Object.keys(tools)
+  if (names.length === 0) return undefined
+  try {
+    const members: string[] = []
+    let size = 2
+    let cut = false
+    for (const name of names) {
+      const definition = tools[name]
+      const body = isRecord(definition) ? definition : {}
+      const member = JSON.stringify({ name, description: body['description'], input: body['input'] })
+      members.push(member)
+      size += member.length + 1
+      if (size > MAX_CONTENT_CHARS) {
+        cut = true
+        break
+      }
+    }
+    return capContent(`[${members.join(',')}${cut ? '' : ']'}`)
+  } catch {
+    // A tools value JSON cannot serialize (a cycle, a BigInt) has no wire form: absent, not partial.
+    return undefined
+  }
+}
+
+/** UTF-8 size of `JSON.stringify(value)`; undefined when the value has no JSON form. */
+export function jsonBytes(value: unknown): number | undefined {
+  try {
+    const text = JSON.stringify(value)
+    return text === undefined ? undefined : Buffer.byteLength(text, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * UTF-8 size of the concatenated `text` parts of a tool result's content: the result the model
+ * receives. Undefined when the content is not a parts array.
+ */
+export function textPartsBytes(content: unknown): number | undefined {
+  if (!Array.isArray(content)) return undefined
+  let bytes = 0
+  for (const part of content as unknown[]) {
+    if (isRecord(part) && typeof part['text'] === 'string') bytes += Buffer.byteLength(part['text'], 'utf8')
+  }
+  return bytes
 }

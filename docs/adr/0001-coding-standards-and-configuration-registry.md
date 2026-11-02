@@ -4,7 +4,7 @@ title: Decoupled Coding Standards and Derived Configuration Registry
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-10-29
 ---
 
 # ADR 0001: Decoupled Coding Standards and Derived Configuration Registry
@@ -32,8 +32,10 @@ We decouple project-specific coding standards from portable agents through three
    - Standard documents reside at `<docs-root>/standards/<technology>/README.md`.
 
 2. **Derived Configuration Registry ("Config Reg")**:
-   - A machine-readable Markdown comment block (`<!-- KYBER_WEAVE_CONFIG_REG_START -->` / `<!-- KYBER_WEAVE_CONFIG_REG_END -->`) rendered into the repository root `AGENTS.md` and `CLAUDE.md`.
+   - A machine-readable Markdown comment block (`<!-- KYBER_WEAVE_CONFIG_REG_START -->` / `<!-- KYBER_WEAVE_CONFIG_REG_END -->`) spliced into the repository root `AGENTS.md` only. Root and component `CLAUDE.md` files stay hand-authored pointers to that one home; they do not carry a generated block.
    - The registry block is dynamically derived from `docs-root` and `ontology.technologies` during `kyber-weave docs init .`, ensuring zero drift and eliminating stale duplicated paths in configuration files (`KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`).
+
+   *Amended 2026-10-29:* the splice target is root `AGENTS.md` only. `ConfigRegValidator` enforces the block there; duplicating it into `CLAUDE.md` was removed from the decision in force.
 
 3. **Standard Authority & Lifecycle Rule**:
    - Only coding standards with `status: current` represent authoritative host policies that outrank portable agent defaults. Standards with `status: draft` are non-authoritative proposals/templates.

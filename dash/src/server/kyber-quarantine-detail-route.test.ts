@@ -9,6 +9,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 // Plan 2026-10-10, B7: the turn view links a Claude turn to the quarantined
 // interaction span that kept the sender's raw packet. The quarantine list stays

@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import statusMixed from '../../../../src/server/fixtures/capture-api/status-mixed.json'
@@ -35,7 +35,7 @@ function mixedWith(id: string, patch: Json): Json {
 }
 
 type Recorded = { url: string; method: string; body: Json | null }
-type Reply = { status?: number; json?: unknown; hold?: Promise<void> }
+type Reply = { status?: number; json?: unknown; hold?: Promise<void>; networkError?: boolean }
 
 interface Mock {
   calls: Recorded[]
@@ -53,10 +53,28 @@ const SETTINGS_JSON = {
   dashboardPort: 4747,
 }
 
+/** The running engine's version, as `/api/kyber/version` answers it. */
+const VERSION_JSON = { version: '9.8.7-rc.1', apiVersion: 1 }
+
 /** GET calls to one URL, so a new read-only fetch elsewhere does not move a count. */
 function getsTo(mock: Mock, url: string): number {
   return mock.calls.filter((c) => c.method === 'GET' && c.url === url).length
 }
+
+/**
+ * Lets real time pass, so a request the drawer would make later has the chance to
+ * happen before a test counts. Proving that nothing more is requested needs a window.
+ */
+async function elapse(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms))
+  })
+}
+
+/** A retry fires after a short delay, so waits for it need more than waitFor's 1s default. */
+const RETRY_WAIT = { timeout: 5000 }
+/** Longer than the retry delay, so a further request (polling) would land inside the window. */
+const SETTLE_MS = 2500
 
 /**
  * One fetch mock for the drawer's whole surface. `status` may be a function so
@@ -66,6 +84,7 @@ function stubFetch(options: {
   status?: () => Reply
   post?: (call: Recorded) => Reply
   put?: (call: Recorded) => Reply
+  version?: () => Reply
 }): Mock {
   const calls: Recorded[] = []
   vi.stubGlobal(
@@ -80,12 +99,16 @@ function stubFetch(options: {
       calls.push(call)
       let reply: Reply
       if (method === 'GET' && String(url).includes('/api/kyber/settings')) reply = { json: SETTINGS_JSON }
+      else if (method === 'GET' && String(url) === '/api/kyber/version') reply = options.version?.() ?? { json: VERSION_JSON }
       else if (method === 'GET') reply = options.status?.() ?? { json: statusMixed }
       else if (method === 'POST') reply = options.post?.(call) ?? { status: 500, json: {} }
       else reply = options.put?.(call) ?? { json: { receiverHosted: true } }
+      // A rejected fetch, as a dropped connection surfaces: no response at all.
+      if (reply.networkError) throw new TypeError('Failed to fetch')
       if (reply.hold) await reply.hold
       const status = reply.status ?? 200
-      return { ok: status >= 200 && status < 300, status, json: async () => reply.json ?? {} } as Response
+      // An explicit `json` (even `null`) is the body as sent; an absent one is an empty object.
+      return { ok: status >= 200 && status < 300, status, json: async () => ('json' in reply ? reply.json : {}) } as Response
     }),
   )
   return {
@@ -393,14 +416,11 @@ describe('SettingsDrawer: rows come only from the server', () => {
     )
   })
 
-  it('names the OpenCode environment variable as a manual step without claiming it is set', async () => {
+  it('offers no OpenCode environment step: the OTLP endpoint is never a manual step for OpenCode', async () => {
     stubFetch({})
     await openedDrawer()
 
-    const manual = screen.getByTestId('settings-harness-manual-opencode')
-    expect(manual.textContent).toContain('OTEL_EXPORTER_OTLP_ENDPOINT')
-    expect(manual.textContent).toMatch(/cannot (see|read|observe)/i)
-    expect(manual.textContent).not.toMatch(/is currently|already set|is set to/i)
+    expect(screen.queryByTestId('settings-harness-manual-opencode')).toBeNull()
   })
 })
 
@@ -814,5 +834,189 @@ describe('SettingsDrawer: receiver section', () => {
     fireEvent.click(toggle)
 
     await waitFor(() => expect(mock.puts()[0]?.body).toEqual({ receiverHosted: true }))
+  })
+})
+
+describe('SettingsDrawer: version line', () => {
+  const versionLine = () => screen.getByTestId('settings-kyberdash-version')
+
+  it('shows the KyberDash version the server reports, inside the dialog', async () => {
+    stubFetch({ version: () => ({ json: VERSION_JSON }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'))
+    expect(screen.getByRole('dialog').contains(versionLine())).toBe(true)
+  })
+
+  it('shows unknown, never a placeholder version, when the version request fails with a 500', async () => {
+    stubFetch({ version: () => ({ status: 500, json: { error: 'Version failed' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toContain('0.0.0')
+  })
+
+  it('shows unknown, never a placeholder version, when the version request is rejected', async () => {
+    stubFetch({ version: () => ({ networkError: true }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toContain('0.0.0')
+  })
+
+  it.each([
+    ['an empty object', {}],
+    ['null', null],
+  ])('shows unknown, never undefined, null, or a placeholder version, when the version body is %s', async (_label, body) => {
+    stubFetch({ version: () => ({ json: body }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toMatch(/undefined|null|0\.0\.0/)
+  })
+
+  it.each([
+    ['a whitespace-only version', { version: '   ', apiVersion: 1 }],
+    ['the 0.0.0 placeholder version', { version: '0.0.0', apiVersion: 1 }],
+    ['the 0.0.0 placeholder padded with spaces', { version: ' 0.0.0 ', apiVersion: 1 }],
+    ['the 0.0.0 placeholder with a trailing space', { version: '0.0.0 ', apiVersion: 1 }],
+  ])('shows unknown, never a blank or placeholder version, when the engine reports %s', async (_label, body) => {
+    stubFetch({ version: () => ({ json: body }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    expect(versionLine().textContent).not.toMatch(/0\.0\.0/)
+  })
+
+  it('shows a real version trimmed, with no padding inside the line, when the engine pads it with spaces', async () => {
+    stubFetch({ version: () => ({ json: { version: ' 1.2.3 ', apiVersion: 1 } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 1.2.3'))
+  })
+
+  it('requests the version once when the first request succeeds, and a status refresh does not repeat it', async () => {
+    const mock = stubFetch({ version: () => ({ json: VERSION_JSON }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'))
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+
+    fireEvent.click(screen.getByTestId('settings-refresh-status-button'))
+
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
+  // A 200 whose body is the wrong shape is a deterministic answer: the same engine
+  // gives the same body on a retry, so retrying only repeats the request. Fail fast.
+  // Regression guard: the drawer's retry once also retried these validation failures.
+  it.each([
+    ['a whitespace-only version', { version: '   ', apiVersion: 1 }],
+    ['an empty object', {}],
+    ['the 0.0.0 placeholder version', { version: '0.0.0', apiVersion: 1 }],
+  ])('makes exactly one version request, then shows unknown, when the engine reports %s', async (_label, body) => {
+    const mock = stubFetch({ version: () => ({ json: body }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'))
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
+  // A 4xx other than 429 is a deterministic answer: an older engine without the version
+  // route answers 404, and a rejected request answers 400 or 405. The same engine answers
+  // the same way on a retry, so a second request only repeats the first. Fail fast.
+  // Regression guard: the drawer's retry once also retried every non-2xx answer.
+  it.each([
+    ['404 Not Found', 404],
+    ['400 Bad Request', 400],
+    ['405 Method Not Allowed', 405],
+  ])('makes exactly one version request, then shows unknown, when the engine answers %s', async (_label, status) => {
+    const mock = stubFetch({ version: () => ({ status, json: { error: 'Not here' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(1)
+  })
+
+  it('retries once after a dropped connection and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { networkError: true } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  // The engine can be restarting while the drawer opens. One retry lets the version
+  // recover; a second consecutive failure is final, with no polling behind it.
+  it('retries once after a transient failure and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { status: 500, json: { error: 'Version failed' } } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  // 429 is the one 4xx that means "try again later", so it is retried like a 5xx.
+  it('retries once after a 429 rate limit and shows the version the retry returns', async () => {
+    let attempt = 0
+    const mock = stubFetch({
+      version: () => (++attempt === 1 ? { status: 429, json: { error: 'Too many requests' } } : { json: VERSION_JSON }),
+    })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  it('shows unknown after two consecutive failures, and makes no further request', async () => {
+    const mock = stubFetch({ version: () => ({ status: 500, json: { error: 'Version failed' } }) })
+    await openedDrawer()
+
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+
+    await elapse(SETTLE_MS)
+
+    expect(versionLine().textContent).toBe('KyberDash version unknown')
+    expect(getsTo(mock, '/api/kyber/version')).toBe(2)
+  })
+
+  it('fetches the version again when the connection comes back after the failures', async () => {
+    let engineUp = false
+    const mock = stubFetch({
+      version: () => (engineUp ? { json: VERSION_JSON } : { status: 500, json: { error: 'Version failed' } }),
+    })
+    await openedDrawer()
+    await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version unknown'), RETRY_WAIT)
+    const before = getsTo(mock, '/api/kyber/version')
+
+    engineUp = true
+    try {
+      act(() => {
+        window.dispatchEvent(new Event('offline'))
+      })
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+      await waitFor(() => expect(versionLine().textContent).toBe('KyberDash version 9.8.7-rc.1'), RETRY_WAIT)
+    } finally {
+      act(() => {
+        window.dispatchEvent(new Event('online'))
+      })
+    }
+    expect(getsTo(mock, '/api/kyber/version')).toBe(before + 1)
   })
 })

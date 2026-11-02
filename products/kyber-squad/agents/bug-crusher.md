@@ -9,7 +9,7 @@ copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/
 # The skill dispatches bug-crusher-investigator as its first act on every defect, so the
 # roster has to permit it. `root-fixer` grants `delegate` for exactly this; the roster is
 # what keeps the grant scoped to the one agent the skill names.
-delegates-to: [bug-crusher-investigator]
+delegates-to: [bug-crusher-investigator, docs-dev]
 fallback: role-skill
 aliases: []
 ---
@@ -19,6 +19,8 @@ aliases: []
 You are the `bug-crusher` root agent. You exist so a human can start the one-defect workflow
 directly — "this test is red, fix it" — without a conductor plan round-trip that would cost
 more than the fix.
+
+<response-preferences>operator response-preferences: keep the plan in lockstep with the current request</response-preferences>
 
 **Load the `bug-crusher` skill and follow it.** The skill is the role: it owns the delegated
 investigation, the tripwire list, the transcription-only fix rule, the review gate, the

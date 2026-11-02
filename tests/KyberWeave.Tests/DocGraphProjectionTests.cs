@@ -30,14 +30,18 @@ public sealed class DocGraphProjectionTests
         Assert.Contains(projection.Nodes, n => n is { Id: "doc:architecture/billing", Label: "Document" });
         Assert.Contains(projection.Nodes, n => n is { Id: "component:Billing", Label: "Component" });
         Assert.Contains(projection.Nodes, n => n is { Id: "team:Platform", Label: "Team" });
-        Assert.Contains(new DocGraphEdge("DOCUMENTS", "doc:architecture/billing", "component:Billing"), projection.Edges);
+        Assert.Contains(new DocGraphEdge("DOCUMENTS", "doc:architecture/billing", "component:Billing"),
+            projection.Edges);
         Assert.Contains(new DocGraphEdge("OWNED_BY", "doc:architecture/billing", "team:Platform"), projection.Edges);
-        Assert.Contains(new DocGraphEdge("DESCRIBES", "doc:architecture/billing", "path:src/Billing"), projection.Edges);
+        Assert.Contains(new DocGraphEdge("DESCRIBES", "doc:architecture/billing", "path:src/Billing"),
+            projection.Edges);
         Assert.Contains(new DocGraphEdge("REFERENCES", "doc:architecture/billing", "code:billing"), projection.Edges);
         Assert.Contains(new DocGraphEdge("EXPOSES", "doc:architecture/billing", "route:billing"), projection.Edges);
-        Assert.Contains(new DocGraphEdge("LINKS_TO", "doc:architecture/billing", "doc:reference/billing"), projection.Edges);
+        Assert.Contains(new DocGraphEdge("LINKS_TO", "doc:architecture/billing", "doc:reference/billing"),
+            projection.Edges);
         Assert.Contains(new DocGraphEdge("DECIDED_BY", "doc:architecture/billing", "doc:adr/0001"), projection.Edges);
-        Assert.Contains(new DocGraphEdge("SUPERSEDES", "doc:architecture/billing", "doc:architecture/legacy"), projection.Edges);
+        Assert.Contains(new DocGraphEdge("SUPERSEDES", "doc:architecture/billing", "doc:architecture/legacy"),
+            projection.Edges);
     }
 
     [Fact]
@@ -52,7 +56,7 @@ public sealed class DocGraphProjectionTests
         [
             new("EVIDENCED_BY", "term:loop", "doc:reference/billing")
         ];
-        StubContributor contributor = new StubContributor(nodes, edges);
+        StubContributor contributor = new(nodes, edges);
 
         DocGraphProjection projection = DocGraphProjection.Build(
             new DocumentSet { Documents = [] },
@@ -68,7 +72,7 @@ public sealed class DocGraphProjectionTests
     [Fact]
     public void AreDocumentsRelatedTreatsOverlappingSourceRootsAsGraphNeighbors()
     {
-        DocumentSet set = new DocumentSet
+        DocumentSet set = new()
         {
             Documents =
             [
@@ -85,12 +89,12 @@ public sealed class DocGraphProjectionTests
     [Fact]
     public void BuildIdLessDocumentsRegisterFallbackPathNodesAndSharedComponentRelatedness()
     {
-        DocumentSet set = new DocumentSet
+        DocumentSet set = new()
         {
             Documents =
             [
-                Document("", "docs/left.md", component: "Runtime"),
-                Document("", "docs/right.md", component: "Runtime")
+                Document("", "docs/left.md", "Runtime"),
+                Document("", "docs/right.md", "Runtime")
             ]
         };
 
@@ -141,7 +145,7 @@ public sealed class DocGraphProjectionTests
             .WithEdge(new CodeGraphEdge("code:hub", "code:third", "calls"));
 
         DocGraphProjection projection = DocGraphProjection.Build(
-            TwoCodeReferenceDocuments(), resolver, maxCodeNeighbors: 1);
+            TwoCodeReferenceDocuments(), resolver, 1);
 
         Assert.False(projection.AreDocumentsRelated("doc:left", "doc:right"));
         Assert.Equal(1, resolver.LastMaxDegree);
@@ -150,12 +154,12 @@ public sealed class DocGraphProjectionTests
     [Fact]
     public void BuildWhenResolverHasNoNeighborhoodPortPreservesDocumentRelationships()
     {
-        DocumentSet set = new DocumentSet
+        DocumentSet set = new()
         {
             Documents =
             [
-                Document("first", "docs/first.md", component: "Shared"),
-                Document("second", "docs/second.md", component: "Shared")
+                Document("first", "docs/first.md", "Shared"),
+                Document("second", "docs/second.md", "Shared")
             ]
         };
 
@@ -167,7 +171,7 @@ public sealed class DocGraphProjectionTests
     [Fact]
     public void AreDocumentsRelatedDoesNotRelateDocumentsOnlyBecauseTheyShareAnOwner()
     {
-        DocumentSet set = new DocumentSet
+        DocumentSet set = new()
         {
             Documents =
             [
@@ -187,7 +191,7 @@ public sealed class DocGraphProjectionTests
         NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("BillingService", Node("code:billing", "BillingService"))
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
-        using TempDirectory output = new TempDirectory();
+        using TempDirectory output = new();
 
         DocGraphExportResult result = new DocGraphExporter(resolver).Export(FullRelationshipSet(), output.Path);
         List<JsonElement> nodes = File.ReadAllLines(result.NodesPath).Select(Parse).ToList();
@@ -196,44 +200,71 @@ public sealed class DocGraphProjectionTests
         Assert.All(nodes, node => Assert.Equal("node", node.GetProperty("type").GetString()));
         Assert.All(edges, edge => Assert.Equal("edge", edge.GetProperty("type").GetString()));
         Assert.Contains(nodes, node => node.GetProperty("id").GetString() == "doc:architecture/billing"
-            && node.GetProperty("docType").GetString() == "architecture"
-            && node.GetProperty("status").GetString() == "current"
-            && node.GetProperty("path").GetString() == "docs/billing.md");
+                                       && node.GetProperty("docType").GetString() == "architecture"
+                                       && node.GetProperty("status").GetString() == "current"
+                                       && node.GetProperty("path").GetString() == "docs/billing.md");
         Assert.Contains(edges, edge => edge.GetProperty("label").GetString() == "REFERENCES"
-            && edge.GetProperty("from").GetString() == "doc:architecture/billing"
-            && edge.GetProperty("to").GetString() == "code:billing");
+                                       && edge.GetProperty("from").GetString() == "doc:architecture/billing"
+                                       && edge.GetProperty("to").GetString() == "code:billing");
+    }
+
+    [Fact]
+    public void EdgePropertiesCannotReplaceTheEdgeTypeField()
+    {
+        List<DocGraphEdge> edges =
+        [
+            new(
+                "CUSTOM",
+                "doc:from",
+                "doc:to",
+                new ReadOnlyDictionary<string, string?>(
+                    new Dictionary<string, string?>(StringComparer.Ordinal) { ["type"] = "node" }))
+        ];
+        StubContributor contributor = new([], edges);
+        using TempDirectory output = new();
+
+        DocGraphExportResult result = new DocGraphExporter(FakeCodeGraphResolver.WithSymbols()).Export(
+            new DocumentSet { Documents = [] },
+            output.Path,
+            [contributor]);
+        JsonElement edge = Parse(File.ReadAllLines(result.EdgesPath).Single());
+
+        Assert.Equal("edge", edge.GetProperty("type").GetString());
     }
 
     public static TheoryData<string> ApprovedCodeEdgeKinds()
     {
-        TheoryData<string> data = new TheoryData<string>();
+        TheoryData<string> data = new();
         foreach (string kind in TraversedCodeEdgeKinds)
             data.Add(kind);
         return data;
     }
 
-    private static DocumentSet FullRelationshipSet() =>
-        new()
+    private static DocumentSet FullRelationshipSet()
+    {
+        return new DocumentSet
         {
             Documents =
             [
                 Document(
                     "architecture/billing",
                     "docs/billing.md",
-                    component: "Billing",
-                    owner: "Platform",
-                    sourceRoot: "src/Billing",
-                    codeRefs: ["BillingService"],
-                    endpoints: ["GET /billing"],
-                    decidedBy: ["adr/0001"],
-                    supersedes: ["architecture/legacy"],
-                    bodyLinks: ["billing-reference.md"]),
+                    "Billing",
+                    "Platform",
+                    "src/Billing",
+                    ["BillingService"],
+                    ["GET /billing"],
+                    ["adr/0001"],
+                    ["architecture/legacy"],
+                    ["billing-reference.md"]),
                 Document("reference/billing", "docs/billing-reference.md")
             ]
         };
+    }
 
-    private static DocumentSet TwoCodeReferenceDocuments() =>
-        new()
+    private static DocumentSet TwoCodeReferenceDocuments()
+    {
+        return new DocumentSet
         {
             Documents =
             [
@@ -241,6 +272,7 @@ public sealed class DocGraphProjectionTests
                 Document("right", "docs/right.md", codeRefs: ["Right"])
             ]
         };
+    }
 
     private static DocumentModel Document(
         string id,
@@ -252,8 +284,9 @@ public sealed class DocGraphProjectionTests
         IReadOnlyList<string>? endpoints = null,
         IReadOnlyList<string>? decidedBy = null,
         IReadOnlyList<string>? supersedes = null,
-        IReadOnlyList<string>? bodyLinks = null) =>
-        new()
+        IReadOnlyList<string>? bodyLinks = null)
+    {
+        return new DocumentModel
         {
             RelativePath = path,
             FilePath = "/tmp/" + path,
@@ -277,18 +310,26 @@ public sealed class DocGraphProjectionTests
             Status = DocStatus.Current,
             BodyLinks = bodyLinks ?? []
         };
+    }
 
-    private static CodeGraphNode Node(string id, string name, string kind = "class") =>
-        new(id, kind, name, name, $"src/{name}.cs", "csharp", 1);
+    private static CodeGraphNode Node(string id, string name, string kind = "class")
+    {
+        return new CodeGraphNode(id, kind, name, name, $"src/{name}.cs", "csharp", 1);
+    }
 
-    private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    private static JsonElement Parse(string json)
+    {
+        return JsonDocument.Parse(json).RootElement.Clone();
+    }
 
     private sealed class StubContributor(
         IReadOnlyList<DocGraphNode> nodes,
         IReadOnlyList<DocGraphEdge> edges) : IDocGraphContributor
     {
-        public DocGraphContribution Contribute(DocumentSet documents, ICodeGraphResolver codeGraph) =>
-            new(nodes, edges);
+        public DocGraphContribution Contribute(DocumentSet documents, ICodeGraphResolver codeGraph)
+        {
+            return new DocGraphContribution(nodes, edges);
+        }
     }
 
     private sealed class NeighborhoodResolver : ICodeGraphResolver, ICodeGraphNeighborhoodProvider
@@ -322,11 +363,15 @@ public sealed class DocGraphProjectionTests
             return this;
         }
 
-        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) =>
-            _symbols.TryGetValue(name, out CodeGraphNode? node) ? [node] : [];
+        public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name)
+        {
+            return _symbols.TryGetValue(name, out CodeGraphNode? node) ? [node] : [];
+        }
 
-        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) =>
-            _routes.TryGetValue(route, out CodeGraphNode? node) ? [node] : [];
+        public IReadOnlyList<CodeGraphNode> ResolveRoute(string route)
+        {
+            return _routes.TryGetValue(route, out CodeGraphNode? node) ? [node] : [];
+        }
 
         public IReadOnlyList<CodeGraphEdge> GetEdges(IReadOnlyCollection<string> nodeIds, int maxDegree)
         {
@@ -336,8 +381,19 @@ public sealed class DocGraphProjectionTests
             return _edges;
         }
 
-        public bool HasFilesUnder(string relativePathPrefix) => true;
-        public IReadOnlyList<string> CandidateNames(string like) => [];
-        public IReadOnlyList<string> AllRoutes() => _routes.Keys.ToList();
+        public bool HasFilesUnder(string relativePathPrefix)
+        {
+            return true;
+        }
+
+        public IReadOnlyList<string> CandidateNames(string like)
+        {
+            return [];
+        }
+
+        public IReadOnlyList<string> AllRoutes()
+        {
+            return _routes.Keys.ToList();
+        }
     }
 }

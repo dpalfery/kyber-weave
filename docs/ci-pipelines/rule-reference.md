@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-11-01
 ---
 
 # Rule reference
@@ -46,6 +46,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-001` | Error | A `plan` document in the plans folder that the plan index does not reach by links inside that folder |
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
 
 ### Drift — `docs drift`
 
@@ -76,6 +77,28 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 Analysis findings respect `docs integrity-check --fail-on`; operational errors always return
 non-zero. See [analysis and review](../docgraph/analysis.md) for classifier and lifecycle
 details.
+
+### MCP wiring — `docs init`, `docs mcp-wire`, `docs mcp-unwire`
+
+Emitted by the wiring check `docs init` runs and by the two repair verbs. `001`–`004` report
+a repository's wiring state and never change `docs init`'s exit code; `005` and `006` are
+refusals of an operation an operator explicitly requested, and exit 1. See the [MCP
+runbook](../docgraph/mcp-runbook.md#checking-and-wiring).
+
+| Id | Severity | Meaning | Hint |
+|---|---|---|---|
+| `KW-MCP-WIRE-001` | Warning for a `required` server, Info for a `recommended` one | A declared server is not wired for an in-play harness, or its file could not be read — including a configuration that is a symbolic link, which is not read at all, and one this process may not inspect, which is reported as a gap because a denied file cannot be told from an absent one | `kyber-weave docs mcp-wire --target <harness>`; for a harness the repair does not write, a linked configuration, or a file this process may not inspect, the file to fix, the link to replace, or the permission to grant — by hand, because a repair would be refused the same way |
+| `KW-MCP-WIRE-002` | Warning for a `required` server, Info for a `recommended` one | A wired entry's launch command differs from the declaration, once the harness's own spelling of the repository root (`${workspaceFolder}` for VS Code, `.` elsewhere) is allowed for; the line names both. Never fixable, so it is never offered as a repair | The edit that makes the entry run the declared command. On a writable harness the hint also quotes the wire command with the caveat that it refuses an entry that already exists, so the entry is edited — or deleted and re-added — by hand |
+| `KW-MCP-WIRE-003` | Warning for a `required` server, Info for a `recommended` one | The wired entry's launch binary is not resolvable: a command name is looked up along `PATH` in order, and a command that names a path is resolved against the repository under inspection rather than the working directory | First-party: `kyber-weave update`, because the installation is broken. Third-party: the declaration's `install` text verbatim, or a manual pointer when it carries none — never an installation |
+| `KW-MCP-WIRE-004` | Info | The harness is not in play, has no marker to detect it, or its configuration is repository settings rather than a file | `No action unless this repository uses <harness>`; where the repair may write it, the wire command, otherwise the Copilot settings and workflow-step pointer |
+| `KW-MCP-WIRE-005` | Error — `docs mcp-wire` only | The target was refused and nothing was written to it: malformed or foreign document, an entry with the same server name already present, a harness the repair does not write, an absent binary, a configuration that is a symbolic link — refused before the read, so not one byte of the target is opened — a configuration this process may not inspect, or a receipt record that could not be persisted | The file and the reason, plus the snippet to paste for a snippet-only harness, the install repair for an absent binary, or the receipt path and its write failure |
+| `KW-MCP-WIRE-006` | Error — `docs mcp-unwire` only | Removal was refused: no receipt record for the file, a file that is gone, a current digest that differs from the receipt's post-write digest, a file that is a symbolic link — refused ahead of the receipt lookup — or a file this process may not read. A file still holding the receipt's pre-write digest is the other case, an interrupted write rather than drift, and is reported without a refusal | The receipt path, both digests, and the choice to make by hand — the removal never restores over a later edit; for a denial, the permission to grant |
+
+`docs init` prints the hint beneath a finding so it can be copied, with one exception: a
+not-detectable line is advice about a harness nobody claimed to use, so its hint is withheld.
+The Copilot coding agent is the exception to that exception — its configuration is repository
+settings rather than a file, so its hint *is* its report and is printed, while every other
+undetectable harness still reports one `info` line and nothing more.
 
 ## Skills — [Skill governance](../context-hygiene/skills.md)
 
@@ -174,10 +197,12 @@ number, and a missing report is the same class of signal rather than a failed ga
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
-| `KW-REVIEW-026` | Info | A task gate was skipped: its `os` does not match the host, or no changed file matches its `include` (`--agent`) |
+| `KW-REVIEW-026` | Info | A gate was skipped: its `os` does not match the host, or no changed file matches its `include` |
 | `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
-| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran (`--agent`) |
+| `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}` or `{task}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
+| `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, or its working directory does not exist. Error when blocking, warning otherwise. |
+| `KW-REVIEW-034` | Info | The changed set is unknown, so gates with `include` ran unscoped. Fetch the full history, or name a base that exists with `--base`. |
 
 ### Duplicates — `review duplicates`
 
@@ -193,6 +218,7 @@ number, and a missing report is the same class of signal rather than a failed ga
 |---|---|---|
 | `KW-PARSE-000` | Error | An artifact could not be parsed |
 | `KW-CONFIG-001` | Error | `kyber-weave.yml` invalid or unreadable |
+| `KW-CONFIG-002` | Warning | A `review.gates` or `review.task-gates` entry carries an unknown key. The key is ignored and the configuration still loads. |
 
 ## Related
 

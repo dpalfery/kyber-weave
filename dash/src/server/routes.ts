@@ -27,11 +27,14 @@ import type { SourceCheckpoint } from '../canon/source-state.js'
 import type { CleanRequest } from '../clean/clean.js'
 import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
 import { handleCaptureRequest, type CaptureRouteSettings } from './capture-routes.js'
+import { handleAnalyticsRequest, type AnalyticsService } from './analytics-routes.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
-const KYBERDASH_VERSION = String(
-  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
-)
+const KYBERDASH_VERSION_RAW = (
+  createRequire(import.meta.url)('../../package.json') as { version?: string }
+).version
+/** `/meta` keeps its long-standing '0.0.0' fallback; `/version` must not use it. */
+const KYBERDASH_VERSION = String(KYBERDASH_VERSION_RAW ?? '0.0.0')
 
 const VALID_SECTIONS: readonly ReportSection[] = [
   'coverage',
@@ -532,6 +535,8 @@ export const cleanBodyParser: { parse(bodyText: string): CleanRequest | undefine
  */
 export type KyberRouteDeps = {
   readonly store: CanonStore
+  /** Shared analytics engine; the transport routes never open a second store. */
+  readonly analyticsService?: AnalyticsService
   /**
    * Absent only while the host pair is still coming up. The store is resolved before the
    * socket binds (the settings routes work from the first accepted connection), the
@@ -840,6 +845,8 @@ export function handleKyberRequest(
   if (!url.pathname.startsWith('/api/kyber/') && url.pathname !== '/api/kyber') {
     return false
   }
+
+  if (handleAnalyticsRequest(req, res, url, deps?.analyticsService)) return true
 
   // Kyber agent session analysis endpoints
   if (url.pathname === '/api/kyber/sessions') {
@@ -1217,6 +1224,28 @@ export function handleKyberRequest(
     sendKyberJson(res, 200, {
       ...bridge.getMeta(),
       version: KYBERDASH_VERSION,
+      apiVersion: REPORT_SCHEMA_VERSION,
+    })
+    return true
+  }
+
+  // Store-free on purpose: `/meta` calls bridge.getMeta(), which measured 23 s during a
+  // projection, and the tray polls every 15 s. The build identity needs no store read,
+  // so this answers instantly even while the database is busy or unavailable.
+  if (url.pathname === '/api/kyber/version') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    // Why 503: a defaulted '0.0.0' would read as a real build to the tray's version check,
+    // so an absent, blank, or placeholder '0.0.0' package version is reported as unavailable.
+    const version = typeof KYBERDASH_VERSION_RAW === 'string' ? KYBERDASH_VERSION_RAW.trim() : ''
+    if (version === '' || version === '0.0.0') {
+      sendKyberJson(res, 503, { error: 'KyberDash version is unavailable' })
+      return true
+    }
+    sendKyberJson(res, 200, {
+      version,
       apiVersion: REPORT_SCHEMA_VERSION,
     })
     return true

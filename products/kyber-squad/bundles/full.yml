@@ -41,6 +41,7 @@ skills:
   - github-cli
   - github-devops
   - go-dev
+  - kilo-review-loop
   - lm-studio-cli
   - maui-dev
   - pr-review-fix-comments
@@ -48,7 +49,6 @@ skills:
   - python-dev
   - resharper-clt
   - rust-dev
-  - second-brain
   - security-review
   - setup-dev-environment
   - task-gate

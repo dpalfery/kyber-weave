@@ -3,6 +3,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -51,7 +52,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
         ("filesystem.write", ["Edit", "Write"]),
         ("process.execute", ["Bash"]),
         ("network.read", ["WebFetch", "WebSearch"]),
-        ("delegate", ["Agent"]),
+        ("delegate", ["Agent"])
     ];
 
     /// <summary>
@@ -83,7 +84,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     private static readonly HashSet<string> CommandSafeFrontmatterKeys =
         new(StringComparer.Ordinal)
-        { "allowed-tools", "argument-hint", "description", "disable-noninteractive", "model", "skills" };
+            { "allowed-tools", "argument-hint", "description", "disable-noninteractive", "model", "skills" };
 
     /// <summary>
     /// Accepted agent frontmatter keys (<c>core/src/subagent/profile.ts</c>).
@@ -107,42 +108,40 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     private const int MaxDescriptionLength = 1024;
 
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
+    private static HashSet<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
     /// A primary shared identity reuses its canonical skill as the entry point, so it is
     /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
     /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
-
-    /// <summary>
-    /// The pure-orchestrator profile, excluded from the MCP grant on ZCode exactly as it is on
-    /// Claude: a role that routes work has no use for documentation or code-graph lookups.
-    /// </summary>
-    private const string PureOrchestratorProfile = "orchestrator";
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    }
 
     /// <summary>
     /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
     /// from source rather than from the renderer, in the same server-then-tool order.
     /// </summary>
-    private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source) =>
-    [
-        .. source.Toolchain.RequiredMcpTools
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .SelectMany(entry => entry.Value
-                .OrderBy(tool => tool, StringComparer.Ordinal)
-                .Select(tool => $"mcp__{entry.Key}__{tool}"))
-    ];
+    private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source)
+    {
+        return SquadMcpGrantProjection.QualifiedToolNames(source, _ => true);
+    }
 
-    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
-        !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-        profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-        decision == SquadPermissionDecision.Allow;
+    /// <summary>
+    /// The MCP tool names one principal is entitled to: <c>kyber-weave</c> on the file-read
+    /// entitlement alone, <c>codegraph</c> and <c>context7</c> minus the pure orchestrator.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedEntitledMcpToolNames(SquadSource source, SquadAgent agent)
+    {
+        return SquadMcpGrantProjection.EntitledRosterToolNames(source, agent, SquadTarget.ZCode);
+    }
 
     private static IReadOnlyList<string> ComputeExpectedTools(
         SquadAgent agent,
@@ -165,7 +164,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
         return
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : []
+            .. ExpectedEntitledMcpToolNames(source, agent)
         ];
     }
 
@@ -259,14 +258,18 @@ public sealed class ZCodeRendererContractTests : IDisposable
         return value;
     }
 
-    private static string DocumentText(SquadDeploymentFile file) =>
-        Encoding.UTF8.GetString(file.Content.Span);
+    private static string DocumentText(SquadDeploymentFile file)
+    {
+        return Encoding.UTF8.GetString(file.Content.Span);
+    }
 
-    private static string CollapseToSingleLine(string value) =>
-        string.Join(
+    private static string CollapseToSingleLine(string value)
+    {
+        return string.Join(
             ' ',
             value.Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
 
     /// <summary>
     /// An agent or command description as ZCode will actually hold it after reading a rendered
@@ -283,20 +286,27 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// contains either character today, which
     /// <see cref="RenderAsync_ZCode_TheCanonicalCorpusEmitsNoEscapedScalars"/> pins.
     /// </remarks>
-    private static string AsZCodeReadsIt(string canonical) =>
-        CollapseToSingleLine(canonical)
+    private static string AsZCodeReadsIt(string canonical)
+    {
+        return CollapseToSingleLine(canonical)
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
+    }
 
     private static async Task<SquadRenderResult> RenderZCodeAsync(
         string sourceDirectory,
         SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
+        if (string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal))
+        {
+            return await TestSquadCorpus.GetDefaultRenderAsync(SquadTarget.ZCode, scope);
+        }
+
         SquadRendererRegistry registry = new([new ZCodeRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: sourceDirectory,
-            Targets: [SquadTarget.ZCode],
-            Scope: scope));
+            sourceDirectory,
+            [SquadTarget.ZCode],
+            scope));
     }
 
     public void Dispose()
@@ -320,9 +330,10 @@ public sealed class ZCodeRendererContractTests : IDisposable
         SquadRendererRegistry registry = new([new ZCodeRenderer()]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.ZCode, SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project));
+            ProductRoot,
+            [SquadTarget.ZCode, SquadTarget.Cursor],
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource));
 
         Assert.False(result.Success);
         Assert.Empty(result.Files);
@@ -335,15 +346,16 @@ public sealed class ZCodeRendererContractTests : IDisposable
         ZCodeRenderer renderer = new();
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project)));
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project,
+            PreloadedSource: TestSquadCorpus.CanonicalSource)));
     }
 
     [Fact]
     public async Task RenderAsync_ZCode_ProjectsEveryCanonicalPrincipalExactlyOnce()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source);
         HashSet<string> suppressed = SuppressedSkillIdentities(source);
 
@@ -360,7 +372,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
         int suppressedSkills = source.Skills.Count(skill => suppressed.Contains(skill.Name));
         int expected =
             source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkills
+                                                  + source.Skills.Count - suppressedSkills
             + source.Skills.Where(skill => !suppressed.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
@@ -384,7 +396,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_LowersThePrimaryAgentToASlashCommand()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         // The conductor is the primary agent that is NOT a declared shared identity, so it is the
         // one lowered to a slash command; the two root wrappers reuse their canonical skills.
         SquadAgent primary = Assert.Single(
@@ -424,7 +436,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_EmitsOnlyAcceptedAgentFrontmatterKeys()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -451,7 +463,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_AlwaysEmitsTheToolListBecauseOmittingItGrantsEverything()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -472,7 +484,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_AskAndDenyBothWithholdTheirTools()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -516,7 +528,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_RecordsThatTheDelegationRosterIsNotEnforceable()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         List<SquadAgent> delegating = source.Agents
@@ -550,7 +562,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_EmitsOnlySafeSkillFrontmatterKeysWithinTheDescriptionCap()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source);
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
@@ -630,7 +642,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_ProjectsAgentResourcesUnderSkillsAndRewritesTheirLinks()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         List<SquadAgent> withResources = source.Agents.Where(a => a.Resources.Count > 0).ToList();
@@ -684,16 +696,20 @@ public sealed class ZCodeRendererContractTests : IDisposable
             f => f.RelativePath == $".zcode/agents/{ZCodeResourceLinkFragmentFixture.AgentName}.md");
         string body = DocumentText(principal);
 
-        Assert.Contains("](../skills/architect/references/intake-assessment.md#overview)", body, StringComparison.Ordinal);
-        Assert.Contains("](../skills/architect/references/plan-authoring.md?version=2)", body, StringComparison.Ordinal);
-        Assert.Contains("](../skills/architect/references/test-first-contract.md#summary?v=1)", body, StringComparison.Ordinal);
-        Assert.Contains("](../skills/architect%2Freferences%2Fstandard-verification.md#details)", body, StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect/references/intake-assessment.md#overview)", body,
+            StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect/references/plan-authoring.md?version=2)", body,
+            StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect/references/test-first-contract.md#summary?v=1)", body,
+            StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect%2Freferences%2Fstandard-verification.md#details)", body,
+            StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task RenderAsync_ZCode_SkillResourcesStayBesideTheirSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source);
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
@@ -755,14 +771,13 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_ThrowsWhenACanonicalSkillOccupiesARewrittenResourceRoot()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent owner = source.Agents.First(agent => agent.Resources.Count > 0);
 
         using ZCodeResourceRootCollisionFixture fixture = ZCodeResourceRootCollisionFixture.Create(owner.Name);
 
         SquadRenderValidationException exception =
-            await Assert.ThrowsAsync<SquadRenderValidationException>(
-                () => RenderZCodeAsync(fixture.ProductRoot));
+            await Assert.ThrowsAsync<SquadRenderValidationException>(() => RenderZCodeAsync(fixture.ProductRoot));
 
         Assert.Contains(owner.Name, exception.Message, StringComparison.Ordinal);
         Assert.Contains(".zcode/skills/", exception.Message, StringComparison.Ordinal);
@@ -782,8 +797,28 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_SkillDescriptionsUseALosslessFoldedBlockScalar()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        // The canonical corpus carries no embedded quote today, so seed a controlled
+        // exemplar: copy it and give one skill a description containing one, then render
+        // the copy through the same path. The canonical description stays untouched.
+        using TempDirectory temp = new();
+        string fixtureRoot = Path.Combine(temp.Path, "kyber-squad");
+        ZCodeFixtureFiles.CopyCanonicalCorpus(fixtureRoot);
+
+        string skillFile = Path.Combine(fixtureRoot, "skills", "app-docs-standard", "SKILL.md");
+        string skillText = await File.ReadAllTextAsync(skillFile);
+        string[] skillLines = skillText.Split('\n');
+        int descriptionIndex = Array.FindIndex(
+            skillLines,
+            line => line.StartsWith("description:", StringComparison.Ordinal));
+        Assert.True(descriptionIndex >= 0, "app-docs-standard SKILL.md has no description line to seed.");
+        skillLines[descriptionIndex] = skillLines[descriptionIndex].TrimEnd() + " Say \"hello\".";
+        await File.WriteAllTextAsync(
+            skillFile,
+            string.Join('\n', skillLines),
+            new UTF8Encoding(false));
+
+        SquadSource source = SquadSourceLoader.Load(fixtureRoot);
+        SquadRenderResult result = await RenderZCodeAsync(fixtureRoot);
 
         List<SquadSkill> quoted = source.Skills
             .Where(skill => skill.Description.Contains('"', StringComparison.Ordinal))
@@ -834,7 +869,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_GrantsTheUngovernedBaseOnEveryPrincipal()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
         Assert.Contains(
@@ -894,15 +929,20 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// tool, and it is still collected into <c>requiredServerNames</c>, so it imposes a
     /// connected-server requirement while granting nothing. This suite therefore asserts the
     /// qualified form is present and the selector form is absent.
+    ///
+    /// Two entitlements, not one: <c>kyber-weave</c> follows the file-read grant alone and
+    /// reaches the pure orchestrator, while <c>codegraph</c> and <c>context7</c> keep the
+    /// carve-out. Each principal's expectation is computed from
+    /// <see cref="SquadMcpGrantProjection"/>, so a re-added exclusion cannot agree with itself.
     /// </remarks>
     [Fact]
     public async Task RenderAsync_ZCode_GrantsEveryDeclaredMcpToolByQualifiedName()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        IReadOnlyList<string> expected = ExpectedMcpToolNames(source);
-        Assert.NotEmpty(expected);
+        IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
+        Assert.NotEmpty(allTools);
 
         int granted = 0;
         foreach (SquadAgent agent in source.Agents)
@@ -928,16 +968,22 @@ public sealed class ZCodeRendererContractTests : IDisposable
             // naming a server there only adds a second failure mode.
             Assert.DoesNotContain("mcpServers", document, StringComparison.Ordinal);
 
-            if (ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            IReadOnlyList<string> entitled = ExpectedEntitledMcpToolNames(source, agent);
+            IReadOnlyList<string> withheld =
+                [.. allTools.Where(tool => !entitled.Contains(tool, StringComparer.Ordinal))];
+
+            Assert.All(entitled, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
+            Assert.All(withheld, tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
+
+            // The entitled names keep the roster's server-then-tool order, so a rename or a
+            // reordered roster shows up as an ordering failure rather than a silent reflow.
+            Assert.Equal(
+                entitled,
+                tools.Where(entitled.Contains).ToArray());
+
+            if (entitled.Count > 0)
             {
                 granted++;
-                Assert.All(expected, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
-            }
-            else
-            {
-                Assert.All(
-                    expected,
-                    tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
             }
         }
 
@@ -945,42 +991,68 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// A principal outside the standard grant records why, so the withholding is visible in
-    /// the receipt rather than looking like an oversight.
+    /// A principal outside an entitlement records why, and the record names exactly the servers
+    /// it is withheld from — no more, and no fewer.
     /// </summary>
+    /// <remarks>
+    /// The orchestrator still loses <c>codegraph</c> and <c>context7</c>, so its receipt has to
+    /// say so. It no longer loses <c>kyber-weave</c>: naming that server as withheld would be the
+    /// one place a review or a <c>squad doctor</c> run reads a claim that contradicts the render.
+    /// </remarks>
     [Fact]
-    public async Task RenderAsync_ZCode_RecordsMcpWithheldFromThePureOrchestrator()
+    public async Task RenderAsync_ZCode_WithholdsOnlyTheOrchestratorExcludedServers()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        List<SquadAgent> withheld = source.Agents
-            .Where(agent => !ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
-            .ToList();
+        IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
 
-        Assert.NotEmpty(withheld);
-
-        foreach (SquadAgent agent in withheld)
+        foreach (SquadAgent agent in source.Agents)
         {
-            SquadDegradationRecord record = Assert.Single(
-                result.Degradations,
-                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
-            Assert.All(
-                source.Toolchain.RequiredMcpTools.Keys,
-                server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
-        }
+            IReadOnlyList<string> entitled = ExpectedEntitledMcpToolNames(source, agent);
+            IReadOnlyList<string> withheldServers =
+                SquadMcpGrantProjection.WithheldServers(source, agent, SquadTarget.ZCode);
+            string[] withheldTools =
+                [.. allTools.Where(tool => !entitled.Contains(tool, StringComparer.Ordinal))];
 
-        // An entitled agent records no MCP gap, because it has none.
-        foreach (SquadAgent agent in source.Agents.Where(a =>
-                     ExpectsMcp(a, source.CapabilityProfiles.Profiles[a.CapabilityProfile])))
-        {
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
-            if (record is not null)
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
+                d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
+
+            if (withheldTools.Length == 0)
             {
-                Assert.DoesNotContain("withheld", record.Details!, StringComparison.Ordinal);
+                // An entitled principal records no MCP gap, because it has none.
+                if (record is not null)
+                {
+                    Assert.DoesNotContain("withheld", record.Details!, StringComparison.Ordinal);
+                }
+
+                continue;
+            }
+
+            Assert.NotNull(record);
+            Assert.All(
+                withheldServers,
+                server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
+            foreach (string grantedServer in SquadMcpGrantProjection.DeclaredServers(source)
+                         .Where(server => !withheldServers.Contains(server, StringComparer.Ordinal)))
+            {
+                Assert.DoesNotContain(grantedServer, record.Details!, StringComparison.Ordinal);
             }
         }
+
+        // The shipped corpus exercises exactly one such principal: the orchestrator, whose
+        // withholding is now the two servers it never used rather than the one it needs.
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            ["codegraph", "context7"],
+            SquadMcpGrantProjection.WithheldServers(source, conductor, SquadTarget.ZCode));
+        Assert.Equal(
+            [conductor.Name],
+            source.Agents
+                .Where(agent => SquadMcpGrantProjection
+                    .WithheldServers(source, agent, SquadTarget.ZCode)
+                    .Count > 0)
+                .Select(agent => agent.Name));
     }
 
     /// <summary>
@@ -990,7 +1062,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public void ExpectedMcpToolNames_UseOnlyCharactersZCodePreservesInAToolName()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.All(ExpectedMcpToolNames(source), name =>
         {
@@ -1012,7 +1084,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -1023,8 +1095,10 @@ public sealed class ZCodeRendererContractTests : IDisposable
             .Where(a =>
             {
                 SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
-                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) &&
+                            e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) &&
+                             w == SquadPermissionDecision.Allow;
                 return exec && !write;
             })
             .Select(a => a.Name)
@@ -1036,13 +1110,15 @@ public sealed class ZCodeRendererContractTests : IDisposable
         foreach (SquadAgent agent in source.Agents)
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+            bool executeAllowed =
+                profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
                 exec == SquadPermissionDecision.Allow;
-            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+            bool writeAllowed =
+                profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
                 write == SquadPermissionDecision.Allow;
 
-            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
-                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(d =>
+                d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
 
             if (executeAllowed && !writeAllowed)
             {
@@ -1056,6 +1132,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 {
                     Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
                 }
+
                 foreach (string writeTool in withheldWriteTools)
                 {
                     Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
@@ -1068,16 +1145,20 @@ public sealed class ZCodeRendererContractTests : IDisposable
         }
     }
 
-    private static bool IsAgentOrCommand(SquadDeploymentFile file) =>
-        file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||
-        file.RelativePath.StartsWith(".zcode/commands/", StringComparison.Ordinal) ||
-        file.RelativePath.StartsWith("agents/", StringComparison.Ordinal) ||
-        file.RelativePath.StartsWith("commands/", StringComparison.Ordinal);
+    private static bool IsAgentOrCommand(SquadDeploymentFile file)
+    {
+        return file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||
+               file.RelativePath.StartsWith(".zcode/commands/", StringComparison.Ordinal) ||
+               file.RelativePath.StartsWith("agents/", StringComparison.Ordinal) ||
+               file.RelativePath.StartsWith("commands/", StringComparison.Ordinal);
+    }
 
-    private static bool IsPrincipal(SquadDeploymentFile file) =>
-        file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||
-        file.RelativePath.StartsWith(".zcode/commands/", StringComparison.Ordinal) ||
-        file.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal);
+    private static bool IsPrincipal(SquadDeploymentFile file)
+    {
+        return file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||
+               file.RelativePath.StartsWith(".zcode/commands/", StringComparison.Ordinal) ||
+               file.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
@@ -1095,7 +1176,10 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
 
     private readonly TempDirectory _temp = new();
 
-    private ZCodeModelOverrideFixture() => ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    private ZCodeModelOverrideFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
 
     internal string ProductRoot { get; }
 
@@ -1116,7 +1200,7 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
                 $"'{InheritProfile}' to mutate.");
         }
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(false));
         return fixture;
     }
 
@@ -1134,7 +1218,9 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
             throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
         }
 
-        for (int index = start + 1; index < lines.Length && lines[index].StartsWith("    ", StringComparison.Ordinal); index++)
+        for (int index = start + 1;
+             index < lines.Length && lines[index].StartsWith("    ", StringComparison.Ordinal);
+             index++)
         {
             if (lines[index].StartsWith("    zcode:", StringComparison.Ordinal))
             {
@@ -1146,7 +1232,10 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
         throw new InvalidOperationException($"Profile '{profileName}' declares no zcode value.");
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 }
 
 /// <summary>
@@ -1157,7 +1246,10 @@ internal sealed class ZCodeResourceRootCollisionFixture : IDisposable
 {
     private readonly TempDirectory _temp = new();
 
-    private ZCodeResourceRootCollisionFixture() => ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    private ZCodeResourceRootCollisionFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
 
     internal string ProductRoot { get; }
 
@@ -1178,12 +1270,15 @@ internal sealed class ZCodeResourceRootCollisionFixture : IDisposable
              ---
              Fixture body for the '{agentName}' resource-root collision.
              """,
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            new UTF8Encoding(false));
 
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 }
 
 internal static class ZCodeFixtureFiles
@@ -1214,7 +1309,10 @@ internal sealed class ZCodeResourceLinkFragmentFixture : IDisposable
 
     private readonly TempDirectory _temp = new();
 
-    private ZCodeResourceLinkFragmentFixture() => ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    private ZCodeResourceLinkFragmentFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
 
     internal string ProductRoot { get; }
 
@@ -1227,14 +1325,17 @@ internal sealed class ZCodeResourceLinkFragmentFixture : IDisposable
         string content = File.ReadAllText(agentFile);
 
         string augmented = content + "\n\n" +
-            "Fragment test: [intake](architect/references/intake-assessment.md#overview)\n" +
-            "Query test: [plan](architect/references/plan-authoring.md?version=2)\n" +
-            "Fragment and query test: [contract](architect/references/test-first-contract.md#summary?v=1)\n" +
-            "Encoded test: [standard](architect%2Freferences%2Fstandard-verification.md#details)\n";
+                           "Fragment test: [intake](architect/references/intake-assessment.md#overview)\n" +
+                           "Query test: [plan](architect/references/plan-authoring.md?version=2)\n" +
+                           "Fragment and query test: [contract](architect/references/test-first-contract.md#summary?v=1)\n" +
+                           "Encoded test: [standard](architect%2Freferences%2Fstandard-verification.md#details)\n";
 
-        File.WriteAllText(agentFile, augmented, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.WriteAllText(agentFile, augmented, new UTF8Encoding(false));
         return fixture;
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 }

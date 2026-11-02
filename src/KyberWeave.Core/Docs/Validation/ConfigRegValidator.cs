@@ -5,8 +5,8 @@ using KyberWeave.Core.Docs.Scaffolding;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// Checks the configuration registry: that every property resolves to something on disk, and
-/// that the copy rendered into the repository root <c>AGENTS.md</c> still says what
+/// Checks the configuration registry: that every path-valued property resolves to something on
+/// disk, and that the copy rendered into the repository root <c>AGENTS.md</c> still says what
 /// configuration says.
 /// </summary>
 /// <remarks>
@@ -45,8 +45,9 @@ public sealed class ConfigRegValidator
     /// Adoption is what makes these findings meaningful. Every corpus predating the registry
     /// would otherwise fail the moment its CLI was upgraded, with an error per property, for
     /// a structure it never asked for. A repository has adopted the registry when its
-    /// <c>AGENTS.md</c> carries the generated block, or when it declared additions of its own
-    /// — both are deliberate acts, and after either one a broken entry is a real defect.
+    /// <c>AGENTS.md</c> carries the generated block, or when it configured something the
+    /// registry publishes — an addition, or a setting behind a mode property — since each of
+    /// those is a deliberate act, and after any of them a broken entry is a real defect.
     /// </remarks>
     public DiagnosticReport Validate()
     {
@@ -54,6 +55,7 @@ public sealed class ConfigRegValidator
         string agentsFile = Path.Combine(_repoRoot, AgentsFilePath);
         bool adopted = _config.ConfigReg.Additions.Count > 0
             || _config.ConfigReg.Autonomy is not null
+            || _config.Ontology.Intake
             || (File.Exists(agentsFile) && ConfigRegMarkdown.ContainsBlock(File.ReadAllText(agentsFile)));
 
         if (!adopted)
@@ -63,6 +65,13 @@ public sealed class ConfigRegValidator
 
         foreach (ConfigRegEntry entry in entries)
         {
+            // A mode entry carries a setting, not a path: there is no 'enabled' file for this
+            // check to find, and reporting one would fail an opted-in repository for adopting
+            // the feature. The exemption is a property of the entry kind, not a way out for a
+            // path entry — those are still checked, below and without exception.
+            if (entry.Kind is ConfigRegEntryKind.Mode)
+                continue;
+
             string absolute = Path.Combine(_repoRoot, entry.Path.Replace('/', Path.DirectorySeparatorChar));
             if (Directory.Exists(absolute) || File.Exists(absolute))
                 continue;

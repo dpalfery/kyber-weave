@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { SlideOutDrawer } from '../ui/SlideOutDrawer.js'
 import {
+  KyberApiError,
   fetchKyberCaptureStatus,
+  fetchKyberVersion,
   postKyberCapture,
   updateKyberSettings,
   type KyberCaptureAction,
@@ -13,6 +15,7 @@ import {
   type KyberCaptureRequest,
   type KyberCaptureResult,
   type KyberCaptureValue,
+  type KyberVersion,
 } from '../../lib/kyberApi.js'
 import { DashboardPortSetting } from './DashboardPortSetting.js'
 import { ATTENTION_TEXT, HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
@@ -23,6 +26,20 @@ export interface SettingsDrawerProps {
 }
 
 const CAPTURE_KEY = ['kyber-capture'] as const
+const VERSION_KEY = ['kyber-version'] as const
+
+/**
+ * Whether a failed version request is worth one more try. A dropped connection (a
+ * TypeError, not a KyberApiError) can change on retry, so it is retried. A KyberApiError
+ * is retried only for a 5xx (an engine restarting) or a 429 (rate limited, try later).
+ * Every other KyberApiError fails fast: a 2xx whose body failed validation, a 404 from an
+ * older engine without the route, and a 400 or 405 are deterministic, and the same engine
+ * gives the same answer again.
+ */
+function isTransientVersionError(error: Error): boolean {
+  if (error instanceof KyberApiError) return error.status >= 500 || error.status === 429
+  return true
+}
 
 const EVENT_LABEL: Record<KyberCaptureEvent['kind'], string> = {
   'would-write': 'Will write',
@@ -161,6 +178,21 @@ function CheckSummary({ check }: { check: KyberCaptureCheck }) {
 }
 
 /**
+ * The version line's words. The version is shown only when the engine reported a
+ * real string (not blank, not the `0.0.0` placeholder); a failed or unusable answer
+ * reads as unknown, never as a placeholder, and only a request still in flight
+ * shows the loading dots.
+ */
+function versionLineText(version: { data: KyberVersion | undefined; isError: boolean }): string {
+  const reported: unknown = version.data?.version
+  const trimmed = typeof reported === 'string' ? reported.trim() : ''
+  if (trimmed !== '' && trimmed !== '0.0.0') {
+    return `KyberDash version ${trimmed}`
+  }
+  return version.data === undefined && !version.isError ? 'KyberDash version …' : 'KyberDash version unknown'
+}
+
+/**
  * The drawer's content. It exists only while the drawer is open, so closing
  * drops its preview and alerts and opening fetches a fresh status. Display
  * state only: every enabled/disabled/checked value below is read from the
@@ -188,6 +220,20 @@ function SettingsContent() {
     },
   })
   const busy = capture.isPending || receiver.isPending
+
+  // Requested when the drawer content mounts. One retry (default backoff) for a transient
+  // failure, and a refetch when the connection returns, let a startup race or an engine
+  // restart recover, so the version does not stay 'unknown' for the whole open session. A
+  // 2xx answer with an invalid body is not retried (see isTransientVersionError). There is
+  // no interval and no refetch on window focus or status refresh: the version does not
+  // change while open.
+  const version = useQuery({
+    queryKey: VERSION_KEY,
+    queryFn: fetchKyberVersion,
+    retry: (failureCount, error) => failureCount < 1 && isTransientVersionError(error),
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: false,
+  })
 
   const harnesses = status.data?.harnesses ?? []
   const nameOf = (id: string): string => harnesses.find((h) => h.id === id)?.displayName ?? id
@@ -392,6 +438,10 @@ function SettingsContent() {
       )}
 
       <DashboardPortSetting />
+
+      <p data-testid="settings-kyberdash-version" className="text-[11px] text-muted-foreground">
+        {versionLineText(version)}
+      </p>
     </>
   )
 }

@@ -14,6 +14,9 @@ import { projectCanonicalStore } from '../canon/projection.js'
 import { loadPricing } from '../pricing/models.js'
 import type { CanonicalRecord, CostBlock } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
+import { useAbsentLiveReceiver } from '../../tests/setup/live-receiver-stub.js'
+
+useAbsentLiveReceiver()
 
 const asadShape = JSON.parse(
   readFileSync(new URL('../canon/fixtures/asad-session-shape.json', import.meta.url), 'utf8')
@@ -1359,6 +1362,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         { url: `${base}/api/kyber/quarantine`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/problems`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/meta`, methods: ['POST', 'PUT', 'DELETE'] },
+        { url: `${base}/api/kyber/version`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/timeline`, methods: ['POST', 'PUT', 'DELETE'] },
       ]
 

@@ -14,11 +14,13 @@
   ],
   "scripts": {
     "bundle-litellm": "node scripts/bundle-litellm.mjs",
-    "build": "node scripts/bundle-litellm.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:web",
-    "build:cli": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
+    "bundle:opencode-plugin": "node scripts/bundle-opencode-plugin.mjs",
+    "build": "node scripts/bundle-litellm.mjs && node scripts/bundle-opencode-plugin.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:web",
+    "build:cli": "node scripts/bundle-opencode-plugin.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
     "build:web": "cd web && npm install --no-audit --no-fund --silent && npm run build",
     "dev": "NODE_OPTIONS=--no-deprecation tsx src/launcher.ts",
     "test": "vitest run src tests scripts web/src --exclude \"src/refresh/lock*\"",
+    "test:related": "vitest related --run",
     "test:cost-isolation": "vitest run src/tools/cost-isolation.test.ts",
     "check:reachable": "node scripts/unreachable.mjs",
     "test:locks": "vitest run src/refresh/lock.test.ts src/refresh/lock-corrupt-body.test.ts src/refresh/lock-process.test.ts --pool=forks --no-file-parallelism",
@@ -26,6 +28,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
+    "gate:opencode-live": "node scripts/opencode-live-gate/run.mjs",
     "prepublishOnly": "npm run build:cli",
     "report:fixtures": "tsx src/tools/report-fixtures.ts",
     "memory:store": "tsx src/tools/store-memory.ts"
@@ -79,6 +82,7 @@
     "@types/node": "^22.19.17",
     "@types/selfsigned": "^2.0.4",
     "@vitest/coverage-v8": "^5.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.18.0",
     "happy-dom": "^21.0.4",
     "playwright": "^1.61.1",
@@ -87,5 +91,8 @@
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.20.0",
     "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
   }
 }

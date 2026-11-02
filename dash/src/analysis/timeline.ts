@@ -99,13 +99,23 @@ function recordAttributes(record: CanonicalRecord): Record<string, unknown> {
   return {}
 }
 
+/**
+ * The projection's own attribute namespace (`kyber.session.label`, `kyber.skills.*`). A
+ * `kyber.*` attribute is KyberDash's note about the span, not something the harness said of
+ * it, so neither its key nor its value is evidence: a session titled "fix subagent title"
+ * must not read as a subagent or as title generation (D11).
+ */
+const KYBER_ATTRIBUTE_PREFIX = 'kyber.'
+
 /** Every term evidence markers are matched against, lowercased. */
 function evidenceTerms(record: CanonicalRecord): string {
-  const attributes = recordAttributes(record)
-  const keys = Object.keys(attributes)
-  const values = Object.values(attributes).filter(
-    (value): value is string => typeof value === 'string'
+  const attributes = Object.entries(recordAttributes(record)).filter(
+    ([key]) => !key.startsWith(KYBER_ATTRIBUTE_PREFIX)
   )
+  const keys = attributes.map(([key]) => key)
+  const values = attributes
+    .map(([, value]) => value)
+    .filter((value): value is string => typeof value === 'string')
   return [record.name, record.op, ...keys, ...values].join(' ').toLowerCase()
 }
 

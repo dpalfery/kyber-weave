@@ -202,5 +202,5 @@ where it is version-controlled alongside the project it describes.
 ## Related
 
 - [ADR 0024: An Explicit Layout Marker on Global Squad Receipts, with Legacy Single-Root Recovery](0024-squad-global-receipt-layout-marker.md), amended here
-- [Kyber-Squad architecture: state, identity, and locking](../kyber-squad/architecture.md#4-state-identity-and-locking-model)
+- [Kyber-Squad architecture: state, identity, and locking](../kyber-squad/architecture.md#4-deployment-scopes-and-state-topology)
 - [Kyber-Squad adoption and usage guide: deployment scopes](../kyber-squad/onboarding.md#deployment-scopes)

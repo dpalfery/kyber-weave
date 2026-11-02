@@ -1,192 +1,113 @@
-// T3 loadable entry + D5 consent gate (test-first).
+// The OpenCode 2.x loadable entry (entry.ts): the default export and the `setup` seam.
 //
-// Fixture: fixtures/context-payload.json @opencode/plugin 2.1.4 — v2
-// `Plugin.define({ id, setup })` with `ctx.session.hook("context", …)`;
-// v1 fallback: default-export hooks map. D5: content (systemPrompt,
-// toolsText, skills) rides only under KYBERDASH_OPENCODE_CONTEXT=1;
-// identity/markers always flow. Never-fail-host throughout.
+// `setup` registers the V2 hook set on the host, subscribes to the event stream, and returns a
+// cleanup. It must never fail the host: refused registrations, throwing subscriptions and inputs that
+// name no session are all absorbed.
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import entryDefault, {
-  KYBERDASH_OPENCODE_CONTEXT_ENV,
-  KyberdashOpencodePlugin,
-  applyContextConsent,
-  createEntryHandlers,
-  readContextConsent,
-  toHookPayload,
-} from './entry.js'
-import type { OpencodeHookEvent } from './plugin.js'
+import entry, { createSetup } from './entry.js'
 import { OPENCODE_PLUGIN_ID } from './plugin.js'
+import {
+  createHost,
+  isCleanup,
+  noSleep,
+  receiver,
+  start,
+  stopPlugin,
+  useTempDirectories,
+  consentPathIn,
+} from './testing.js'
 
-const SESSION_ID = 'opencode-session-7f3a'
+const tempDir = useTempDirectories()
+const SESSION_HOOKS = ['context', 'model.request', 'prompt']
+const TOOL_HOOKS = ['execute.after', 'execute.before']
 
-const FULL_PAYLOAD = {
-  sessionId: SESSION_ID,
-  messageId: 'msg-01',
-  turnIndex: 3,
-  systemPrompt: 'secret system',
-  toolsText: '[{"name":"read"}]',
-  skills: ['skill-a'],
-  model: 'model-x',
-  agent: 'agent-y',
-} as const
+function options(rcv = receiver()) {
+  return { fetchFn: rcv.fetch, env: {}, consentPath: consentPathIn(tempDir()), sleepFn: noSleep, randomFn: () => 0 }
+}
 
-describe('readContextConsent (D5)', () => {
-  it('is true only for KYBERDASH_OPENCODE_CONTEXT=1', () => {
-    expect(KYBERDASH_OPENCODE_CONTEXT_ENV).toBe('KYBERDASH_OPENCODE_CONTEXT')
-    expect(readContextConsent({ KYBERDASH_OPENCODE_CONTEXT: '1' })).toBe(true)
-    expect(readContextConsent({})).toBe(false)
-    expect(readContextConsent({ KYBERDASH_OPENCODE_CONTEXT: '0' })).toBe(false)
-    expect(readContextConsent({ KYBERDASH_OPENCODE_CONTEXT: 'true' })).toBe(false)
+describe('default export matches the 2.x loader schema { id, setup }', () => {
+  it('has exactly the keys id and setup, with the plugin id', () => {
+    expect(Object.keys(entry).sort()).toEqual(['id', 'setup'])
+    expect(entry.id).toBe(OPENCODE_PLUGIN_ID)
+    expect(typeof entry.setup).toBe('function')
   })
 })
 
-describe('applyContextConsent (D5 gate)', () => {
-  it('drops content fields but keeps identity/markers when consent is absent', () => {
-    const gated = applyContextConsent({ kind: 'session.context', ...FULL_PAYLOAD, timestamp: 't' }, false)
-    expect(gated).toMatchObject({
-      kind: 'session.context',
-      sessionId: SESSION_ID,
-      messageId: 'msg-01',
-      turnIndex: 3,
-      model: 'model-x',
-      agent: 'agent-y',
-    })
-    expect(gated).not.toHaveProperty('systemPrompt')
-    expect(gated).not.toHaveProperty('toolsText')
-    expect(gated).not.toHaveProperty('skills')
+describe('setup registers the V2 hook set and one event subscription', () => {
+  it('registers prompt, context and model.request on the session (never experimental.idle), and execute.before/after on tools', async () => {
+    const host = createHost()
+    await start(createSetup(options()), host)
+    expect([...host.sessionHooks].sort()).toEqual(SESSION_HOOKS)
+    expect([...host.toolHooks].sort()).toEqual(TOOL_HOOKS)
+    expect(host.subscriptions).toBe(1)
   })
 
-  it('lets content ride when consent is set', () => {
-    const gated = applyContextConsent({ kind: 'session.context', ...FULL_PAYLOAD, timestamp: 't' }, true)
-    expect(gated).toMatchObject({
-      systemPrompt: 'secret system',
-      toolsText: '[{"name":"read"}]',
-      skills: ['skill-a'],
-    })
+  it('returns a cleanup that stops the event subscription', async () => {
+    const host = createHost()
+    const cleanup = await start(createSetup(options()), host)
+    expect(isCleanup(cleanup)).toBe(true)
+    if (!isCleanup(cleanup)) return
+    await cleanup()
+    expect(host.closedSubscriptions).toBe(1)
+  })
+
+  it('still returns a cleanup on a host with no session, tool or event surface', async () => {
+    const cleanup = await start(createSetup(options()), createHost({ bare: true }))
+    expect(isCleanup(cleanup)).toBe(true)
+    await stopPlugin(cleanup)
   })
 })
 
-describe('entry handlers (consent observable at the emitted event)', () => {
-  const lastEvent = (handlers: ReturnType<typeof createEntryHandlers>): OpencodeHookEvent => {
-    const event = handlers.installed.plugin.events.at(-1)
-    expect(event).toBeDefined()
-    return event as OpencodeHookEvent
+describe('setup never fails the host', () => {
+  it('resolves to a cleanup when the session surface refuses registration', async () => {
+    const cleanup = await start(createSetup(options()), createHost({ rejectSessionHook: true }))
+    expect(isCleanup(cleanup)).toBe(true)
+  })
+
+  it('resolves to a cleanup when event subscription throws', async () => {
+    const cleanup = await start(createSetup(options()), createHost({ throwOnSubscribe: true }))
+    expect(isCleanup(cleanup)).toBe(true)
+  })
+
+  it('gives up on a hook registration the host never answers, names it, and still registers the rest', async () => {
+    const errors: string[] = []
+    const host = createHost({ hangSessionHook: true })
+    const cleanup = await start(
+      createSetup({ ...options(), hookRegistrationTimeoutMs: 20, onError: (where) => errors.push(where) }),
+      host,
+    )
+    expect(isCleanup(cleanup)).toBe(true)
+    expect(errors).toEqual(['hook prompt', 'hook context', 'hook model.request'])
+    expect([...host.toolHooks].sort()).toEqual(TOOL_HOOKS)
+    await stopPlugin(cleanup)
+    expect(host.closedSubscriptions).toBe(1)
+  })
+
+  for (const timeout of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    it(`falls back to the default wait when hookRegistrationTimeoutMs is ${timeout}`, async () => {
+      const errors: string[] = []
+      const host = createHost({ sessionHookDelayMs: 60 })
+      const cleanup = await start(
+        createSetup({ ...options(), hookRegistrationTimeoutMs: timeout, onError: (where) => errors.push(where) }),
+        host,
+      )
+      expect(errors).toEqual([])
+      expect([...host.sessionHooks].sort()).toEqual(SESSION_HOOKS)
+      await stopPlugin(cleanup)
+    })
   }
 
-  it('consent unset → emitted event carries no content fields', async () => {
-    const handlers = createEntryHandlers({
-      env: {},
-      now: () => '2026-10-23T00:00:00.000Z',
-    })
-    await handlers['session.context']({ ...FULL_PAYLOAD })
-    const emitted = lastEvent(handlers)
-    expect(emitted).toMatchObject({ kind: 'session.context', sessionId: SESSION_ID, model: 'model-x' })
-    expect(emitted).not.toHaveProperty('systemPrompt')
-    expect(emitted).not.toHaveProperty('toolsText')
-    expect(emitted).not.toHaveProperty('skills')
-  })
-
-  it('consent set → emitted event carries content', async () => {
-    const handlers = createEntryHandlers({
-      env: { KYBERDASH_OPENCODE_CONTEXT: '1' },
-      now: () => '2026-10-23T00:00:00.000Z',
-    })
-    await handlers['session.context']({ ...FULL_PAYLOAD })
-    expect(lastEvent(handlers)).toMatchObject({
-      systemPrompt: 'secret system',
-      toolsText: '[{"name":"read"}]',
-      skills: ['skill-a'],
-    })
-  })
-
-  it('never fails the host when delivery throws', async () => {
-    const handlers = createEntryHandlers({
-      env: {},
-      now: () => '2026-10-23T00:00:00.000Z',
-      onError: () => {
-        throw new Error('tap down')
-      },
-    })
-    handlers.installed.outbox.enqueue = () => {
-      throw new Error('receiver down')
-    }
-    await expect(handlers['session.context']({ sessionId: SESSION_ID })).resolves.toBeUndefined()
-  })
-})
-
-describe('opencode-loadable shape (T0 pin)', () => {
-  it('exposes the v2 Plugin.define shape and registers context on setup', async () => {
-    expect(KyberdashOpencodePlugin.id).toBe(OPENCODE_PLUGIN_ID)
-    const seen: string[] = []
-    const ctx = {
-      session: {
-        hook: (name: string, _cb: unknown) => {
-          seen.push(name)
-          return Promise.resolve({ dispose: () => Promise.resolve() })
-        },
-      },
-    }
-    await expect(KyberdashOpencodePlugin.setup(ctx as never)).resolves.toBeUndefined()
-    expect(seen).toContain('context')
-  })
-
-  it('tolerates a rejecting setup host', async () => {
-    const ctx = {
-      session: {
-        hook: () => Promise.reject(new Error('host busy')),
-      },
-    }
-    await expect(KyberdashOpencodePlugin.setup(ctx as never)).resolves.toBeUndefined()
-  })
-
-  it('default-exports the v1 hooks map including session.context', () => {
-    const hooks = entryDefault as unknown as Record<string, unknown>
-    expect(hooks['session.context']).toEqual(expect.any(Function))
-    expect(hooks['session.start']).toEqual(expect.any(Function))
-    expect(hooks['session.end']).toEqual(expect.any(Function))
-  })
-
-  it('setup uses the shared createInstalledOpencodePlugin pipeline', async () => {
-    const hook = vi.fn(() => Promise.resolve({ dispose: () => Promise.resolve() }))
-    await KyberdashOpencodePlugin.setup({ session: { hook } } as never)
-    expect(hook).toHaveBeenCalledWith('context', expect.any(Function))
-  })
-})
-
-describe('session.context entry boundary (review PR #425 finding, round 2)', () => {
-  it('drops an identity-less payload: no event emitted', async () => {
-    const handlers = createEntryHandlers({
-      env: {},
-      now: () => '2026-10-23T00:00:00.000Z',
-    })
-    await handlers['session.context']({} as unknown as Parameters<typeof handlers['session.context']>[0])
-    expect(handlers.installed.plugin.events).toHaveLength(0)
-    expect(handlers.installed.mappedSpans).toHaveLength(0)
-  })
-
-  it('drops a toHookPayload identity-less input: no event emitted', async () => {
-    const handlers = createEntryHandlers({
-      env: {},
-      now: () => '2026-10-23T00:00:00.000Z',
-    })
-    await handlers['session.context'](toHookPayload({ model: 'm' }))
-    expect(handlers.installed.plugin.events).toHaveLength(0)
-    expect(handlers.installed.mappedSpans).toHaveLength(0)
-  })
-})
-
-describe('toHookPayload identity (review PR #425 finding 1, RED)', () => {
-  it('omits the identity key when the input names no session', () => {
-    const payload = toHookPayload({ model: 'm' })
-    expect('sessionId' in payload).toBe(false)
-    expect('sessionID' in payload).toBe(false)
-  })
-
-  it('never emits both sessionID and sessionId spellings', () => {
-    const payload = toHookPayload({ sessionID: 'ses-dual' } as Record<string, unknown>)
-    expect('sessionID' in payload).toBe(false)
-    expect(payload.sessionId).toBe('ses-dual')
+  it('ignores hook inputs that name no session and never rejects', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await expect(host.deliverSession('prompt', {})).resolves.toBeUndefined()
+    await expect(host.deliverSession('context', null)).resolves.toBeUndefined()
+    await expect(host.deliverSession('model.request', 42)).resolves.toBeUndefined()
+    await expect(host.deliverTool('execute.before', {})).resolves.toBeUndefined()
+    await stopPlugin(cleanup)
+    expect(rcv.attempts).toEqual([])
   })
 })

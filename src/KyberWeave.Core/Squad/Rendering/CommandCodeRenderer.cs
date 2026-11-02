@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
@@ -35,8 +34,21 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// A subagent is never given the <c>agent</c> or <c>agent_output</c> tools, so
-/// <c>delegate</c> is not expressible. MCP tools reach a subagent only when named in its
-/// <c>tools</c> list; Squad names none, so parent MCP is not inherited.
+/// <c>delegate</c> is not expressible.
+/// </para>
+/// <para>
+/// <b>MCP is granted by fully qualified tool name, on the file-read entitlement.</b> Command Code
+/// gives a subagent no MCP tool it does not name in its own <c>tools</c> list, so an unnamed
+/// server is a server the agent cannot call. This renderer therefore names the
+/// <c>kyber-weave</c> roster's <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> entries for every agent
+/// whose capability profile resolves and allows <c>filesystem.read</c> — the pure orchestrator
+/// included, because that server carries <c>agent_coding_standards</c> (ADR 0050). It names that
+/// one server and no other: <c>codegraph</c> and <c>context7</c> keep the orchestrator carve-out,
+/// and this target never named them before the widening either, so it is not the surface on
+/// which that carve-out is expressed. Where the grant is empty — a profile that denies the read,
+/// or an unresolvable one — the agent names no MCP tool and its
+/// <c>permission-not-expressible</c> record states that reason rather than claiming in general
+/// terms that Squad names nothing.
 /// </para>
 /// <para>
 /// Profile-declared shared identities suppress their skill projections per the native
@@ -69,7 +81,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         ("filesystem.search", ["read_directory", "grep", "glob"]),
         ("filesystem.write", ["write_file", "edit_file"]),
         ("process.execute", ["shell_command", "shell_output"]),
-        ("network.read", ["web_search", "web_fetch"]),
+        ("network.read", ["web_search", "web_fetch"])
     ];
 
     /// <summary>
@@ -141,7 +153,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.CommandCode);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -161,12 +173,20 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        // Read from canonical source through the shared derivation rather than a renderer-local
+        // list, so a tool renamed upstream is a source edit, the doctor check reads the same
+        // roster, and this target cannot disagree with the others about which server is which
+        // entitlement class (ADR 0050 decision 4).
+        IReadOnlyList<string> universalMcpToolNames =
+            CapabilityDegradations.UniversalMcpToolNames(source.Toolchain.RequiredMcpTools);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
+                universalMcpToolNames,
                 request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -188,8 +208,9 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                                 agent,
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
+                                universalMcpToolNames,
                                 $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
-                                reusedCanonicalSkill: true));
+                                true));
                         }
                         else
                         {
@@ -214,13 +235,15 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                             agent,
                             fallbackProfile,
                             source.CapabilityProfiles.Profiles,
+                            universalMcpToolNames,
                             skillPrincipal.RelativePath));
                     }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
                     // Omit mode: the agent renders exactly as before, with no entry-point skill.
-                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                    degradations.AddRange(BuildDegradationRecords(
+                        agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
                 }
                 else
                 {
@@ -231,7 +254,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             }
             else
             {
-                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                degradations.AddRange(BuildDegradationRecords(
+                    agent, source.CapabilityProfiles.Profiles, universalMcpToolNames));
             }
         }
 
@@ -258,6 +282,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -279,7 +304,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
 
         // Always emit tools. Omitting it already grants nothing, but an explicit list keeps
         // the grant reviewable in the file, and an empty grant is the visible tools: [].
-        frontmatter["tools"] = new CommandCodeYamlFlowSequence(ResolveTools(agent, capabilityProfiles));
+        frontmatter["tools"] = new CommandCodeYamlFlowSequence(
+            ResolveTools(agent, capabilityProfiles, universalMcpToolNames));
 
         string content;
         lock (SerializerLock)
@@ -404,12 +430,14 @@ public sealed class CommandCodeRenderer : ISquadRenderer
 
         if (profile.HarnessModels.TryGetValue("commandcode", out string? commandCodeModel))
         {
-            return string.Equals(commandCodeModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(commandCodeModel)
+            return string.Equals(commandCodeModel, "inherit", StringComparison.Ordinal) ||
+                   string.IsNullOrWhiteSpace(commandCodeModel)
                 ? null
                 : commandCodeModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(profile.Default)
             ? null
             : profile.Default;
     }
@@ -419,9 +447,26 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
     /// withhold, which keeps the lowering non-broadening by construction.
     /// </summary>
+    /// <remarks>
+    /// Command Code has no per-server permission key, only the agent's own <c>tools</c> list, so
+    /// the MCP entitlement is written out name by name — which is how the target consumes the
+    /// roster, not how the roster is derived. Which names the roster holds, and which of them a
+    /// profile is entitled to, are the shared
+    /// <see cref="CapabilityDegradations.UniversalMcpToolNames"/> and
+    /// <see cref="CapabilityDegradations.ResolveMcpToolNames"/> derivations — the ones Devin and
+    /// ZCode consume — so an edit to the entitlement partition reaches this target instead of
+    /// leaving it rendering the set the others just changed.
+    /// <para>
+    /// The orchestrator-excluded class is passed in empty rather than filtered out here: this
+    /// target names the universal server alone and has since before the widening, so it grants
+    /// none of that class. Declaring the class empty at the call site keeps the derivation
+    /// shared while stating, in one place a reader can see, that this target has no member of it.
+    /// </para>
+    /// </remarks>
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames)
     {
         HashSet<string> granted = new(StringComparer.Ordinal);
 
@@ -442,7 +487,18 @@ public sealed class CommandCodeRenderer : ISquadRenderer
             }
         }
 
-        return ToolOrder.Where(granted.Contains).ToArray();
+        // MCP names append after the built-ins: they come from source, so they cannot join the
+        // fixed renderer-local order, and the shared derivation already orders them
+        // server-then-tool.
+        return
+        [
+            .. ToolOrder.Where(granted.Contains),
+            .. CapabilityDegradations.ResolveMcpToolNames(
+                agent.CapabilityProfile,
+                capabilityProfiles,
+                orchestratorExcludedMcpToolNames: [],
+                universalMcpToolNames)
+        ];
     }
 
     /// <summary>
@@ -457,36 +513,37 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         string entryPointSkillPath,
         bool reusedCanonicalSkill = false)
     {
         string entryPointDetails = reusedCanonicalSkill
             ? $"The same-name canonical skill at {entryPointSkillPath} is the entry point and " +
-                "carries the role; no duplicate entry-point skill is emitted, because the " +
-                "canonical skill already occupies that identity."
+              "carries the role; no duplicate entry-point skill is emitted, because the " +
+              "canonical skill already occupies that identity."
             : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
-                $"skill at {entryPointSkillPath}.";
+              $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
+              $"skill at {entryPointSkillPath}.";
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "role-skill-fallback",
-            InstructionDigest: agent.BodyDigest,
-            Details: "Command Code dispatches custom agents only as subagents through its task " +
-                "tool and offers no way to start a session as one. " + entryPointDetails +
-                " The entry point runs in the main session under the session's permissions — " +
-                "the agent's explicit tools allow-list does not apply to it. The agent file is " +
-                "kept for task dispatch.");
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            "role-skill-fallback",
+            agent.BodyDigest,
+            "Command Code dispatches custom agents only as subagents through its task " +
+            "tool and offers no way to start a session as one. " + entryPointDetails +
+            " The entry point runs in the main session under the session's permissions — " +
+            "the agent's explicit tools allow-list does not apply to it. The agent file is " +
+            "kept for task dispatch.");
 
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
-            agent,
-            capabilityProfiles,
-            entryPointSkillNote:
-                $"The same-name entry point at {entryPointSkillPath} runs under the " +
-                "session's permissions; the agent's explicit tools allow-list does not " +
-                "apply to it."))
+                     agent,
+                     capabilityProfiles,
+                     universalMcpToolNames,
+                     $"The same-name entry point at {entryPointSkillPath} runs under the " +
+                     "session's permissions; the agent's explicit tools allow-list does not " +
+                     "apply to it."))
         {
             yield return record;
         }
@@ -495,6 +552,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> universalMcpToolNames,
         string? entryPointSkillNote = null)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
@@ -511,15 +569,15 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Command Code has no per-tool approval key in agent " +
-                    "frontmatter, so these narrow to deny and the corresponding tools are withheld " +
-                    "from the agent's tools list.");
+                SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Command Code has no per-tool approval key in agent " +
+                "frontmatter, so these narrow to deny and the corresponding tools are withheld " +
+                "from the agent's tools list.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -538,8 +596,21 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                 "Capability 'delegate' cannot spawn subagents; Command Code never gives a subagent the agent tool.");
         }
 
-        notExpressibleDetails.Add(
-            "MCP tools reach a Command Code subagent only when named in tools; Squad names none, so parent MCP was not inherited.");
+        // The parent-MCP sentence states the actual condition, and only when the condition
+        // holds: an agent whose tools list names the roster's MCP tools must not carry a record
+        // claiming Squad names none. The cause is selected rather than assumed, so a roster that
+        // declares nothing is not reported as a profile that denied the read.
+        if (!CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles) ||
+            universalMcpToolNames.Count == 0)
+        {
+            string cause = universalMcpToolNames.Count == 0
+                ? "the toolchain roster declares no tool for the server every agent needs"
+                : $"capability profile '{agent.CapabilityProfile}' does not allow 'filesystem.read'";
+            notExpressibleDetails.Add(
+                "MCP tools reach a Command Code subagent only when named in its tools list; " +
+                $"because {cause}, no MCP tool is named for this agent and parent MCP is not " +
+                "inherited.");
+        }
 
         if (entryPointSkillNote is not null)
         {
@@ -547,29 +618,31 @@ public sealed class CommandCodeRenderer : ISquadRenderer
         }
 
         yield return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            CanonicalIdentity: agent.Name,
-            OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
-            InstructionDigest: agent.BodyDigest,
-            Details: string.Join(" ", notExpressibleDetails));
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            "permission-not-expressible",
+            agent.BodyDigest,
+            string.Join(" ", notExpressibleDetails));
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["shell_command"],
-            withheldWriteTools: ["edit_file", "write_file"]);
+            SquadTargetCatalog.GetToken(SquadTarget.CommandCode),
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["shell_command"],
+            ["edit_file", "write_file"]);
 
         if (notIsolable is not null)
         {
@@ -589,7 +662,10 @@ public sealed class CommandCodeRenderer : ISquadRenderer
     /// </summary>
     private sealed class CommandCodeYamlFlowSequenceConverter : IYamlTypeConverter
     {
-        public bool Accepts(Type type) => type == typeof(CommandCodeYamlFlowSequence);
+        public bool Accepts(Type type)
+        {
+            return type == typeof(CommandCodeYamlFlowSequence);
+        }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
@@ -603,7 +679,7 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                 return;
             }
 
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, true, SequenceStyle.Flow));
             foreach (string item in items)
             {
                 emitter.Emit(new Scalar(
@@ -611,8 +687,8 @@ public sealed class CommandCodeRenderer : ISquadRenderer
                     TagName.Empty,
                     item,
                     ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
+                    true,
+                    true));
             }
 
             emitter.Emit(new SequenceEnd());

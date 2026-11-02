@@ -20,6 +20,7 @@ import type {
   KyberSkillRow,
   KyberToolDefinitionShadow,
   KyberTurnContentShadow,
+  KyberUnmeasurable,
 } from '../lib/kyberApi.js'
 
 // ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ export interface SessionSummaryPayload {
   models?: string[]
   tool_calls?: number | null
   tools_invoked?: string[] | number | null
-  tools_offered?: string[] | number | null
+  tools_offered?: string[] | number | KyberUnmeasurable | null
   /** Skill names listed to the agent; absent when not measured. */
   skills_listed?: string[] | null
   /** Skill names invoked at least once; absent when not measured. */
@@ -154,7 +155,13 @@ export interface SessionTimelineNode {
 }
 
 export interface SessionRequestItem {
+  /** The request's span id. Identity only; it is never the request's label. */
   request: string
+  /**
+   * Preview of the user's prompt, at most 200 characters. Null or a not_measurable object when
+   * the prompt was not recorded (content capture off); the label falls back to the request's position.
+   */
+  prompt?: string | KyberUnmeasurable | null
   timestamp?: string
   turns?: number
   model?: string
@@ -723,7 +730,9 @@ export function AgentSessionContent({
   const badReconciliation = rows.filter((r) => !(r.input_match && r.output_match))
   const cost = u.cost || {}
   const basis = cost.basis || 'none'
-  const isReported = basis === 'harness_reported'
+  // The engine stamps a harness-reported cost with basis `harness`; `harness_reported` is the
+  // legacy spelling, still accepted (SessionCostPanel reads both).
+  const isReported = basis === 'harness' || basis === 'harness_reported'
 
   // Tool definitions grouping
   const toolRows = session.tools || []
@@ -950,7 +959,7 @@ export function AgentSessionContent({
                   <span key={i} className="inline-flex items-center gap-1">
                     <span className="font-mono text-tertiary-foreground">{i + 1}.</span>
                     <span className="text-foreground max-w-xs truncate" title={r.request}>
-                      {r.request}
+                      {typeof r.prompt === 'string' && r.prompt ? r.prompt : `Request ${i + 1}`}
                     </span>
                     {r.turns !== undefined && (
                       <em className="text-tertiary-foreground text-[11px]">({r.turns} turns)</em>

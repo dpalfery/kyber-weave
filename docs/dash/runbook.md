@@ -6,7 +6,11 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-21
+last-reviewed: 2026-10-31
+decided-by:
+  - adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys
+  - adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline
+  - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -14,6 +18,7 @@ code-refs:
   - runTranscriptSync
   - formatSessionTitle
   - relinkQuarantinedClaudeLogs
+  - runMcpCommand
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -96,13 +101,18 @@ flowchart TD
 - **Who hosts what**: the tray spawns (or attaches to) `web --no-open` and nothing else — it
   never starts `kyber otel`. The OTLP receiver is a `ReceiverHost` child of the
   `kyberdash web` server, run only while `settings.receiverHosted` is on, and the scheduled
-  refresh/import jobs run in that server's `JobHost`.
+  refresh/import jobs run in that server's `JobHost`. `ReceiverHost` keeps at most one
+  child: a poll never spawns while a child is owned (starting or running), a probe that
+  resolves after close creates nothing, and `close()` seals the host — no later poll
+  probes or spawns — killing every owned child.
 - **One shared projection**: whichever entry fills the store — `dash refresh`, live OTLP
   ingest, or a manual `kyber build` — the derived data every surface reads is produced by the
   same `projectCanonicalStore()` projection over `buildSessions()`. There is no second
   derivation and no raw-record reporting path. The live collector's scheduler runs that
   projection on a debounced cadence (10s idle window, 10min staleness cap, 10min minimum
-  pass interval; `drain()`/`close()` bypass it) — see
+  pass interval shared across processes through `projection_last_start_ms`, one pass at
+  a time through the atomic `projection_lease` with 90s stale reclaim and 10s
+  heartbeats; `drain()`/`close()` bypass the schedule but still take the lease) — see
   [The shared canonical projection](architecture.md#the-shared-canonical-projection).
 - **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did
   may still carry the `codeburn` git remote; nothing uses it, so remove it with
@@ -138,6 +148,16 @@ There is exactly one KyberDash engine per user ([ADR 0039](../adr/0039-single-in
 and the OTLP receiver is its child, listening for OTLP over HTTP on `127.0.0.1:4318` at
 `POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. Logs enrich their
 correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)).
+
+Queue admission is bounded before anything is queued: a batch that alone exceeds the
+count or byte ceiling is refused permanently (HTTP 413 — shrink or split it, retrying
+cannot succeed), and a full backlog is shed transiently (HTTP 503 + Retry-After — the
+exporter must retry). Request bodies are capped at 64 MiB per request.
+
+Shutdown is ordered and idempotent: receiver stop, writer stop, projection drain, then
+store close. The service registers named SIGINT/SIGTERM handlers that `close()`
+removes, and concurrent closes join one shared teardown promise instead of resolving
+early, so a signal's exit chain cannot terminate the service mid-drain.
 
 The engine holds a local IPC endpoint (`~/.kyberdash/engine.sock`, a named pipe on Windows)
 and records itself in `~/.kyberdash/engine.json` (pid, executable, version, URL). The CLI and
@@ -181,6 +201,84 @@ database ([§4](#4-content-retention-policy),
 accept that exposure. What the receiver then does with the text — and the reasons it declares
 when a body is redacted, truncated, or arrives as a `body_ref` it will not open — is in the
 [telemetry inventory](telemetry-inventory.md#claude-code-otlp-content-live).
+
+### 1b. OpenCode capture: enable and verify
+
+OpenCode is captured by one plugin, for OpenCode 2.x only ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)).
+Turn it on and check it:
+
+```bash
+kyberdash kyber capture enable --harness opencode
+kyberdash kyber capture status --harness opencode
+```
+
+`enable` installs the `kyberdash-opencode` plugin file in OpenCode's global plugin directory and sets
+content consent to on in `~/.kyberdash/opencode-plugin.json`. It writes no key into `opencode.jsonc`. The first
+enable or disable after an upgrade also restores the `experimental.openTelemetry` value that older KyberDash
+builds wrote there, using the capture receipt. A value you have changed since is left alone, with a warning. `disable`
+sets consent off, removes the plugin file, and runs the same restore. `status` reports the plugin state,
+the consent, and whether the receiver is up. The Settings switch "OpenCode Enabled" runs the same
+`enable` and `disable`.
+
+The plugin posts to the loopback receiver directly, so `OTEL_EXPORTER_OTLP_ENDPOINT` plays no part.
+Content (system prompt, tool definitions, skills listing, prompt text, session title) flows only under
+consent. The consent file is created with content off when it is absent, and an install never rewrites
+it. `KYBERDASH_OPENCODE_CONTEXT=1` or `0` overrides the file.
+
+If new OpenCode sessions do not appear in KyberDash after an install or an upgrade, restart OpenCode.
+KyberDash cannot restart it for you. The 2026-10-31 live gate did not see OpenCode reload the plugin without
+a restart, so restart it.
+
+There is no OpenCode import. `dash refresh` does not read OpenCode data, and the plugin is the only source.
+What each path measures is in the [telemetry inventory](telemetry-inventory.md).
+
+**Old OpenCode rows.** Rows written before this pipeline (from contract-2 spans or the removed table import)
+stay in the store until you remove them. The removal is yours to run, and it does not re-ingest:
+
+```bash
+kyberdash dash clean --harness opencode --no-reingest --yes
+```
+
+**Test replay.** The e2e spec `dash/e2e/harness-collection.spec.ts` replays recorded OpenCode 2.2.1 events
+through the production plugin, receiver, adapter and projection, against an isolated dashboard and temp
+`canon.db`. It proves what the dashboard renders from that replay. It is not proof of live capture. Run it
+through the watchdog with the isolated config:
+
+```bash
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+```
+
+**Live gate (the proof of live capture).** The gate drives a real OpenCode session on this machine and checks
+kyberDash against OpenCode's own totals. It calls a real model, so it is never part of the test suite. Run it
+only when the owner asks for it. It is started with `npm --prefix dash run gate:opencode-live`, and
+`node dash/scripts/opencode-live-gate/run.mjs --dry-run` prints the plan without running anything. It needs
+the build under test installed and the live kyberDash on `127.0.0.1:4747`. The runner does this, in order:
+
+1. Creates a scratch project outside the repository, with one skill and a three-line file.
+2. Sends prompt 1 (tool and skill) through the shared OpenCode background service, with an explicit model.
+3. Sends prompt 2 in the same session, with the skill attached.
+4. Waits for the session to go idle in `opencode.db`, read only. It interrupts the session on timeout.
+5. Waits for `canon.db` to hold one step record per assistant message, then projects.
+6. Reads kyberDash's API and `opencode.db`, both read only.
+7. Compares them row by row (`compare.mjs`) and writes `comparison.json`.
+8. Runs the UI spec `dash/e2e/opencode-live-gate.spec.ts` against the live dashboard, which writes a screenshot.
+9. Cleans up: no gate `opencode run` left, the session not busy, the scratch project removed.
+
+The gate passes only when every comparison row, the UI spec and the cleanup pass. Evidence goes to
+`artifacts/evidence/opencode-v2-live-gate/<UTC-stamp>/`, which git ignores, with secrets stripped. The models
+are the approved pair only: `opencode-go/muse-spark-1.3-contributor`, falling back to `opencode/big-pickle`.
+No Anthropic model is used, and no OpenCode session may be left running.
+
+A run passed on 2026-10-31 on macOS with OpenCode 2.2.3 and a local build of this pipeline: every token class,
+cost, duration, request and turn count, tool, system-prompt and skill row matched OpenCode's own database
+(the row-by-row result is in the plan's closeout, archived under `docs/archive/plans/`). Two behaviours of OpenCode 2.2.x shape the gate. It takes a session's
+directory from `$PWD`, so the runner sets `PWD` for each child it starts. It leaves `time_busy` set after an
+execution ends, so a session is busy only while `time_busy` is newer than `time_idle`.
+
+Known limitation, waived by the comparator and reported as `WAIVED`: the session title. A headless
+`opencode run --title` in a directory whose project instance is not loaded yet emits its first events before
+the plugin subscribes, so the plugin never learns the title and the dashboard shows "OpenCode session". Install
+or upgrade the plugin, then restart OpenCode: the running service does not hot-reload it.
 
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
@@ -274,6 +372,27 @@ The dashboard's **Status** panel reads that route and lists sources discovered b
 ingested, grouped by their persisted reason: `window_filtered` (all native records predate the
 refresh window; widen `--history-weeks` to ingest them) or `no_recordable_events` (the file
 holds no usage or model events, so there is nothing to ingest).
+
+### 2a.1 Degraded-but-successful refresh (`derivation_failed`)
+
+When one session's derivation throws, `buildSessions` skips that session and the refresh
+still succeeds. The failing session is recorded as a `derivation_failed` problem row
+(severity `error`, session id and harness where known, error message plus stack), the
+`skipped` and `derivationDegraded` counters increment, and every other session still
+derives. The refresh exits **0** and its summary names the degraded count
+(e.g. `"; N session(s) skipped: derivation failed"`). A projection-level failure still
+closes the run as `failure` (exit **1**) through the outer `projectCanonicalStore` catch.
+
+Operating it:
+
+- Open **Problems** and look for `derivation_failed`: the row names the skipped session
+  and carries the stack. That plus the degraded count in the refresh summary is the whole
+  signal — nothing was silently dropped.
+- A green tray with a degraded count means skip-and-record. The red `Last refresh failed`
+  state is reserved for a failed run (failed harness job or projection-level derivation
+  failure), never for a degraded-but-successful one.
+- After the producer defect is fixed, the next refresh re-ingests and the session derives
+  normally; no manual rebuild is required beyond the normal refresh.
 
 ### 2b. Database clean (`dash clean`)
 
@@ -658,6 +777,114 @@ run the build against the store:
 node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 ```
 
+### 2j. Conversational analytics over MCP (`kyberdash mcp`)
+
+`kyberdash mcp` serves the eight read-only analytics tools over stdio for an MCP
+client. `runMcpCommand` (`dash/src/cli/mcp.ts`) builds the adapter
+(`createAnalyticsMcpServer`) on a client that only fetches the eight
+`/api/kyber/analytics/*` routes — the adapter never imports the canonical store and
+never owns the server lifecycle:
+
+```bash
+kyberdash web --no-open     # the engine must already be running; mcp never starts it
+kyberdash mcp                                       # discover via the server.json receipt
+kyberdash mcp --server-url http://127.0.0.1:4747   # explicit receipt override (wins)
+kyberdash mcp --state-dir /path/to/state           # read an existing receipt elsewhere
+```
+
+```mermaid
+flowchart LR
+    Client[MCP client] -->|stdio JSON-RPC| MCP[kyberdash mcp]
+    MCP -->|loopback fetch, 8 routes only| Engine[running engine /api/kyber/analytics/*]
+    Engine --> P[canon.db projection]
+    MCP -.->|never starts, stops, migrates, or reprojects| Engine
+```
+
+**Attach-only ownership.** The MCP process starts no engine, acquires no job lease,
+mutates no config, imports no content, and triggers no migration or projection; it
+never stops the engine it attached to. Discovery reads the existing receipt without
+rewriting it, and there is no `--db` flag because the running engine owns the
+datastore selection. Only literal loopback origins are contacted
+(`http://127.0.0.1:<port>` or `http://[::1]:<port>`, port required, no
+userinfo/query/fragment, no redirects); anything else, a missing receipt, or a stale
+one yields `engine_unavailable` telling the operator to run `kyberdash web --no-open`.
+An unknown analytics contract version (or a non-conforming body) yields
+`incompatible_engine`, never an empty corpus. Rediscovery happens once after an
+unavailable connection; the adapter never silently attaches to a different store
+mid-query, and a changed engine instance or projection generation rejects the cursor.
+
+**Stdio and shutdown discipline.** Help/version before transport activation keep normal
+CLI behavior. Once connected, every stdout line is valid JSON-RPC; logs, pricing
+messages, and diagnostics go to stderr, and nothing else is printed on stdout. Tool
+results carry the full analytics envelope as structured content with `isError: true`
+on tool-domain errors; JSON-RPC errors are reserved for protocol failures. Client
+cancellation aborts active fetches (10 s abortable HTTP cap); EOF/SIGTERM drains
+accepted requests within a bounded deadline, closes stdio/fetch resources, and exits
+without stopping the shared engine. A client closing its read end does not produce an
+unhandled EPIPE. Status reports a store identity token, never the DB contents or an
+unnecessary absolute path.
+
+**Limits the operator will meet.** Request bodies cap at 64 KiB and MCP replies at 64
+KiB (an oversized reply becomes a `budget_exceeded` envelope naming the narrowing
+step, not a silent truncation); each content page caps at 16 KiB UTF-8 — a page and
+working-memory bound, not a transcript total (`byteLimit` caps content pages;
+`limit` caps manifest rows). Queries admit
+at most 10,000 sessions, scan derived summaries in batches of at most 100, refuse a
+single decoded summary over 256 KiB or cumulative decoded input over 16 MiB, and
+return no partial total on budget failure. A 5 s cooperative computation deadline is
+checked between bounded batches. The refused request names the narrowing step
+(`stale_cursor` says restart from the first page; `unsupported_query` says what to
+narrow, including the unsupported-dimension hint toward `dash_inspect`). Over HTTP, the
+status follows the envelope error code — 400 for `invalid_request`/`unsupported_query`,
+404 for `not_found`, 409 for `stale_cursor`, 413 for `budget_exceeded`, 503 for
+`engine_unavailable`/`incompatible_engine`/`cancelled`, and 500 for `internal_error` or
+any code the route does not know — so a 500 means the engine returned a code the route
+does not know.
+
+**Content and outcome caveats are operational facts.** Search is metadata-only;
+`dash_inspect` and `POST /api/kyber/analytics/inspect` share one body —
+`mode: 'manifest' | 'content'` plus an explicit `target` (`run` / `session` /
+`turn`) — and content needs no additional flag or approval. `mode: 'manifest'`
+discovers without returning text bodies (run executions with parent/child/session
+linkage and `isSubagent`, turn identities, part/block identities with `role` and
+`origin`); `mode: 'content'` returns `chunks` (`partId`, `blockId`, `sessionId`,
+`turnIndex`, `spanId`, `origin`, `text`, `byteOffset`, `complete`, `role`, `order`,
+`resident`) paged by `pagination.nextCursor` / `hasMore`, following continuations to
+reach all retained context. `limit` (manifest only; default 25, max 100) and
+`byteLimit` (content only; default and max 16384) bound a page and working memory,
+never the total retrievable transcript. `coverage.completeness` is `captured_only`
+with `coverage.gaps` naming what is missing; `representation: 'assembled_turn'`
+(turn targets only) is a labelled reconstruction, never the exact model input. `run`
+scope includes child/subagent sessions; `session` scope stays local. Cursors bind
+target, representation, limits, and projection generation: a reused, tampered,
+cross-target, or post-purge cursor answers `stale_cursor`; capacity answers
+`budget_exceeded`; cancellation answers `cancelled`. Canonical content older than the
+retention window reads as absent or expired — retrieval never recaptures or
+manufactures absent text. The historical `includeContent: true` turn/block form and
+the metadata-only session inspection are retained legacy forms, not the way to
+retrieve context. A field outside the recognized set for its form answers
+`invalid_request`; unknown fields are never silently dropped. Outcomes stay sparse and empirical: missing data and conflicting signals are
+reported, never smoothed over, and comparisons are descriptive, never causal. Tool
+annotations (read-only/idempotent/non-destructive/closed-world hints) do not replace
+the route allowlist.
+
+**Verifying it.** Focused suites plus the release smoke:
+
+```bash
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/analysis/query      # engine contracts, budgets, cursors
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/analytics-routes.test.ts src/server/analytics-parity.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/mcp                 # tools, discovery, stdio, clean exit
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run scripts/sea-mcp-smoke.test.ts
+```
+
+`dash/scripts/sea-mcp-smoke.mjs` stages the real single-executable binary outside any
+checkout (`HOME`, config, and state all point at a temp dir), initializes over stdio,
+lists exactly the eight tools, calls `dash_status` against an isolated loopback
+fixture, then closes the child and asserts a clean exit. It runs beside the web smoke
+in `scripts/release-local.sh` and `.github/workflows/release.yml`. It proves protocol,
+tool list, and the attach-only boundary — not host-client compatibility (see the
+[adoption guide](onboarding.md#3-what-is-and-is-not-validated)).
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -738,7 +965,10 @@ The macOS menu bar and Windows notification area show one diagonal lightsaber, w
 its handle at the bottom left and blade pointing to the top right. The blade is green
 only when the shared coverage API reports a healthy, enabled, listening, unpaused
 collector with no recent failures and a current health check. Otherwise it is red,
-including startup before coverage is available. Both colours use the same silver
+including startup before coverage is available. A degraded-but-successful refresh keeps
+the healthy/green state: the skipped sessions ride in the refresh summary as a degraded
+count with their `derivation_failed` rows in Problems, while the red `Last refresh
+failed` state is reserved for a failed run. Both colours use the same silver
 handle and silhouette; macOS template tinting is disabled to preserve the colour.
 Windows shows the saber instead of a pressure number or status dot; pressure remains
 available in the tooltip and popover. Flat fills keep the icon legible at small sizes.
@@ -786,10 +1016,13 @@ Build the native shell with `cargo build --locked --manifest-path dash/tray/src-
 
 #### Local gates
 
+Run each of these through the watchdog from the repository root
+([Running tests safely](#running-tests-safely)):
+
 ```bash
-npm --prefix dash/tray/ui run typecheck
-npm --prefix dash/tray/ui run test
-cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash/tray/ui run test
+scripts/proc-guard.sh run -- bash -c 'cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test'
 ```
 
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
@@ -888,6 +1121,14 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
+   Check which engine version is answering. The route is store-free, so it answers at once even while a projection runs:
+
+   ```bash
+   curl -s http://127.0.0.1:3000/api/kyber/version
+   ```
+
+   It returns `{ "version": "...", "apiVersion": 1 }`. A dev checkout reports the version in `dash/package.json`. A release reports the version stamped into `dash/package.json` at release time, which is the same version the web and tray Settings views show.
+
 #### Navigating the web dashboard
 
 Every view has its own URL, so a view can be bookmarked, shared, or opened directly.
@@ -972,7 +1213,7 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   (`canPromote: false`) until history is explicitly measured. See
   [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
-- **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+- **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors. A skipped session appears here as `derivation_failed` (severity `error`): it names the session (and harness where known) and carries the error message and stack. It means skip-and-record, not silent loss — see the [degraded refresh](#2a1-degraded-but-successful-refresh-derivation_failed).
 
 #### Status and Maintenance panels
 
@@ -1118,32 +1359,143 @@ curl -s http://127.0.0.1:3000/api/kyber/jobs | jq .
 curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
 ```
 
+### Running tests safely
+
+A test run that starts its own dashboard can start more dashboards, and each one starts more. In
+2026-10 this fork-bombed `node` (536 processes) and crashed three developer Macs. Three independent
+layers now guard against a repeat:
+
+- **The watchdog** (`scripts/proc-guard.sh run`) kills the command's whole process tree at an
+  absolute cap, and refuses to call a run clean while its children are still alive.
+- **Spawn guard** (ADR 0047). Under test, every KyberDash child spawn is refused unless the test opts
+  in with `allowRealSpawns(reason)`. A child stamped with a job or receiver role never hosts a
+  dashboard.
+- **Isolated e2e boots.** The self-booting Playwright specs use `dash/e2e/boot-dashboard.ts`, which
+  injects inert spawners and keeps state under the test's temp root.
+
+**Rule: every local test, gate and e2e command runs through the watchdog, from the repository root.**
+Do not start the dashboard (`kyberdash web`, `npm run dev -- web`) to run a test.
+
+```bash
+scripts/proc-guard.sh run -- npm --prefix dash run test
+scripts/proc-guard.sh run -- npm --prefix dash run test:locks
+scripts/proc-guard.sh run -- dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+```
+
+The watchdog runs the command in its own process group and polls the process table about every
+half second. It has two caps, both absolute, not measured against a baseline. The only way to change
+a cap is its flag; there is no environment variable for it, so a stray exported value cannot raise
+the safety limit.
+
+| Option | Default | Trips when |
+|---|---|---|
+| `--max-node N` | 128 | This user's JavaScript runtime processes on the machine reach N. Counted by basename: `node`, `nodejs`, `bun`, `deno` and `tsx`. |
+| `--max-tree M` | 64 | Descendants of the wrapped command reach M |
+| `--timeout S` | none | S seconds of wall clock pass |
+| `--tty` | off | Keeps the guard's terminal as the command's stdin (see below). Risky. |
+
+The watchdog refuses to run with an empty root, a root that is not a directory, or `/` (exit 2).
+
+**Standard input.** When the guard's own stdin is a terminal, the wrapped command gets stdin from
+`/dev/null`. The command runs as a background job in its own process group, so a read from the
+terminal would stop it with SIGTTIN, and it would then run until `--timeout` killed it (exit 124).
+`--tty` turns that redirection off. Use it only for a command that must read the terminal; a
+command that does so is stopped by SIGTTIN and ends only at `--timeout`.
+
+**Timeouts from an agent tool.** A foreground command longer than about 600 seconds is moved to the
+background by the agent tool. A guard timeout above 600 seconds therefore must not be used from an
+agent tool. Keep `--timeout` at or below 540 when a run comes from an agent tool.
+
+**Silent runs.** `review gates` prints its result only at the end, so a slow run and a stuck run look
+the same until the timeout fires. Progress output is a follow-up, tracked in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+
+Exit codes:
+
+| Code | Meaning | What to do |
+|---|---|---|
+| 86 | A cap tripped. stderr names the cap and the count. The whole tree was killed. | Read the top commands it prints. A real storm needs a fix before a rerun. A false trip on a loaded machine: rerun with a higher flag for that one run, for example `scripts/proc-guard.sh run --max-node 256 -- npm --prefix dash run test`, and say in the PR why the default was too low. |
+| 87 | Processes started by the run survived it. When the command itself passed, the run exits 87 anyway; they were killed. | Read the listed pids and commands. Fix the test that left them. |
+| 124 | `--timeout` elapsed. The tree was killed. | Find the hang; do not raise the timeout first. |
+| any other | The wrapped command's own exit code. | Normal failure. |
+
+The watchdog (`scripts/proc-guard.sh`) is POSIX-only and runs on macOS and Linux. Windows has no
+watchdog cap; the ledger's Windows mode is described under the process ledger below.
+
+**Playwright runs only with the isolated config.** Give `--config dash/playwright.isolated.config.ts`
+on every invocation, from the repository root, through the watchdog:
+
+```bash
+scripts/proc-guard.sh run --timeout 600 -- npx --prefix dash playwright test --config dash/playwright.isolated.config.ts
+```
+
+That config runs the two self-booting specs (`harness-collection.spec.ts` and
+`refresh-filters.spec.ts`), one worker, and adds the process-ledger teardown. The only Playwright
+configs in `dash/` are `playwright.config.ts` and `playwright.isolated.config.ts`: a test pins that
+set, and that each sets the spawn guard to deny and wires the ledger. Do not run `dash/playwright.config.ts` by
+hand. Its `webServer` starts a dashboard on port 4747, the port the tray uses, and it is not the
+isolated path. Which specs have no sanctioned invocation is tracked in
+[the Playwright webServer specs todo](../todo/kyberdash-playwright-webserver-specs.md).
+
+**Process ledger.** Vitest and Playwright both end with a ledger teardown. It finds three kinds of
+child: every child a guarded spawn started in the run (recorded in `KYBERDASH_SPAWN_LEDGER_FILE`),
+every descendant of the test runner, and every process re-parented to PID 1 whose command line
+contains the `dash/` directory and that started after the run began. It kills each one (TERM, then
+KILL after a short grace period) and fails the run, listing them. Two residuals are known. A
+child that exits within about 3 seconds of the end of the run is not counted, because the ledger
+waits that long for pool workers to finish exiting. The descendant and orphan scans use `ps`, so
+they run on POSIX only. On Windows the ledger runs in ledger-entry-only mode: it checks the
+children it recorded, by pid liveness, then sends TERM and KILL; it does not scan descendants or
+orphans, and it cannot tell a reused pid from its child. The other residuals (the receiver child labelled `job`, the allow-list granularity,
+and spawns through another module's API) are listed in
+[the spawn-guard residuals todo](../todo/kyberdash-spawn-guard-residuals.md).
+
+**Opting in to a real child.** A test that must start a real bounded process calls
+`allowRealSpawns` from `dash/tests/setup/spawn-guard.ts`, with a reason that says what bounds the
+child (for example, "self-exits after 30 s"). The opt-in lasts for that test only. The site is also
+added to the spawn-site allow-list with the same bound; see
+[the test standard](../standards/test/README.md#tests-that-start-processes).
+
+**Leftovers from an earlier run.** `check-leftovers` lists processes that a run left behind. It
+does not kill anything.
+
+```bash
+scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)"
+scripts/proc-guard.sh check-leftovers --root "$(git rev-parse --show-toplevel)" --since <epoch-seconds>
+pgrep -x node | wc -l
+```
+
+It exits 0 when none are listed and 87 when some are. Each survivor is printed as pid, then command.
+`--since` limits the list to processes that started at or after that epoch second. Read each
+command, confirm it is a KyberDash test process from this checkout, and stop it yourself. A process
+you do not recognise is not yours to stop; report it.
+
 ### Running Unit & Contract Tests
 
 The dash suites are co-located with the code they cover. The canonical gates are:
 
 ```bash
-npm --prefix dash run typecheck
-npm --prefix dash run lint
-npm --prefix dash run test        # excludes the refresh-lock files; run test:locks for those
-npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
-npm --prefix dash run check:reachable
+scripts/proc-guard.sh run -- npm --prefix dash run typecheck
+scripts/proc-guard.sh run -- npm --prefix dash run lint
+scripts/proc-guard.sh run -- npm --prefix dash run test        # excludes the refresh-lock files; run test:locks for those
+scripts/proc-guard.sh run -- npm --prefix dash run test:locks  # refresh lock takeover/heartbeat behaviour, forked pool
+scripts/proc-guard.sh run -- npm --prefix dash run check:reachable
 ```
 
-Focused runs use the same runner:
+Focused runs use the same runner, also through the watchdog:
 
 ```bash
 # /api/kyber/* backend contract tests
-npm --prefix dash exec -- vitest run src/server/kyber-api.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/kyber-api.test.ts
 
 # SQLite query bridge tests
-npm --prefix dash exec -- vitest run src/server/kyber-bridge.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/server/kyber-bridge.test.ts
 
 # CLI/REST report parity (Requirement 11.14)
-npm --prefix dash exec -- vitest run src/cli/report-api-parity.test.ts
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run src/cli/report-api-parity.test.ts
 
 # Web dashboard component tests
-npm --prefix dash exec -- vitest run web/src
+scripts/proc-guard.sh run -- npm --prefix dash exec -- vitest run web/src
 ```
 
 These suites validate:
@@ -1177,15 +1529,12 @@ pre- and post-edit hashes in a receipt. `disable` restores only keys that still 
 `enable` wrote and otherwise refuses, naming the drift. The CLI has no store, so it never
 touches the receiver setting.
 
-**Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
-and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
-**Codex**, **pi** and **Antigravity** are status-only: status reports them, `enable` and
-`disable` do not write them, and the drawer shows them read-only. **Kilo Code** is a file plugin
-rather than a key writer: `enable` installs one plugin file, `disable` removes it, and the drawer
-shows it with Enable and Disable. OpenCode reads its
-OTLP endpoint from the process environment, so `enable` writes only its flag; the drawer and
-`status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
-KyberDash cannot see whether the shell that launches OpenCode has it set.
+**Which harnesses are written.** Two are managed key writers that can be switched: **Copilot** (VS Code
+and VS Code Insiders `settings.json`) and **Claude Code**. **OpenCode** and **Kilo Code** are file plugins
+rather than key writers: `enable` installs one plugin file, `disable` removes it, and the drawer shows
+them with Enable and Disable. OpenCode writes no key into `opencode.jsonc`. Its enable also sets content
+consent, and its disable turns that consent off. **Codex**, **pi** and **Antigravity** are status-only:
+status reports them, `enable` and `disable` do not write them, and the drawer shows them read-only.
 
 **Kilo Code row.** The `kilo` row is not a key writer (ADR 0031, 2026-10-21 amendments): Kilo
 has no config key that turns on local telemetry export, and `experimental.openTelemetry` is its
@@ -1210,25 +1559,92 @@ It is detected from any **one** of three traces, and nothing else counts as dete
 VS Code Insiders, JetBrains and a Windows `%APPDATA%` Kilo config directory are not probed. A Kilo
 installed only there has none of the three traces, so the row says not detected while Kilo itself
 works — run the import above and ignore the row.
-**OpenCode plugin (`kyberdash-opencode`).** The dash-CLI-managed plugin observes
-session/turn/span hooks plus the `session.context` hook (system prompt, tool definitions,
-skills listing, session/model identity) from opencode's own plugin directories (`~/.config/opencode/plugins/`,
-`.opencode/plugins/`; loadable entry `entry.ts` covers both the v2 CLI `Plugin.define` shape
-and the v1 Desktop hooks map) and posts span-anchored OTLP/HTTP spans to the loopback receiver
-through the bounded outbox, which spools offline and retries with backoff. Capture owns
-the plugin keys declare-only: the writer declares the plugin id and its `plugins` config
-keys, but `enable` writes only `experimental.openTelemetry` — the registration installs by
-file and the endpoint stays process-env-only, so neither ever enters a receipt. Context
-content rides only under the sender-owned consent `KYBERDASH_OPENCODE_CONTEXT=1` (off by
-default; unset or any other value drops content pre-emit while identity/markers still flow).
-After enabling, install/upgrade the plugin file, set the consent where opencode launches,
-and restart OpenCode (CLIv2 watched-config reload or `opencode service restart`;
-Desktop: disable plugins, clear cache, restart) with `OTEL_EXPORTER_OTLP_ENDPOINT` set
-where it launches, then emit a turn; a green enable is not capture. Restart-to-upgrade note:
-spans stamped contract `'1'` by a pre-upgrade plugin quarantine under `unknown opencode
-contract version` after the `'2'` bump — reinstall the plugin file and re-emit so the turn
-is stamped `'2'`. Live check: emit one opencode turn and confirm the session's Context view
-shows the system prompt and tool definitions and the Skills view shows the listing.
+**OpenCode capture plugin (`kyberdash-opencode`).** KyberDash installs one plugin file,
+`kyberdash-opencode.js`, into OpenCode's global plugin directory, `<root>/plugins/`. The root is
+`--config-dir` when given, else `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`. You do not copy
+the file by hand; the `kyberdash` binary carries it. `kyberdash kyber capture enable`,
+`disable` and `status` take `--config-dir` with the same precedence (flag, else
+`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`), so a re-enable into a custom root needs no
+env export. Even without the flag, a plugin Squad installed
+into a custom root is still found by `capture status` and `capture disable`, which follow the path in
+the receipt, but only when that path is `<dir>/plugins/kyberdash-opencode.js`, a regular file (not a
+symlink) that carries the KyberDash marker. To re-enable into that custom root, pass
+`--config-dir`, set `$OPENCODE_CONFIG_DIR`, or rerun the Squad install. The plugin loads the default export
+`{ id: 'kyberdash-opencode', setup }` of OpenCode 2.x, and it posts contract-3 request, step and tool spans to
+the loopback receiver through a bounded outbox. It reads OpenCode's events and hooks and never changes them.
+OpenCode 1.x is not supported ([ADR 0048](../adr/0048-opencode-capture-is-a-v2-only-plugin-pipeline.md)). The
+pipeline is described in [the architecture](architecture.md#opencode-v2-capture-plugin-pipeline-kyberdash-opencode).
+
+**Install and update: one command.**
+
+- `kyber-weave squad install --global` or `kyber-weave squad update --global` with the OpenCode
+  target installs or upgrades the plugin after the Squad step. Pass `--no-capture-plugin` to skip
+  it. Project-scope runs do not install it.
+- `kyber-weave update` installs the new `kyberdash`, restarts the engine and tray, and upgrades
+  the plugin only if it is already installed. See [Updating](../install.md#updating). Pass
+  `--no-restart` to skip the restart.
+- Both paths run `kyberdash kyber capture plugin install --harness opencode --preserve`. Preserve
+  mode keeps a plugin file you edited, an older KyberDash plugin with no matching receipt (its
+  origin cannot be proven; reported as `kept-edited`), or a file KyberDash did not write, prints a
+  warning, and exits 0. It upgrades an older plugin only when the receipt proves it is unmodified. It never touches `opencode.jsonc`.
+- Strict mode (no `--preserve`) refuses to overwrite such a file and exits 1. Add `--dry-run` to
+  preview either mode without writing.
+
+**If new OpenCode sessions do not show, restart OpenCode.** KyberDash cannot restart your OpenCode
+process. The install prints `harness opencode: OpenCode 2.x picks up the capture plugin for new sessions; if
+KyberDash shows no new OpenCode sessions, restart OpenCode.` Squad and `kyber-weave update` relay that same
+line. Until you restart, a running OpenCode may keep the old plugin or none.
+
+**Content consent.** Consent controls whether the system prompt, tool definitions and skills
+listing are sent. It lives in `~/.kyberdash/opencode-plugin.json` (`{ "version": 1, "content": <bool> }`).
+
+- Install creates that file with `content: false` only if it does not exist. An existing file is
+  never rewritten by install or update.
+- **On:** turn OpenCode on in the KyberDash Settings drawer, or run
+  `kyberdash kyber capture enable --harness opencode`. This installs the plugin, sets `content: true`,
+  and ensures the engine is running.
+- **Off:** turn OpenCode off in the Settings drawer, or run
+  `kyberdash kyber capture disable --harness opencode`. This sets `content: false` and removes the
+  plugin file.
+- The plugin reads the consent file on each request, so a change applies without reinstalling. A
+  restart is still needed for an upgraded plugin file, not for consent.
+- `KYBERDASH_OPENCODE_CONTEXT=1` forces content on and `0` forces it off. Unset defers to the file.
+  This is a debugging override only: a Desktop app started from the Dock does not inherit shell variables.
+- While consent is off, usage, cost, timings, request structure and tool names still flow. The system
+  prompt, tool definitions, skills listing and prompt text read "not measurable", with a reason.
+
+**Confirm it works.** Run one turn in OpenCode, then open the session in the dashboard. Usage, cost and
+the request list should show the turn. Under consent, the Context view shows the system prompt and tool
+definitions, and the Skills view shows the listing. The plugin sends no context window, so the window
+follows KyberDash's model-window catalog or its declared-window rules, and the view labels which. A green
+`capture enable` is still not capture: confirm with a turn, then with the live gate in §1b.
+
+**Engine check.** `kyberdash engine ensure --if-running` replaces a live engine of another version and
+starts nothing when none runs. It prints one line: `engine: not-running`, `engine: attached <version>`,
+or `engine: replaced <old> -> <new>`. It exits 1 with `engine: unresponsive` or `engine: failed` when it
+cannot act. `kyber-weave update` runs it after the binaries commit.
+
+**Engine version in status.** `kyberdash kyber capture status` prints the running engine's version
+against the CLI's own, as `engine: running <engine>, cli <cli>`. When they differ it adds `(differs)`
+and the remedy `kyber-weave update`. It prints `engine: not-running (cli <cli>)` when no engine holds
+the endpoint, and `engine: unresponsive` when the holder never answers.
+
+**Re-projection after an upgrade.** The engine re-projects the store on its own start. The job host
+runs one maintenance tick at once, and when the store's detector stamp is older than this build's
+(`DETECTOR_VERSION`), that tick projects the store to the new rules. You do not need `kyber build`.
+Rows from an older build, including OpenCode buckets that showed a measured zero, refresh on that tick.
+A current stamp means the tick does nothing.
+
+**Quarantined spans from before this change.** Test runs sent 41 spans (test session
+`opencode-session-7f3a`) into `canon.db` at contract `'1'`. They stay in quarantine under
+`unknown opencode contract version` as evidence, and nothing relinks them. To clear the OpenCode
+rows, wipe the harness scope:
+`kyberdash dash clean --harness opencode --no-reingest --yes`. The scope wipe also removes
+quarantine rows for `opencode`.
+
+**Tests.** A test cannot reach the live OTLP receiver. `dash/tests/setup/network-guard.ts` refuses
+any fetch to `127.0.0.1:4318` or `localhost:4318` with a named error. Inject `fetchFn` into plugin
+code under test instead.
 
 **Settings drawer.** The header **Settings** button opens a right slide-out. It reads
 `GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows
@@ -1431,8 +1847,8 @@ here.
   from your instruction files.
 - **Do not set `OTEL_EXPORTER_OTLP_ENDPOINT` for Kilo to "turn OTel on".** Kilo's OTLP stream
   carries no model spans, usage or content (AI SDK span recording is off upstream), and its
-  `Session.*` spans are claimed by the OpenCode adapter, so they land as quarantined non-model
-  spans attributed to the **OpenCode** source. That is noise, not Kilo records. The Settings row
+  `Session.*` spans are claimed by no adapter, so they land in the unclaimed quarantine. That is
+  noise, not Kilo records. The Settings row
   says the same and deliberately offers no endpoint variable.
 - **Settings row says "not detected":** see the three probe paths under
   [Harness OpenTelemetry capture](#harness-opentelemetry-capture). A Kilo installed only under VS

@@ -16,7 +16,7 @@ public static class DocsServerInstructions
         For a question about how something in this repository works, how to run or configure
         it, what a command, flag, or rule means, or whether something is documented, call
         docs_explore first, before grepping or reading files under docs/ or other markdown. It
-        returns the most relevant sections, ranked, with the code locations they refer to. If it
+        returns one answer with a confidence score and a single source line. If it
         reports a miss, the subject is likely undocumented and searching files directly is
         appropriate.
 
@@ -24,8 +24,9 @@ public static class DocsServerInstructions
         it), agent_coding_standards (how this repository writes code in a named technology, and
         the rule ids that standard states, before writing or reviewing code in it),
         docs_glossary (what a term means here), docs_analysis_candidates (duplicated or
-        contradictory documentation), and docs_status (which repository and revision the
-        documentation comes from).
+        contradictory documentation), docs_validate and docs_drift (the same schema and drift
+        gates as kyber-weave docs validate and docs drift, without a shell), and docs_status
+        (which repository and revision the documentation comes from).
         """;
 
     /// <summary>Applies the instructions to the server options.</summary>

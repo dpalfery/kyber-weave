@@ -70,6 +70,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "github-cli",
         "github-devops",
         "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
@@ -77,7 +78,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "python-dev",
         "resharper-clt",
         "rust-dev",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
         "task-gate",
@@ -194,6 +194,22 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         Assert.Contains("skills/task-gate/SKILL.md", entryNames);
         Assert.DoesNotContain(entryNames, name => name.Contains("task-reviewer", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The retired <c>second-brain</c> documentation-architecture skill moves to Kyber-Docs
+    /// (<c>.apm/skills/kyber-docs-onboarding-and-assessment</c>). The APM package ships the
+    /// Squad bundle, so no entry may carry it in any path.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "no-second-brain");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+
+        Assert.DoesNotContain(entryNames, name => name.Contains("second-brain", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -563,6 +579,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
+                if (TryGetAllowedGateCatalogueInclude(path, out string family))
+                {
+                    Assert.Equal(
+                        $"Gates.{family}.yml",
+                        element.Attribute("LogicalName")?.Value);
+                    continue;
+                }
+
                 Assert.DoesNotContain("products", path, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("kyber-squad", path, StringComparison.OrdinalIgnoreCase);
             }
@@ -597,6 +621,30 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         }
 
         technology = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Core may embed the five gate catalogue family files from
+    /// <c>products/kyber-squad/standards/&lt;family&gt;/gates.yml</c> only when LogicalName
+    /// remaps them to <c>Gates.&lt;family&gt;.yml</c>. They are configuration, not the Squad corpus.
+    /// </summary>
+    private static bool TryGetAllowedGateCatalogueInclude(string path, out string family)
+    {
+        string normalized = path.Replace('\\', '/');
+        string[] families = ["csharp", "typescript", "rust", "go", "python"];
+        foreach (string candidate in families)
+        {
+            if (normalized.EndsWith(
+                    $"products/kyber-squad/standards/{candidate}/gates.yml",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                family = candidate;
+                return true;
+            }
+        }
+
+        family = string.Empty;
         return false;
     }
 

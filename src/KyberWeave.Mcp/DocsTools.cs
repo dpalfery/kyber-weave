@@ -2,8 +2,11 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Claims;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Model;
@@ -74,12 +77,11 @@ public sealed partial class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        DOCS FIRST — call before grepping or reading anything under docs/ or other markdown.
-        Searches this repository documentation (guides, runbooks, decision records, design
-        notes) and returns the best-matching sections of each document in ONE call, ranked, plus the code
-        they reference as symbol -> file:line. Treat the returned sections as already read; do
-        NOT reopen those files. Retired and archived pages are excluded, so the answer is
-        current guidance.
+        DOCS FIRST — call before grepping or reading repository documentation under docs/ or other markdown.
+        Searches this repository's guides, runbooks, decision records, and design
+        notes and returns one answer with a confidence score and a single source line. Treat
+        the returned prose as already read; do NOT reopen that file. Retired and archived
+        pages are excluded.
 
         Use for: how X works, how to install/run/configure it, what a command, flag, or rule
         id means, why a design decision was made, is X documented, and before starting a task
@@ -87,35 +89,31 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         flag, rule id, component, or doc id.
 
         A miss says how many documents were searched: the subject is undocumented, so grep
-        is now fine. Do not use for what the code does right now; read the code instead.
+        under docs/ is now fine. Do not use for what the code does right now; read the code instead.
         """)]
     public string Explore(
         [Description("The question in plain words, or a command, flag, rule id, feature or component name, or document id.")] string query,
         [Description("""
-            Maximum documents to return (1-20). Defaults to 5. Lowering this deepens each
-            result rather than merely shortening the list, because charBudget is shared
-            across the documents returned; maxDocs=1 usually fits a whole document.
+            Continuation token from a prior incomplete answer for the same question. Omit on
+            the first call; repeat the same question with this value to read the next span.
             """)]
-        int maxDocs = 5,
-        [Description("""
-            Total characters of prose across all returned documents (1000-120000). Defaults
-            to 12000. Sections that did not fit are named in the response; re-query with a
-            larger budget to retrieve them.
-            """)]
-        int charBudget = DocumentIndex.DefaultCharBudget)
+        string? cursor = null)
     {
         DocumentIndex index = _host.Current();
         string provenance = Provenance(index);
-        IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs, charBudget);
+        ExploreAnswer answer = index.Explore(query, cursor);
 
-        if (hits.Count == 0)
+        if (answer.IsInvalidCursor)
         {
-            // Saying so plainly is the whole point of the relevance floor. An agent told
-            // to use this before grepping needs an explicit signal that it may now grep.
+            return Lead(provenance, answer.InvalidCursorMessage ?? string.Empty);
+        }
+
+        if (answer.IsMiss)
+        {
             string docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
             return Lead(provenance, $"""
-                No document in the governed corpus scored above the relevance threshold for '{query}'.
-                {index.DocumentCount} documents were considered.
+                No document in the documentation tree scored above the relevance threshold for '{query}'.
+                {answer.DocumentsConsidered} documents were considered.
 
                 This is a real miss, not an empty corpus. Either the subject is undocumented, or the
                 question uses vocabulary the documentation does not. Try naming a component, a doc-id
@@ -123,29 +121,42 @@ public sealed partial class DocsTools(DocumentIndexHost host)
                 """);
         }
 
+        return Lead(provenance, FormatExploreAnswer(answer));
+    }
+
+    private const string ExploreReadingRule =
+        "Stop reading when confidence is 0.60 or higher and the answer is not marked incomplete; otherwise call docs_explore again with the cursor when one is present, or ask a narrower question.";
+
+    private static string FormatExploreAnswer(ExploreAnswer answer)
+    {
         StringBuilder sb = new();
-        sb.Append("Top ").Append(hits.Count).Append(" of ").Append(index.DocumentCount)
-          .Append(" documents, best first (relevance ")
-          .Append(hits[0].Score.ToString("0.00", CultureInfo.InvariantCulture))
-          .Append(" … ")
-          .Append(hits[^1].Score.ToString("0.00", CultureInfo.InvariantCulture))
-          .AppendLine(").");
-        if (!index.CodeGraphAvailable)
-        {
-            sb.AppendLine("Warning: no CodeGraph index was readable, so code joins are unresolved.");
-        }
+        sb.Append("confidence: ")
+          .Append(answer.Confidence.ToString("0.00", CultureInfo.InvariantCulture))
+          .AppendLine();
+        sb.AppendLine(ExploreReadingRule);
 
-        foreach (DocumentHit hit in hits)
+        if (answer.Incomplete && answer.CursorToken is not null)
         {
+            sb.Append("This answer is incomplete. Call docs_explore again with the same question and cursor \"")
+              .Append(answer.CursorToken)
+              .AppendLine("\".");
             sb.AppendLine();
-            // This surface states no cap and prints no index, so it withholds nothing: every
-            // id the document cites is one the response is telling the caller about.
-            AppendIdentity(sb, hit, WithheldRuleIds.None);
-            AppendExcerpt(sb, hit.Excerpt);
-            AppendJoins(sb, hit);
         }
 
-        return Lead(provenance, sb.ToString());
+        string path = answer.SourceDocument!.RelativePath.Replace('\\', '/');
+        if (string.IsNullOrEmpty(answer.SourceHeading))
+        {
+            sb.Append("source: ").AppendLine(path);
+        }
+        else
+        {
+            sb.Append("source: ").Append(path).Append(" — ").AppendLine(answer.SourceHeading);
+        }
+
+        sb.AppendLine();
+        sb.Append(answer.Prose);
+
+        return sb.ToString();
     }
 
     [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
@@ -380,6 +391,103 @@ public sealed partial class DocsTools(DocumentIndexHost host)
         return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
+    [McpServerTool(Name = "docs_validate", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Use when you need the same schema conformance gate as kyber-weave docs validate after
+        editing governed documentation — especially after writing or revising a plan under
+        docs/plans — and before claiming PLAN_READY or PLAN_FINALIZED. There is no
+        repository-path argument: compare the provenance root to your checkout before trusting
+        the verdict. Default mergeReady false is the planning gate while a plan stays in the
+        active plans folder. Returns provenance, pass or fail with counts, then findings.
+        """)]
+    public string DocsValidate(
+        [Description("""
+            When true, runs merge-ready checks including open-work rules such as
+            KW-DOC-LIFECYCLE-003 and archive closeout. Default false for active plan work.
+            """)]
+        bool mergeReady = false,
+        [Description("""
+            Git ref for archive-closeout scope when mergeReady is true. Defaults to
+            origin/HEAD, matching the CLI.
+            """)]
+        string @base = "origin/HEAD",
+        [Description("""
+            Total characters of finding text after the verdict line (1000-120000). Defaults
+            to 12000. The provenance and verdict lines are always emitted whole.
+            """)]
+        int charBudget = DocumentIndex.DefaultCharBudget)
+    {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        DiagnosticReport report = new();
+        if (!TryLoadHostConfiguration(report, out KyberWeaveConfig config))
+            return FormatGateResponse(provenance, report, charBudget);
+
+        try
+        {
+            DocumentSet set = _host.LoadDocumentSet();
+            report.AddRange(DocsSchemaGate.Validate(
+                _host.RepositoryRoot,
+                config,
+                set,
+                () => new DocumentLoader(_host.RepositoryRoot, config.Ontology),
+                mergeReady,
+                mergeReady ? @base : null).Items);
+        }
+        catch (Exception exception) when (IsExpectedReadFailure(exception))
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                exception.Message,
+                "docs validate",
+                Hint: "Fix the repository configuration or corpus access, then call docs_validate again."));
+        }
+
+        return FormatGateResponse(provenance, report, charBudget);
+    }
+
+    [McpServerTool(Name = "docs_drift", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Use when you need the same entity-drift gate as kyber-weave docs drift after
+        documentation edits that cite code symbols or API routes, alongside docs_validate
+        before PLAN_READY or PLAN_FINALIZED. There is no repository-path argument: compare
+        the provenance root to your checkout. A missing CodeGraph index fails rather than
+        passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
+        appear. Returns provenance, pass or fail with counts, then findings.
+        """)]
+    public string DocsDrift(
+        [Description("""
+            Total characters of finding text after the verdict line (1000-120000). Defaults
+            to 12000. The provenance and verdict lines are always emitted whole.
+            """)]
+        int charBudget = DocumentIndex.DefaultCharBudget)
+    {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        DiagnosticReport report = new();
+        if (!TryLoadHostConfiguration(report, out KyberWeaveConfig _))
+            return FormatGateResponse(provenance, report, charBudget);
+
+        try
+        {
+            DocumentSet set = _host.LoadDocumentSet();
+            report.AddRange(
+                new DocDriftLinter(_host.CreateCodeGraphResolver()).Validate(set).Items);
+        }
+        catch (Exception exception) when (IsExpectedReadFailure(exception))
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                exception.Message,
+                "docs drift",
+                Hint: "Fix the repository configuration or corpus access, then call docs_drift again."));
+        }
+
+        return FormatGateResponse(provenance, report, charBudget);
+    }
+
     /// <summary>
     /// Reports the provenance of the corpus this server answers from, with no query. This is
     /// the cheap session-start check an agent calls before trusting any other docs tool.
@@ -506,6 +614,145 @@ public sealed partial class DocsTools(DocumentIndexHost host)
     /// </summary>
     private static string Lead(string provenance, string body) =>
         provenance + "\n" + body;
+
+    private bool TryLoadHostConfiguration(DiagnosticReport report, out KyberWeaveConfig config)
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_host.RepositoryRoot, null);
+        if (!result.Success)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                result.Error ?? "Failed to load kyber-weave.yml.",
+                "kyber-weave.yml",
+                result.ConfigPath));
+            config = KyberWeaveConfig.ProductDefaults;
+            return false;
+        }
+
+        config = result.Config!;
+        foreach (string warning in config.Review.Warnings)
+        {
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigWarningCode,
+                Severity.Warning,
+                warning,
+                "kyber-weave.yml",
+                result.ConfigPath,
+                Hint: "Check the spelling against the gate keys, or remove the key."));
+        }
+
+        return true;
+    }
+
+    private static string FormatGateResponse(string provenance, DiagnosticReport report, int charBudget)
+    {
+        int effectiveBudget = Math.Clamp(charBudget, MinCharBudget, MaxCharBudget);
+        string verdict = report.HasErrors ? "fail" : "pass";
+        string resultLine = string.Create(
+            CultureInfo.InvariantCulture,
+            $"result: {verdict} ({report.Errors} errors, {report.Warnings} warnings)");
+
+        List<Diagnostic> errors =
+        [
+            .. report.Items
+                .Where(item => item.Severity >= Severity.Error)
+                .OrderByDescending(item => item.Severity)
+                .ThenBy(item => item.Code, StringComparer.Ordinal)
+                .ThenBy(item => item.FilePath ?? string.Empty, StringComparer.Ordinal)
+        ];
+        List<Diagnostic> warnings =
+        [
+            .. report.Items
+                .Where(item => item.Severity == Severity.Warning)
+                .OrderBy(item => item.Code, StringComparer.Ordinal)
+                .ThenBy(item => item.FilePath ?? string.Empty, StringComparer.Ordinal)
+        ];
+
+        int reserveForWarning = 0;
+        if (warnings.Count > 0)
+            reserveForWarning = Math.Min(
+                effectiveBudget / 3,
+                FormatGateFinding(warnings[0]).Length + Environment.NewLine.Length);
+
+        StringBuilder findingsText = new();
+        int emitted = 0;
+        int errorBudget = Math.Max(0, effectiveBudget - reserveForWarning);
+
+        foreach (Diagnostic diagnostic in errors)
+        {
+            string line = FormatGateFinding(diagnostic) + Environment.NewLine;
+            if (findingsText.Length + line.Length > errorBudget)
+            {
+                if (emitted > 0)
+                    break;
+
+                int remaining = errorBudget - findingsText.Length;
+                if (remaining > 0)
+                {
+                    string finding = FormatGateFinding(diagnostic);
+                    int maxFindingChars = remaining - Environment.NewLine.Length;
+                    if (maxFindingChars > 0 && finding.Length > maxFindingChars)
+                        finding = finding[..maxFindingChars];
+
+                    if (finding.Length > 0)
+                    {
+                        findingsText.AppendLine(finding);
+                        emitted++;
+                    }
+                }
+
+                break;
+            }
+
+            findingsText.Append(line);
+            emitted++;
+        }
+
+        foreach (Diagnostic diagnostic in warnings)
+        {
+            string line = FormatGateFinding(diagnostic) + Environment.NewLine;
+            if (findingsText.Length + line.Length > effectiveBudget)
+                break;
+
+            findingsText.Append(line);
+            emitted++;
+        }
+
+        int totalFindings = errors.Count + warnings.Count;
+        int omitted = totalFindings - emitted;
+        if (omitted > 0)
+        {
+            findingsText.Append(CultureInfo.InvariantCulture, $"{omitted} findings omitted.");
+            findingsText.AppendLine();
+        }
+
+        string body = findingsText.Length == 0
+            ? resultLine
+            : resultLine + "\n" + findingsText.ToString().TrimEnd('\r', '\n');
+
+        return Lead(provenance, body);
+    }
+
+    private static string FormatGateFinding(Diagnostic diagnostic)
+    {
+        StringBuilder sb = new();
+        sb.Append(diagnostic.Code)
+          .Append(" [")
+          .Append(diagnostic.Severity.ToString().ToUpperInvariant())
+          .Append("] ");
+        if (!string.IsNullOrEmpty(diagnostic.FilePath))
+        {
+            sb.Append(diagnostic.FilePath.Replace('\\', '/'));
+            sb.Append(": ");
+        }
+
+        sb.Append(diagnostic.Message.ReplaceLineEndings(" "));
+        if (!string.IsNullOrWhiteSpace(diagnostic.Hint))
+            sb.Append(CultureInfo.InvariantCulture, $" hint: {diagnostic.Hint.ReplaceLineEndings(" ")}");
+
+        return sb.ToString();
+    }
 
     private static bool TryParseKind(string? kind, out AnalysisRuleKind? parsedKind)
     {

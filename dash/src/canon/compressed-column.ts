@@ -82,3 +82,24 @@ export function decompressColumn(stored: unknown): unknown | undefined {
   }
   return undefined
 }
+
+/**
+ * Decode one stored JSON column without allowing a deflate bomb to allocate
+ * past the caller's admitted byte budget. `undefined` is deliberately shared
+ * by malformed and over-budget values: neither is content we can honestly
+ * serve as a partial successful read.
+ */
+export function decompressColumnBounded(stored: unknown, maxOutputBytes: number): unknown | undefined {
+  if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1) return undefined
+  try {
+    const text = typeof stored === 'string'
+      ? stored
+      : stored instanceof Uint8Array
+        ? inflateSync(Buffer.from(stored), { maxOutputLength: maxOutputBytes }).toString('utf8')
+        : undefined
+    if (text === undefined || Buffer.byteLength(text, 'utf8') > maxOutputBytes) return undefined
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -36,6 +38,98 @@ public sealed class SquadCanonicalContentTests
     private static readonly Regex CircuitBreakerTriggerToken = new(
         @"[A-Z][A-Z0-9_]*",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The no-label rule: a negation, a labelling verb, and "format", all in one sentence on one line.
+    /// </summary>
+    /// <remarks>
+    /// The confinement is the assertion, not a convenience. With a line break inside the window a
+    /// negation in one bullet and the word "format" in the next match each other, so the pin would pass
+    /// on prose that forbids nothing. The windows are sized to the skill's own sentence — "A response
+    /// never labels, names, mentions, or refers to the format it follows." — rather than left wide
+    /// enough to reach a neighbouring one.
+    /// </remarks>
+    private static readonly Regex NoFormatLabelRule = new(
+        @"\b(?:never|must not|do not|does not)\b[^.!?\n]{0,60}\b(?:labels?|names?|mentions?|tags?|announces?|refers?)\b[^.!?\n]{0,30}\bformat\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The opening of the one bullet that tells an agent it may name a session, verbatim and including
+    /// the Markdown emphasis, so the guard below is read from the instruction it governs.
+    /// </summary>
+    private const string SessionTitleBulletLead = "- **Name the session after the work**";
+
+    /// <summary>The condition on naming a session: only a mechanism the harness really exposes.</summary>
+    private const string SessionTitleMechanismGuard = "only where the harness exposes a confirmed way to set it";
+
+    /// <summary>The second condition: an invented title is never acceptable.</summary>
+    private const string SessionTitleFabricationGuard = "never fabricate a title";
+
+    /// <summary>
+    /// The vocabulary of the shape itself: the title line, the bottom line, the sentence cap on it, and
+    /// the rule that the format is never named. A surface that uses these words to say how an answer is
+    /// arranged has started a second copy of what the shipped default guidance owns.
+    /// </summary>
+    /// <remarks>
+    /// The gaps are <c>\s+</c> so a phrase wrapped across two lines is still seen, and the text is read
+    /// without Markdown emphasis so a phrase split by <c>**</c> or backticks is seen too.
+    /// </remarks>
+    private static readonly Regex RestatedShapeRule = new(
+        @"\btitle\s+line\b|\bbottom\s+line\b|\bat\s+most\s+(?:3|three)\s+sentences\b|\bmention\s+the\s+format\b|\bannouncing\s+which\s+shape\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// A specialist digest relayed to the human is presented in the response format. Either order
+    /// of the two clauses in a sentence satisfies it.
+    /// </summary>
+    private static readonly Regex RelayRule = new(
+        @"\brelay\w*\b[^.]{0,240}<response-preferences>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The plan path taken because the assessment is off is a routing decision the user is entitled
+    /// to see and to redirect. A conductor that routes silently leaves no room for the user to ask
+    /// for a specification instead.
+    /// </summary>
+    private const string PlanPathAnnouncementSentence =
+        "When you take the plan path because the assessment is off, say so in one line and tell the user they can ask for a specification instead; never route silently.";
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content: every
+    /// marker, id, path, count, gap and open question the specialist returned survives the relay.
+    /// </summary>
+    private const string VerbatimRelaySentence =
+        "Change the presentation only: keep every status marker, id, path, count, gap, open question and evidence value exactly as the specialist returned it, and never drop, merge or paraphrase an item.";
+
+    /// <summary>
+    /// A diagnosed defect with no stated artifact choice reaches the architect's intake recommendation
+    /// only when the repository opted in. The diagnosis route is a second door into the same assessment,
+    /// so it carries the same gate as the assessment itself.
+    /// </summary>
+    private const string GatedDiagnosisRecommendationSentence =
+        "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.";
+
+    /// <summary>Without the opt-in, the same request takes the plan path with its diagnosis attached.</summary>
+    private const string DefaultedDiagnosisRouteSentence =
+        "If choice is UNSTATED and that property is absent, skip the intake recommendation and proceed to Promotion with the plan choice and the diagnosis attached, saying so as the Assessment section directs.";
+
+    /// <summary>An absent intake property skips the assessment and takes the plan path directly.</summary>
+    private static readonly Regex IntakeAbsentRule = new(
+        @"\b(?:absent|not present|missing|omitted)\b[^.]{0,240}\b(?:skip|no assessment|without an assessment|plan path)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>A present intake property runs the assessment.</summary>
+    private static readonly Regex IntakePresentRule = new(
+        @"\b(?:present|enabled|published)\b[^.]{0,240}\b(?:run|perform|apply|execute|conduct)\w*\b[^.]{0,80}\bassessment\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The assessment is off by default: it runs only when the resolved registry publishes the
+    /// property, so a repository that never set the flag keeps the behaviour it had.
+    /// </summary>
+    private static readonly Regex DefaultOffRule = new(
+        @"(?:\bdefault[-\s]off\b)|(?:\bskipped\s+unless\b)|(?:\babsent\b[^.]{0,160}\bskip\w*\b)|(?:\bunless\b[^.]{0,160}\bpresent\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -121,6 +215,7 @@ public sealed class SquadCanonicalContentTests
         "github-cli",
         "github-devops",
         "go-dev",
+        "kilo-review-loop",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
@@ -128,7 +223,6 @@ public sealed class SquadCanonicalContentTests
         "python-dev",
         "resharper-clt",
         "rust-dev",
-        "second-brain",
         "security-review",
         "setup-dev-environment",
         "task-gate",
@@ -216,6 +310,647 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
         Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
+    }
+
+    /// <summary>
+    /// The retired <c>second-brain</c> skill moves to Kyber-Docs. The Squad bundle file and
+    /// the loaded bundle roster must not name it, or pack and install keep shipping it.
+    /// </summary>
+    [Fact]
+    public void LoadFullProductTreeContainsNoSecondBrainInBundleOrRoster()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string bundleText = File.ReadAllText(Path.Combine(ProductRoot, "bundles", "full.yml"));
+
+        Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
+        Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
+        Assert.DoesNotContain("second-brain", bundleText, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "second-brain")));
+    }
+
+    /// <summary>
+    /// The product README is the human-readable skill roster. It must not list the retired skill in its tree or
+    /// its canonical-skill counts, and it must state the count the tree actually holds: 28 once the retired
+    /// <c>response-format</c> skill is gone.
+    /// </summary>
+    [Fact]
+    public void ProductReadmeRosterLacksSecondBrain()
+    {
+        string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
+
+        Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
+        Assert.Contains("28 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("29 canonical skill", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The human-facing entry files carry the response preferences the shipped default owns, and they carry
+    /// them through one block the deployer replaces. Naming the skill is not the mechanism any more.
+    /// </summary>
+    /// <remarks>
+    /// A count of exactly one, not at least one: an entry with no block receives no guidance, and an entry with
+    /// two receives it twice. The injector's own tests pin the replacement; this pins the carrier in the source.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("agents/bug-crusher.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void EveryHumanFacingEntryCarriesExactlyOneResponsePreferencesBlock(string relativePath)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.True(File.Exists(path), $"Expected the canonical entry source at '{path}'.");
+        int blocks = Regex.Count(
+            File.ReadAllText(path),
+            "<response-preferences>.*?</response-preferences>",
+            RegexOptions.Singleline);
+        Assert.True(
+            blocks == 1,
+            $"'{relativePath}' must carry exactly one <response-preferences> block; it carries {blocks}.");
+    }
+
+    /// <summary>
+    /// The retired skill must not survive anywhere in the product tree: a name left behind routes an agent to a
+    /// skill that no longer deploys. The conductor's migration record keeps one historical note about it, so
+    /// that file is the only one exempt.
+    /// </summary>
+    [Fact]
+    public void NoProductFileNamesTheRetiredResponseFormatSkill()
+    {
+        string historicalNote = Path.GetFullPath(Path.Combine(ProductRoot, "migration", "conductor.md"));
+        string[] offenders = Directory
+            .EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFullPath(path), historicalNote, StringComparison.Ordinal))
+            .Where(path => File.ReadAllText(path).Contains("response-format", StringComparison.Ordinal))
+            .Select(RelativeSourcePath)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "These product files still name the retired 'response-format' skill: " + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// The order of the three steps is the format. The shipped default owns it, so a default that opens with a
+    /// bottom line, or ends without its open decisions, is a different contract. The sequence is pinned rather
+    /// than the presence of the three steps anywhere in the file.
+    /// </summary>
+    /// <remarks>
+    /// Each step is asserted as the bold list item the default states. Verified by mutation: swapping the title
+    /// step and the open-decisions step must fail this test, and so must removing either.
+    /// </remarks>
+    [Fact]
+    public void ResponseGuidanceOrdersTitleThenBottomLineThenOpenDecisions()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+
+        const string TitleMarker = "**Title first.**";
+        const string BottomLineMarker = "**Then the bottom line, in at most three sentences**";
+        const string OpenDecisionsMarker = "**Then what needs a decision**";
+        int title = guidance.IndexOf(TitleMarker, StringComparison.Ordinal);
+        int bottomLine = guidance.IndexOf(BottomLineMarker, StringComparison.Ordinal);
+        int openDecisions = guidance.IndexOf(OpenDecisionsMarker, StringComparison.Ordinal);
+
+        Assert.True(
+            title >= 0,
+            $"The shipped default must open its ordered steps with '{TitleMarker}'.");
+        Assert.True(
+            bottomLine >= 0,
+            $"The shipped default must carry the '{BottomLineMarker}' step, which caps the bottom line at three sentences.");
+        Assert.True(
+            openDecisions >= 0,
+            $"The shipped default must end its ordered steps with '{OpenDecisionsMarker}'.");
+        Assert.True(
+            bottomLine > title,
+            $"The shipped default must order '{BottomLineMarker}' after '{TitleMarker}'.");
+        Assert.True(
+            openDecisions > bottomLine,
+            $"The shipped default must order '{OpenDecisionsMarker}' after '{BottomLineMarker}'.");
+    }
+
+    /// <summary>
+    /// The format is invisible: a reader should see a well-shaped answer, never an agent telling them which
+    /// format it is using. The shipped default states this rule, and every deployed entry receives it.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultForbidsLabellingAResponseWithItsFormat()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+
+        Assert.True(
+            NoFormatLabelRule.IsMatch(guidance),
+            "The shipped default must state, in one sentence, that a response never labels, names, or refers to " +
+            "the format it is following.");
+    }
+
+    /// <summary>
+    /// The no-label rule is only a rule if it stays inside one sentence. Prose that forbids nothing —
+    /// a negation in one bullet and the word "format" in the next — must not satisfy it, or the pin
+    /// passes on a skill whose guidance never says the format is invisible.
+    /// </summary>
+    /// <remarks>
+    /// Both controls below are ones a window that admits a line break or an exclamation mark accepts:
+    /// bullets need no full stop, and a sentence may end in "!". They are the shapes that made the
+    /// earlier rule match two unrelated statements.
+    /// </remarks>
+    [Fact]
+    public void NoFormatLabelRuleDoesNotCrossASentenceOrALineBreak()
+    {
+        Assert.False(
+            NoFormatLabelRule.IsMatch("- **Never label the answer**\n- **The format speaks for itself**\n"),
+            "A negation in one bullet and the word 'format' in the next must not satisfy the rule, " +
+            "even though neither bullet ends with a full stop.");
+        Assert.False(
+            NoFormatLabelRule.IsMatch("Never label the answer! The format speaks for itself.\n"),
+            "An exclamation mark ends the sentence as surely as a full stop, so the rule must not " +
+            "reach the next one.");
+        Assert.True(
+            NoFormatLabelRule.IsMatch(
+                "A response never labels, names, mentions, or refers to the format it follows.\n"),
+            "The rule must still match the skill's own sentence, which states it in one line.");
+    }
+
+    /// <summary>
+    /// A session title is a harness capability, not a response rule. The shipped default records the one target
+    /// whose title no agent can set, so the default never instructs an agent to claim a capability the harness
+    /// does not expose.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultRecordsThatFactoryTitlesAreNotAgentSettable()
+    {
+        string bullet = SessionTitleBullet(ReadResponseGuidanceDefault()) ?? string.Empty;
+
+        Assert.True(
+            bullet.Contains("Factory", StringComparison.Ordinal) &&
+            bullet.Contains("no agent can set", StringComparison.Ordinal),
+            "The session-title bullet in the shipped default must record that no agent can set a Factory session title.");
+    }
+
+    /// <summary>
+    /// The shipped default file exists at its product path and carries content. It is the one file
+    /// the build embeds and a global install deploys, so an empty or missing default leaves every
+    /// Squad answer without its shape.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultGuidanceFileExistsAndIsNonEmpty()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}'.");
+        Assert.False(
+            string.IsNullOrWhiteSpace(File.ReadAllText(defaultPath)),
+            $"The shipped response-guidance default at '{defaultPath}' must not be empty.");
+    }
+
+    /// <summary>
+    /// The default file is the owner the build reads from, not a copy that can drift. The drift guard
+    /// must name it as canonical, and the copy embedded as <c>Squad.response-guidance.md</c> must be
+    /// byte-identical to it. Otherwise the deployed default and the documented default can disagree
+    /// while both still build.
+    /// </summary>
+    [Fact]
+    public void TheBuildEmbedsTheDefaultGuidanceAsTheCanonicalProductFile()
+    {
+        string defaultPath = ResponseGuidanceDefaultPath;
+        Assert.True(
+            File.Exists(defaultPath),
+            $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
+        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core");
+        XDocument project = XDocument.Load(Path.Combine(corePath, "KyberWeave.Core.csproj"));
+
+        string? canonical = project
+            .Descendants("CanonicalResponseGuidance")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+        string? embedded = project
+            .Descendants("EmbeddedResource")
+            .Where(element => element.Attribute("LogicalName")?.Value == "Squad.response-guidance.md")
+            .Select(element => element.Attribute("Include")?.Value)
+            .FirstOrDefault();
+
+        Assert.NotNull(canonical);
+        Assert.NotNull(embedded);
+        Assert.Equal(
+            defaultPath,
+            Path.GetFullPath(ResolveProjectPath(corePath, canonical)));
+        Assert.True(
+            File.ReadAllBytes(Path.GetFullPath(ResolveProjectPath(corePath, embedded)))
+                .AsSpan()
+                .SequenceEqual(File.ReadAllBytes(defaultPath)),
+            "The copy embedded as 'Squad.response-guidance.md' must be byte-identical to the shipped default " +
+            $"at '{defaultPath}'.");
+    }
+
+    /// <summary>
+    /// The shipped default states the session-title rule itself: name the session after the work,
+    /// and only where the harness exposes a confirmed mechanism, and never fabricate one. The rule
+    /// lives in the default now that the skill that used to carry it is being removed.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultStatesTheSessionTitleRule()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            $"The shipped default must state the session-title rule as the bullet '{SessionTitleBulletLead}'.");
+        Assert.True(
+            bullet.Contains("title", StringComparison.OrdinalIgnoreCase) &&
+            bullet.Contains("work", StringComparison.OrdinalIgnoreCase),
+            "The session-title bullet must say the title reflects the work.");
+        Assert.True(
+            CarriesSessionTitleGuard(guidance),
+            "The session-title rule in the shipped default must carry both its mechanism and fabrication guards.");
+    }
+
+    /// <summary>
+    /// The deployed default replaces the skill's wording wherever it exists, so it carries the
+    /// session-title guard the matrix states. Without the guard, the default tells an agent to
+    /// name a session on a target that exposes no way to set one.
+    /// </summary>
+    [Fact]
+    public void TheShippedDefaultKeepsTheSessionTitleGuard()
+    {
+        string guidance = ReadResponseGuidanceDefault();
+        string bullet = SessionTitleBullet(guidance) ?? string.Empty;
+
+        Assert.True(
+            bullet.Length > 0,
+            "The shipped default must carry the session-title bullet, " +
+            $"'{SessionTitleBulletLead}', on one line.");
+        Assert.Contains(SessionTitleMechanismGuard, bullet, StringComparison.Ordinal);
+        Assert.Contains(SessionTitleFabricationGuard, bullet, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The guard is a condition on the session-title instruction, not a phrase anywhere in the file. A
+    /// default whose session-title bullet drops the condition must fail even when another bullet still
+    /// says "never fabricate", which is what the whole-file search this replaced could not tell apart.
+    /// </summary>
+    [Fact]
+    public void TheSessionTitleGuardMustSitOnTheSessionTitleBullet()
+    {
+        string unguarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} where it helps the reader.\n";
+        string guarded =
+            "- **Never fabricate a title.** Say what happened instead.\n" +
+            $"{SessionTitleBulletLead} {SessionTitleMechanismGuard}, and {SessionTitleFabricationGuard}.\n";
+
+        Assert.False(
+            CarriesSessionTitleGuard(unguarded),
+            "'never fabricate' in another bullet must not satisfy a session-title bullet that omits it.");
+        Assert.True(
+            CarriesSessionTitleGuard(guarded),
+            "A session-title bullet that carries both conditions must satisfy the pin.");
+        Assert.False(
+            CarriesSessionTitleGuard(
+                $"- Name the session after the work {SessionTitleMechanismGuard} and {SessionTitleFabricationGuard}.\n"),
+            "A line that is not the emphasised session-title bullet must not satisfy the pin.");
+    }
+
+    /// <summary>
+    /// A specialist digest relayed to the human is presented in the shape the response-preferences block sets.
+    /// Relay is the boundary where a worker's digest becomes a response, so the conductor contract has to say so.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsInTheResponsePreferences()
+    {
+        string contract = ReadAgentContract("conductor").Replace("`", string.Empty, StringComparison.Ordinal);
+
+        Assert.True(
+            RelayRule.IsMatch(contract),
+            "The conductor contract must state that a specialist digest surfaced to the human is presented in " +
+            "the shape set by '<response-preferences>'.");
+    }
+
+    /// <summary>
+    /// The intake assessment is opt-in. It runs when configuration publishes the
+    /// <c>&lt;intake-assessment&gt;</c> property; a repository that never set the flag keeps the plan
+    /// path it always had. Defect-first precedence is unchanged, because a concrete failure still
+    /// outranks the question of which artifact to write.
+    /// </summary>
+    [Fact]
+    public void ConductorResolvesTheIntakeAssessmentOnlyWhenConfigPublishesIt()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int intake = conductor.IndexOf("<intake-assessment>", StringComparison.Ordinal);
+        int defectFirst = conductor.IndexOf("**Defect first**", StringComparison.Ordinal);
+
+        Assert.True(
+            intake >= 0,
+            "'agents/conductor.md' must carry an '<intake-assessment>' resolution order.");
+        Assert.True(
+            defectFirst >= 0 && defectFirst < intake,
+            "'agents/conductor.md' must keep defect-first precedence ahead of the " +
+            "'<intake-assessment>' resolution.");
+        Assert.True(
+            IntakeAbsentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that an absent " +
+            "property skips the assessment and takes the plan path directly.");
+        Assert.True(
+            IntakePresentRule.IsMatch(conductor),
+            "The '<intake-assessment>' resolution in 'agents/conductor.md' must state that a present " +
+            "property runs the assessment.");
+    }
+
+    /// <summary>
+    /// The plan path taken because the assessment is off is still a routing decision, and the user
+    /// is entitled to see it and to redirect it. A conductor that routes silently leaves no room for
+    /// the user to ask for a specification instead.
+    /// </summary>
+    [Fact]
+    public void ConductorAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string resolution = BlockContaining(conductor, "skip the assessment and take the plan path directly");
+
+        Assert.True(
+            resolution.Length > 0,
+            "'agents/conductor.md' must resolve the absent '<intake-assessment>' property in one block, " +
+            "so the announcement can be pinned to the resolution that takes the plan path.");
+        Assert.True(
+            SentenceLine(resolution, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor.md' must announce, next to the intake resolution, that a plan path " +
+            "taken because the assessment is off is said out loud and offers a specification instead: " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path is where the plan path is defined, so the announcement belongs there too: two
+    /// files that describe the same default-off routing must not disagree about telling the user.
+    /// </summary>
+    [Fact]
+    public void IntakePathAnnouncesThePlanPathItTakesBecauseTheAssessmentIsOff()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string assessment = BlockContaining(intakePath, "The assessment is default-off.");
+
+        Assert.True(
+            assessment.Length > 0,
+            "'agents/conductor/references/intake-path.md' must record the default-off assessment in one " +
+            "block, so the announcement can be pinned to the paragraph that states the default.");
+        Assert.True(
+            SentenceLine(assessment, PlanPathAnnouncementSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must announce a plan path taken because the " +
+            "assessment is off, so it does not disagree with 'agents/conductor.md': " +
+            $"\"{PlanPathAnnouncementSentence}\"");
+    }
+
+    /// <summary>
+    /// The intake path states the default-off assessment twice: once as the rule, and once on the route
+    /// a diagnosed defect takes. The second must not send an unstated choice to the architect's intake
+    /// recommendation unconditionally, or a repository that never opted in gets the assessment anyway.
+    /// </summary>
+    [Fact]
+    public void DefectDiagnosisSendsAnUnstatedChoiceToTheAssessmentOnlyWhenTheRepositoryOptedIn()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string route = BlockContaining(intakePath, "Without existing Ready authority");
+
+        Assert.True(
+            route.Length > 0,
+            "'agents/conductor/references/intake-path.md' must state the route a diagnosed defect takes " +
+            "without Ready authority in one block, so the opt-in gate can be pinned to that route.");
+        Assert.True(
+            SentenceLine(route, GatedDiagnosisRecommendationSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must send an unstated choice to the architect's " +
+            "intake recommendation only when the repository publishes the property: " +
+            $"\"{GatedDiagnosisRecommendationSentence}\"");
+        Assert.True(
+            SentenceLine(route, DefaultedDiagnosisRouteSentence) is not null,
+            "'agents/conductor/references/intake-path.md' must say what an unstated choice does when the " +
+            $"property is absent: \"{DefaultedDiagnosisRouteSentence}\"");
+        Assert.DoesNotContain(
+            "If choice is UNSTATED, send the diagnosis",
+            WithoutEmphasis(route),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The gate pins are worth having only if they can fail. The ungated route they replaced, a gate
+    /// sentence wrapped across two lines, and a gate sentence carried outside the route all have to
+    /// leave them red.
+    /// </summary>
+    [Fact]
+    public void TheDiagnosisRoutePinsRejectTheUngatedWrappedOrMisplacedRoute()
+    {
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED, send the diagnosis to architect for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "The route without the opt-in gate must not satisfy the gated pin.");
+        Assert.True(
+            SentenceLine(
+                "If choice is UNSTATED and the repository publishes <intake-assessment>, send the diagnosis to architect\n" +
+                "for an intake recommendation, then obtain the user's artifact choice.\n",
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence wrapped across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + GatedDiagnosisRecommendationSentence + "\n",
+                    "Without existing Ready authority"),
+                GatedDiagnosisRecommendationSentence) is null,
+            "A gate sentence outside the route a diagnosed defect takes must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(GatedDiagnosisRecommendationSentence + "\n", GatedDiagnosisRecommendationSentence) is not null,
+            "The pin must still accept the gate sentence exactly as the intake path states it.");
+        Assert.True(
+            SentenceLine(DefaultedDiagnosisRouteSentence + "\n", DefaultedDiagnosisRouteSentence) is not null,
+            "The pin must still accept the default sentence exactly as the intake path states it.");
+    }
+
+    /// <summary>
+    /// The response format shapes the presentation of a relayed digest, never its content. Every
+    /// marker, id, path, count, gap and open question the specialist returned has to survive the
+    /// relay to the human.
+    /// </summary>
+    [Fact]
+    public void ConductorRelaysSpecialistDigestsWithoutChangingTheirContent()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string relay = BlockContaining(conductor, "Relay every specialist digest you surface to the human");
+
+        Assert.True(
+            relay.Length > 0,
+            "'agents/conductor.md' must state the digest relay rule in one block, so the verbatim " +
+            "constraint can be pinned to the rule that governs it.");
+        Assert.True(
+            SentenceLine(relay, VerbatimRelaySentence) is not null,
+            "'agents/conductor.md' must state, in the relay rule, that only the presentation changes " +
+            "and every relayed item survives: " +
+            $"\"{VerbatimRelaySentence}\"");
+    }
+
+    /// <summary>
+    /// The conductor pins are worth having only if they can fail. A sentence wrapped across two
+    /// lines, a sentence that dropped an item, and a sentence carried in a different part of the
+    /// file must each leave the pin red.
+    /// </summary>
+    [Fact]
+    public void TheConductorPinsRejectAWrappedRewordedOrMisplacedSentence()
+    {
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line and tell\n" +
+                "the user they can ask for a specification instead; never route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement split across two lines is not the instruction the pin looks for.");
+        Assert.True(
+            SentenceLine(
+                "When you take the plan path because the assessment is off, say so in one line; never " +
+                "route silently.\n",
+                PlanPathAnnouncementSentence) is null,
+            "An announcement that dropped the specification offer must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                "Change the presentation only: keep every status marker, id, path and count exactly as " +
+                "the specialist returned it.\n",
+                VerbatimRelaySentence) is null,
+            "A relay rule that dropped the gap, open question and evidence clauses must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(
+                BlockContaining(
+                    "## Elsewhere\n\n" + VerbatimRelaySentence + "\n",
+                    "Relay every specialist digest you surface to the human"),
+                VerbatimRelaySentence) is null,
+            "A relay constraint outside the relay rule must not satisfy the pin.");
+        Assert.True(
+            SentenceLine(VerbatimRelaySentence + "\n", VerbatimRelaySentence) is not null,
+            "The pin must still accept the sentence exactly as the conductor states it.");
+    }
+
+    /// <summary>
+    /// The default is recorded where the intake path is defined, so a reader cannot conclude the
+    /// assessment is something the conductor always performs.
+    /// </summary>
+    [Fact]
+    public void IntakePathRecordsThatTheAssessmentIsOffByDefault()
+    {
+        string intakePath = File.ReadAllText(
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+
+        Assert.True(
+            intakePath.Contains("<intake-assessment>", StringComparison.Ordinal),
+            "'agents/conductor/references/intake-path.md' must record the '<intake-assessment>' gate " +
+            "the plan path depends on.");
+        Assert.True(
+            DefaultOffRule.IsMatch(intakePath),
+            "'agents/conductor/references/intake-path.md' must record the default-off semantics: the " +
+            "assessment is skipped unless the '<intake-assessment>' property is present.");
+    }
+
+    /// <summary>
+    /// The shape has one home (requirement R5). A surface that spells it out again carries a second copy
+    /// that the user's own guidance file cannot reach, so an operator who replaces the wording still gets
+    /// the old shape from whichever surface restated it. A surface binds the skill by name and says only
+    /// what each response has to contain; how it is arranged is the skill's, and the operator's, to say.
+    /// </summary>
+    [Fact]
+    public void NoAgentOrSkillRestatesTheResponseShapeOutsideTheDefaultGuidance()
+    {
+        string defaultGuidance = ReadResponseGuidanceDefault();
+        string[] surfaces = Directory
+            .EnumerateFiles(Path.Combine(ProductRoot, "agents"), "*.md", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(ProductRoot, "skills"),
+                "*.md",
+                SearchOption.AllDirectories))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] restatements = surfaces
+            .SelectMany(path => RestatedShapeHits(RelativeSourcePath(path), File.ReadAllText(path)))
+            .ToArray();
+
+        Assert.True(
+            RestatesTheShape(defaultGuidance),
+            "The shipped default guidance must be the one owner of the response shape, so it must carry the shape's vocabulary.");
+        Assert.NotEmpty(surfaces);
+        Assert.True(
+            restatements.Length == 0,
+            "These agent and skill bodies restate the response shape the shipped default guidance owns, so a " +
+            "user's own guidance file cannot change it there. Keep the response-preferences block and what the response " +
+            $"must contain, and leave the arrangement to the default guidance:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, restatements));
+    }
+
+    /// <summary>
+    /// The retired skill-copy path must not survive in source or test code. A build target or a
+    /// doc comment that still names it points at a file the skill removal deletes, so the build
+    /// and the tests would fail for a reason no reader can see from the code.
+    /// </summary>
+    [Fact]
+    public void NoSourceOrTestFileNamesTheRetiredResponseGuidancePath()
+    {
+        Regex retired = new(
+            @"skills[\\/]response-format[\\/]user-guidance\.md",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        string[] extensions = [".cs", ".csproj", ".props", ".targets"];
+        string[] offenders =
+        [
+            .. Directory
+                .EnumerateFiles(Path.Combine(KyberWeaveTestPaths.ToolRoot, "src"), "*", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(
+                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests"),
+                    "*",
+                    SearchOption.AllDirectories))
+                .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.Ordinal))
+                .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment =>
+                    segment is "bin" or "obj" or ".agent_scratchpad"))
+                .Where(path => retired.IsMatch(File.ReadAllText(path)))
+                .Order(StringComparer.Ordinal)
+        ];
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// The restatement pin is worth having only if it can fail. It has to see the shape in the skill that
+    /// owns it, in each way the bug-crusher skill once spelled it out, and across a line wrap, and it has
+    /// to let through a surface that only binds the skill by name.
+    /// </summary>
+    [Fact]
+    public void TheRestatedShapePinSeesEveryWayTheShapeIsSpelledOut()
+    {
+        Assert.True(
+            RestatesTheShape(ReadResponseGuidanceDefault()),
+            "The pin must see the shape in the shipped default that owns it; a detector blind to its owner is blind everywhere.");
+        Assert.True(
+            RestatesTheShape(
+                "Each opens with a title line naming the work, states the bottom line in at most 3 sentences."),
+            "The title line and the sentence cap are the shape and must be seen.");
+        Assert.True(
+            RestatesTheShape("Close with a bottom line of at most three sentences."),
+            "A cap spelled out in words must be seen as well as one written as a digit.");
+        Assert.True(
+            RestatesTheShape("The grouped questions are bullets, with the title and bottom\nline above them."),
+            "A phrase wrapped across two lines must still be seen.");
+        Assert.True(
+            RestatesTheShape("Never tag, header, or otherwise mention the **format** in the report."),
+            "The never-name-it rule is the skill's too, and emphasis inside it must not hide it.");
+        Assert.True(
+            RestatesTheShape(
+                "The reader should see a well-shaped answer, not an agent announcing which shape it chose."),
+            "The reason given for the never-name-it rule is a restatement of it.");
+        Assert.False(
+            RestatesTheShape(
+                "Each entry file carries the operator response preferences in a <response-preferences> block."),
+            "The response-preferences block is the binding and must not be flagged.");
+        Assert.False(
+            RestatesTheShape(
+                "The shape of an answer is the one thing this wrapper binds by name instead of restating."),
+            "A surface that says it does not restate the shape must not be flagged for saying so.");
+        Assert.False(
+            RestatesTheShape(
+                "- **Summary**: the problem and the outcome, in one to three sentences; why more than how."),
+            "The length of a pull request summary is another artifact's rule, not the shape of a response.");
     }
 
     [Fact]
@@ -702,7 +1437,8 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("2-cycle cap", skill, StringComparison.Ordinal);
         Assert.Contains("ITERATION_CAP_EXCEEDED", skill, StringComparison.Ordinal);
         Assert.Contains("task-gate/<gate-id>", skill, StringComparison.Ordinal);
-        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill, StringComparison.Ordinal);
+        Assert.Contains("TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE", skill,
+            StringComparison.Ordinal);
         Assert.Contains("every declared gate was skipped", skill, StringComparison.Ordinal);
         AssertClosedCircuitBreakerTriggerSet(skill);
     }
@@ -762,8 +1498,10 @@ public sealed class SquadCanonicalContentTests
             "The architect plan-authoring reference must not name the retired task-reviewer.");
     }
 
-    private static string RelativeSourcePath(string path) =>
-        Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+    private static string RelativeSourcePath(string path)
+    {
+        return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+    }
 
     [Fact]
     public void LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest()
@@ -844,8 +1582,110 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Review-council and conductor instructions must not keep the retired delivery wording that
+    /// held a pushed change back until the council returned, or parked it unpushed. The scan covers
+    /// every surface that carried the wording, so a copy left behind in one file fails the build.
+    /// </summary>
+    [Fact]
+    public void ReviewInstructionsDropTheHoldUntilCouncilAndParkWording()
+    {
+        string[] reviewSurfaces =
+        [
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
+            Path.Combine(ProductRoot, "agents", "conductor", "references", "execution-and-review.md"),
+            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
+            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
+            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "reference", "autonomous-gates.md"),
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "code-review", "architecture.md")
+        ];
+        string[] retiredPhrases =
+        [
+            "Do not commit, push, publish, or open a pull request until the council returns",
+            "leave it unpushed",
+            "Do not mark the pull request ready",
+            "Park that change or task",
+            "parked NEEDS_HUMAN",
+            "at least one review"
+        ];
+
+        string[] offenders = reviewSurfaces
+            .SelectMany(path => retiredPhrases
+                .Where(phrase => File.ReadAllText(path).Contains(phrase, StringComparison.Ordinal))
+                .Select(phrase => $"{Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, path)}: \"{phrase}\""))
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// Both run-start surfaces carry the read-only doctor step, gated on the docs-enabled condition, with the
+    /// warn-and-continue rule. A later edit that drops any one of the three silently disables the check.
+    /// </summary>
+    /// <remarks>
+    /// The condition is the D14 predicate: the config file and its docs-root. The rule is D15: a failed doctor
+    /// is recorded and the run continues, so a missing index never blocks a fresh clone.
+    /// </remarks>
+    [Theory]
+    [InlineData("agents/conductor.md")]
+    [InlineData("skills/bug-crusher/SKILL.md")]
+    public void RunStartSurfacesCarryTheReadOnlyDoctorStepWhenDocsAreEnabled(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Contains("kyber-weave doctor --check", text, StringComparison.Ordinal);
+        Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
+        Assert.Contains("docs-root", text, StringComparison.Ordinal);
+        Assert.Contains("warn and continue", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The conductor's run-start step sits in <c>Shared lifecycle invariants</c>, the earliest section that applies to
+    /// every route (D17), so it runs before any routing decision rather than on one branch of it.
+    /// </summary>
+    [Fact]
+    public void ConductorRunStartDoctorStepIsInSharedLifecycleInvariants()
+    {
+        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
+        int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
+        int doctor = conductor.IndexOf("kyber-weave doctor --check", StringComparison.Ordinal);
+
+        Assert.True(invariants >= 0, "'agents/conductor.md' must keep its 'Shared lifecycle invariants' section.");
+        Assert.True(
+            doctor > invariants && doctor < handoffs,
+            "'agents/conductor.md' must state the run-start doctor step inside 'Shared lifecycle invariants'.");
+    }
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    /// <summary>The shipped default response guidance: the one owner of the response shape.</summary>
+    private static string ResponseGuidanceDefaultPath =>
+        Path.Combine(ProductRoot, "response-guidance.default.md");
+
+    /// <summary>
+    /// Reads the shipped default guidance, asserting its absence first so a missing file reports the
+    /// missing artifact rather than an I/O exception.
+    /// </summary>
+    private static string ReadResponseGuidanceDefault()
+    {
+        Assert.True(
+            File.Exists(ResponseGuidanceDefaultPath),
+            $"The shipped response-guidance default must live at '{ResponseGuidanceDefaultPath}'.");
+        return File.ReadAllText(ResponseGuidanceDefaultPath);
+    }
+
+    /// <summary>
+    /// Resolves an MSBuild item path relative to the project directory, expanding the
+    /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
+    /// </summary>
+    private static string ResolveProjectPath(string projectDirectory, string item) =>
+        Path.Combine(
+            projectDirectory,
+            item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
+                .Replace('\\', Path.DirectorySeparatorChar));
 
     private static bool IsVersionedIdentity(string name)
     {
@@ -951,6 +1791,107 @@ public sealed class SquadCanonicalContentTests
                 .Order(StringComparer.Ordinal)
                 .Select(File.ReadAllText));
     }
+
+    /// <summary>
+    /// The session-title bullet of a response-guidance document: the single line that opens with the
+    /// instruction to name the session after the work, or null when the document carries none.
+    /// </summary>
+    private static string? SessionTitleBullet(string guidance) =>
+        guidance
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .FirstOrDefault(line => line.TrimStart().StartsWith(SessionTitleBulletLead, StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when the session-title bullet carries both of its conditions. Scoped to that bullet because
+    /// the conditions are what constrain the instruction: a document that says "never fabricate" in
+    /// some other bullet, while its session-title instruction asks for a title unconditionally, has no
+    /// guard where the guard belongs.
+    /// </summary>
+    private static bool CarriesSessionTitleGuard(string guidance)
+    {
+        string? bullet = SessionTitleBullet(guidance);
+        return bullet is not null
+               && bullet.Contains(SessionTitleMechanismGuard, StringComparison.Ordinal)
+               && bullet.Contains(SessionTitleFabricationGuard, StringComparison.Ordinal);
+    }
+
+    /// <summary>True when <paramref name="text"/> uses the shape's own vocabulary, ignoring emphasis.</summary>
+    private static bool RestatesTheShape(string text) =>
+        RestatedShapeRule.IsMatch(WithoutEmphasis(text));
+
+    /// <summary>
+    /// Each place <paramref name="text"/> uses the shape's own vocabulary, as <c>path:line: "phrase"</c>.
+    /// Emphasis markers are removed without touching a newline, so the line numbers still count the
+    /// lines of the file as written.
+    /// </summary>
+    private static IEnumerable<string> RestatedShapeHits(string relativePath, string text)
+    {
+        string plain = WithoutEmphasis(text);
+        foreach (Match match in RestatedShapeRule.Matches(plain))
+        {
+            int line = plain.AsSpan(0, match.Index).Count('\n') + 1;
+            yield return $"{relativePath}:{line}: \"{match.Value}\"";
+        }
+    }
+
+    /// <summary>
+    /// The line of <paramref name="text"/> that states <paramref name="sentence"/> in full, or null
+    /// when no single line does.
+    /// </summary>
+    /// <remarks>
+    /// One line is the assertion. A sentence wrapped across two lines is not the instruction, and a
+    /// check that tolerated the wrap would also tolerate a sentence cut in half by an edit. The
+    /// comparison is ordinal, so a lowercased or reworded sentence fails it too.
+    /// </remarks>
+    private static string? SentenceLine(string text, string sentence)
+    {
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.TrimEnd('\r').Trim();
+            string plain = WithoutEmphasis(line);
+            plain = Regex.Replace(plain, @"^\s*(?:[-*+]|\d+\.)\s+", string.Empty, RegexOptions.CultureInvariant);
+            if (plain.Equals(sentence, StringComparison.Ordinal))
+            {
+                return line;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The block of <paramref name="text"/> that states <paramref name="anchor"/>, or an empty string
+    /// when no block states it.
+    /// </summary>
+    /// <remarks>
+    /// Blocks are the paragraphs and list items a Markdown reader sees: runs of consecutive
+    /// non-blank lines. Scoping a pin to the block that owns the rule is what keeps a sentence that
+    /// merely repeats the rule elsewhere in the file from satisfying it.
+    /// </remarks>
+    private static string BlockContaining(string text, string anchor)
+    {
+        string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (string block in normalized.Split("\n\n", StringSplitOptions.None))
+        {
+            if (block.Replace("\n", " ", StringComparison.Ordinal).Contains(anchor, StringComparison.Ordinal))
+            {
+                return block;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> with Markdown emphasis markers removed, so a bold or inline-code rendering
+    /// of a sentence compares equal to the plain one. Only presentation is dropped: the words, their
+    /// order, the case, and the closing full stop all still have to match.
+    /// </summary>
+    private static string WithoutEmphasis(string text) =>
+        text.Replace("*", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("`", string.Empty, StringComparison.Ordinal);
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {

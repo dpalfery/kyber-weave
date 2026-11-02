@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-29
 status: current
 ---
 
@@ -60,6 +60,17 @@ kyberdash report            # terminal report, formatted from the canonical stor
 `kyberdash web` serves the dashboard from a packed asset inside the binary, so it needs no
 `npm` and no checkout. `KYBERDASH_DASH_DIR` overrides it with a directory of your own build.
 
+### OpenCode capture plugin
+
+KyberDash captures OpenCode 2.x only. OpenCode 1.x is not supported. `install.sh` does not install the
+OpenCode capture plugin. Squad installs it. Run `kyber-weave squad install --global` or
+`kyber-weave squad update --global` with the OpenCode target, and it is written to OpenCode's global
+plugin directory. Pass `--no-capture-plugin` to skip it. If new OpenCode sessions do not appear, restart
+OpenCode. Usage, cost and timings flow once the plugin is installed and the KyberDash receiver is running. Content capture
+(system prompt, tool definitions, skills, prompt text) stays off until you turn OpenCode on in the
+Settings drawer. The [runbook](runbook.md#1b-opencode-capture-enable-and-verify) describes the consent
+file and the live gate.
+
 ### Install the tray
 
 The tray ships as its own release asset from `0.1.7-rc.13`. On macOS and Windows:
@@ -77,17 +88,24 @@ exits `1`: the tray ships for macOS and Windows only.
 
 ## Update
 
-`kyber-weave update` updates an installed `kyberdash` along with the CLI and MCP server. When
-a tray is installed, `kyber-weave update` hands off to `kyberdash menubar --update`, which
-quits the running tray, replaces it, and relaunches it — restoring the previous app if any
-step fails. You can also update the tray directly:
+One command updates KyberDash. Run `kyber-weave update`, and no other command is needed:
 
-```bash
-kyberdash menubar --update
-```
+- It replaces the `kyberdash` binary beside the CLI, along with the CLI and MCP server.
+- It restarts the KyberDash engine. A running engine of an older version is replaced by the new one,
+  and this also runs when the release is unchanged. Nothing starts if no engine is running.
+- It relaunches the tray when a tray is installed. The tray is quit, replaced, and relaunched, and
+  the previous app is restored if a step fails.
+- It upgrades the OpenCode capture plugin, but only if that plugin is already installed.
 
-The CLI-only update flags (`--no-kyberdash`, `--no-mcp`, `--no-menubar`) let you narrow what
-`kyber-weave update` touches; `kyber-weave update --help` lists them.
+When the plugin file changed, the output says to restart OpenCode if new sessions do not appear. KyberDash
+cannot restart your OpenCode process. The engine then re-projects the store on its own start, so you do not run
+`kyber build` after an update.
+
+To update the tray alone, use `kyberdash menubar --update`.
+
+Flags: `--no-restart` replaces the binaries and leaves the engine and tray running as they are.
+`--no-kyberdash`, `--no-mcp`, and `--no-menubar` narrow what the command touches. `kyber-weave update --help`
+lists them all.
 
 ---
 
@@ -133,6 +151,86 @@ refreshed by maintainers. Where a source needs a rate that is not bundled — De
 today — set it in `~/.kyberdash/config.json` (for example `devin.acuUsdRate`); until it is
 set, Devin cost is reported as unpriced rather than as a measured zero. See the
 [telemetry inventory](telemetry-inventory.md) for which sources require a rate.
+
+---
+
+## Ask KyberDash from an MCP client
+
+The same engine answers conversational analytics over MCP. `kyberdash mcp` exposes eight
+read-only tools — `dash_status`, `dash_catalog`, `dash_query`, `dash_search_sessions`,
+`dash_inspect`, `dash_findings`, `dash_compare`, `dash_outcomes` — over stdio, computed
+by the shared engine behind `/api/kyber/analytics/*`. See
+[the architecture](architecture.md#conversational-analytics-over-mcp-kyberdash-mcp) for
+the tool contract, the limits, and the content/outcome caveats.
+
+### 1. Start the engine first
+
+The MCP adapter attaches to a running engine and never starts one. Start (or attach to)
+it, then connect the client:
+
+```bash
+kyberdash web --no-open     # start the engine, or attach to the one running (exit 0 either way)
+kyberdash mcp               # serve the eight tools over stdio
+```
+
+`kyberdash mcp` discovers the engine through its `server.json` receipt. Two flags change
+only where it looks — an explicit `--server-url http://127.0.0.1:<port>` wins, and
+`--state-dir <dir>` reads an existing receipt from another directory. There is no `--db`
+flag: the running engine owns the datastore choice. Only literal loopback origins
+(`127.0.0.1` or `[::1]`, with an explicit port) are contacted; anything else is refused.
+Stopping the client (EOF, SIGTERM, or closing its read end) ends the MCP session within
+a bounded deadline and never stops the shared engine. A failed `server.connect`
+releases the keep-alive, signal handlers, and stdout guard instead of leaking them.
+
+### 2. Register the client yourself
+
+KyberDash never writes a client's configuration: no `mcp` subcommand edits user-level
+client config, and setup means pasting one entry into the client's own config by hand.
+The shape below is an example — consult the client's documentation for where it keeps
+MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "kyberdash": {
+      "command": "kyberdash",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+With an engine on a non-default port, use `"args": ["mcp", "--server-url",
+"http://127.0.0.1:<port>"]` instead. When the client lists tools, it must see exactly
+the eight `dash_*` names above; `dash_status` with no engine attached answers
+`engine_unavailable` and tells you to run `kyberdash web --no-open`.
+
+### 3. What is (and is not) validated
+
+The stdio shape is verified on every release path: `dash/scripts/sea-mcp-smoke.mjs`
+initializes over the SDK client, lists exactly the eight tools, calls `dash_status`
+against an isolated fixture engine, then observes a clean exit — run from both the npm
+build and the staged single-executable binary with no checkout and no access to your
+state (`scripts/release-local.sh` and `.github/workflows/release.yml` wire it alongside
+the web smoke). What that proves is the protocol, the tool list, and the attach-only
+boundary — not that every host client renders them.
+
+> **[NOT LIVE-VERIFIED]** No host-client integration (Claude Code/Desktop, Cursor,
+> Copilot, or any other MCP host) has been observed against this surface. The SDK smoke
+> above is necessary but does not prove every host client works. If you connect one,
+> record the product and client versions, one successful question, one
+> unavailable-data answer, and the clean disconnect — and never authorize a real-data
+> analysis merely to satisfy that check.
+
+## Check the KyberDash version
+
+Three places show the version. They agree when the engine and the surfaces come from the same release:
+
+- **Web dashboard:** open **Settings** in the header. The drawer ends with `KyberDash version <version>`. It is read once, when the drawer opens.
+- **Tray:** open the popover and choose **Settings**. The same line sits above **Back**.
+- **Terminal:** run `kyberdash --version`.
+
+The tray shows the engine's version, not the version of the tray app bundle. If a surface shows `KyberDash version unknown`, it could not reach the engine, or the engine predates the version route. Update KyberDash, then reopen the surface.
 
 ---
 

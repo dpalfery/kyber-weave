@@ -79,10 +79,9 @@ describe('fetchKyberCaptureStatus', () => {
     expect(copilot.files[1]!.applicable).toBe(false)
 
     const opencode = status.harnesses.find((h) => h.id === 'opencode')!
-    expect(opencode.manualSteps[0]!.env).toEqual({
-      name: 'OTEL_EXPORTER_OTLP_ENDPOINT',
-      value: 'http://127.0.0.1:4318',
-    })
+    // OpenCode is plugin-only: no OTLP endpoint is offered as a manual step any more.
+    expect(opencode.manualSteps).toEqual([])
+    expect(opencode.statusLines).toContain('plugin: not installed')
 
     const pi = status.harnesses.find((h) => h.id === 'pi')!
     expect(pi.mode).toBe('status-only')
@@ -309,6 +308,8 @@ describe('postKyberCapture', () => {
 
     expect(result.action).toBe('disable')
     expect(result.events[0]!.kind).toBe('restored')
+    // Disabling OpenCode removes its plugin only; no opencode.jsonc event is reported.
+    expect(result.events.map((event) => event.fileId)).toEqual(['plugin'])
     expect(result.receiver.lastManagedHarnessDisabled).toBe(true)
     expect(result.receiver.hosted).toBe(true)
     expect(result.receiver.enabled).toBe(false)

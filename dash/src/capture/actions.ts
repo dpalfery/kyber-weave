@@ -45,6 +45,8 @@ export type CaptureActionRequest = {
   fetchHealth?: HealthFetcher
   probeTimeoutMs?: number
   fileFilter?: CaptureFileFilter
+  /** OpenCode config root override, forwarded to the file plugin. */
+  opencodeConfigDir?: string
 }
 
 export type CaptureActionResult = {
@@ -140,6 +142,7 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
         ...(request.fetchHealth === undefined ? {} : { fetchHealth: request.fetchHealth }),
         ...(request.probeTimeoutMs === undefined ? {} : { probeTimeoutMs: request.probeTimeoutMs }),
         ...(request.fileFilter === undefined ? {} : { fileFilter: request.fileFilter }),
+        ...(request.opencodeConfigDir === undefined ? {} : { opencodeConfigDir: request.opencodeConfigDir }),
       }
       if (request.expectedPreviewEvents !== undefined) {
         const preview = await runCapture('disable', { ...runOptions, dryRun: true })

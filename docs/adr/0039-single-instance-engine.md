@@ -5,7 +5,7 @@ doc-type: adr
 status: current
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-26
 ---
 
 # ADR 0039: One KyberDash Engine per User
@@ -15,6 +15,13 @@ last-reviewed: 2026-10-16
 Accepted, 2026-10-16. Replaces the "a second server over one state dir is a supported
 configuration" position in `dash/src/cli/web.ts` and the port-probe adoption model of
 `ReceiverHost` as the only guard against duplicate processes.
+
+Amended 2026-10-26 (OpenCode capture deploy plan, D12): `kyber-weave update` is a new caller of the
+ensure-or-attach contract. After it commits the binaries, it runs `kyberdash engine ensure --if-running`,
+which calls `ensureEngine` and replaces a live engine of another version. It starts nothing when no
+engine runs, and it runs even when the release is unchanged ("already on"). This clears a stale engine
+with one command. No invariant changed: `ensureEngine` is still the only restart path, and the
+receiver is still the engine's child.
 
 ## Context
 

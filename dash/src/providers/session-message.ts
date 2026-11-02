@@ -2,13 +2,14 @@ import { calculateCost } from '../pricing/models.js'
 import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ParsedProviderCall } from './types.js'
 
-// The message/part shape shared by OpenCode-style stores (OpenCode SQLite, the
-// OpenCode file-based JSON layout, and Kilo Code). Token-bearing assistant
-// messages carry either the normalized `tokens` object or a raw `usage` block.
+// The message/part shape of OpenCode-style stores. Kilo Code is the only provider that
+// still reads one (the OpenCode importers are gone; OpenCode reaches KyberDash through its
+// capture plugin). Token-bearing assistant messages carry either the normalized `tokens`
+// object or a raw `usage` block.
 export type MessageData = {
   role: string
   modelID?: string
-  // Kilo (and some OpenCode-shaped stores) persist model as `{ id, providerID }`
+  // Kilo (and other OpenCode-shaped stores) persist model as `{ id, providerID }`
   // rather than a string; the object branch in `buildAssistantCall` is live
   // only when this union includes that shape.
   model?: string | { id?: string; providerID?: string }
@@ -38,7 +39,7 @@ export type PartData = {
   type: string
   text?: string
   tool?: string
-  // Kilo/opencode-style stores key a tool part to its call by `callID`; the
+  // Kilo's OpenCode-style store keys a tool part to its call by `callID`; the
   // state fills in as the call runs (`status`, `input`, then `output`/`error`
   // on completion) and may carry `time` bounds for duration.
   callID?: string
@@ -84,6 +85,28 @@ export function sanitize(dir: string): string {
   return dir.replace(/^\//, '').replace(/\//g, '-')
 }
 
+/**
+ * Qualify a `{ providerID, modelID }` pair into the single model string the
+ * built call prices against.
+ *
+ * The predicate has to be an exact prefix test, not a substring search: a
+ * model id may legitimately contain a slash of its own (`my-model/v2`), and
+ * `includes('/')` read that as "already qualified", skipped the prefix, and
+ * left the rate table unable to match the model — the call then silently fell
+ * back to the store's pre-calculated cost.
+ *
+ * Kilo Code's SQLite reader is the only caller now that the OpenCode importers are gone.
+ */
+export function qualifyProviderModel<T extends MessageData>(data: T): T {
+  const carrier = data as unknown as { providerID?: unknown; modelID?: unknown }
+  if (typeof carrier.providerID !== 'string' || typeof carrier.modelID !== 'string') return data
+  const providerID = carrier.providerID.trim()
+  const modelID = carrier.modelID.trim()
+  if (!providerID || !modelID) return data
+  if (modelID === providerID || modelID.startsWith(`${providerID}/`)) return data
+  return { ...data, modelID: `${providerID}/${modelID}` }
+}
+
 export function parseTimestamp(raw: number): string {
   const ms = raw < 1e12 ? raw * 1000 : raw
   return new Date(ms).toISOString()
@@ -91,8 +114,8 @@ export function parseTimestamp(raw: number): string {
 
 // Build a ParsedProviderCall from one assistant message and its parts. Returns
 // null when the message has no tokens, no cost, and no substantive parts (an
-// empty or errored turn worth skipping). Shared by the SQLite and file-based
-// OpenCode parsers so both attribute tokens, tools, and cost identically.
+// empty or errored turn worth skipping). Kilo Code's SQLite parser is the remaining
+// caller; it keeps token, tool, and cost attribution in one place.
 // Divergent stores sometimes persist token fields as strings (or NaN slips in
 // through JSON). Anything that is not a finite number must behave as absent so
 // the fallback default applies, instead of leaking into cost maths as a string

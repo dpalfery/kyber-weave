@@ -1,0 +1,290 @@
+---
+name: kyber-docs-authoring
+description: "Generate conformant Kyber-Weave frontmatter for repository documentation so that docs validate and docs drift pass. Use when a document fails a KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation tree after kyber-weave docs init, or when authoring a new governed document — including a todo or a coding standard — and you must choose doc-type, status, component, technology, source-root, and code-refs. Not for editing prose or style, authoring SKILL.md skills, or writing harness agent definitions."
+license: MIT
+metadata:
+  author: dpalfery
+  version: 0.1.4
+---
+
+# Authoring Kyber-Weave documentation
+
+Your job is to make a Markdown document **conformant**: correct frontmatter, honest
+claims about code, and a `doc-type` that matches what the document actually is.
+
+Verify with the tool, never by eye:
+
+```bash
+kyber-weave docs validate .
+kyber-weave docs drift .
+```
+
+## Required frontmatter
+
+Every governed document needs all six base keys:
+
+```yaml
+---
+id: docgraph/architecture      # permanent, unique slug; others reference this
+title: DocGraph architecture
+doc-type: architecture         # closed vocabulary — see below
+status: current                # closed vocabulary — see below
+owner: dpalfery                # MUST already exist in <docs-root>/catalog.md
+last-reviewed: 2026-08-01      # ISO yyyy-MM-dd, no other format
+---
+```
+
+**doc-type** and **status** are closed sets. Read both, and the required-key
+matrix, from the document named by `<documentation-ontology>` in the Config Reg.
+`docs init` writes that file from the host's ontology, so a list copied into this
+skill goes stale the next time a type is added. That is how `todo` and
+`coding-standard` were omitted here, and how an agent then labelled a coding
+standard `reference`: the document validated, and nothing reported that it would
+never resolve as a standard.
+
+If `<documentation-ontology>` does not exist yet, finish **Setting up a new
+repository** and run `docs init` before choosing a type. Do not guess the set.
+
+Do not invent a value. Do not relabel a document `reference` because no type seems
+to fit. `reference` is reference material. A reminder of work not done now is
+`todo`. A document that says how one technology's code is written in this
+repository is `coding-standard`.
+
+## Additional keys by doc-type
+
+Read the required-key matrix in `<documentation-ontology>` and apply that row. The
+ontology document is the authority; this skill does not keep a second copy of the
+matrix. Two rows the omitted list used to hide, which the product defaults still
+require:
+
+- `todo` — `component`, in addition to the base keys
+- `coding-standard` — `technology`, and not `component`
+
+When the ontology document disagrees with those two rows, the ontology document
+wins. A host can require more; it cannot make a copied list in this skill true.
+
+`component` and `owner` must already be rows in the catalog. If the value you need is not
+there, **add the catalog row first** — inventing a component in frontmatter fails
+`KW-DOC-SPEC-004`.
+
+A repository has exactly one catalog, at `<docs-root>/catalog.md` — the first root, when
+`docs-root` names several — or wherever `ontology.catalog-path` puts it. A `catalog.md`
+sitting in another root is an ordinary document and supplies no vocabulary; adding a row
+there will not make a component valid.
+
+## The pairing invariant
+
+For `architecture` and `runbook` only: `source-root` and `code-refs` travel together.
+
+- An architecture doc with `source-root` **must** list `code-refs`
+- An architecture doc with `code-refs` **must** declare `source-root`
+- A runbook with `source-root` **must** list `code-refs`
+
+If you cannot name real symbols, drop `source-root` rather than inventing them.
+
+## code-refs are claims, not mentions
+
+```yaml
+code-refs:
+  - DocumentIndex
+  - DocumentCorpus
+api-endpoints:
+  - GET /api/me/usage
+```
+
+Listing a symbol asserts **this document is answerable for it**. Every entry is resolved
+against a live code index — a name that does not resolve fails `KW-DOC-DRIFT-001`.
+
+So: list only symbols the document genuinely describes. Do not list every type it
+mentions in passing. Three accurate entries beat twenty aspirational ones.
+
+**Verify before writing.** Confirm each symbol exists, and prefer the bare name over a
+fully qualified one unless it is ambiguous. If a code graph index is present you can check
+directly:
+
+```bash
+sqlite3 .codegraph/codegraph.db \
+  "SELECT name, kind, file_path FROM nodes WHERE name='DocumentIndex' AND kind<>'import';"
+```
+
+`source-root` must be a real repository-relative directory that actually contains the
+indexed source for that component.
+
+LOAD `references/retrofit.md` when converting an existing documentation tree.
+LOAD `references/rules.md` for every rule id and what clears it.
+
+## Choosing doc-type honestly
+
+The type drives retrieval ranking, so a wrong one is not cosmetic:
+
+- **`plan` and `spec` are demoted to 0.55** — they are records of intent, not current guidance
+- **`superseded` is demoted to 0.4**
+- **`adr` sits at 0.9**
+
+Labelling a standard as a `plan` buries it. Labelling a closed plan as `reference`
+promotes a work artifact into guidance an agent will act on. Labelling a coding
+standard as `reference` validates and then never resolves as a standard. Labelling
+a deferred finding as `reference` or `plan` hides it from the todo inventory. Pick
+what the document *is*, not what would rank best.
+
+Set `status: draft` when you have filled the mechanical keys but a human has not confirmed
+the semantic ones. Draft is demoted to 0.85, which degrades gracefully — far better than a
+confident `current` on metadata nobody checked.
+
+## Example
+
+A file at `<docs-root>/payments/architecture.md` opening with `# Payments service` and no
+frontmatter. The catalog already has a `Payments` component owned by `payments-team`,
+whose source root is `src/Payments`.
+
+Verify the symbols first:
+
+```bash
+sqlite3 .codegraph/codegraph.db \
+  "SELECT name, kind FROM nodes WHERE name IN ('PaymentProcessor','RefundHandler') AND kind<>'import';"
+```
+
+`PaymentProcessor` returns a class; `RefundHandler` returns nothing. So only the first is
+listed — the second would fail `KW-DOC-DRIFT-001`:
+
+```yaml
+---
+id: payments/architecture
+title: Payments service
+doc-type: architecture
+status: draft
+component: Payments
+source-root: src/Payments
+owner: payments-team
+last-reviewed: 2026-08-01
+code-refs:
+  - PaymentProcessor
+---
+```
+
+`status: draft` because a human has not yet confirmed the component and source-root are
+right. `source-root` and `code-refs` appear together, satisfying the pairing invariant for
+an architecture document.
+
+## Authoring a coding standard
+
+A coding standard is how one technology's code is written in this repository. It is
+not a `rule`, which governs the repository whatever the language, and it is not a
+`reference`.
+
+1. Read the technologies list in `<documentation-ontology>`. It is the same list as
+   `ontology.technologies` in `.kyber-weave/kyber-weave.yml`. A value that is not on
+   it is not a legal `technology`.
+2. Write the document at `<docs-root>/standards/<technology>/README.md`. The folder
+   name and the `technology` value are the same string. That is the file the
+   registry property `<technology>-coding-standard` points at.
+3. Frontmatter is the six base keys plus `technology`. Do not set `component`. One
+   standard covers every component the catalog lists, so naming one of them would
+   claim a scope the document does not have.
+4. `owner` must already be a catalog row. Add the row first when it is missing.
+5. When the repository writes that stack and the technology is not declared yet, add
+   it under `ontology.technologies` and run `kyber-weave docs init`. Init creates
+   the folder and publishes the registry property. Do that only for a stack the
+   repository actually uses. Do not add a technology, and do not add a doc-type, to
+   silence a finding on a document that is not a standard.
+
+`technology` on any other doc-type fails `KW-DOC-SPEC-007`. A technology the
+repository has not declared fails `KW-DOC-SPEC-002`. A folder name that does not
+match the key fails `KW-DOC-SPEC-007`.
+
+`csharp` in the example has to already be declared. `status: draft` because a human
+has not confirmed the prose; the keys themselves are the mechanical part.
+
+```yaml
+---
+id: standards/csharp
+title: C# coding standard
+doc-type: coding-standard
+status: draft
+technology: csharp
+owner: payments-team
+last-reviewed: 2026-08-01
+---
+```
+
+The file is `<docs-root>/standards/csharp/README.md`.
+
+## Setting up a new repository
+
+Before a governed corpus can exist, every agent and skill must be able to resolve the
+docs root. It is declared once, in the repository's root `AGENTS.md`, under a canonical
+heading — never hardcode it, never assume it.
+
+1. **Read the root `AGENTS.md`** and look for the heading
+   `## Repository Configuration & Paths Registry (Config Reg)`.
+2. **If it exists, its declared values are authoritative.** Use `docs-root`,
+   `<documentation-index>`, and `<documentation-ontology>` as `<docs-root>` and its fixed
+   files everywhere in this skill.
+3. **If it does not exist, ask the user for the documentation root.** It is a
+   repository-relative directory, conventionally `docs`. Ask — where a new corpus lives is
+   the user's choice, not an agent's guess.
+4. **Update the root `AGENTS.md`** with the section, deriving the two fixed filenames
+   from the root the user provided:
+
+```markdown
+## Repository Configuration & Paths Registry (Config Reg)
+
+Agents and skills should look up the following properties dynamically to find the relevant documentation and references for this repository:
+
+- **<docs-root>**: `docs`
+- **<documentation-index>**: `<docs-root>/catalog.md`
+- **<documentation-ontology>**: `<docs-root>/documentation-ontology.md`
+```
+
+1. Read the document. Decide what it actually *is* → `doc-type`, from
+   `<documentation-ontology>`, not from memory.
+2. Check the catalog for the `component` and `owner`. Add a row if missing.
+   A coding standard uses `technology` instead of `component`.
+3. Write the base keys. Use a real ISO date for `last-reviewed`.
+4. Add type-specific keys from the ontology's required-key matrix. Honour the
+   pairing invariant.
+5. Verify every `code-refs` symbol resolves before listing it.
+6. Run `kyber-weave docs validate .` and fix findings by rule id.
+7. Run `kyber-weave docs drift .` and correct or drop unresolved symbols.
+
+Fix what a rule reports. Do not widen the ontology in `.kyber-weave/kyber-weave.yml` to
+make a failure disappear — that discards the guarantee the corpus exists to provide.
+
+## After conformance: analyze, do not auto-rewrite
+
+When the repository supports documentation analysis, run it only after `docs validate`
+and `docs drift` are clean:
+
+```bash
+kyber-weave docs integrity-check .
+```
+
+Treat duplicate, conflict, and terminology findings as evidence to review. Never merge,
+delete, or rewrite source documentation merely because analysis paired two claims. Exact
+duplicates are deterministic; conflicts and distinct term senses need a scope-aware human
+or agent verdict through `docs review export` / `docs review import`.
+
+Use `<kyber-ignore>` only for intentional, reviewed cases and only with `duplicate`,
+`conflict`, `terminology`, or `all`. The tags are case-sensitive, balanced, non-nested,
+and cannot cross frontmatter or a `##` boundary. Malformed suppression is an operational
+error rather than a silent ignore.
+
+`docs glossary .` previews terminology proposals; `--write` merges them into the one
+configured glossary without rewriting source documents. The glossary remains a conformant
+`reference` document. Humans approve/reject sense rows, supply approved definitions and
+component/code scopes, update `last-reviewed`, and return the document to `current` after
+review. Do not invent a glossary doc-type or use sense-row status as document status.
+
+## Never
+
+- Invent a `component` or `owner` that is not in the catalog
+- Add a `code-refs` symbol you have not verified
+- Guess the docs root during setup — ask the user and record the answer under the Config
+  Reg heading in `AGENTS.md`
+- Change `doc-type` or `status` vocabularies to fit one document
+- Label a coding standard or a todo as `reference` to make validation pass
+- Copy a doc-type list into this skill — read `<documentation-ontology>`
+- Set `status: current` on frontmatter you filled in without review
+- Backdate or forward-date `last-reviewed` — use the date it was actually reviewed
+- Auto-rewrite source prose from an unreviewed duplicate, conflict, or terminology candidate
+- Use ignore markup to hide a finding whose scope or evidence has not been reviewed

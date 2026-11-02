@@ -33,10 +33,80 @@ env:
   CONFIGURATION: Release
 
 jobs:
+  # Decides which jobs a change needs. Skipping is done with job-level `if:` (never a
+  # workflow-level `paths:` filter) because only "CI Summary" is a required check and a
+  # skipped job counts as passed, while a workflow that never starts leaves it pending.
+  # Anything that is not a pull request runs everything. A change to this workflow
+  # or to the CodeQL config also runs everything, so an edit to the filters is itself fully exercised.
+  #
+  # build-test, gitleaks and the skill and docs gate always run: the .NET tests read
+  # files under docs/, products/, .kyber-weave/, .github/, scripts/ and a few under
+  # dash/, so no path set can prove they are irrelevant.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      dash: ${{ steps.areas.outputs.dash }}
+      code: ${{ steps.areas.outputs.code }}
+      dotnet: ${{ steps.areas.outputs.dotnet }}
+      codeql: ${{ steps.areas.outputs.codeql }}
+      sbom: ${{ steps.areas.outputs.sbom }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Classify changed files
+        id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          all() {
+            {
+              echo "dash=true"; echo "code=true"; echo "dotnet=true"; echo "sbom=true"
+              echo 'codeql=["csharp","javascript-typescript"]'
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          [ "${EVENT_NAME}" = "pull_request" ] || all
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}"
+          files="$(git diff --name-only "${BASE_SHA}" HEAD)"
+          printf 'Changed files:\n%s\n' "${files}"
+          [ -n "${files}" ] || all
+          if grep -qxF '.github/workflows/ci.yml' <<<"${files}" || grep -q '^\.github/codeql/' <<<"${files}"; then all; fi
+
+          has() { if grep -Eq "$1" <<<"${files}"; then echo true; else echo false; fi; }
+          nonempty() { if [ -n "$1" ]; then echo true; else echo false; fi; }
+          dash="$(has '^dash/')"
+          # Docs-only: everything under docs/ and markdown at the repo root.
+          code="$(nonempty "$(grep -Ev '^(docs/|[^/]+\.md$)' <<<"${files}" || true)")"
+          dotnet="$(nonempty "$(grep -Ev '^(docs/|dash/|[^/]+\.md$)' <<<"${files}" || true)")"
+          cs="$(has '(\.(cs|csproj|props|targets|sln|slnx|editorconfig)$|^global\.json$|(^|/)nuget\.config$|(^|/)packages\.lock\.json$)')"
+          js="$(has '\.(js|mjs|cjs|mts|cts|ts|tsx|jsx|json)$')"
+          # The release builds and attests the SBOM every time; the PR only needs to prove
+          # the generator still works when its inputs (dependency manifests, lockfiles,
+          # the scripts) change.
+          sbom="$(has '(package-lock\.json|Cargo\.lock|packages\.lock\.json|\.csproj|Directory\..*\.props|^global\.json|^scripts/(generate|validate)-sbom|^scripts/syft-bootstrap\.sh|^\.github/workflows/release\.yml|^dash/tray/vendor/)')"
+          langs=()
+          [ "${cs}" = true ] && langs+=('"csharp"')
+          [ "${js}" = true ] && langs+=('"javascript-typescript"')
+          codeql="[$(IFS=,; echo "${langs[*]:-}")]"
+          {
+            echo "dash=${dash}"; echo "code=${code}"; echo "dotnet=${dotnet}"
+            echo "codeql=${codeql}"; echo "sbom=${sbom}"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -114,6 +184,15 @@ jobs:
           path: artifacts/nupkg/
           retention-days: 14
 
+      - name: Shut down .NET build servers
+        if: always()
+        run: dotnet build-server shutdown
+
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
+
   sbom:
     # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
     # job proves the generator works and that its output is schema-valid, without
@@ -125,6 +204,8 @@ jobs:
     # strictly; without it the check degrades to a warning, because the fallback
     # to the checked-in packages.lock.json files is knowingly partial.
     name: SBOM (CycloneDX 1.6)
+    needs: changes
+    if: needs.changes.outputs.sbom == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -194,11 +275,14 @@ jobs:
 
   squad-filesystem-contract:
     name: Squad filesystem contract (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # No ubuntu leg: build-test already runs the whole suite there.
+        os: [macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -221,7 +305,8 @@ jobs:
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -271,7 +356,8 @@ jobs:
   update-loop:
     name: Self-update and Squad install loop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # The loop runs npm-resolved code (npm ci, tsup, postject) to build kyberdash, so it
     # gets no more than it needs: without this it would inherit security-events: write.
     permissions:
@@ -316,11 +402,21 @@ jobs:
   codeql:
     name: CodeQL Analysis (${{ matrix.language }})
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.codeql != '[]'
+    # A pull request that touches no .NET files legitimately skips the csharp leg, and a
+    # docs-only pull request skips this job entirely. GitHub code scanning identifies a
+    # configuration by (workflow, category) and diffs the set between main and the PR head,
+    # so the missing leg surfaces as a NEUTRAL "1 configuration not found" check naming
+    # /language:csharp. That check is expected here, informational, and cannot fail CI
+    # Summary — the only required check. Anything that is not a pull request, and any edit
+    # to this workflow or .github/codeql/, takes the changes job's all() fallback and runs
+    # every language, so main's C# analysis never goes stale. Do not restore a static
+    # matrix to silence it; see docs/ci-pipelines/workflows-runbook.md.
     strategy:
       fail-fast: false
       matrix:
-        language: [csharp, javascript-typescript]
+        language: ${{ fromJSON(needs.changes.outputs.codeql) }}
     permissions:
       security-events: write
       contents: read
@@ -329,9 +425,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Intentional github/codeql-action v4 pin (v4.38.1)
+      # Intentional github/codeql-action v4 pin (v4.39.0)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -351,16 +447,17 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
-      # Intentional github/codeql-action v4 pin (v4.38.1)
+      # Intentional github/codeql-action v4 pin (v4.39.0)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:${{ matrix.language }}"
 
   trivy:
     name: Trivy OSS Security Scan
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       security-events: write
@@ -412,7 +509,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         if: always() && hashFiles('trivy.sarif') != ''
         with:
           sarif_file: trivy.sarif
@@ -421,7 +518,8 @@ jobs:
   semgrep:
     name: Semgrep Community SAST
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     permissions:
       contents: read
       security-events: write
@@ -467,7 +565,7 @@ jobs:
 
       # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         if: always() && hashFiles('semgrep.sarif') != ''
         with:
           sarif_file: semgrep.sarif
@@ -497,7 +595,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         if: always() && hashFiles('results.sarif') != ''
         with:
           sarif_file: results.sarif
@@ -506,13 +604,16 @@ jobs:
   skill-docs-gate:
     name: Skill and docs gate
     runs-on: ubuntu-latest
-    needs: build-test
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history: the 004 closeout gate resolves its scope through
+          # git merge-base, which a single-commit checkout cannot answer.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -535,7 +636,7 @@ jobs:
           # Every skill directory is gated under the same three verbs. Add a path here
           # AND a matching upload step below when a new skill lands, or the suite covers it
           # zero times / its SARIF never reaches code scanning.
-          skills_dirs=(.apm/skills/kyber-weave-docs .apm/skills/kyber-weave-cli)
+          skills_dirs=(.apm/skills/kyber-docs-authoring .apm/skills/kyber-docs-integrity-review .apm/skills/kyber-docs-onboarding-and-assessment .apm/skills/kyber-weave-cli)
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
           for skills_dir in "${skills_dirs[@]}"; do
             # Path-derived, not basename: two skills whose leaf directories share a name
@@ -558,12 +659,33 @@ jobs:
       # determine the alerts introduced by this pull request". Do not "tidy" it to match the
       # file name or the cli category below.
       # Intentional github/codeql-action v4 pin
-      - name: Upload skill scan SARIF (kyber-weave-docs, legacy category)
+      - name: Upload skill scan SARIF (kyber-docs-authoring, legacy category)
         if: always()
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
-          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-docs.sarif
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-authoring.sarif
           category: kyber-weave-skills
+
+      # The integrity-review and onboarding-and-assessment skills are new names on
+      # this branch, so they take path-derived categories like the cli skill.
+      # A separate upload step, not one directory upload: the action applies a
+      # single `category` to every run that has no automationDetails of its own,
+      # and refuses two runs that share a category.
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-docs-integrity-review)
+        if: always()
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-integrity-review.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-docs-integrity-review
+
+      # Intentional github/codeql-action v4 pin
+      - name: Upload skill scan SARIF (kyber-docs-onboarding-and-assessment)
+        if: always()
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-docs-onboarding-and-assessment.sarif
+          category: kyber-weave-skills-_apm_skills_kyber-docs-onboarding-and-assessment
 
       # The cli skill is new on this branch, so it has no prior configuration to preserve
       # and takes a path-derived category. A separate upload step, not one directory upload:
@@ -572,17 +694,36 @@ jobs:
       # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF (kyber-weave-cli)
         if: always()
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: kyber-weave-sarif/skills-_apm_skills_kyber-weave-cli.sarif
           category: kyber-weave-skills-_apm_skills_kyber-weave-cli
 
-      # --merge-ready adds KW-DOC-LIFECYCLE-003: a plan or specification still open fails
-      # the build. Open work is correct on a branch while it is built, never in a merge.
+      # --merge-ready adds KW-DOC-LIFECYCLE-003 (a plan or specification still open
+      # fails the build) and KW-DOC-LIFECYCLE-004 (an archived entry the change
+      # touches must carry its closeout evidence). Open work is correct on a branch
+      # while it is built, never in a merge. --base scopes 004 to the change under
+      # review: the PR target on pull_request, the pushed range on push, and the
+      # remote default branch elsewhere (schedule, dispatch). Full history
+      # (fetch-depth: 0 above) is what lets git merge-base resolve that scope.
       - name: Docs validate
-        run: >
-          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
-          docs validate . --merge-ready --format table
+        env:
+          # Event values travel through env, never interpolated into run:,
+          # so a hostile ref cannot reach the shell.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            BASE="origin/${BASE_REF}"
+          elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${EVENT_BEFORE}"
+          else
+            BASE="origin/HEAD"
+          fi
+          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} -- \
+            docs validate . --merge-ready --base "$BASE" --format table
 
       # docs drift needs a host-owned CodeGraph index (.codegraph/codegraph.db).
       # Kyber-Weave does not create that index; without a CI indexer/cache the gate would
@@ -592,7 +733,8 @@ jobs:
   ts-gates:
     name: TypeScript gates (KyberDash)
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     # Mirrors the same three gates declared in .kyber-weave/kyber-weave.yml as
     # `ts-typecheck`, `ts-test`, `ts-lint`. The commands here are the exact
     # argv the gates emit; if a future change to the gate config or to the
@@ -602,6 +744,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -672,6 +817,61 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
+
+  # Harness-collection standard: deterministic per-harness completeness
+  # enforcement. Runs the Playwright conformance spec against an isolated
+  # dashboard booted from a self-seeded temp canon.db — never the live 4747
+  # host. Ubuntu-only, no funded model call, no new secret.
+  #
+  # The spec runs from the repository root with the pinned dash Playwright
+  # (`--prefix dash`, the same pattern as the archived spine e2e commands) so
+  # no floating npx fetch can move the runner under CI, and so that
+  # dash/playwright.config.ts — whose webServer targets the live host — stays
+  # unloaded; the spec's own isolated boot is the only server.
+  dash-e2e:
+    name: Dash harness-collection e2e
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
+    permissions:
+      contents: read
+    steps:
+      - name: Record job start epoch
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/package-lock.json
+
+      # npm ci (not `npm install`): package-lock.json is committed so a CI
+      # run reproduces the same devDependency graph a contributor's local
+      # install produces. Mirrors the ts-gates install.
+      - name: Install dash dependencies
+        working-directory: dash
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: dash
+        run: npx playwright install --with-deps
+
+      - name: Harness-collection conformance spec
+        run: npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
+
+      - name: Check for leftover processes
+        if: always()
+        run: |
+          scripts/proc-guard.sh check-leftovers --root "$GITHUB_WORKSPACE" --since "$JOB_START_EPOCH"
+
   # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
   # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture
   # tests run here; the full suite stays on ts-gates. Equivalent local command:
@@ -683,7 +883,8 @@ jobs:
   capture-windows:
     name: Capture tests (windows-latest)
     runs-on: windows-latest
-    needs: build-test
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     permissions:
       contents: read
     steps:
@@ -709,6 +910,8 @@ jobs:
 
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -821,7 +1024,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: dash/tray/src-tauri
 
@@ -867,13 +1070,18 @@ jobs:
     name: CI Summary
     runs-on: ubuntu-latest
     needs:
+      - changes
       - build-test
+      - trivy
+      - semgrep
+      - gitleaks
       - sbom
       - publish-smoke
       - update-loop
       - codeql
       - skill-docs-gate
       - ts-gates
+      - dash-e2e
       - capture-windows
       - tray-rust
     if: always()
@@ -885,6 +1093,7 @@ jobs:
           echo "" >> results.md
           echo "| Job | Status |" >> results.md
           echo "|-----|--------|" >> results.md
+          echo "| Detect changed areas | ${{ needs.changes.result }} |" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
           echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
@@ -892,6 +1101,7 @@ jobs:
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Dash harness-collection e2e | ${{ needs.dash-e2e.result }} |" >> results.md
           echo "| Capture tests (Windows) | ${{ needs.capture-windows.result }} |" >> results.md
           echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
@@ -902,6 +1112,7 @@ jobs:
 
           FAILED=false
           for result in \
+            "${{ needs.changes.result }}" \
             "${{ needs.build-test.result }}" \
             "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \
@@ -909,6 +1120,7 @@ jobs:
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
             "${{ needs.ts-gates.result }}" \
+            "${{ needs.dash-e2e.result }}" \
             "${{ needs.capture-windows.result }}" \
             "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then

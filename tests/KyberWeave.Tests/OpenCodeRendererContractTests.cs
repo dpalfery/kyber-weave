@@ -1,4 +1,5 @@
 using System.Text;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -168,7 +169,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_OpenCode_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
@@ -211,8 +212,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
+        // Derived from the loaded corpus, not a pinned literal: adding a checklist reference or
+        // resource file must not require editing this test. A dropped or duplicated file still
+        // fails here because the count is computed from the source, not from the renderer.
         Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.Equal(143, result.Files.Count);
 
         // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
         // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.
@@ -332,13 +335,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             }
 
             // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow,
-            // excluding pure orchestrators and suppressed (subagent) shared identities. A primary
-            // shared identity keeps the grant: it edits files and runs commands.
-            bool isPureOrchestrator = string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal);
-            bool readAllowed =
-                capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow;
-            bool expectedKwMcp = !isPureOrchestrator && !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
+            // excluding suppressed (subagent) shared identities, whose canonical skill is the only
+            // projection emitted. A primary shared identity keeps the grant: it edits files and
+            // runs commands. The pure orchestrator is not excluded any more: kyber-weave carries
+            // agent_coding_standards, which the conductor needs to point its delegates at the
+            // standards they are held to.
+            bool readAllowed = SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.OpenCode);
+            bool expectedKwMcp = !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
             Assert.True(
                 permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
                 $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
@@ -438,7 +441,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         // Concrete lowering snapshots
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        Assert.Equal(SquadPermissionDecision.Deny, architectProfile.Permissions["process.execute"]);
         AssertPermissions(
             result,
             "architect",
@@ -468,6 +471,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
         AssertPermissions(
             result,
             "docs-dev",
@@ -482,7 +486,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["glob"] = "allow",
                 ["list"] = "allow",
                 ["edit"] = "allow",
-                ["bash"] = "deny",
+                ["bash"] = "allow",
                 ["webfetch"] = "deny",
                 ["websearch"] = "deny",
                 ["external_directory"] = "deny",
@@ -598,7 +602,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .ToArray();
 
         Assert.NotEmpty(expectedSafetyNarrowed);
-        Assert.Contains("architect", expectedSafetyNarrowed);
+        Assert.DoesNotContain("architect", expectedSafetyNarrowed);
 
         IReadOnlyList<SquadDegradationRecord> safetyNarrowed = result.Degradations
             .Where(d => string.Equals(d.Code, "safety-narrowed", StringComparison.Ordinal))
@@ -689,7 +693,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_OpenCode_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
             ProductRoot,
@@ -943,6 +947,42 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Assert.DoesNotContain(
             result.Files,
             file => file.RelativePath == $".opencode/skills/{SharedIdentitySquadFixture.Identity}/SKILL.md");
+    }
+
+    /// <summary>
+    /// The pure orchestrator's rendered permission map allows <c>kyber-weave_*</c>.
+    /// </summary>
+    /// <remarks>
+    /// OpenCode merges an agent's permission map with the global config, where most keys default
+    /// to <c>allow</c>, so the key is pinned with an explicit value rather than checked for
+    /// presence. The expectation comes from <see cref="SquadMcpGrantProjection"/>, never from the
+    /// renderer, so a re-added exclusion fails here instead of agreeing with itself.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_OpenCode_GrantsKyberWeaveToThePureOrchestrator()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.OpenCode),
+            "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
+            + "cannot state the conductor is entitled to kyber-weave.");
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.OpenCode);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".opencode/agents/{conductor.Name}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            conductor.Name);
+        YamlMappingNode permissionMap = RequireMapping(frontmatter, "permission", conductor.Name);
+
+        Assert.Equal("allow", RequireScalar(permissionMap, "kyber-weave_*", conductor.Name));
     }
 
     private static void AssertPermissions(

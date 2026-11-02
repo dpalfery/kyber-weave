@@ -168,14 +168,14 @@ describe('buildCaptureStatus over a temporary home', () => {
     ])
   })
 
-  it('reports keys set outside KyberDash as on with an absent receipt', () => {
+  it('ignores an OpenCode flag set outside KyberDash: its state comes from the plugin, not the config', () => {
     const home = makeHome()
     writeConfig(opencodePath(home), '{ "experimental": { "openTelemetry": true } }\n')
 
     const opencode = byId(buildCaptureStatus(ctxFor(home)), 'opencode')
-    expect(opencode.state).toBe('on')
+    expect(opencode.state).toBe('off')
     expect(opencode.receipt).toBe('absent')
-    expect(opencode.files[0]!.drift).toBeNull()
+    expect(opencode.files).toEqual([])
   })
 
   it('does not call Copilot Stable-only partial: the unused Insiders file is not applicable', async () => {
@@ -255,7 +255,7 @@ describe('buildCaptureStatus over a temporary home', () => {
     expect(withOverride.statusLines).toEqual(copilot.statusLines)
   })
 
-  it('reports unknown for an unreadable config and an unparseable one, and downgrades install', () => {
+  it('reports unknown for an unreadable config, and leaves OpenCode to its plugin when its config is unparseable', () => {
     const home = makeHome()
     // A directory where the settings file belongs: every read fails without chmod tricks.
     mkdirSync(claudePath(home), { recursive: true })
@@ -269,9 +269,10 @@ describe('buildCaptureStatus over a temporary home', () => {
     expect(claude.installEvidence[0]).toContain('could not inspect')
     expect(claude.installEvidence.join('\n')).toContain('EISDIR')
 
+    // OpenCode's state comes from its plugin, so an unparseable opencode.jsonc no longer makes it unknown.
     const opencode = byId(statuses, 'opencode')
-    expect(opencode.state).toBe('unknown')
-    expect(opencode.files[0]!.exists).toBe(true)
+    expect(opencode.state).toBe('off')
+    expect(opencode.files).toEqual([])
   })
 
   it('warns when an existing ensure-if-absent endpoint points somewhere else', () => {
@@ -332,14 +333,10 @@ describe('buildCaptureStatus over a temporary home', () => {
     expect(byId(statuses, 'antigravity').statusLines.at(-1)).toContain('declaredContextWindow snippet:')
   })
 
-  it('names the OpenCode endpoint variable with the suggested value, never the process value', () => {
+  it('offers no OpenCode environment step, whatever the process environment holds', () => {
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:9999')
     const opencode = byId(buildCaptureStatus(ctxFor(makeHome())), 'opencode')
-    expect(opencode.manualSteps).toHaveLength(1)
-    expect(opencode.manualSteps[0]).toMatchObject({
-      id: 'opencode-otel-endpoint',
-      env: { name: 'OTEL_EXPORTER_OTLP_ENDPOINT', value: 'http://127.0.0.1:4318' },
-    })
+    expect(opencode.manualSteps).toEqual([])
     expect(JSON.stringify(opencode)).not.toContain('9999')
     expect(byId(buildCaptureStatus(ctxFor(makeHome())), 'copilot').manualSteps).toEqual([])
   })
@@ -544,13 +541,13 @@ describe('parity with the CLI text status', () => {
         homeDir: home,
         platform: HOST,
     appDataDir: hostEnv(home).appData,
-        harnessIds: ['opencode'],
+        harnessIds: ['claude-code'],
         fetchHealth: NO_LISTENER,
       })
     ).stdout
     expect(text).toContain('(missing)')
-    const opencode = byId(buildCaptureStatus(ctxFor(home)), 'opencode')
-    expect(opencode.files[0]).toMatchObject({ exists: false, presentKeys: [] })
+    const claude = byId(buildCaptureStatus(ctxFor(home)), 'claude-code')
+    expect(claude.files[0]).toMatchObject({ exists: false, presentKeys: [] })
   })
 })
 

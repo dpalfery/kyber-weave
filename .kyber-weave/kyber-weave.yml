@@ -10,12 +10,16 @@ ontology:
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
 
-  # This repository is C# plus the tests that pin it. The list is what creates
+  # This repository writes C#, TypeScript, and the tests that pin them. The list creates
   # docs/standards/<technology>/, publishes <technology-coding-standard> in the registry,
   # and legalizes the technology value in that standard's frontmatter.
   technologies:
     - csharp
     - test
+    - typescript
+    - rust
+    - tauri
+    - go
 
 # The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
 # cites their output as evidence rather than restating a claim that they passed.
@@ -37,9 +41,11 @@ review:
     # `--no-restore` is omitted: each gate is an independent process and there is no
     # restore gate ahead of them.
     - id: format-whitespace
+      include: &net-source-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
       run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, -v, minimal]
       blocking: true
     - id: format-style
+      include: *net-source-paths
       run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
       blocking: true
     # `--no-incremental` because coverlet.MTP instruments `bin/Release` in place: an
@@ -48,6 +54,7 @@ review:
     # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
     # test gate that follows it from running against binaries no longer executable.
     - id: build
+      include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".config/dotnet-tools.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
       run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
@@ -57,40 +64,109 @@ review:
     # Release. Without it every run re-links the test project, and the gate evidence
     # would come from binaries the suite did not actually gate.
     - id: test
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      include: *net-test-paths
+      run: [scripts/proc-guard.sh, run, --, dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       blocking: true
     # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
     # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite
     # and invisible in the report, which records one line per gate regardless. The build
     # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-docs]
+      include: &skill-authoring-paths [".apm/skills/kyber-docs-authoring/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-authoring]
       blocking: true
     - id: skill-lint
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
+      include: *skill-authoring-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-authoring, --min-desc-score, "70"]
       blocking: true
     # `--fail-on critical` is the documented local check. Binding it here means a
     # later change to the CLI default cannot silently loosen what the gate enforces.
     - id: skill-scan
-      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      include: *skill-authoring-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-authoring, --fail-on, critical]
       blocking: true
-    # The entry-point skill is a second skill directory, and `skill validate` / `lint` /
-    # `scan` each take one path. The declared suite covers it the same way it covers the
-    # authoring skill — three more gates, one per verb, or the new skill is discoverable
-    # to an agent but never gated.
+    # The entry-point skill was the second gated skill directory, and the two
+    # Kyber-Docs skills that moved out of Squad are the third and fourth.
+    # `skill validate` / `lint` / `scan` each take one path. The declared suite
+    # covers each the same way it covers the authoring skill — three more gates
+    # per skill, one per verb, or a new skill is discoverable to an agent but
+    # never gated.
     - id: skill-validate-cli
+      include: &skill-cli-paths [".apm/skills/kyber-weave-cli/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
       blocking: true
     - id: skill-lint-cli
+      include: *skill-cli-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-cli, --min-desc-score, "70"]
       blocking: true
     - id: skill-scan-cli
+      include: *skill-cli-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-cli, --fail-on, critical]
       blocking: true
+    # The integrity-review skill moved out of .apm's retired
+    # `doc-corpus-integrity-review` directory to its Kyber-Docs name.
+    - id: skill-validate-integrity-review
+      include: &skill-integrity-paths [".apm/skills/kyber-docs-integrity-review/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-integrity-review]
+      blocking: true
+    - id: skill-lint-integrity-review
+      include: *skill-integrity-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-integrity-review, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-integrity-review
+      include: *skill-integrity-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-integrity-review, --fail-on, critical]
+      blocking: true
+    # The onboarding-and-assessment skill moved out of Squad's `second-brain`
+    # directory to its Kyber-Docs home under .apm/skills.
+    - id: skill-validate-onboarding-and-assessment
+      include: &skill-onboarding-paths [".apm/skills/kyber-docs-onboarding-and-assessment/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-onboarding-and-assessment]
+      blocking: true
+    - id: skill-lint-onboarding-and-assessment
+      include: *skill-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-docs-onboarding-and-assessment, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-onboarding-and-assessment
+      include: *skill-onboarding-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-docs-onboarding-and-assessment, --fail-on, critical]
+      blocking: true
+    # The model-profile skill teaches preset authoring for every harness. It is
+    # gated like the rest so the command examples and per-harness table cannot
+    # drift from the CLI surface without a failing gate.
+    # The codegraph skill is the first skill whose subject is a third-party tool rather
+    # than a Kyber-Weave product surface: it drives `kyber-weave doctor` and never runs
+    # `codegraph` itself, so the gates below pin its trigger wording like any other skill.
+    - id: skill-validate-codegraph
+      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/codegraph]
+      blocking: true
+    - id: skill-lint-codegraph
+      include: *skill-codegraph-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/codegraph, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-codegraph
+      include: *skill-codegraph-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/codegraph, --fail-on, critical]
+      blocking: true
+    - id: skill-validate-model-profile
+      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Core/Skills/**"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-model-profile]
+      blocking: true
+    - id: skill-lint-model-profile
+      include: *skill-model-profile-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-model-profile, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-model-profile
+      include: *skill-model-profile-paths
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-model-profile, --fail-on, critical]
+      blocking: true
     - id: docs-validate
+      include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
       blocking: true
     - id: docs-drift
+      include: ["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**", "dash/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
       blocking: true
     # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
@@ -101,7 +177,8 @@ review:
     # the suggestion tier is dominated by style inspections this repository settles in
     # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
     - id: inspectcode
-      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING]
+      include: *net-source-paths
+      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING, "--caches-home=artifacts/inspectcode-cache"]
       blocking: true
     # Cross-file duplicate bodies, from the CodeGraph index. Nothing else in the chain
     # answers this: JetBrains retired `dupfinder`, and the inspections InspectCode still
@@ -110,6 +187,7 @@ review:
     # which clusters this change is responsible for. Like the analyzer gate it exits 0
     # whether or not it finds anything, so "blocking" means it must have *run*.
     - id: duplicates
+      include: *net-source-paths
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
@@ -123,6 +201,7 @@ review:
     # fixed (`typecheck`, `test`, `lint`, `check:reachable`), so a script
     # rename is a gate-name collision that surfaces on the very next review.
     - id: ts-typecheck
+      include: ["dash/**"]
       run: [npm, run, --prefix, dash, typecheck]
       blocking: true
     # `test` excludes the cache-refresh-lock* files because vitest's default
@@ -138,7 +217,8 @@ review:
     # stays the .NET suite's, because the runner picks that from files named
     # coverage.cobertura.xml only.
     - id: ts-test
-      run: [npm, run, --prefix, dash, test, --, --coverage]
+      include: ["dash/**"]
+      run: [scripts/proc-guard.sh, run, --, npm, run, --prefix, dash, test, --, --coverage]
       blocking: true
     # One severity, owned by dash/eslint.config.js: the recommended rules run
     # at error everywhere under dash/. The two-tier split that ran them as
@@ -146,12 +226,33 @@ review:
     # 0020) — there is no upstream to inherit debt from any more, so the gate
     # is debt-free rather than merely running (R4.5).
     - id: ts-lint
+      include: ["dash/**"]
       run: [npm, run, --prefix, dash, lint]
       blocking: true
     # Every non-test source file under dash/ must be reachable from an entry
     # point, so a deleted command cannot leave its private modules behind.
     - id: ts-reachable
+      include: ["dash/**"]
       run: [npm, run, --prefix, dash, "check:reachable"]
+      blocking: true
+
+    # The tray's Rust suite, run the way CI runs it (.github/workflows/ci.yml, working-directory
+    # dash/tray/src-tauri): format check, clippy with warnings denied, then tests. --manifest-path
+    # sets the crate root without a shell `cd`. Clippy and the tests compile the whole Tauri
+    # dependency tree, so they get 1800 seconds rather than the default.
+    - id: cargo-fmt
+      include: &cargo-paths ["dash/tray/src-tauri/**"]
+      run: [cargo, fmt, --manifest-path, dash/tray/src-tauri/Cargo.toml, --check]
+      blocking: true
+    - id: cargo-clippy
+      include: *cargo-paths
+      run: [cargo, clippy, --manifest-path, dash/tray/src-tauri/Cargo.toml, --, -D, warnings]
+      timeout-seconds: 1800
+      blocking: true
+    - id: cargo-test
+      include: *cargo-paths
+      run: [cargo, test, --manifest-path, dash/tray/src-tauri/Cargo.toml]
+      timeout-seconds: 1800
       blocking: true
 
   # Developer task gates. `kyber-weave review gates . --agent <name> --paths ... --task <slug>`
@@ -185,11 +286,6 @@ review:
         include: *net-paths
         run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
         fix: [dotnet, format, KyberWeave.sln, style, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
-      - &fmt-analyzers
-        id: format-analyzers
-        include: *net-paths
-        run: [dotnet, format, KyberWeave.sln, analyzers, --verify-no-changes, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
-        fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}", "-p:BaseOutputPath=.agent_scratchpad/{task}/artifacts/bin/", "-p:BaseIntermediateOutputPath=.agent_scratchpad/{task}/artifacts/obj/"]
       - &dotnet-build
         id: dotnet-build
         # The build is the one gate a solution-only change must reach: a .sln, NuGet.config, or
@@ -201,27 +297,22 @@ review:
     dal-dev:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
     maui-dev:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
     pulumi-dev:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
     sql-database-architect:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
     github-devops:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
 
     # TypeScript and the tray UI. The dash include lists directories instead of `dash/**`,
@@ -260,14 +351,27 @@ review:
       - *dash-lint
       - *tray-ui-typecheck
 
-    # Tests are .NET (tests/) and TypeScript (dash/tests, dash/web), so test-dev runs both sets.
+    # TypeScript and Rust developers run the same gates as their siblings, aliased so the include
+    # lists and commands cannot drift: typescript-dev runs react-dev's dash gates, rust-dev runs
+    # tauri-dev's cargo gates. There is no cargo-test task gate; the full Rust suite runs in
+    # review.gates and CI. Go and Python developers declare no task gates.
+    typescript-dev:
+      - *dash-typecheck
+      - *dash-lint
+    rust-dev:
+      - *cargo-fmt
+      - *cargo-clippy
+
+    # Tests are .NET (tests/), TypeScript (dash/tests, dash/web), and the tray's Rust, so test-dev
+    # runs all three sets' format and lint checks.
     test-dev:
       - *fmt-whitespace
       - *fmt-style
-      - *fmt-analyzers
       - *dotnet-build
       - *dash-typecheck
       - *dash-lint
+      - *cargo-fmt
+      - *cargo-clippy
 
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —
@@ -298,8 +402,9 @@ review:
     # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
     # stamp for whatever comes next.
     max-reviewable-lines: 20000
-    major-count-blocks: 3
-    min-confidence: 7
+    # strict: min-confidence 5, and one surviving major requests changes. The preset supplies
+    # both thresholds, so major-count-blocks and min-confidence are deliberately not set here.
+    strictness: strict
 
 # Rendered into the Config Reg block of AGENTS.md as <autonomy>, the only place a portable
 # agent can read it. This repository is built by agent teams working test-first through the
@@ -309,3 +414,21 @@ autonomy: autonomous
 # Paths agents resolve by property name instead of a relative link.
 config-reg:
   review-guidance: REVIEW.md
+
+mcp:
+  # The MCP servers this repository's agent instructions rely on. `docs init` wires these
+  # into the harnesses it detects; the declaration is host-owned from the moment it exists
+  # and docs init never edits it again. This file is on the review.policy.always-human
+  # list in this repository, so every change here escalates for human review by path alone.
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
+    # A third-party server is declared the same way; its binary is never installed by
+    # Kyber-Weave. Uncomment when the repository's instructions require it:
+    # codegraph:
+    #   command: [codegraph, serve, --mcp]
+    #   provenance: third-party
+    #   level: recommended
+    #   install: codegraph init .   # printed verbatim when the binary is absent

@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { allProviderNames } from '../providers/index.js'
+import { SpawnedChildMayNotHostError } from '../process/spawn-guard.js'
 import { DashboardPortRefusedError, EngineAlreadyRunningError, joinViewUrl, openBrowser, runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { registerKyberCommands } from './register.js'
@@ -90,6 +91,16 @@ export function buildProgram(): Command {
   registerReportCommand(program)
 
   program
+    .command('mcp')
+    .description('Serve read-only KyberDash analytics over MCP stdio')
+    .option('--server-url <url>', 'Attach to an existing literal loopback KyberDash web server')
+    .option('--state-dir <dir>', 'Read an existing KyberDash server receipt from this directory')
+    .action(async (opts: { serverUrl?: string; stateDir?: string }) => {
+      const { runMcpCommand } = await import('./mcp.js')
+      await runMcpCommand(opts)
+    })
+
+  program
     .command('web')
     .description('Open the local KyberDash web dashboard in your browser')
     // No commander default: an absent --port resolves inside the engine from the
@@ -130,6 +141,10 @@ export function buildProgram(): Command {
           process.stdout.write(`\n  ${err.message}\n`)
           if (opts.open && err.record.url !== undefined) openBrowser(joinViewUrl(err.record.url, opts.view))
           process.exit(0)
+        }
+        if (err instanceof SpawnedChildMayNotHostError) {
+          process.stderr.write(`kyberdash web: ${err.message}\n`)
+          process.exit(1)
         }
         if (err instanceof DashboardPortRefusedError) {
           // A configured port that is taken, or that this process may not bind, is a

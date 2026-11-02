@@ -1,7 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -41,8 +40,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// onto OpenCode's permission taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
 /// <c>grep</c>, <c>glob</c>, <c>list</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
 /// <c>network.read</c> -&gt; <c>webfetch</c>, <c>websearch</c>, and <c>delegate</c> -&gt; pattern-based <c>task</c> rules.
-/// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to agents
-/// with <c>filesystem.read: allow</c>, excluding pure orchestrators and shared identities.
+/// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to every agent
+/// with <c>filesystem.read: allow</c>, pure orchestrators included, excluding shared identities whose
+/// canonical skill is the only projection emitted. The orchestrator keeps the grant because that server
+/// carries <c>agent_coding_standards</c> (ADR 0050).
 /// <c>network.publish</c> has no native tool and is withheld, emitting <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
@@ -88,7 +89,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
-        ("network.read", ["webfetch", "websearch"]),
+        ("network.read", ["webfetch", "websearch"])
     ];
 
     /// <summary>
@@ -171,7 +172,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
         }
 
-        SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        SquadSource source = SquadRenderSource.Load(request, SquadTarget.OpenCode);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
@@ -306,12 +307,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (profile.HarnessModels.TryGetValue("opencode", out string? opencodeModel))
         {
             // Omit model key when override is inherit or empty.
-            return string.Equals(opencodeModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(opencodeModel)
+            return string.Equals(opencodeModel, "inherit", StringComparison.Ordinal) ||
+                   string.IsNullOrWhiteSpace(opencodeModel)
                 ? null
                 : opencodeModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(profile.Default)
             ? null
             : profile.Default;
     }
@@ -345,15 +348,12 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 }
             }
 
-            bool isPureOrchestrator = string.Equals(
-                agent.CapabilityProfile,
-                "orchestrator",
-                StringComparison.Ordinal);
-
-            if (!isPureOrchestrator &&
-                !suppressedSkillIdentities.Contains(agent.Name) &&
-                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow)
+            // kyber-weave reaches every read-entitled agent, the pure orchestrator included: it
+            // carries agent_coding_standards, which the role that assigns work needs to point its
+            // delegates at the standards they are held to (ADR 0050). A suppressed shared identity
+            // keeps no grant, because its canonical skill is the only projection emitted.
+            if (!suppressedSkillIdentities.Contains(agent.Name) &&
+                CapabilityDegradations.GrantsUniversalMcpServers(agent.CapabilityProfile, capabilityProfiles))
             {
                 granted.Add(KyberWeaveMcpPermission);
             }
@@ -415,15 +415,15 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (narrowed.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "safety-narrowed",
-                InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. OpenCode's permissions cannot prompt " +
-                    "for per-capability confirmation, so these narrow to 'deny' and the " +
-                    "corresponding permissions are withheld.");
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                agent.Name,
+                agent.Name,
+                "safety-narrowed",
+                agent.BodyDigest,
+                $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. OpenCode's permissions cannot prompt " +
+                "for per-capability confirmation, so these narrow to 'deny' and the " +
+                "corresponding permissions are withheld.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -449,30 +449,32 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
-                Target: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-                CanonicalIdentity: agent.Name,
-                OutputIdentity: agent.Name,
-                Code: "permission-not-expressible",
-                InstructionDigest: agent.BodyDigest,
-                Details: string.Join(" ", notExpressibleDetails));
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+                agent.Name,
+                agent.Name,
+                "permission-not-expressible",
+                agent.BodyDigest,
+                string.Join(" ", notExpressibleDetails));
         }
 
-        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
-            ? exec
-            : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
-            ? write
-            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision executeDecision =
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+                ? exec
+                : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision =
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+                ? write
+                : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
-            targetToken: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
-            canonicalIdentity: agent.Name,
-            outputIdentity: agent.Name,
-            instructionDigest: agent.BodyDigest,
-            executeDecision: executeDecision,
-            writeDecision: writeDecision,
-            grantedShellTools: ["bash"],
-            withheldWriteTools: ["edit"]);
+            SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+            agent.Name,
+            agent.Name,
+            agent.BodyDigest,
+            executeDecision,
+            writeDecision,
+            ["bash"],
+            ["edit"]);
 
         if (notIsolable is not null)
         {

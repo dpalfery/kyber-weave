@@ -38,6 +38,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history: --base resolves through git merge-base, which a
+          # single-commit checkout cannot answer.
+          fetch-depth: 0
 
       - name: Install Kyber-Weave
         run: |
@@ -49,10 +53,31 @@ jobs:
           sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Pull-request gate: --merge-ready fails the build on open work
+      # (KW-DOC-LIFECYCLE-003) and on archived entries without closeout evidence
+      # (KW-DOC-LIFECYCLE-004), scoped to the change under review: the PR target
+      # on pull_request, the pushed range on push, and the remote default branch
+      # elsewhere (schedule, dispatch). Full history (fetch-depth: 0 above) is
+      # what lets git merge-base resolve that scope.
       - name: Validate documentation frontmatter
-        run: >
-          kyber-weave docs validate "${{ env.PROJECT_ROOT }}"
-          --format table
+        env:
+          # Event values travel through env, never interpolated into run:, so a
+          # hostile ref cannot reach the shell.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            BASE="origin/${BASE_REF}"
+          elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${EVENT_BEFORE}"
+          else
+            BASE="origin/HEAD"
+          fi
+          kyber-weave docs validate "${{ env.PROJECT_ROOT }}" \
+            --merge-ready --base "$BASE" \
+            --format table
 
   docs-drift:
     name: Docs drift

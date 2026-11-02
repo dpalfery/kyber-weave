@@ -239,11 +239,10 @@ public sealed class TitleScoringTests : IDisposable
     {
         DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
 
-        IReadOnlyList<DocumentHit> hits = index.Explore("how do I make a sandwich", maxDocs: 3);
+        ExploreAnswer miss = index.Explore("how do I make a sandwich");
 
-        Assert.True(hits.Count == 0,
-            "expected no hits, got: " + string.Join(", ",
-                hits.Select(h => $"{h.Document.RelativePath} ({h.Score:0.00})")));
+        Assert.True(miss.IsMiss,
+            "expected a miss, got prose from: " + miss.SourceDocument?.RelativePath);
     }
 
     [Fact]
@@ -251,11 +250,10 @@ public sealed class TitleScoringTests : IDisposable
     {
         DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
 
-        List<string> ids = index.Explore("unrepresentable counter", maxDocs: 3)
-            .Select(h => h.Document.Frontmatter.Id ?? h.Document.RelativePath)
-            .ToList();
+        ExploreAnswer hit = index.Explore("unrepresentable counter");
+        string id = hit.SourceDocument!.Frontmatter.Id ?? hit.SourceDocument.RelativePath;
 
-        Assert.Contains("plans/tasks/t2-formatter-sentinel", ids, StringComparer.Ordinal);
+        Assert.Contains("plans/tasks/t2-formatter-sentinel", id, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -333,144 +331,6 @@ public class DocumentSectionTests
         Assert.Single(sections);
         Assert.Equal("Commands", sections[0].Heading);
     }
-}
-
-/// <summary>
-/// The budget replaced "return exactly one section", which cost more than it saved: one
-/// section is about a third of a median document, so the caller who needed the rest read
-/// the whole file anyway and retrieval was a net loss.
-/// </summary>
-public sealed class ExcerptBudgetTests : IDisposable
-{
-    private readonly DocFixture _fixture = new();
-
-    // The document declares "routing" in its identity as well as its prose. A real
-    // document that answers a question does the same, and without it the fixture sits
-    // below the relevance floor — which is the floor doing its job, not a defect.
-    private const string Frontmatter = """
-        ---
-        id: api/routing
-        title: Routing
-        doc-type: architecture
-        status: current
-        component: MotorcycleRAG API
-        source-root: 1-Presentation/Api
-        owner: API maintainers
-        last-reviewed: 2026-07-21
-        ---
-        # Routing
-
-        """;
-
-    private DocumentIndex Build(params (string Heading, string Body)[] sections)
-    {
-        string text = Frontmatter + string.Join("\n", sections.Select(s => $"## {s.Heading}\n\n{s.Body}\n"));
-        _fixture.WithCatalog().WithSourceRoot("1-Presentation/Api").Write("6-Docs/webui/architecture.md", text);
-        return DocumentIndex.Build(_fixture.Load(), CodeGraphResolverAdapter.ForRepository(_fixture.Root));
-    }
-
-    private static string Prose(string subject, int words) =>
-        string.Join(' ', Enumerable.Repeat(subject, words));
-
-    [Fact]
-    public void AGenerousBudgetReturnsEverySectionAndSaysSo()
-    {
-        DocumentIndex index = Build(
-            ("Overview", Prose("routing", 40)),
-            ("Components", Prose("routing", 40)),
-            ("Testing", Prose("routing", 40)));
-
-        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
-
-        Assert.Equal(3, hit.Excerpt.Sections.Count);
-        Assert.True(hit.Excerpt.IsComplete);
-        Assert.Empty(hit.Excerpt.OmittedHeadings);
-    }
-
-    [Fact]
-    public void ATightBudgetNamesWhatItLeftOut()
-    {
-        DocumentIndex index = Build(
-            ("Overview", Prose("routing", 200)),
-            ("Components", Prose("routing", 200)),
-            ("Testing", Prose("routing", 200)));
-
-        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
-
-        Assert.False(hit.Excerpt.IsComplete);
-        Assert.True(hit.Excerpt.BudgetExhausted);
-        Assert.NotEmpty(hit.Excerpt.OmittedHeadings);
-        Assert.Equal(3, hit.Excerpt.Sections.Count + hit.Excerpt.OmittedHeadings.Count);
-    }
-
-    /// <summary>
-    /// A section dropped for irrelevance will not come back however much budget is
-    /// offered, so it must not be reported as a budget casualty — telling the caller to
-    /// retry with a bigger budget would waste a whole round trip.
-    /// </summary>
-    [Fact]
-    public void AnIrrelevantSectionIsNotReportedAsABudgetCasualty()
-    {
-        DocumentIndex index = Build(
-            ("Overview", Prose("routing", 40)),
-            ("Unrelated", Prose("kangaroo", 40)));
-
-        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
-
-        Assert.Contains("Unrelated", hit.Excerpt.OmittedHeadings, StringComparer.Ordinal);
-        Assert.False(hit.Excerpt.BudgetExhausted);
-        Assert.False(hit.Excerpt.IsComplete);
-    }
-
-    /// <summary>
-    /// Sections are chosen by relevance but emitted in file order: prose written to be
-    /// read in sequence is confusing when shuffled.
-    /// </summary>
-    [Fact]
-    public void SectionsAreReturnedInDocumentOrder()
-    {
-        DocumentIndex index = Build(
-            ("Alpha", Prose("routing", 30)),
-            ("Beta", Prose("routing", 90)),
-            ("Gamma", Prose("routing", 30)));
-
-        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
-
-        Assert.Equal(["Alpha", "Beta", "Gamma"], hit.Excerpt.Sections.Select(s => s.Heading));
-    }
-
-    /// <summary>
-    /// A single oversized section still comes back. Returning only a path would make the
-    /// tool a directory listing — the exact failure that sent callers to Read.
-    /// </summary>
-    [Fact]
-    public void TheTopSectionSurvivesABudgetSmallerThanItself()
-    {
-        DocumentIndex index = Build(("Overview", Prose("routing", 2000)));
-
-        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
-
-        Assert.Single(hit.Excerpt.Sections);
-        Assert.Equal("Overview", hit.Excerpt.Sections[0].Heading);
-    }
-
-    /// <summary>Narrowing the result set must deepen it, not just shorten the list.</summary>
-    [Fact]
-    public void FewerDocumentsBuysMoreProsePerDocument()
-    {
-        DocumentIndex index = Build(
-            ("Overview", Prose("routing", 300)),
-            ("Components", Prose("routing", 300)),
-            ("Testing", Prose("routing", 300)));
-
-        DocumentHit deep = index.Explore("routing", maxDocs: 1, charBudget: 12_000).Single();
-        DocumentHit shallow = index.Explore("routing", maxDocs: 20, charBudget: 3_000).Single();
-
-        Assert.True(deep.Excerpt.Sections.Count > shallow.Excerpt.Sections.Count,
-            $"deep {deep.Excerpt.Sections.Count} should exceed shallow {shallow.Excerpt.Sections.Count}");
-    }
-
-    public void Dispose() => _fixture.Dispose();
 }
 
 public class CodeJoinScopingTests

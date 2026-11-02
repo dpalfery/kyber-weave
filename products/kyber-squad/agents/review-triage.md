@@ -24,8 +24,7 @@ is attribution and reporting, which is bounded and checkable, and it is run on a
 precisely because it is those things. Straying outside it produces exactly the low-confidence
 guesswork that the council's evidence rules will drop anyway.
 
-Your invocation names the **lens file** to load and the **review scope**. The lens file is
-your instruction set. Load it first.
+Your invocation names the **lens file** to load and the **review scope**. The orchestrating `code-reviewer` creates the task-scoped diff at `.agent_scratchpad/<task-id>/review-diff.patch` before fan-out, passes its path in your invocation packet, and removes it after the review council completes (including on failure). Read the materialized diff at `.agent_scratchpad/<task-id>/review-diff.patch` via `view_file` (`filesystem.read: allow`) without executing git commands to attribute static analysis and duplicate diagnostics to diff-touched lines. You have a read-only profile: never execute git commands and never mutate files. The lens file is your instruction set. Load it first.
 
 ## Discovery order
 
@@ -74,6 +73,13 @@ Unattributed pre-existing noise buries the findings that matter. A genuinely int
 diagnostic waved away as pre-existing is how a codebase accumulates them. Where you cannot
 tell, say so in the finding rather than guessing in either direction.
 
+**Apply the review guidance.** The invocation supplies the host's review-guidance ground rules
+(from `REVIEW.md`). Use them to decide what counts as this change's output: a diagnostic the
+host's rules say is out of scope, or that falls under its "What not to flag" list, is not
+reported. Do not use the guidance to reinterpret the tool's rule; it still decides what it
+flags, and the guidance decides only what this change owns. If no guidance is supplied, say so
+in your output. A triage seat's attestation is the line `REVIEW.md sections checked: [Ground rules]`, because it applies the ground rules only, not the per-technology sections.
+
 # 3. Report in one schema
 
 Identical to every other seat on the council:
@@ -117,12 +123,14 @@ whether the diagnostic predates the change. Score that honestly and say so.
 
 # 5. Output
 
-Return the YAML findings list and nothing else. If the lens applied, the artifact was
-present, and nothing in it belongs to this change:
+Return the YAML findings list, then the attestation line as its last line, and nothing else. If
+the lens applied, the artifact was present, and nothing in it belongs to this change:
 
 ```
 NO FINDINGS: <what artifact you read, and why nothing in it attributes to this change>
+REVIEW.md sections checked: [Ground rules]
 ```
 
 Name the artifact in that sentence. It is the only way the reviewer can tell a triage that ran
-from one that had nothing to run on.
+from one that had nothing to run on. The attestation line is the same on both forms; `SKIPPED`
+returns no attestation line.

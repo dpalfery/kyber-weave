@@ -29,6 +29,19 @@ vi.mock('child_process', () => ({
 
 const execFileMock = vi.mocked(execFile)
 
+/**
+ * openBrowser calls execFile(command, argv, callback), or (command, argv, options, callback) once it sets
+ * options such as a timeout. The command and argv are asserted exactly in both shapes. The options object
+ * is optional; when present it must be exactly `{ timeout: <number> }`.
+ */
+function expectExecFileCall(command: string, argv: unknown): void {
+  try {
+    expect(execFileMock).toHaveBeenCalledWith(command, argv, expect.any(Function))
+  } catch {
+    expect(execFileMock).toHaveBeenCalledWith(command, argv, { timeout: expect.any(Number) }, expect.any(Function))
+  }
+}
+
 type ValidateDashboardUrlFn = (rawUrl: string) => string | null
 
 // In T2 (GREEN), web.ts exports `validateDashboardUrl`. In T1 (RED), it is not yet exported.
@@ -71,13 +84,11 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
     withPlatform('win32', () => {
       openBrowser('http://127.0.0.1:4747')
 
-      expect(execFileMock).toHaveBeenCalledWith(
-        'rundll32.exe',
-        ['url.dll,FileProtocolHandler', 'http://127.0.0.1:4747'],
-        expect.any(Function),
-      )
-      expect(execFileMock).not.toHaveBeenCalledWith('cmd', expect.anything(), expect.anything())
-      expect(execFileMock).not.toHaveBeenCalledWith('cmd.exe', expect.anything(), expect.anything())
+      expectExecFileCall('rundll32.exe', ['url.dll,FileProtocolHandler', 'http://127.0.0.1:4747'])
+      // Checked against the command of every call, whatever its arity: the options object is optional.
+      const commands = execFileMock.mock.calls.map((c) => c[0])
+      expect(commands, 'no call may run cmd or cmd.exe').not.toContain('cmd')
+      expect(commands, 'no call may run cmd or cmd.exe').not.toContain('cmd.exe')
       expect(warnSpy).not.toHaveBeenCalled()
     })
   })
@@ -87,11 +98,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
       const compareUrl = 'http://127.0.0.1:4747/compare?a=run-alpha&b=run-beta'
       openBrowser(compareUrl)
 
-      expect(execFileMock).toHaveBeenCalledWith(
-        'rundll32.exe',
-        ['url.dll,FileProtocolHandler', compareUrl],
-        expect.any(Function),
-      )
+      expectExecFileCall('rundll32.exe', ['url.dll,FileProtocolHandler', compareUrl])
       // The intact URL must be passed directly in argv, never split across command separators
       const call = execFileMock.mock.calls.find((c) => c[0] === 'rundll32.exe')
       expect(call).toBeDefined()
@@ -104,11 +111,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
     withPlatform('darwin', () => {
       openBrowser('http://127.0.0.1:4747/run/r1')
 
-      expect(execFileMock).toHaveBeenCalledWith(
-        'open',
-        ['http://127.0.0.1:4747/run/r1'],
-        expect.any(Function),
-      )
+      expectExecFileCall('open', ['http://127.0.0.1:4747/run/r1'])
       expect(warnSpy).not.toHaveBeenCalled()
     })
   })
@@ -117,11 +120,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
     withPlatform('linux', () => {
       openBrowser('http://127.0.0.1:4747/problems')
 
-      expect(execFileMock).toHaveBeenCalledWith(
-        'xdg-open',
-        ['http://127.0.0.1:4747/problems'],
-        expect.any(Function),
-      )
+      expectExecFileCall('xdg-open', ['http://127.0.0.1:4747/problems'])
       expect(warnSpy).not.toHaveBeenCalled()
     })
   })
@@ -145,7 +144,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
         vi.clearAllMocks()
         openBrowser(route)
         expect(execFileMock).toHaveBeenCalledTimes(1)
-        expect(execFileMock).toHaveBeenCalledWith('open', [expect.stringMatching(/^http:\/\/127\.0\.0\.1:4747/)], expect.any(Function))
+        expectExecFileCall('open', [expect.stringMatching(/^http:\/\/127\.0\.0\.1:4747/)])
         expect(warnSpy).not.toHaveBeenCalled()
       }
     })

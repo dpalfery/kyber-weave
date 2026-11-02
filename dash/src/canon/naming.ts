@@ -16,6 +16,11 @@ const SPAN_OP_RE = /\.(?:llm_request|llm_invoke|generate|completion)$/i
  */
 const CHAT_MODEL_RE = /^chat\s+(?:\S*(?:[_.:/]|-\d|[A-Za-z]\d|\d[A-Za-z])|.*\d\.\d)/i
 const SYNTH_PREFIX_RE = /^(?:synth|derived):/i
+/**
+ * The span names the OpenCode capture plugin gives its request, step and tool spans
+ * (`opencode.request`, `opencode.step`, `opencode.tool`). They name an operation, never a session.
+ */
+const OPENCODE_SPAN_NAME_RE = /^opencode\.(?:request|step|tool)$/i
 const UNSPECIFIED_MODEL_RE = /<(?:synthetic|unknown|unspecified)>|(?::|<)(?:synthetic|unknown)(?:>|$)/i
 
 /**
@@ -30,6 +35,7 @@ export function isMachineLabel(label: string | null | undefined): boolean {
   if (CHAT_MODEL_RE.test(v)) return true
   if (UUID_EXACT_RE.test(v)) return true
   if (SYNTH_PREFIX_RE.test(v)) return true
+  if (OPENCODE_SPAN_NAME_RE.test(v)) return true
   if (UNSPECIFIED_MODEL_RE.test(v)) return true
   return false
 }
@@ -60,8 +66,13 @@ export function formatSessionId(id: string | null | undefined): string {
   return `${rest.slice(0, 9)}…${rest.slice(-8)}`
 }
 
+/** Harness ids whose product name is not the capitalised id. */
+const HARNESS_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([['opencode', 'OpenCode']])
+
 function prettyHarness(raw: string): string {
   const cleaned = raw.replace(/^codeburn\//, '')
+  const named = HARNESS_DISPLAY_NAMES.get(cleaned.toLowerCase())
+  if (named !== undefined) return named
   return cleaned
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())

@@ -1,305 +1,193 @@
-// T3: the opencode plugin span mapper turns real-shaped hook payloads into
-// envelope OTLP spans (test-first RED).
-//
-// One codebase serves both opencode targets from the dash-CLI-managed home
-// `dash/src/capture/harnesses/opencode-plugin/`. The T0 skeleton
-// (`fixtures/span-payload-skeleton.json`) surveys the session/turn/span,
-// token, tool, and error shapes; the T1 envelope (`canon/adapters/opencode-
-// envelope.ts`) is what ingest claims. The mapper is the bridge: session
-// identity, model/tool markers, OpenInference token counters (exclusive
-// convention), timing, and error status map exactly, and marker-less spans
-// stay the non-model quarantine T1 names.
+// Mapping rules of the V2 span model (contract 3), pinned on small synthetic streams. The golden
+// replay pins the full bodies; these pin the rules the golden does not exercise: several prompts in
+// one execution, failed and interrupted outcomes, request kinds, absent-versus-zero cost, skills
+// de-duplicated across their three sources, and tools timed by their hooks alone.
 
 import { describe, expect, it } from 'vitest'
 
-import { ingestBatch } from '../../../canon/ingest.js'
-import { CanonStore } from '../../../canon/store.js'
-import { validateTokens } from '../../../canon/types.js'
+import { OPENCODE_KEYS, SPAN_NAMES } from './contract.js'
+import { createSetup } from './entry.js'
 import {
-  OPENCODE_CONTRACT_VERSION,
-  isOpencodeEnvelopeSpan,
-  isSupportedOpencodeEnvelope,
-} from '../../../canon/adapters/opencode-envelope.js'
-import { rawSpan } from '../../../canon/adapters/testing.js'
-import { opencodeAdapter } from '../../../canon/adapters/opencode.js'
-import {
-  mapOpencodePayloadToAttributes,
-  mapOpencodePayloadToOtlpSpan,
-  type OpencodePluginSpanPayload,
-} from './mapper.js'
+  OWNED_SESSION_ID,
+  attributesOf,
+  bus,
+  createHost,
+  hook,
+  mergeBodies,
+  noSleep,
+  receiver,
+  spansOf,
+  start,
+  stopPlugin,
+  useTempDirectories,
+  consentPathIn,
+  writeConsent,
+  type FakeV2Host,
+  type OtlpSpan,
+  type Receiver,
+} from './testing.js'
 
-const MODEL_PAYLOAD: OpencodePluginSpanPayload = {
-  traceId: 'trace-t3-model',
-  spanId: 'span-t3-model',
-  parentSpanId: null,
-  name: 'opencode.turn',
-  kind: 'internal',
-  sessionID: 'ses_t3_model',
-  messageID: 'msg_t3_001',
-  callID: 'call_t3_001',
-  turnIndex: 3,
-  agent: 'build',
-  model: { providerID: 'anthropic', modelID: 'claude-opus-4-6' },
-  prompt_text: 'T3 model prompt text',
-  tokens: {
-    input_tokens: 120,
-    output_tokens: 45,
-    cache_read_tokens: 300,
-    cache_creation_tokens: 40,
-    reasoning_tokens: 12,
-  },
-  startTimeUnixNano: '1720000000000000000',
-  endTimeUnixNano: '1720000000042000000',
+const tempDir = useTempDirectories()
+const S = OWNED_SESSION_ID
+
+// Consent is on so the content keys (prompt text, session label) are present for the rules that read them.
+function options(rcv: Receiver) {
+  const consentPath = consentPathIn(tempDir())
+  writeConsent(consentPath, true)
+  return { fetchFn: rcv.fetch, env: {}, consentPath, sleepFn: noSleep, randomFn: () => 0 }
 }
 
-const TOOL_PAYLOAD: OpencodePluginSpanPayload = {
-  traceId: 'trace-t3-tool',
-  spanId: 'span-t3-tool',
-  parentSpanId: 'span-t3-model',
-  name: 'Tool.execute',
-  kind: 'internal',
-  sessionID: 'ses_t3_model',
-  turnIndex: 3,
-  agent: 'build',
-  tool: 'read',
-  callID: 'call_t3_tool_001',
-  messageID: 'msg_t3_001',
-  tokens: {
-    input_tokens: 0,
-    output_tokens: 0,
-  },
-  startTimeUnixNano: '1720000000100000000',
-  endTimeUnixNano: '1720000000115000000',
+function attr(span: OtlpSpan, key: string): unknown {
+  return attributesOf(span).get(key)
 }
 
-const ERROR_PAYLOAD: OpencodePluginSpanPayload = {
-  ...MODEL_PAYLOAD,
-  spanId: 'span-t3-error',
-  traceId: 'trace-t3-error',
-  errors: { type: 'ProviderError', message: 'upstream 500', status: 'error' },
+function ofKind(rcv: Receiver, kind: string): OtlpSpan[] {
+  return spansOf(mergeBodies(rcv.accepted)).filter(
+    (span) => (attr(span, OPENCODE_KEYS.spanKind) as { stringValue?: string } | undefined)?.stringValue === kind,
+  )
 }
 
-const NON_MODEL_PAYLOAD: OpencodePluginSpanPayload = {
-  traceId: 'trace-t3-app',
-  spanId: 'span-t3-app',
-  parentSpanId: null,
-  name: 'Session.load',
-  kind: 'internal',
-  sessionID: 'synthetic-session-load-id',
-  startTimeUnixNano: '1720000000200000000',
-  endTimeUnixNano: '1720000000201000000',
+function requestOf(rcv: Receiver): OtlpSpan {
+  const request = spansOf(mergeBodies(rcv.accepted)).find((span) => span.name === SPAN_NAMES.request)
+  if (request === undefined) throw new Error('no request span on the wire')
+  return request
 }
 
-describe('opencode plugin span mapper carries the T0 payload onto the T1 envelope', () => {
-  it('stamps the supported contract version and the envelope session identity', () => {
-    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
+function skillsOf(span: OtlpSpan): string[] | undefined {
+  const value = attr(span, OPENCODE_KEYS.skillsInvoked) as { arrayValue?: { values: { stringValue: string }[] } } | undefined
+  return value?.arrayValue?.values.map((item) => item.stringValue)
+}
 
-    expect(attributes['opencode.contract_version']).toBe(OPENCODE_CONTRACT_VERSION)
-    expect(attributes['opencode.session.id']).toBe('ses_t3_model')
-    expect(attributes['opencode.turn.index']).toBe(3)
-    const span = mapOpencodePayloadToOtlpSpan(MODEL_PAYLOAD)
-    expect(isOpencodeEnvelopeSpan(rawSpan({ spanId: span.spanId, attributes: span.attributes }))).toBe(true)
-    expect(
-      isSupportedOpencodeEnvelope(rawSpan({ spanId: span.spanId, attributes: span.attributes })),
-    ).toBe(true)
+async function openExecution(host: FakeV2Host, created = 1000): Promise<void> {
+  await host.deliverEvent(bus.sessionCreated(S, created))
+  await host.deliverEvent(bus.executionStarted(S, created + 10))
+}
+
+describe('the request span', () => {
+  it('joins every prompt of one execution with a blank line and counts them', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverSession('prompt', hook.prompt(S, 'msg_p1', 'first'))
+    await host.deliverSession('prompt', hook.prompt(S, 'msg_p2', 'second'))
+    await host.deliverEvent(bus.executionSucceeded(S, 1100))
+    await stopPlugin(cleanup)
+    expect(attr(requestOf(rcv), OPENCODE_KEYS.promptText)).toEqual({ stringValue: 'first\n\nsecond' })
+    expect(attr(requestOf(rcv), OPENCODE_KEYS.promptCount)).toEqual({ intValue: '2' })
   })
 
-  it('maps model provider, id, and prompt text onto envelope markers', () => {
-    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
-
-    expect(attributes['opencode.model.provider']).toBe('anthropic')
-    expect(attributes['opencode.model.id']).toBe('claude-opus-4-6')
-    expect(attributes['opencode.prompt.text']).toBe('T3 model prompt text')
+  it('maps a failed execution to error status with outcome failed', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverEvent(bus.executionFailed(S, 1100, { type: 'provider', message: 'upstream 500 (synthetic)' }))
+    await stopPlugin(cleanup)
+    const request = requestOf(rcv)
+    expect(attr(request, OPENCODE_KEYS.executionOutcome)).toEqual({ stringValue: 'failed' })
+    expect((request['status'] as { code: string }).code).toBe('STATUS_CODE_ERROR')
   })
 
-  it('maps T0 token counters onto exclusive OpenInference counters', () => {
-    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
-
-    expect(attributes['llm.token_count.prompt']).toBe(120)
-    expect(attributes['llm.token_count.completion']).toBe(45)
-    expect(attributes['llm.token_count.prompt_details.cache_read']).toBe(300)
-    expect(attributes['llm.token_count.prompt_details.cache_write']).toBe(40)
-    expect(attributes['llm.token_count.completion_details.reasoning']).toBe(12)
+  it('leaves the status unset for an execution that ended with no terminal event: unknown is not a failure', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await stopPlugin(cleanup)
+    const request = requestOf(rcv)
+    expect(attr(request, OPENCODE_KEYS.executionOutcome)).toEqual({ stringValue: 'unknown' })
+    expect(request['status']).toBeUndefined()
   })
 
-  it('maps tool name and call id so the tool marker wins the operation vote', () => {
-    const attributes = mapOpencodePayloadToAttributes(TOOL_PAYLOAD)
-
-    expect(attributes['opencode.tool.name']).toBe('read')
-    expect(attributes['opencode.tool.call.id']).toBe('call_t3_tool_001')
-  })
-
-  it('maps T0 timing onto the OTLP span timestamp, duration, and kind', () => {
-    const span = mapOpencodePayloadToOtlpSpan(MODEL_PAYLOAD)
-
-    expect(span.timestamp).toBe(new Date(1720000000000).toISOString())
-    expect(span.durationMs).toBe(42)
-    expect(span.kind).toBe('internal')
-    expect(span.name).toBe('opencode.turn')
-  })
-
-  it('maps T0 errors onto the OTLP error status without dropping the session', () => {
-    const span = mapOpencodePayloadToOtlpSpan(ERROR_PAYLOAD)
-
-    expect(span.status.code).toBe('error')
-    expect(String(span.status.message ?? '')).toMatch(/upstream 500/)
-    expect(span.attributes['opencode.session.id']).toBe('ses_t3_model')
-  })
-
-  it('omits non-finite token counters instead of stamping NaN/Infinity', () => {
-    const attributes = mapOpencodePayloadToAttributes({
-      ...MODEL_PAYLOAD,
-      spanId: 'span-t3-nan-tokens',
-      tokens: {
-        input_tokens: Number.NaN,
-        output_tokens: Number.POSITIVE_INFINITY,
-        cache_read_tokens: Number.NaN,
-        cache_creation_tokens: Number.POSITIVE_INFINITY,
-        reasoning_tokens: Number.NaN,
-      },
-    })
-
-    expect(attributes['llm.token_count.prompt']).toBeUndefined()
-    expect(attributes['llm.token_count.completion']).toBeUndefined()
-    expect(attributes['llm.token_count.prompt_details.cache_read']).toBeUndefined()
-    expect(attributes['llm.token_count.prompt_details.cache_write']).toBeUndefined()
-    expect(attributes['llm.token_count.completion_details.reasoning']).toBeUndefined()
-  })
-
-  it('never throws on junk timestamps, falling back to a valid span', () => {
-    const span = mapOpencodePayloadToOtlpSpan({
-      ...MODEL_PAYLOAD,
-      spanId: 'span-t3-junk-time',
-      startTimeUnixNano: 'not-a-timestamp',
-      endTimeUnixNano: 'also-junk',
-    })
-
-    expect(span.startTimeUnixNano).toBe('not-a-timestamp')
-    expect(Number.isNaN(Date.parse(span.timestamp))).toBe(false)
-    expect(span.durationMs).toBeGreaterThanOrEqual(0)
+  it('maps an interrupted execution to outcome interrupted and carries the reason', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverEvent(bus.executionInterrupted(S, 1100, 'user'))
+    await stopPlugin(cleanup)
+    const request = requestOf(rcv)
+    expect(attr(request, OPENCODE_KEYS.executionOutcome)).toEqual({ stringValue: 'interrupted' })
+    expect(attr(request, OPENCODE_KEYS.executionReason)).toEqual({ stringValue: 'user' })
   })
 })
 
-describe('opencode plugin span mapper round-trips through the opencode adapter', () => {
-  it('round-trips a model fixture with exact tokens, timing, and session identity', () => {
-    const store = new CanonStore(':memory:')
-    const span = mapOpencodePayloadToOtlpSpan(MODEL_PAYLOAD)
-    const outcome = ingestBatch([span], store)
-
-    expect(outcome).toEqual({ accepted: 1, quarantined: 0, rejected: 0 })
-    const record = store.get('span-t3-model')
-    expect(record?.harness).toBe('opencode')
-    expect(record?.op).toBe('llm.invoke')
-    expect(record?.sessionId).toBe('ses_t3_model')
-    expect(record?.tokens.freshInput).toBe(120)
-    expect(record?.tokens.cacheRead).toBe(300)
-    expect(record?.tokens.cacheCreation).toBe(40)
-    expect(record?.tokens.output).toBe(45)
-    expect(record?.tokens.reasoning).toBe(12)
-    expect(record?.tokens.reportedInput).toBe(460)
-    expect(record?.tokens.reportedOutput).toBe(45)
-    expect(validateTokens(record!.tokens).valid).toBe(true)
-    expect(opencodeAdapter.validate(record!)).toBeUndefined()
-    expect(record?.timestamp).toBe(span.timestamp)
-    expect(record?.durationMs).toBe(42)
-    expect(record?.content.conversation_history).toContain('T3 model prompt text')
-    store.close()
+describe('the step span', () => {
+  it('reports the primary request kind by default and the kind of a model.request hook before it', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverEvent(bus.stepStarted(S, 1020, 'msg_default'))
+    await host.deliverEvent(bus.stepEnded(S, 1030, 'msg_default'))
+    await host.deliverSession('model.request', hook.modelRequest(S, 'compaction'))
+    await host.deliverEvent(bus.stepStarted(S, 1040, 'msg_compact'))
+    await host.deliverEvent(bus.stepEnded(S, 1050, 'msg_compact'))
+    await host.deliverEvent(bus.executionSucceeded(S, 1060))
+    await stopPlugin(cleanup)
+    const steps = ofKind(rcv, 'step')
+    const kindOf = (messageID: string) =>
+      steps.find((span) => (attr(span, OPENCODE_KEYS.messageId) as { stringValue: string }).stringValue === messageID)
+    expect(attr(kindOf('msg_default') as OtlpSpan, OPENCODE_KEYS.requestKind)).toEqual({ stringValue: 'primary' })
+    expect(attr(kindOf('msg_compact') as OtlpSpan, OPENCODE_KEYS.requestKind)).toEqual({ stringValue: 'compaction' })
   })
 
-  it('round-trips a tool fixture as a tool.invoke record', () => {
-    const store = new CanonStore(':memory:')
-    const span = mapOpencodePayloadToOtlpSpan(TOOL_PAYLOAD)
-    const outcome = ingestBatch([span], store)
-
-    expect(outcome).toEqual({ accepted: 1, quarantined: 0, rejected: 0 })
-    const record = store.get('span-t3-tool')
-    expect(record?.harness).toBe('opencode')
-    expect(record?.op).toBe('tool.invoke')
-    expect(record?.sessionId).toBe('ses_t3_model')
-    store.close()
+  it('leaves cost absent when the step reports none, and includes a reported zero', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverEvent(bus.stepStarted(S, 1020, 'msg_zero'))
+    await host.deliverEvent(bus.stepEnded(S, 1030, 'msg_zero', { cost: 0 }))
+    await host.deliverEvent(bus.stepStarted(S, 1040, 'msg_silent'))
+    await host.deliverEvent(bus.stepEnded(S, 1050, 'msg_silent'))
+    await host.deliverEvent(bus.executionSucceeded(S, 1060))
+    await stopPlugin(cleanup)
+    const byMessage = (messageID: string) =>
+      ofKind(rcv, 'step').find((span) => (attr(span, OPENCODE_KEYS.messageId) as { stringValue: string }).stringValue === messageID)
+    expect(attr(byMessage('msg_zero') as OtlpSpan, OPENCODE_KEYS.cost)).toEqual({ doubleValue: 0 })
+    expect(attr(byMessage('msg_silent') as OtlpSpan, OPENCODE_KEYS.cost)).toBeUndefined()
   })
 
-  it('round-trips an error fixture with the harness error status preserved', () => {
-    const store = new CanonStore(':memory:')
-    const span = mapOpencodePayloadToOtlpSpan(ERROR_PAYLOAD)
-    ingestBatch([span], store)
-
-    const record = store.get('span-t3-error')
-    expect(record?.harness).toBe('opencode')
-    expect(record?.status).toBe('error')
-    store.close()
+  it('counts a skill once across the skill tool, the prompt skills and the activation event', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverSession('prompt', hook.prompt(S, 'msg_p1', 'use skills', [{ id: 'alpha' }]))
+    await host.deliverSession('context', hook.context(S, ['sys']))
+    await host.deliverSession('model.request', hook.modelRequest(S))
+    await host.deliverEvent(bus.stepStarted(S, 1020, 'msg_skills'))
+    await host.deliverTool('execute.before', hook.toolBefore(S, 'msg_skills', 'call_skill', 'skill', { id: 'alpha' }))
+    await host.deliverTool('execute.after', hook.toolAfterCompleted(S, 'msg_skills', 'call_skill', 'skill', { id: 'alpha' }))
+    await host.deliverEvent(bus.skillActivated(S, 1025, 'alpha'))
+    await host.deliverEvent(bus.skillActivated(S, 1027, 'beta'))
+    await host.deliverEvent(bus.stepEnded(S, 1030, 'msg_skills'))
+    await host.deliverEvent(bus.executionSucceeded(S, 1060))
+    await stopPlugin(cleanup)
+    const step = ofKind(rcv, 'step')[0]
+    expect(step).toBeDefined()
+    expect(skillsOf(step as OtlpSpan)?.slice().sort()).toEqual(['alpha', 'beta'])
   })
 
-  it('filters a marker-less app span as non-model per the T1 envelope rules', () => {
-    const store = new CanonStore(':memory:')
-    const span = mapOpencodePayloadToOtlpSpan(NON_MODEL_PAYLOAD)
-    const outcome = ingestBatch([span], store)
-
-    expect(outcome.accepted).toBe(0)
-    expect(store.get('span-t3-app')).toBeUndefined()
-    expect(store.getQuarantine('span-t3-app')?.reason).toMatch(/non[- ]model/i)
-    store.close()
-  })
-})
-
-// T4 (plan 2026-10-23 §6-T4 RED): the T0 context fixture
-// (`fixtures/context-payload.json`: system, tools, skills, model/agent
-// identity) must round-trip onto envelope v2 attributes
-// (`opencode.context.system/.tools/.skills`, model markers when named).
-// Absent fields stay absent — never empty-string padding.
-
-describe('opencode plugin span mapper carries T0 context fields onto envelope v2 (T4)', () => {
-  const CONTEXT_PAYLOAD: OpencodePluginSpanPayload = {
-    ...MODEL_PAYLOAD,
-    traceId: 'trace-t4-context',
-    spanId: 'span-t4-context',
-    systemPrompt: 'T4 assembled system prompt',
-    toolsText: '[{"name":"read","description":"read a file"}]',
-    skills: ['plan', 'review'],
-  }
-
-  it('maps system prompt, tool definitions, and skills onto opencode.context.* keys', () => {
-    const attributes = mapOpencodePayloadToAttributes(CONTEXT_PAYLOAD)
-
-    expect(attributes['opencode.context.system']).toBe('T4 assembled system prompt')
-    expect(attributes['opencode.context.tools']).toBe(
-      '[{"name":"read","description":"read a file"}]',
-    )
-    expect(attributes['opencode.context.skills']).toBe('["plan","review"]')
-  })
-
-  it("drops an empty skills array and its '[]' serialization alike (review PR #425 finding 3, RED)", () => {
-    const fromArray = mapOpencodePayloadToAttributes({
-      ...MODEL_PAYLOAD,
-      spanId: 'span-skills-empty-array',
-      skills: [],
-    })
-    expect('opencode.context.skills' in fromArray).toBe(false)
-    const fromString = mapOpencodePayloadToAttributes({
-      ...MODEL_PAYLOAD,
-      spanId: 'span-skills-empty-string',
-      skills: '[]',
-    })
-    expect('opencode.context.skills' in fromString).toBe(false)
-  })
-
-  it('keeps malformed skills stamped for the named not-measurable path (review PR #425 finding 3, RED)', () => {
-    const attributes = mapOpencodePayloadToAttributes({
-      ...MODEL_PAYLOAD,
-      spanId: 'span-skills-malformed',
-      skills: 'not-json',
-    })
-    expect(attributes['opencode.context.skills']).toBe('not-json')
-  })
-
-  it('leaves context keys absent when the payload names no content', () => {
-    const attributes = mapOpencodePayloadToAttributes(MODEL_PAYLOAD)
-
-    expect(attributes['opencode.context.system']).toBeUndefined()
-    expect(attributes['opencode.context.tools']).toBeUndefined()
-    expect(attributes['opencode.context.skills']).toBeUndefined()
-    expect('opencode.context.system' in attributes).toBe(false)
-    expect('opencode.context.tools' in attributes).toBe(false)
-    expect('opencode.context.skills' in attributes).toBe(false)
+  it('times a tool from its hooks alone when no bus event arrives, and parents it to its step', async () => {
+    const rcv = receiver()
+    const host = createHost()
+    const cleanup = await start(createSetup(options(rcv)), host)
+    await openExecution(host)
+    await host.deliverSession('context', hook.context(S, ['sys']))
+    await host.deliverSession('model.request', hook.modelRequest(S))
+    await host.deliverEvent(bus.stepStarted(S, 1020, 'msg_hook'))
+    await host.deliverTool('execute.before', hook.toolBefore(S, 'msg_hook', 'call_hook', 'read', { path: 'a.txt' }))
+    await host.deliverTool('execute.after', hook.toolAfterCompleted(S, 'msg_hook', 'call_hook', 'read', { path: 'a.txt' }))
+    await host.deliverEvent(bus.stepEnded(S, 1030, 'msg_hook'))
+    await host.deliverEvent(bus.executionSucceeded(S, 1060))
+    await stopPlugin(cleanup)
+    const tool = ofKind(rcv, 'tool').find((span) => (attr(span, OPENCODE_KEYS.toolCallId) as { stringValue: string }).stringValue === 'call_hook')
+    const step = ofKind(rcv, 'step').find((span) => (attr(span, OPENCODE_KEYS.messageId) as { stringValue: string }).stringValue === 'msg_hook')
+    expect(tool, 'the hook-timed tool span').toBeDefined()
+    expect(attr(tool as OtlpSpan, OPENCODE_KEYS.toolTiming)).toEqual({ stringValue: 'hook' })
+    expect((tool as OtlpSpan)['parentSpanId']).toBe((step as OtlpSpan)['spanId'])
   })
 })

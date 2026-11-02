@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/code-reviewer.agent.md
 sources:
   .github/agents/code-reviewer.agent.md: 98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-final-body-sha256: 85e6052c8c86020e5c64eff7b7102cec95352e43dbbf89fae0bbdc9a5ac5a6bc
+final-body-sha256: 8b11d9514946c5b65490e13f12306a8c9b81633e05ea1382f31023b34d4995ee
 ---
 # code-reviewer migration
 
@@ -16,9 +16,10 @@ Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source f
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
 
-The body has since evolved by one paragraph: what to do when the harness gives the reviewer no
-tool for invoking another agent, as on Devin (ADR 0025). `final-body-sha256` covers that
-evolved body.
+The body has since evolved: what to do when the harness gives the reviewer no tool for invoking
+another agent, as on Devin (ADR 0025), and the review-guidance step, which makes the reviewer
+pass the host's `REVIEW.md` sections to each seat and record a missing seat attestation as a
+coverage gap. `final-body-sha256` covers that evolved body.
 
 ## Canonical projection
 

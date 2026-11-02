@@ -1572,6 +1572,48 @@ export function fetchKyberSettings(): Promise<KyberSettings> {
   return fetchJson<KyberSettings>('/api/kyber/settings')
 }
 
+/** `GET /api/kyber/version`: the running engine's version and its API contract version. */
+export interface KyberVersion {
+  version: string
+  apiVersion: number
+}
+
+const VERSION_PATH = '/api/kyber/version'
+
+/**
+ * A 2xx version body must carry a real version string (not blank, not the `0.0.0`
+ * placeholder a dev build stamps) and a finite API version number.
+ */
+function isKyberVersion(value: unknown): value is KyberVersion {
+  return (
+    isRaw(value) &&
+    typeof value.version === 'string' &&
+    value.version.trim() !== '' &&
+    value.version.trim() !== '0.0.0' &&
+    typeof value.apiVersion === 'number' &&
+    Number.isFinite(value.apiVersion)
+  )
+}
+
+/**
+ * Reads the engine's version. A 2xx body that is not the documented shape (or not
+ * JSON at all) is a broken engine, so it is rejected as a `KyberApiError` rather
+ * than passed on for the surface to render as `undefined` or `0.0.0`. The returned
+ * version is trimmed, matching what the route serves, so every surface shows it bare.
+ */
+export async function fetchKyberVersion(): Promise<KyberVersion> {
+  const res = await fetch(VERSION_PATH)
+  if (!res.ok) throw new KyberApiError(res.status, VERSION_PATH)
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    body = null
+  }
+  if (!isKyberVersion(body)) throw new KyberApiError(res.status, VERSION_PATH)
+  return { version: body.version.trim(), apiVersion: body.apiVersion }
+}
+
 /**
  * Applies a partial settings change and returns the full settings as the server
  * now holds them, so the panel renders what was persisted rather than what was

@@ -9,19 +9,23 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, extname, join, resolve } from 'node:path'
 
+import { guardedSpawn } from '../process/spawn-guard.js'
 import { getConfigDir } from '../config.js'
 import { runningAsSea } from '../sea.js'
 import { EXPECTED_TEAM_ID, type CommandResult, type InstallDeps, type InstallFs, type Verifier } from './types.js'
+
+/** Bounds codesign, spctl and ditto: spawn kills a tool that outlives this and reports a failed exit. */
+const TOOL_TIMEOUT_MS = 300_000
 
 async function run(command: string, args: string[]): Promise<CommandResult> {
   return new Promise((resolve) => {
     // No shell: every argument here can contain a user's own path, and a shell
     // would give those paths meaning they must not have.
-    const child = spawn(command, args, { shell: false })
+    const child = guardedSpawn(spawn, { kind: 'tool', program: command, args, options: { shell: false, timeout: TOOL_TIMEOUT_MS } })
     let stdout = ''
     let stderr = ''
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -90,6 +94,44 @@ export const nodeFs: InstallFs = {
   },
   remove: async (path) => {
     await rm(path, { recursive: true, force: true })
+  },
+  trash: async (path, homeDir) => {
+    if (homeDir === '') throw new Error('no home directory to find the Trash in')
+    const trashDir = join(homeDir, '.Trash')
+    await mkdir(trashDir, { recursive: true })
+    // Keep the `.app` extension so Finder still treats the trashed copy as an app.
+    const ext = extname(path)
+    const stem = `${basename(path, ext)} ${Date.now()}`
+    // `rename` replaces an existing file, so claim a free name first: a plain
+    // `mkdir` fails atomically with EEXIST if another process holds the name,
+    // and `rename` of a directory may replace the empty one we just made.
+    let destination = join(trashDir, `${stem}${ext}`)
+    for (let n = 2; ; n += 1) {
+      try {
+        await mkdir(destination)
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        destination = join(trashDir, `${stem} ${n}${ext}`)
+      }
+    }
+    try {
+      await rename(path, destination)
+    } catch (error) {
+      // The name was only a claim: drop the empty placeholder (`rmdir` refuses a
+      // non-empty one), and say so if that fails rather than leaving it silently.
+      const moveError = error instanceof Error ? error.message : String(error)
+      try {
+        await rmdir(destination)
+      } catch (cleanup) {
+        if ((cleanup as NodeJS.ErrnoException).code !== 'ENOENT') {
+          const reason = cleanup instanceof Error ? cleanup.message : String(cleanup)
+          throw new Error(`${moveError} (and the empty placeholder ${destination} could not be removed: ${reason})`)
+        }
+      }
+      throw error
+    }
+    return destination
   },
   unzip: async (archive, into) => {
     // `ditto -xk` rather than `unzip`: it is what the release job packs with,
