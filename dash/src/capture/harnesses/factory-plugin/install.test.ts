@@ -154,6 +154,43 @@ function expectedPaths(pluginDir: string): string[] {
   return OWNED_FILES.map((relative) => join(pluginDir, ...relative.split('/'))).sort()
 }
 
+// ── The tree the PREVIOUS route wrote ───────────────────────────────────────────────────────
+
+/** The plugin directory the previous route wrote into the Factory root. */
+const LEGACY_PLUGIN_DIR_NAME = 'kyberdash-factory'
+
+/** The files the previous route owned, relative to its plugin directory. */
+const LEGACY_FILES = [
+  '.factory-plugin/plugin.json',
+  'hooks/hooks.json',
+  'hooks/kyberdash-factory.mjs',
+]
+
+/**
+ * The tree the PREVIOUS route wrote into the Factory root, with the receipt that route
+ * wrote beside it: `{ version, root, files }`, with no marketplace and no plugin identity.
+ *
+ * The bytes are synthetic: what the proof needs is a digest per owned file, not the old
+ * route's exact bytes.
+ */
+function legacyInstall(f: Fixture): string {
+  const pluginDir = join(f.root, 'plugins', LEGACY_PLUGIN_DIR_NAME)
+  const files: { path: string; sha256: string }[] = []
+  for (const relative of LEGACY_FILES) {
+    const absolute = join(pluginDir, ...relative.split('/'))
+    mkdirSync(join(absolute, '..'), { recursive: true })
+    const text = `// ${relative}\n`
+    writeFileSync(absolute, text)
+    files.push({ path: absolute, sha256: sha256Hex(text) })
+  }
+  mkdirSync(f.stateDir, { recursive: true })
+  writeFileSync(
+    f.receiptFile,
+    `${JSON.stringify({ version: 1, root: pluginDir, files }, null, 2)}\n`,
+  )
+  return pluginDir
+}
+
 describe('factoryPluginPaths', () => {
   it('resolves the Factory root from $FACTORY_DIR, not from the home directory', () => {
     const paths = factoryPluginPaths('/home/me', { platform: 'linux' }, { processEnv: { FACTORY_DIR: '/env/factory' } })
@@ -562,5 +599,107 @@ describe('writes are atomic and the receipt lands last', () => {
     } finally {
       chmodSync(blocked, 0o700)
     }
+  })
+})
+
+describe('the tree the previous route wrote into the Factory root', () => {
+  const uninstall = (f: Fixture, extra: Record<string, unknown> = {}) =>
+    uninstallFactoryPlugin(f.home, undefined, {
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+      ...extra,
+    })
+
+  it('the uninstall removes it when the receipt proves the tree is KyberDash\'s own', () => {
+    const f = fixture('factory-legacy-')
+    const legacyDir = legacyInstall(f)
+
+    const result = uninstall(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(legacyDir)).toBe(false)
+    expect(result.out.join('\n')).toContain(legacyDir)
+  })
+
+  it('the uninstall leaves it in place and names the exact command when the receipt does not prove it', () => {
+    const f = fixture('factory-legacy-edited-')
+    const legacyDir = legacyInstall(f)
+    // The owner edited a file, so the tree is no longer the one KyberDash wrote.
+    writeFileSync(join(legacyDir, 'hooks', 'hooks.json'), '// owner edit\n')
+
+    const result = uninstall(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(legacyDir)).toBe(true)
+    expect(result.err.join('\n')).toContain(`rm -rf "${legacyDir}"`)
+  })
+
+  it('the uninstall reads a receipt in the previous route\'s shape without failing', () => {
+    const f = fixture('factory-legacy-receipt-')
+    const legacyDir = legacyInstall(f)
+
+    const result = uninstall(f)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.outcome).toBe('restored')
+    expect(existsSync(legacyDir)).toBe(false)
+  })
+
+  it('the install removes it before it writes its own receipt, which would otherwise lose the proof', () => {
+    const f = fixture('factory-legacy-install-')
+    const legacyDir = legacyInstall(f)
+
+    const result = installFactoryPlugin(f.home, undefined, {
+      mode: 'strict',
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(existsSync(legacyDir)).toBe(false)
+    // The receipt the install leaves is the marketplace one, not the previous route's.
+    expect(readReceipt(f.receiptFile).marketplace).toBe(MARKETPLACE_NAME)
+  })
+})
+
+describe("the plugin's hooks file", () => {
+  /** The published hooks file, read as it lands in the tree. */
+  function publishedHooks(f: Fixture): Record<string, unknown> {
+    installFactoryPlugin(f.home, undefined, {
+      mode: 'strict',
+      processEnv: f.env,
+      harnessCli: f.fake.harness,
+    })
+    const bytes = readFileSync(join(f.pluginDir, 'kyberdash-factory', 'hooks', 'hooks.json'), 'utf8')
+    return JSON.parse(bytes) as Record<string, unknown>
+  }
+
+  it('is keyed directly by event name, with no top-level hooks wrapper', () => {
+    const f = fixture('factory-hooks-shape-')
+    const hooks = publishedHooks(f)
+
+    // Factory documents a plugin's standalone hooks.json as keyed by event name; the
+    // `hooks` wrapper is the idiom for the `hooks` key inside settings.json.
+    expect(Object.keys(hooks)).not.toContain('hooks')
+    expect(Object.keys(hooks)).toContain('SessionStart')
+    for (const key of Object.keys(hooks)) {
+      expect(key).toMatch(/^[A-Z][A-Za-z]+$/)
+    }
+  })
+
+  it('registers only the events that produce a span', () => {
+    const f = fixture('factory-hooks-events-')
+    const hooks = publishedHooks(f)
+
+    // `SubagentStop` produces no span: its documented payload carries no child session id,
+    // so a registration would cost a process per subagent stop for no output.
+    expect(Object.keys(hooks)).toEqual([
+      'SessionStart',
+      'UserPromptSubmit',
+      'PreToolUse',
+      'PostToolUse',
+      'Stop',
+      'SessionEnd',
+    ])
   })
 })

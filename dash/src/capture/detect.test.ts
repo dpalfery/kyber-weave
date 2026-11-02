@@ -213,53 +213,55 @@ describe('detectInstall: factory', () => {
   const factory = (): CaptureHarnessWriter => writerFor('factory')
 
   /**
-   * The Factory root a test points $FACTORY_DIR at, and the marketplace tree KyberDash
-   * owns. The tree is under KyberDash's own state directory: the install writes nothing
-   * under the Factory root, so the tree is no longer evidence that lives there.
+   * The harness's own directory, and the registry it writes when a plugin is installed.
+   * The harness populates both: a `.factory` tree exists for a Droid that never wrote a
+   * settings file, and $FACTORY_DIR redirects the sessions tree only, never the harness's
+   * own directory.
    */
-  const ROOT = '/env/factory'
-  const PLUGIN_DIR = '/h/.kyberdash/marketplaces/kyberdash'
+  const FACTORY_DIR = '/h/.factory'
+  const REGISTRY = '/h/.factory/plugins/installed_plugins'
 
-  it('is detected by the Factory marketplace tree', () => {
-    vi.stubEnv('FACTORY_DIR', ROOT)
-    // The marketplace tree and the directory that holds it: the probe may ask for either.
-    const result = detectInstall(
-      factory(),
-      '/h',
-      POSIX,
-      probeOf([PLUGIN_DIR, '/h/.kyberdash/marketplaces']),
-    )
+  it('is detected by the harness\'s own directory', () => {
+    const result = detectInstall(factory(), '/h', POSIX, probeOf([FACTORY_DIR]))
     expect(result.installed).toBe('detected')
-    expect(result.evidence.join('\n')).toContain(PLUGIN_DIR)
+    expect(result.evidence.join('\n')).toContain(FACTORY_DIR)
   })
 
-  it('is not detected by an empty .factory directory', () => {
-    vi.stubEnv('FACTORY_DIR', ROOT)
-    const result = detectInstall(factory(), '/h', POSIX, probeOf([ROOT]))
+  it('is detected by the harness\'s own plugin registry', () => {
+    const result = detectInstall(factory(), '/h', POSIX, probeOf([REGISTRY]))
+    expect(result.installed).toBe('detected')
+    expect(result.evidence.join('\n')).toContain(REGISTRY)
+  })
+
+  it('is not detected when neither the directory nor the registry is there', () => {
+    const result = detectInstall(factory(), '/h', POSIX, probeOf([]))
     expect(result.installed).toBe('not-detected')
+    expect(result.evidence.join('\n')).toContain(FACTORY_DIR)
   })
 
   it('is not detected by the owner settings file alone', () => {
-    vi.stubEnv('FACTORY_DIR', ROOT)
-    const result = detectInstall(factory(), '/h', POSIX, probeOf(['/env/factory/settings.json']))
+    const result = detectInstall(factory(), '/h', POSIX, probeOf(['/h/.factory/settings.json']))
     expect(result.installed).toBe('not-detected')
   })
 
   it('is not detected by a .factory directory in an unrelated place', () => {
-    vi.stubEnv('FACTORY_DIR', ROOT)
     const result = detectInstall(factory(), '/h', POSIX, probeOf(['/h/project/.factory']))
     expect(result.installed).toBe('not-detected')
   })
 
-  it('resolves the Factory tree under KyberDash\'s own state directory, not under the Factory root', () => {
-    vi.stubEnv('FACTORY_DIR', ROOT)
+  it('asks the harness\'s own directory, never KyberDash\'s marketplace tree', () => {
+    vi.stubEnv('FACTORY_DIR', '/env/factory')
     const seen: string[] = []
     detectInstall(factory(), '/h', POSIX, (path) => {
       seen.push(path)
       return 'absent'
     })
-    expect(seen.length).toBeGreaterThan(0)
-    expect(seen.some((path) => path.startsWith(PLUGIN_DIR))).toBe(true)
-    expect(seen.some((path) => path.startsWith(ROOT))).toBe(false)
+    expect(seen).toContain(FACTORY_DIR)
+    expect(seen).toContain(REGISTRY)
+    // The marketplace tree is KyberDash's own artifact under KyberDash's own state
+    // directory: it says nothing about whether the harness is installed.
+    expect(seen.some((path) => path.startsWith('/h/.kyberdash'))).toBe(false)
+    // $FACTORY_DIR redirects the sessions tree, never the harness's own directory.
+    expect(seen.some((path) => path.startsWith('/env/factory'))).toBe(false)
   })
 })
