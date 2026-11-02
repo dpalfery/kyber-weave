@@ -329,12 +329,16 @@ point that carried no value of its own keeps the value absent, never zero.
 
 **The row stores the exporter's own content, verbatim.** `attributes_json` holds the point's own
 attributes and `resource_json` the resource attributes, and the store writes both **verbatim** —
-it redacts nothing. The receiver strips account identity from the **resource** at the decode
-seam, exactly as it does for spans and logs, so `resource_json` carries the exporter's resource
-attributes (`service.name`, `service.version`, `os.type`, …) and never `user.id`, `user.email` or
-`organization.id`. A metric **point's** own attributes are not stripped, and Factory's native
-export puts the identity keys `user.id`, `user.email` and `organization.id` on every data point —
-so those keys reach `attributes_json` verbatim and stay in the store.
+it redacts nothing. The receiver is what decides, at the decode seam and before anything is
+stored: it strips account identity from the metric **resource** and from the metric **point's own
+attributes**, exactly as it does for spans and logs. So `resource_json` carries the exporter's
+resource attributes (`service.name`, `service.version`, `os.type`, …), `attributes_json` carries
+the point's own attributes, and neither carries `user.id`, `user.email` or `organization.id` —
+Factory's native export puts those identity keys on every data point, and the receiver is where
+they are dropped, so they never reach the stored row. The keys that survive are the correlation
+and usage evidence: `session.id`, `conversation.id`, the whole `gen_ai.*` namespace, and the
+point's own measurement attributes such as `model.id` or `skill.name`. Those are not identity, so
+they are kept.
 
 A metric point has **no span**, so its row carries **no harness attribution** — there is no span
 to fingerprint — and the exporter's `service.name` is a source, not an attribution. That is also
