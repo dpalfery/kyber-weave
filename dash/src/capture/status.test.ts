@@ -4,11 +4,12 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { callRoute, makeDeps, type RouteDeps } from '../server/testing.js'
 import { claudeCodeHarness } from './harnesses/claude-code.js'
 import { copilotHarness } from './harnesses/copilot.js'
 import { opencodeHarness } from './harnesses/opencode.js'
 import { pjoin, type PathEnv } from './paths.js'
-import { DEFAULT_CAPTURE_ENDPOINT, runCapture } from './index.js'
+import { DEFAULT_CAPTURE_ENDPOINT, isPluginOnly, runCapture, type PluginOnlyWriter } from './index.js'
 import { buildCaptureStatus, buildHarnessStatus, createApplicabilityFilter } from './status.js'
 import type { CaptureHarnessStatus, StatusContext } from './status.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
@@ -122,7 +123,10 @@ describe('buildCaptureStatus over a temporary home', () => {
 
   it('marks managed and status-only modes', () => {
     const statuses = buildCaptureStatus(ctxFor(makeHome()))
-    expect(statuses.map((status) => [status.id, status.mode])).toEqual([
+    // The Factory row joins the registry; the rows that were already there keep their order.
+    expect(
+      statuses.filter((status) => status.id !== 'factory').map((status) => [status.id, status.mode]),
+    ).toEqual([
       ['copilot', 'managed'],
       ['claude-code', 'managed'],
       ['codex', 'status-only'],
@@ -502,6 +506,92 @@ describe('kilo plugin capture status', () => {
     // user runs, never an env var the drawer could set for them.
     expect(step.env).toBeUndefined()
     expect(step.text).toMatch(/Scheduled folder import|import-history --harness kilo-shared-runtime/)
+  })
+})
+
+describe('factory (droid) capture status', () => {
+  /**
+   * The Factory writer, which must be a managed writer that owns a plugin and no
+   * configuration key. Resolved per test, so the rest of this file still runs (and
+   * reports) while factory is not yet in the registry.
+   */
+  const factoryWriter = (): PluginOnlyWriter => {
+    const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === 'factory')
+    if (writer === undefined) throw new Error('no capture writer is registered for factory')
+    if (!isPluginOnly(writer)) throw new Error('the factory writer is not a plugin-only managed writer')
+    return writer
+  }
+
+  /** The status line that speaks about the plugin, not about the consent. */
+  const pluginLine = (row: CaptureHarnessStatus): string => {
+    const line = row.statusLines.find((text) => text.toLowerCase().includes('plugin'))
+    if (line === undefined) throw new Error(`no plugin line in ${JSON.stringify(row.statusLines)}`)
+    return line
+  }
+
+  it('lists the Factory row as a managed harness with no configuration file', () => {
+    const statuses = buildCaptureStatus(ctxFor(makeHome()))
+    const factory = byId(statuses, 'factory')
+    expect(factory.displayName).toBe('Factory (Droid)')
+    expect(factory.mode).toBe('managed')
+    // Plugin-only: no configuration key is declared, read or drift-checked.
+    expect(factory.files).toEqual([])
+  })
+
+  it('reports the plugin as off, with no receipt, before it is installed', () => {
+    const factory = byId(buildCaptureStatus(ctxFor(makeHome())), 'factory')
+    expect(factory.state).toBe('off')
+    expect(factory.receipt).toBe('absent')
+    expect(pluginLine(factory)).toMatch(/off|not installed/i)
+  })
+
+  it('reports the plugin as on with a recorded receipt after it is installed', () => {
+    const home = makeHome()
+    const writer = factoryWriter()
+    const installed = writer.filePlugin.install(home, hostEnv(home), { dryRun: false })
+    expect(installed.exitCode).toBe(0)
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    expect(factory.state).toBe('on')
+    expect(factory.receipt).toBe('recorded')
+    expect(pluginLine(factory)).toMatch(/installed/i)
+    expect(pluginLine(factory)).not.toMatch(/not installed/i)
+  })
+
+  it('names the resolved plugin directory and the consent', () => {
+    const home = makeHome()
+    const writer = factoryWriter()
+    writer.filePlugin.install(home, hostEnv(home), { dryRun: false })
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    // The directory the plugin resolves to is reported wherever the row carries it.
+    expect(JSON.stringify(factory)).toContain(writer.filePlugin.path(home, hostEnv(home)))
+    expect(factory.statusLines.some((line) => /consent/i.test(line))).toBe(true)
+  })
+
+  it('reports unknown for a plugin tree KyberDash did not write', () => {
+    const home = makeHome()
+    const pluginDir = join(home, '.factory', 'plugins', 'kyberdash-factory')
+    mkdirSync(join(pluginDir, 'hooks'), { recursive: true })
+    writeFileSync(join(pluginDir, 'hooks', 'kyberdash-factory.mjs'), '// owner owned\n')
+
+    const factory = byId(buildCaptureStatus(ctxFor(home)), 'factory')
+    expect(factory.state).toBe('unknown')
+  })
+
+  it('reports the same Factory row over the API', async () => {
+    const home = makeHome()
+    const deps: RouteDeps = (makeDeps as unknown as (options?: unknown) => RouteDeps)({
+      capture: { homeDir: home, platform: HOST, fetchHealth: NO_LISTENER },
+    })
+
+    const { status, body } = await callRoute('GET', '/api/kyber/capture', { deps })
+
+    expect(status).toBe(200)
+    const harnesses = (body as { harnesses: CaptureHarnessStatus[] }).harnesses
+    const factory = harnesses.find((row) => row.id === 'factory')
+    expect(factory).toBeDefined()
+    expect(factory!.state).toBe('off')
   })
 })
 

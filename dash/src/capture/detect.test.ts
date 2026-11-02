@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { detectInstall, type ExistenceProbe, type ExistenceResult } from './detect.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
 import type { CaptureHarnessWriter } from './harnesses/registry.js'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 function writerFor(id: string): CaptureHarnessWriter {
   const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === id)
@@ -200,5 +204,58 @@ describe('detectInstall: kilo', () => {
     expect(seen).toContain(
       'C:\\Users\\me\\AppData\\Roaming\\Code\\User\\globalStorage\\kilocode.kilo-code',
     )
+  })
+})
+
+describe('detectInstall: factory', () => {
+  // Resolved per test rather than at describe scope, so the rest of this file still
+  // runs (and reports) while factory is not yet in the registry.
+  const factory = (): CaptureHarnessWriter => writerFor('factory')
+
+  /** The Factory root a test points $FACTORY_DIR at, and the plugin tree inside it. */
+  const ROOT = '/env/factory'
+  const PLUGIN_DIR = '/env/factory/plugins/kyberdash-factory'
+
+  it('is detected by the Factory plugin tree', () => {
+    vi.stubEnv('FACTORY_DIR', ROOT)
+    // The plugin directory and the directory that holds it: the probe may ask for either.
+    const result = detectInstall(
+      factory(),
+      '/h',
+      POSIX,
+      probeOf([PLUGIN_DIR, '/env/factory/plugins']),
+    )
+    expect(result.installed).toBe('detected')
+    expect(result.evidence.join('\n')).toContain(ROOT)
+  })
+
+  it('is not detected by an empty .factory directory', () => {
+    vi.stubEnv('FACTORY_DIR', ROOT)
+    const result = detectInstall(factory(), '/h', POSIX, probeOf([ROOT]))
+    expect(result.installed).toBe('not-detected')
+  })
+
+  it('is not detected by the owner settings file alone', () => {
+    vi.stubEnv('FACTORY_DIR', ROOT)
+    const result = detectInstall(factory(), '/h', POSIX, probeOf(['/env/factory/settings.json']))
+    expect(result.installed).toBe('not-detected')
+  })
+
+  it('is not detected by a .factory directory in an unrelated place', () => {
+    vi.stubEnv('FACTORY_DIR', ROOT)
+    const result = detectInstall(factory(), '/h', POSIX, probeOf(['/h/project/.factory']))
+    expect(result.installed).toBe('not-detected')
+  })
+
+  it('resolves the Factory tree through $FACTORY_DIR, not through the home', () => {
+    vi.stubEnv('FACTORY_DIR', ROOT)
+    const seen: string[] = []
+    detectInstall(factory(), '/h', POSIX, (path) => {
+      seen.push(path)
+      return 'absent'
+    })
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.some((path) => path.startsWith(ROOT))).toBe(true)
+    expect(seen.some((path) => path.startsWith('/h/.factory'))).toBe(false)
   })
 })
