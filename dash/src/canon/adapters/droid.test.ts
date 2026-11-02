@@ -231,6 +231,127 @@ function tokenUsageOf(record: CanonicalRecord): { availability: string; reason?:
   return { availability: declared.availability, reason: declared.reason }
 }
 
+/**
+ * The counter classes the adapter declares on every record, and the word each
+ * class's metric is named by.
+ *
+ * The classes are the canonical token counters: the total input-side usage,
+ * the output usage, the cache read count and the cache creation count.
+ */
+const COUNTER_CLASSES = [
+  { metric: 'token_usage', metricPattern: /token/i },
+  { metric: 'output', metricPattern: /output/i },
+  { metric: 'cache_read', metricPattern: /cache[\s-]?read/i },
+  { metric: 'cache_creation', metricPattern: /cache[\s-]?creation/i },
+] as const
+
+/**
+ * The claim a reason must not make: that the counter WAS measured.
+ *
+ * A reason states where the number WOULD come from, so a past-tense claim
+ * that the counter was measured, recorded or is present contradicts the
+ * declaration the reason belongs to.
+ */
+const PRESENCE_CLAIMS = [
+  /\b(?:was|were|has been|have been)\s+(?:measured|recorded|captured|counted|exported|present|available|known)\b/i,
+  /\bthe\s+(?:tokens?|counters?|numbers?)\s+(?:exist|are present|are known|were present|were measured)\b/i,
+  /\b(?:telemetry|export|plugin|span)\s+(?:measured|recorded|captured|counted|exported)\s+(?:the\s+)?(?:token|counter|usage|number)/i,
+] as const
+
+/**
+ * The word a reason must carry when it states that the counter is absent.
+ *
+ * The reason has to say the number is not there, not merely say where it
+ * would come from: a reader who only reads the source clause must not come
+ * away believing the counter was measured.
+ */
+const ABSENCE_MARKER =
+  /\b(?:not|never|no|none|nothing|without|cannot|absent|lacks?|missing|unavailable|outside|elsewhere)\b/i
+
+/**
+ * The declaration a counter class carries, and the reason it gives.
+ */
+function declarationOf(
+  record: CanonicalRecord,
+  metric: string,
+): { availability: string; reason?: string } | undefined {
+  const declared = record.measurability?.[metric]
+  if (declared === undefined) return undefined
+  if (typeof declared === 'string') return { availability: declared }
+  return { availability: declared.availability, reason: declared.reason }
+}
+
+/**
+ * Assert what a counter class's reason must carry.
+ *
+ * The wording is the implementer's to choose, so the reason is checked for
+ * the FACTS it states — the harness, the metric, the file source the number
+ * would come from, and the session-id pairing that supplies it — and never
+ * for one exact sentence.
+ */
+function expectCounterReason(
+  record: CanonicalRecord,
+  metric: string,
+  metricPattern: RegExp,
+): void {
+  const declared = declarationOf(record, metric)
+  expect(declared, `the ${metric} class must declare what it cannot measure`).toBeDefined()
+  expect(declared?.availability, `the ${metric} class must not be claimed measured`).toBe(
+    'not_measurable',
+  )
+  const reason = declared?.reason ?? ''
+  expect(reason, `the ${metric} reason must name the harness`).toMatch(/droid/i)
+  expect(reason, `the ${metric} reason must name the metric`).toMatch(metricPattern)
+  // The file source: the Factory session file's companion settings are where
+  // the counter comes from.
+  expect(reason, `the ${metric} reason must name the file source the counter comes from`).toMatch(
+    /file|settings/i,
+  )
+  // The pairing: the number is supplied when this session's id matches a
+  // file-sourced session.
+  expect(reason, `the ${metric} reason must name the session id the pairing is made on`).toMatch(
+    /\bsession(?:['’]s)?[\s_-]*(?:ids?|identifier)\b/i,
+  )
+  expect(reason, `the ${metric} reason must name the pairing that supplies the counter`).toMatch(
+    /match|pair|join|equal|same/i,
+  )
+  // The reason states where the number would come from. It never says the
+  // counter is there.
+  expect(reason, `the ${metric} reason must state that the counter is absent`).toMatch(
+    ABSENCE_MARKER,
+  )
+  for (const claim of PRESENCE_CLAIMS) {
+    expect(reason, `the ${metric} reason must not claim the counter was measured`).not.toMatch(
+      claim,
+    )
+  }
+}
+
+/**
+ * Assert that a native path reason is left alone.
+ *
+ * A native span has no companion settings file of its own to pair with, so
+ * its reasons are not rewritten to name the file source the plugin path
+ * pairs with.
+ */
+function expectNativeReasonUntouched(
+  record: CanonicalRecord,
+  metric: string,
+  metricPattern: RegExp,
+): void {
+  const declared = declarationOf(record, metric)
+  expect(declared, `the native ${metric} class must declare what it cannot measure`).toBeDefined()
+  const reason = declared?.reason ?? ''
+  expect(reason, `the native ${metric} reason must still name the harness`).toMatch(/droid/i)
+  expect(reason, `the native ${metric} reason must still name the metric`).toMatch(metricPattern)
+  expect(reason, `the native ${metric} reason must not name the file source`).not.toMatch(
+    /file|settings/i,
+  )
+  expect(reason, `the native ${metric} reason must not name the session-id pairing`).not.toMatch(
+    /\bsession(?:['’]s)?[\s_-]*(?:ids?|identifier)\b/i,
+  )
+}
+
 /** The session's summary figures, as the dashboard projects them. */
 async function summaryOf(store: CanonStore, sessionId: string): Promise<Record<string, unknown>> {
   await buildSessions(store)
@@ -392,6 +513,14 @@ describe('the native Factory path — the genai format', () => {
       }
     }
   })
+
+  it('leaves the native reasons clear of the file source the plugin path pairs with', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(droidAdapter, 'native-chat', nativeAttributes())
+    for (const { metric, metricPattern } of COUNTER_CLASSES) {
+      expectNativeReasonUntouched(record, metric, metricPattern)
+    }
+  })
 })
 
 describe('the plugin envelope path', () => {
@@ -415,13 +544,37 @@ describe('the plugin envelope path', () => {
     expect(modelOf(normalize(droidAdapter, 'plugin-turn-no-model', attributes))).toBeUndefined()
   })
 
-  it('declares the token usage not measurable on the plugin path too', async () => {
+  it('declares the token usage not measurable and names where the counter would come from', async () => {
     const { droidAdapter } = await loadDroid()
-    const declared = tokenUsageOf(normalize(droidAdapter, 'plugin-turn', pluginAttributes()))
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    const declared = tokenUsageOf(record)
     expect(declared, 'a record with no token counter must declare what it cannot measure').toBeDefined()
     expect(declared?.availability).toBe('not_measurable')
     expect(declared?.reason).toMatch(/droid/i)
     expect(declared?.reason).toMatch(/token/i)
+    // The reason also says WHERE the number would come from — the Factory
+    // session file's companion settings, supplied when this session's id
+    // matches a file-sourced session — so a reader can tell "never
+    // measured" from "not joined yet".
+    expectCounterReason(record, 'token_usage', /token/i)
+  })
+
+  it('names the file source and the session-id pairing for the output counter', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    expectCounterReason(record, 'output', /output/i)
+  })
+
+  it('names the file source and the session-id pairing for the cache read counter', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    expectCounterReason(record, 'cache_read', /cache[\s-]?read/i)
+  })
+
+  it('names the file source and the session-id pairing for the cache creation counter', async () => {
+    const { droidAdapter } = await loadDroid()
+    const record = normalize(droidAdapter, 'plugin-turn', pluginAttributes())
+    expectCounterReason(record, 'cache_creation', /cache[\s-]?creation/i)
   })
 })
 
