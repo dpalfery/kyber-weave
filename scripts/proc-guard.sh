@@ -649,7 +649,7 @@ run_guarded() {
     fi
     # An absolute path other than /: a relative one would be a different place for each caller's
     # working directory, which is the opposite of one shared queue.
-    if [[ -n "${slot_dir}" && ( "${slot_dir}" != /* || -z "${slot_dir%%/}" ) ]]; then
+    if [[ -n "${slot_dir}" && ( "${slot_dir}" != /* || "${slot_dir}" =~ ^/+$ || -z "${slot_dir%%/}" ) ]]; then
       printf 'proc-guard: --slot-dir must be an absolute directory other than /\n' >&2
       return 2
     fi
