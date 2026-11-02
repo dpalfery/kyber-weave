@@ -22,11 +22,20 @@
 // The endpoint does not say what the export SENDS. That is the export's shape, and it is
 // configured in the same two places — but NOT by one rule:
 //
+//   - the ENABLED switch follows precedence. The organisation's `telemetry.enabled` wins
+//     outright: where it is set at all the machine's `OTEL_CUSTOMER_ENABLED` is not read,
+//     so an organisation can keep the customer pipeline on (or off) whatever the machine
+//     says. Where the organisation sets nothing, the machine's variable decides — and
+//     where the machine says nothing either the pipeline is ON, because Factory's own
+//     documentation makes that variable an opt-OUT.
 //   - the FORMAT follows precedence. The organisation's `telemetry.format` wins, and where it
 //     is set the machine's `OTEL_TELEMETRY_FORMAT` is not read at all. Anything
 //     unrecognised resolves to `legacy`.
 //   - the GRANULARITY follows most-restrictive-wins, not precedence: `aggregate` beats
-//     `user`, whichever level each of them came from.
+//     `user`, whichever level each of them came from. A value that CANNOT BE READ
+//     resolves to `aggregate` — that is Factory's own published privacy rule, and it is
+//     the restrictive direction. A value that was never set is a different case: it takes
+//     the documented default, which is `user`.
 //   - the MESSAGE-CONTENT switch follows precedence for the organisation's
 //     `telemetry.logMessageContent` — when it is set at all the machine's
 //     `OTEL_LOG_MESSAGE_CONTENT` does not decide — and the granularity overrides both:
@@ -42,7 +51,7 @@
 // as arguments, and it belongs in the leaf list of
 // `dash/src/architecture/factory-leaves.test.ts`.
 
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** The cached organisation settings under the Factory root. */
@@ -64,6 +73,12 @@ const TELEMETRY_FORMAT_VARIABLE = 'OTEL_TELEMETRY_FORMAT'
 const TELEMETRY_GRANULARITY_VARIABLE = 'OTEL_TELEMETRY_GRANULARITY'
 /** The machine variable that carries the message-content switch. */
 const LOG_MESSAGE_CONTENT_VARIABLE = 'OTEL_LOG_MESSAGE_CONTENT'
+/**
+ * The machine variable that carries the export's master switch. Factory's own
+ * documentation makes it an opt-OUT: setting it to `false` takes the machine out of the
+ * customer telemetry pipeline, and leaving it unset does not.
+ */
+const CUSTOMER_ENABLED_VARIABLE = 'OTEL_CUSTOMER_ENABLED'
 
 /**
  * The port this KyberDash receiver listens on: the OTLP/HTTP standard port, the same one
@@ -102,22 +117,32 @@ export type NativeExportShapeSource =
   | typeof TELEMETRY_FORMAT_VARIABLE
   | typeof TELEMETRY_GRANULARITY_VARIABLE
   | typeof LOG_MESSAGE_CONTENT_VARIABLE
+  | typeof CUSTOMER_ENABLED_VARIABLE
 
 /** One resolved switch: its value, and the place it came from. */
 export type NativeExportSwitch<T> = {
   value: T
   source: NativeExportShapeSource
+  /**
+   * Set when the source carried a value that could not be read, so the restrictive value
+   * applied instead of the value the source named. The source still names the level that
+   * carried it, because the source alone would read as that level having pinned the
+   * value the row reports.
+   */
+  unreadable?: true
 }
 
 /**
- * The native export's effective shape: the format, the granularity and the message-content
- * switch, each with the source it came from.
+ * The native export's effective shape: the enabled switch, the format, the granularity and
+ * the message-content switch, each with the source it came from.
  *
- * The shape is not the endpoint. The format decides which metric catalog arrives, the
- * granularity decides whether the legacy format produces spans at all, and the content
- * switch decides whether content-bearing spans are produced.
+ * The shape is not the endpoint. The enabled switch decides whether the export runs at
+ * all, the format decides which metric catalog arrives, the granularity decides whether
+ * the legacy format produces spans at all, and the content switch decides whether
+ * content-bearing spans are produced.
  */
 export type NativeExportShape = {
+  enabled: NativeExportSwitch<boolean>
   format: NativeExportSwitch<NativeExportFormat>
   granularity: NativeExportSwitch<NativeExportGranularity>
   content: NativeExportSwitch<boolean>
@@ -172,19 +197,29 @@ export type NativeExportOptions = {
 }
 
 /**
- * The parsed contents of one settings file, or undefined when the file is absent, unreadable
- * or malformed. An absent settings file is an expected state — a machine may pin nothing —
- * so it reads as absent rather than as a failure. A malformed or unreadable file reads the
- * same way: the row then under-reports the native path, which never claims a working path
- * that is not.
+ * One settings file, as the reader sees it.
+ *
+ * An ABSENT file is an expected state — a machine may pin nothing — so it reads as absent
+ * rather than as a failure. A file that EXISTS and cannot be read is a different state:
+ * it is a pin this reader cannot see, and reading it as "nothing is pinned" would report
+ * the export as more open than it is.
  */
-function readSettingsFile(path: string): unknown {
+type SettingsFile =
+  | { state: 'absent' }
+  | { state: 'readable'; document: unknown }
+  | { state: 'unreadable' }
+
+/**
+ * The parsed contents of one settings file, or the state it could not be read in.
+ */
+function readSettingsFile(path: string): SettingsFile {
+  if (!existsSync(path)) return { state: 'absent' }
   try {
     const stat = statSync(path)
-    if (!stat.isFile() || stat.size > MAX_SETTINGS_BYTES) return undefined
-    return JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (!stat.isFile() || stat.size > MAX_SETTINGS_BYTES) return { state: 'unreadable' }
+    return { state: 'readable', document: JSON.parse(readFileSync(path, 'utf8')) as unknown }
   } catch {
-    return undefined
+    return { state: 'unreadable' }
   }
 }
 
@@ -258,31 +293,144 @@ type OrganisationTelemetry = {
   endpoint: string | undefined
   /** The format the organisation pins, when it pins one. */
   format: string | undefined
-  /** The granularity the organisation pins, when it pins one. */
-  granularity: string | undefined
+  /** The granularity the organisation pins, when it pins one the export can act on. */
+  granularity: NativeExportGranularity | undefined
+  /** The organisation pins a granularity whose value cannot be read. */
+  granularityUnreadable: boolean
   /** The message-content switch the organisation pins, when it pins one. */
   logMessageContent: boolean | undefined
+  /** The enabled switch the organisation pins, when it pins one. */
+  enabled: boolean | undefined
+  /** The organisation pins an enabled switch whose value cannot be read. */
+  enabledUnreadable: boolean
 }
 
 /**
- * The organisation's telemetry block, resolved key by key. The cached view under the Factory
- * root is read first — it is the view Factory itself reads — and the system-managed copy is
- * the fallback for every key the cached view does not carry. The endpoint resolves that way
+ * One of the organisation's two views of its managed settings: the `telemetry` block the
+ * view carries, and whether the view's file exists and could not be read.
+ */
+type OrganisationView = {
+  /** The `telemetry` block the view carries, when it carries a readable one. */
+  block: Record<string, unknown> | undefined
+  /** The view's file exists and could not be read, so its pins are invisible here. */
+  unreadable: boolean
+}
+
+/**
+ * One of the organisation's two views of its managed settings, read from its file. The
+ * cached view under the Factory root is read first — it is the view Factory itself reads —
+ * and the system-managed copy is the fallback for every key the cached view does not
+ * carry.
+ */
+function organisationView(
+  path: string,
+  select: (document: unknown) => Record<string, unknown> | undefined,
+): OrganisationView {
+  const file = readSettingsFile(path)
+  if (file.state === 'absent') return { block: undefined, unreadable: false }
+  if (file.state === 'unreadable') return { block: undefined, unreadable: true }
+  return { block: select(file.document), unreadable: false }
+}
+
+/**
+ * Whether a telemetry block carries a key at all. A key that is present but carries a
+ * value of the wrong type is present: the reader can see that the organisation pinned
+ * something it cannot read, which is not the same as the organisation pinning nothing.
+ */
+function blockHasKey(block: Record<string, unknown> | undefined, key: string): boolean {
+  return block !== undefined && block[key] !== undefined
+}
+
+/**
+ * The organisation's granularity, and whether it could be read.
+ *
+ * The first view that carries a readable value wins. A key that is present but carries
+ * anything the export cannot act on — a name that is neither `aggregate` nor `user`, a
+ * value of the wrong type — and a settings file that exists and cannot be read at all, are
+ * values that CANNOT BE READ: Factory's own published rule resolves those to the
+ * restrictive granularity, so the reader reports them as unreadable rather than as nothing
+ * pinned.
+ */
+function organisationGranularity(
+  views: readonly OrganisationView[],
+): { value: NativeExportGranularity | undefined; unreadable: boolean } {
+  for (const view of views) {
+    const value = blockString(view.block, 'granularity')
+    if (value === 'aggregate' || value === 'user') return { value, unreadable: false }
+  }
+  for (const view of views) {
+    if (blockHasKey(view.block, 'granularity')) return { value: undefined, unreadable: true }
+  }
+  if (views.some((view) => view.unreadable)) return { value: undefined, unreadable: true }
+  return { value: undefined, unreadable: false }
+}
+
+/**
+ * The organisation's telemetry block, resolved key by key. The endpoint resolves that way
  * too, so the verdict under an organisation's pin is unchanged by reading the shape beside
  * it.
  */
 function organisationTelemetry(sources: NativeExportSources): OrganisationTelemetry {
-  const cached = cachedOrganisationTelemetry(
-    readSettingsFile(join(sources.factoryRoot, ORGANISATION_CACHE_FILE)),
+  const cached = organisationView(
+    join(sources.factoryRoot, ORGANISATION_CACHE_FILE),
+    cachedOrganisationTelemetry,
   )
-  const system = telemetryBlock(readSettingsFile(join(systemManagedDir(sources), SYSTEM_SETTINGS_FILE)))
+  const system = organisationView(
+    join(systemManagedDir(sources), SYSTEM_SETTINGS_FILE),
+    telemetryBlock,
+  )
+  const views = [cached, system]
+  const granularity = organisationGranularity(views)
+  const enabled = blockBoolean(cached.block, 'enabled') ?? blockBoolean(system.block, 'enabled')
   return {
-    endpoint: blockEndpoint(cached) ?? blockEndpoint(system),
-    format: blockString(cached, 'format') ?? blockString(system, 'format'),
-    granularity: blockString(cached, 'granularity') ?? blockString(system, 'granularity'),
+    endpoint: blockEndpoint(cached.block) ?? blockEndpoint(system.block),
+    format: blockString(cached.block, 'format') ?? blockString(system.block, 'format'),
+    granularity: granularity.value,
+    granularityUnreadable: granularity.unreadable,
     logMessageContent:
-      blockBoolean(cached, 'logMessageContent') ?? blockBoolean(system, 'logMessageContent'),
+      blockBoolean(cached.block, 'logMessageContent') ??
+      blockBoolean(system.block, 'logMessageContent'),
+    enabled,
+    enabledUnreadable:
+      enabled === undefined &&
+      views.some((view) => blockHasKey(view.block, 'enabled')),
   }
+}
+
+/**
+ * The export's master switch.
+ *
+ * The organisation's `telemetry.enabled` wins outright: where it is set at all the
+ * machine's `OTEL_CUSTOMER_ENABLED` is not read, so an organisation can keep the customer
+ * pipeline on (or off) whatever the machine says. Where the organisation sets nothing the
+ * machine's variable decides, and where the machine says nothing either the pipeline is
+ * ON — Factory's own documentation makes that variable an opt-OUT, so a machine that says
+ * nothing has not opted out.
+ *
+ * A value that cannot be read falls to off. The switch cannot be honoured when it cannot
+ * be read, and off is the direction that never reports an export that is not running.
+ */
+function resolveEnabled(
+  organisation: OrganisationTelemetry,
+  processEnv: NodeJS.ProcessEnv,
+): NativeExportSwitch<boolean> {
+  if (organisation.enabled !== undefined) {
+    return { value: organisation.enabled, source: 'organisation' }
+  }
+  if (organisation.enabledUnreadable) {
+    return { value: false, source: 'organisation', unreadable: true }
+  }
+  const machine = processEnv[CUSTOMER_ENABLED_VARIABLE]
+  if (machine === 'false' || machine === '0') {
+    return { value: false, source: CUSTOMER_ENABLED_VARIABLE }
+  }
+  if (machine === 'true' || machine === '1') {
+    return { value: true, source: CUSTOMER_ENABLED_VARIABLE }
+  }
+  if (machine !== undefined) {
+    return { value: false, source: CUSTOMER_ENABLED_VARIABLE, unreadable: true }
+  }
+  return { value: true, source: 'default' }
 }
 
 /**
@@ -308,17 +456,23 @@ function resolveFormat(
  * The granularity the export sends. Most-restrictive-wins, not precedence: `aggregate`
  * beats `user` whichever level each of them came from. A tie is the organisation's, because
  * that is the level that pinned it.
+ *
+ * A value that CANNOT BE READ resolves to `aggregate`, which is Factory's own published
+ * privacy rule and the restrictive direction: a value that is present but is neither
+ * `aggregate` nor `user`, a value of the wrong type, and a settings file that exists and
+ * cannot be read at all. A value that was never set is a different case and takes the
+ * documented default, which is `user`.
  */
 function resolveGranularity(
   organisation: OrganisationTelemetry,
   processEnv: NodeJS.ProcessEnv,
 ): NativeExportSwitch<NativeExportGranularity> {
-  const organisationValue =
-    organisation.granularity === 'aggregate' || organisation.granularity === 'user'
-      ? organisation.granularity
-      : undefined
+  const organisationValue = organisation.granularity
   const raw = processEnv[TELEMETRY_GRANULARITY_VARIABLE]
   const machineValue = raw === 'aggregate' || raw === 'user' ? raw : undefined
+  if (organisation.granularityUnreadable) {
+    return { value: 'aggregate', source: 'organisation', unreadable: true }
+  }
   if (organisationValue === 'aggregate' || machineValue === 'aggregate') {
     return {
       value: 'aggregate',
@@ -330,6 +484,9 @@ function resolveGranularity(
       value: 'user',
       source: organisationValue === 'user' ? 'organisation' : TELEMETRY_GRANULARITY_VARIABLE,
     }
+  }
+  if (raw !== undefined) {
+    return { value: 'aggregate', source: TELEMETRY_GRANULARITY_VARIABLE, unreadable: true }
   }
   return { value: 'user', source: 'default' }
 }
@@ -366,15 +523,16 @@ function resolveContent(
   return { value: false, source: 'default' }
 }
 
-/** The export's effective shape: the format, the granularity and the content switch. */
+/** The export's effective shape: the enabled switch, the format, the granularity and the content switch. */
 function resolveShape(
   organisation: OrganisationTelemetry,
   processEnv: NodeJS.ProcessEnv,
 ): NativeExportShape {
+  const enabled = resolveEnabled(organisation, processEnv)
   const format = resolveFormat(organisation, processEnv)
   const granularity = resolveGranularity(organisation, processEnv)
   const content = resolveContent(organisation, processEnv, granularity)
-  return { format, granularity, content }
+  return { enabled, format, granularity, content }
 }
 
 /** The machine variable that names the endpoint, and the endpoint it names. */
@@ -422,6 +580,12 @@ function pointsAtReceiver(endpoint: string): boolean {
  * The SHAPE travels with the verdict. It is resolved from the same configuration as the
  * endpoint — the organisation's managed block and the machine's variables — but it follows
  * Factory's own precedence rules, which are not one rule (see the header).
+ *
+ * The verdict's own vocabulary is about the ENDPOINT and stays exact: `available`,
+ * `unavailable` or `not-configured`. The organisation's enabled switch does not add a
+ * verdict of its own, because it does not change where the endpoint points — it decides
+ * whether the export runs at all, and that travels in the shape beside the verdict, where
+ * a reader looks for what the export is.
  */
 export function readNativeExport(
   sources: NativeExportSources,
