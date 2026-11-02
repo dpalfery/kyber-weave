@@ -642,6 +642,15 @@ public static class McpWiringInspector
     /// entry can launch — so the body it answers says its arguments were not read, and the caller
     /// compares the executable against the declaration and nothing more.
     /// </para>
+    /// <para>
+    /// The command it reads is the one in the server's own table. A TOML key belongs to the table
+    /// its header names — or, for a dotted key, to the table its own path names — so a bare
+    /// <c>command</c> under <c>[mcp_servers.&lt;name&gt;.env]</c> is an environment variable, and
+    /// reading it as the launch reported a server that names no command as wired to whatever that
+    /// variable held. The scanner's answer is compatible and is not the same question: a sub-table
+    /// header implicitly declares the server, which is all the scanner claims, while which table a
+    /// key belongs to is decided by the header above it.
+    /// </para>
     /// </remarks>
     private static EntryBody ReadTomlEntryBody(
         string text,
@@ -674,6 +683,8 @@ public static class McpWiringInspector
                 continue;
             }
 
+            // A dotted key names a value inside a sub-table — env.command is a key of env — so only a
+            // single-segment `command` is the server's own launch command.
             return ReadTomlString(line[(assignment + 1)..]) is { } command
                 ? EntryBody.FromCommandLine([command], argumentsRead: false)
                 : EntryBody.Unreadable;
@@ -738,21 +749,34 @@ public static class McpWiringInspector
     }
 
     /// <summary>
-    /// Whether a header line names <paramref name="table"/>, or a sub-table of it.
+    /// Whether a header line names <paramref name="table"/> itself, rather than a sub-table of it.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// A sub-table header is not inside the server's table for this reader's purpose, which is where
+    /// the server's own bare keys live. <c>[mcp_servers.x.env]</c> declares that the server exists —
+    /// the scanner reports it, and correctly — but the keys under it belong to <c>env</c>: a
+    /// <c>command</c> there is an environment variable, and reading it as the launch reported a
+    /// server that names no launch command at all as wired to whatever that variable held.
+    /// </para>
+    /// <para>
+    /// Exactness also keeps a sub-table's keys out of the server's table when they are written as
+    /// dotted keys under the server's own header — <c>env.command = "x"</c> names a value inside
+    /// <c>env</c> — because the bare-key test rejects anything but a single-segment key. The two
+    /// together are the whole rule: a key belongs to the table its header, or its own dotted path,
+    /// names it.
+    /// </para>
+    /// <para>
     /// Quoted keys and the whitespace TOML allows around them are removed before the comparison, so
     /// a spelling the scanner accepted compares equal here too — one classifier and one value reader
-    /// disagreeing about which table they are looking at would report a working entry as a gap. A
-    /// sub-table counts as inside the server's region — <c>[mcp_servers.x.env]</c> implicitly
-    /// creates the server's table — which is the same reading the scanner takes.
+    /// disagreeing about which table they are looking at would report a working entry as a gap.
+    /// </para>
     /// </remarks>
     private static bool NamesTable(string headerLine, string table)
     {
         string path = Normalize(StripComment(headerLine).TrimStart('[').TrimEnd(']'));
 
-        return string.Equals(path, table, StringComparison.Ordinal)
-            || path.StartsWith(table + ".", StringComparison.Ordinal);
+        return string.Equals(path, table, StringComparison.Ordinal);
     }
 
     /// <summary>One quoted TOML value, or null when the text is not a quoted string this reader knows.</summary>

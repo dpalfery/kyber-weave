@@ -918,6 +918,68 @@ public sealed class McpWiringInspectorTests : IDisposable
         AssertNoFindingFor(report, ZCode);
     }
 
+    /// <summary>
+    /// Codex documents whose only <c>command</c> key belongs to a table other than the server's own.
+    /// </summary>
+    public static TheoryData<string> SubTableCommandDocuments() => new()
+    {
+        // The server's table, then its env sub-table: the sub-table ends the server's own region.
+        string.Join(
+            '\n',
+            "[mcp_servers.kyber-weave]",
+            "args = [\"--repo-root\", \".\"]",
+            string.Empty,
+            "[mcp_servers.kyber-weave.env]",
+            "command = \"evil\""),
+
+        // The sub-table alone: it implicitly declares the server, and names no launch of its own.
+        string.Join(
+            '\n',
+            "[mcp_servers.kyber-weave.env]",
+            "command = \"evil\""),
+
+        // The same key written as a dotted key under the server's own header, which TOML reads as a
+        // key of the env table rather than of the server.
+        string.Join(
+            '\n',
+            "[mcp_servers.kyber-weave]",
+            "env.command = \"evil\"")
+    };
+
+    /// <summary>
+    /// A <c>command</c> key inside a sub-table of the server's table is not the server's command.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>[mcp_servers.x.env]</c> implicitly creates <c>[mcp_servers.x]</c>, which is why the scanner
+    /// reports the server as declared and why the region it names is not the same question as which
+    /// table a key belongs to. A TOML key belongs to the table its nearest header names, and to that
+    /// table only, so a bare <c>command</c> under <c>.env</c> is an environment variable named
+    /// <c>command</c>. Reading it as the launch command reported a server that names no launch at
+    /// all as wired to <c>evil</c>.
+    /// </para>
+    /// <para>
+    /// The correct answer is the gap an entry that names no launch command is: not wired, with the
+    /// entry to correct. <c>evil</c> must not appear in it — the report would otherwise name a value
+    /// the file never gave the server.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(SubTableCommandDocuments))]
+    public void ACodexSubTableCommandIsNotTheServersLaunchCommand(string document)
+    {
+        McpWiringFixture.WriteText(Repo, ".codex/config.toml", document);
+        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(Bin, "evil");
+
+        McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
+
+        McpWiringFinding finding = SingleFindingFor(report, Codex);
+        Assert.Equal(McpWiringKind.NotWired, finding.Kind);
+        Assert.Equal(NotWiredCode, finding.Code);
+        Assert.DoesNotContain("evil", finding.Message, StringComparison.Ordinal);
+    }
+
     private McpWiringReport Inspect(McpConfig config, params string[] searchPaths) =>
         McpWiringInspector.Inspect(Repo, config, new LaunchCommandResolver(searchPaths));
 
