@@ -36,6 +36,9 @@ const LEAVES = [
   'capture/consent-file.ts',
   'capture/harnesses/factory-plugin/entry.ts',
   'capture/harnesses/factory-plugin/spool.ts',
+  'capture/harnesses/factory-plugin/contract.ts',
+  'capture/harnesses/factory-plugin/mapper.ts',
+  'capture/harnesses/factory-plugin/consent.ts',
 ]
 
 export type LeafReason = 'third-party' | 'outside-capture' | 'opencode-plugin'

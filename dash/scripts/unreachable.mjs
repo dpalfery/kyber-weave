@@ -149,6 +149,8 @@ export const ENTRIES = [
   'src/capture/harnesses/opencode-plugin/entry.ts', // opencode loads the installed plugin file by path (runbook), never by dash import
   'src/capture/harnesses/factory-plugin/entry.ts', // factory runs the installed hook script by path (runbook), never by dash import
   'src/capture/harnesses/opencode-plugin/generated/plugin-source.ts', // generated text of the plugin; the T4 installer imports it, bundle.test.ts guards it
+  'src/capture/harnesses/factory-plugin/generated/plugin-source.ts', // generated text of the plugin; the installer imports it, bundle.test.ts guards it
+  'src/capture/harnesses/factory-plugin/install.ts', // the factory installer; the capture command that imports it has not landed yet
   'web/src/main.tsx', //        the web dashboard's Vite entry
 ]
 export const SCAN_ROOTS = ['src', 'web/src']

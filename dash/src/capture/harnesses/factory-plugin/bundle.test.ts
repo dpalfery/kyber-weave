@@ -411,6 +411,7 @@ describe('the Factory capture plugin bundle inlines only leaves', () => {
       [
         'src/capture/consent-file.ts',
         'src/capture/harnesses/factory-plugin/contract.ts',
+        'src/capture/harnesses/factory-plugin/consent.ts',
         'src/capture/harnesses/factory-plugin/entry.ts',
         'src/capture/harnesses/factory-plugin/factory-plugin-bundle-entry.ts',
         'src/capture/harnesses/factory-plugin/mapper.ts',

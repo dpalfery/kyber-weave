@@ -14,7 +14,8 @@
 //   - stdout carries the hook protocol and nothing else. Diagnostics go to stderr and to a
 //     bounded tail file under the KyberDash state root;
 //   - one payload becomes at most one span, through the mapper (`./mapper.ts`);
-//   - the prompt text travels only when the consent file says so;
+//   - the prompt text travels only when the consent reader says so: the consent file, or the
+//     `KYBERDASH_FACTORY_CONTEXT` override, which wins over the file (`./consent.ts`);
 //   - the delivery is bounded: it carries an abort signal and a deadline of at most two seconds;
 //   - every run drains the spool before it sends its own event.
 //
@@ -25,7 +26,8 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { readConsentState, writeFileAtomic } from '../../consent-file.js'
+import { writeFileAtomic } from '../../consent-file.js'
+import { FACTORY_CONSENT_FILE_NAME, resolveContentConsent } from './consent.js'
 import { mapHookEvent, type FactoryWireSpan } from './mapper.js'
 import { appendSpoolEvent, clearSpool, readSpoolEvents } from './spool.js'
 import {
@@ -39,8 +41,6 @@ import {
 const FACTORY_SERVICE_NAME = 'kyberdash-factory-plugin'
 /** The scope the Factory plugin's spans ride under. */
 const FACTORY_SCOPE_NAME = 'kyberdash.factory-plugin'
-/** The consent file's name inside the KyberDash state directory. */
-const CONSENT_FILE_NAME = 'factory-plugin.json'
 /** The cap on the diagnostic tail file. */
 const TAIL_CAP_BYTES = 64 * 1024
 /**
@@ -59,6 +59,11 @@ export type HookRunOptions = {
   endpoint?: string
   /** The consent file. The prompt text travels only when it says content is on. */
   consentPath?: string
+  /**
+   * The environment the consent override is read from; `process.env` by default. The override
+   * (`KYBERDASH_FACTORY_CONTEXT`) wins over the consent file, so it is the seam a test injects.
+   */
+  env?: NodeJS.ProcessEnv
   /** The KyberDash state directory the spool and the diagnostic tail live under. */
   stateDir?: string
   /** Reads the hook payload; the process stdin by default. */
@@ -124,10 +129,10 @@ async function captureOnce(options: HookRunOptions, stateDir: string): Promise<v
     reportDiagnostic(stateDir, options.stderr, 'payload', new Error('the hook payload is not a JSON object'))
     return
   }
-  const consentPath = options.consentPath ?? join(stateDir, CONSENT_FILE_NAME)
-  // The consent file decides, not the runner: content travels only when the file says so, and a
-  // missing or malformed file means content off.
-  const contentAllowed = readConsentState(consentPath) === 'on'
+  const consentPath = options.consentPath ?? join(stateDir, FACTORY_CONSENT_FILE_NAME)
+  // The consent reader decides, not the runner: content travels only when the file says so, a
+  // missing or malformed file means content off, and the environment override wins over the file.
+  const contentAllowed = resolveContentConsent(options.env ?? process.env, consentPath)
   const spans = mapHookEvent(payload, { contentAllowed })
   // The spool is drained first: an event parked by an earlier run is older than this one.
   await drainSpool(options, stateDir)
