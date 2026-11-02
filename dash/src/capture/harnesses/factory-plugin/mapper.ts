@@ -1,5 +1,5 @@
 // Hook-to-span mapping for the Factory (Droid) capture plugin (contract 1): the eight documented
-// hook events onto the four `factory.*` span names.
+// hook events onto the three `factory.*` span names.
 //
 // This module is pure. It says how a hook payload looks on the wire and nothing else: the hook
 // runner (a later task) decides which hook fired and when, the consent gate decides whether
@@ -9,6 +9,11 @@
 // Absence is absence. A field the payload does not carry is never written as 0, '' or null: the
 // attribute is left off the wire entirely. A tool outcome is only ever what the payload states,
 // and a byte count is only ever the size of the value the payload carries.
+//
+// An event the payload cannot identify yields no span at all. `SubagentStop` is one: Factory's
+// documented payload for it names no child session id, and the common `session_id` is the session
+// the hook fires in — the parent's, for a subagent's stop. A span there would name the parent as
+// the child, so none is written.
 
 import {
   FACTORY_CONTRACT_VERSION,
@@ -52,8 +57,9 @@ export type FactoryMapOptions = {
 }
 
 /**
- * The eight hook events Factory documents. `PreCompact` yields no span in contract 1: the contract
- * names no span for a compaction, so none is written.
+ * The eight hook events Factory documents. Two of them yield no span in contract 1: `PreCompact`,
+ * because the contract names no span for a compaction, and `SubagentStop`, because the documented
+ * payload carries no child session id to anchor one on.
  */
 export const FACTORY_HOOK_EVENTS = [
   'SessionStart',
@@ -255,28 +261,13 @@ function toolSpan(payload: Record<string, unknown>, outcome: boolean): FactoryWi
   return span('tool', sessionId, callId ?? sessionId, attributes)
 }
 
-/**
- * The child session span of a finished subagent, anchored at the child's own session id. The
- * parent session id travels beside it, never instead of it.
- */
-function childSessionSpan(payload: Record<string, unknown>): FactoryWireSpan {
-  const sessionId = sessionIdOf(payload)
-  const attributes: FactoryWireAttribute[] = [contractAttribute()]
-  const session = textOf(payload['session_id'])
-  if (session !== undefined) attributes.push(stringAttribute(FACTORY_KEYS.sessionId, session))
-  const parentSession = textOf(payload['parent_session_id'])
-  if (parentSession !== undefined) {
-    attributes.push(stringAttribute(FACTORY_KEYS.parentSessionId, parentSession))
-  }
-  return span('child_session', sessionId, sessionId, attributes)
-}
-
 // ---------------------------------------------------------------------------------------------
 // Mapping
 
 /**
- * Map one hook payload onto the spans it produces: one span for every documented event, and no
- * span for an event the contract does not name.
+ * Map one hook payload onto the spans it produces: one span for every documented event that names
+ * one, and no span for an event the contract does not name — nor for one whose payload carries no
+ * identity to anchor a span on.
  */
 export function mapHookEvent(
   payload: Record<string, unknown>,
@@ -296,7 +287,10 @@ export function mapHookEvent(
     case 'Stop':
       return [stopTurnSpan(payload)]
     case 'SubagentStop':
-      return [childSessionSpan(payload)]
+      // The documented payload names the task and its outcome, and no child session id: the
+      // common `session_id` is the session the hook fires in, which for a subagent's stop is the
+      // parent's. A span here would publish the parent as the child, so none is written.
+      return []
     case 'SessionEnd':
       return [sessionSpan(payload)]
     case 'PreCompact':
