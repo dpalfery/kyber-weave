@@ -378,6 +378,45 @@ public sealed class ProcGuardSlotTests : IDisposable
     }
 
     /// <summary>
+    /// A <c>--slot-wait</c> that is not a plain integer of at most a day is a usage error: text, a sign, an empty value,
+    /// a leading zero, or more than 86400 seconds.
+    /// </summary>
+    /// <remarks>
+    /// Bash reads <c>08</c> as a bad octal number, the comparison fails, and the wait never ends on time; a nine-digit value
+    /// polls for decades. Both used to pass the check, so the pin is on the values, not on the flag.
+    /// </remarks>
+    [Theory]
+    [InlineData("two")]
+    [InlineData("-1")]
+    [InlineData("")]
+    [InlineData("08")]
+    [InlineData("007")]
+    [InlineData("86401")]
+    [InlineData("999999999")]
+    public void RunWithInvalidSlotWait_ExitsUsageError(string wait)
+    {
+        SkipIfBashUnavailable();
+
+        GuardRun result = RunGuard(["run", "--slot", SlotName, "--slot-wait", wait, "--", "sh", "-c", "exit 0"]);
+
+        Assert.Equal(UsageExitCode, result.ExitCode);
+        AssertNoLocksRemain();
+    }
+
+    /// <summary>
+    /// The largest accepted <c>--slot-wait</c>, a day, is taken as given and a free slot still runs the command at once.
+    /// </summary>
+    [Fact]
+    public void RunWithLargestSlotWait_IsAcceptedAndRunsOnAFreeSlot()
+    {
+        SkipIfBashUnavailable();
+
+        GuardRun result = RunGuard(["run", "--slot", SlotName, "--slot-wait", "86400", "--", "sh", "-c", "exit 0"]);
+
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    /// <summary>
     /// When <c>ps</c> cannot answer, a lock held by a live process is not recovered and the caller queues (exit 88).
     /// </summary>
     /// <remarks>

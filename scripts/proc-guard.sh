@@ -37,7 +37,8 @@
 # checks go through the same guard without a slot.
 #   --slot NAME        slot name, a single path component (letters, digits, . _ -)
 #   --slot-count N     how many runs may hold NAME at once (default 1; one run uses every core)
-#   --slot-wait S      give up with exit 88 after S seconds queued (default 540, 0 = do not queue)
+#   --slot-wait S      give up with exit 88 after S seconds queued (default 540, 0 = do not queue,
+#                      at most 86400; no leading zero)
 #   --task LABEL       what to show other callers while this run holds the slot (default: the
 #                      checkout's directory name and the command)
 # A slot is the lock directory ~/.cache/kyber-weave/test-slots/NAME.<n>.lock, taken with an
@@ -72,6 +73,7 @@ readonly KILL_GRACE=1
 readonly SLOT_POLL_INTERVAL=0.5
 readonly SLOT_DEFAULT_WAIT=540
 readonly SLOT_MAX_COUNT=64
+readonly SLOT_MAX_WAIT=86400
 # A lock directory may lack its holder file this long (mkdir and the holder write are two steps);
 # an abandoned break mutex is cleared after the same time.
 readonly SLOT_ORPHAN_GRACE=30
@@ -535,8 +537,8 @@ describe_holder() {
   holder_pid="$(holder_field "${lock}" pid)"
   task="$(holder_field "${lock}" task)"
   since="$(holder_field "${lock}" since)"
-  if [[ "${since}" =~ ^[0-9]+$ ]] && now="$(real_now 2>/dev/null)" && ((now >= since)); then
-    age=", for $((now - since))s"
+  if [[ "${since}" =~ ^[0-9]{1,12}$ ]] && now="$(real_now 2>/dev/null)" && ((now >= 10#${since})); then
+    age=", for $((now - 10#${since}))s"
   fi
   printf 'pid %s (task: %s%s)' "${holder_pid:-unknown}" "${task:-unknown}" "${age}"
 }
@@ -636,8 +638,9 @@ run_guarded() {
       printf 'proc-guard: --slot-count must be an integer from 1 to %s\n' "${SLOT_MAX_COUNT}" >&2
       return 2
     fi
-    if [[ ! "${slot_wait}" =~ ^[0-9]{1,9}$ ]]; then
-      printf 'proc-guard: --slot-wait must be a non-negative integer of seconds\n' >&2
+    # No leading zero: bash would read 08 as a bad octal number and the wait would never expire.
+    if [[ ! "${slot_wait}" =~ ^(0|[1-9][0-9]{0,5})$ ]] || ((slot_wait > SLOT_MAX_WAIT)); then
+      printf 'proc-guard: --slot-wait must be an integer from 0 to %s seconds\n' "${SLOT_MAX_WAIT}" >&2
       return 2
     fi
   fi
