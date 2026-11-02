@@ -148,7 +148,10 @@ internal sealed class KyberDashCapturePluginStep
         AnsiConsole.MarkupLine(verdict.Length == 0
             ? $"{name} capture plugin: ok"
             : Markup.Escape(verdict));
-        foreach (string guidance in Guidance(harness, result.StandardOutput, verdict))
+        foreach (string guidance in KyberDashGuidance.CapturePluginGuidanceLines(
+                     SquadTargetCatalog.GetToken(harness),
+                     result.StandardOutput,
+                     verdict))
             AnsiConsole.MarkupLine(Markup.Escape(guidance));
 
         return CapturePluginStepOutcome.Completed;
@@ -215,30 +218,6 @@ internal sealed class KyberDashCapturePluginStep
         if (dryRun)
             arguments.Add("--dry-run");
         return arguments;
-    }
-
-    /// <summary>
-    ///     The guidance the verb printed after its verdict. The OpenCode verb marks every guidance line with its
-    ///     harness prefix and prints other chatter beside them, so only the marked lines are relayed. The Factory
-    ///     verb's stdout is a contract — the plugin line, the consent file and the consent reminder — and every
-    ///     line in it names the plugin, so every line after the verdict is relayed.
-    /// </summary>
-    private static IReadOnlyList<string> Guidance(SquadTarget harness, string standardOutput, string verdict)
-    {
-        if (harness == SquadTarget.OpenCode)
-            return KyberDashGuidance.HarnessOpenCodeLines(standardOutput);
-
-        List<string> lines = [];
-        foreach (string raw in standardOutput.Split('\n'))
-        {
-            string line = raw.TrimEnd('\r').Trim();
-            if (line.Length == 0 || line == verdict || !line.StartsWith("factory", StringComparison.Ordinal))
-                continue;
-
-            lines.Add(line);
-        }
-
-        return lines;
     }
 
     /// <summary>The name the harness carries in Squad's own lines; the verb's own lines are KyberDash's wording.</summary>

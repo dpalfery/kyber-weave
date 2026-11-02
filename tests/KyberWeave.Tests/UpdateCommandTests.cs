@@ -5,9 +5,12 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Processes;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -1203,6 +1206,91 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.DoesNotContain(log,
             line => line.Contains("verb chatter that is not guidance", StringComparison.Ordinal));
         Assert.DoesNotContain(log, line => line.Contains("mid-line mention", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     The update and the Squad deploy step relay the capture plugin's guidance, and they must relay the same
+    ///     lines from the same verb output. The rule lived in a private copy in each of them, and the two copies
+    ///     differed by one token, so nothing clustered them: a change to one copy left the other relaying something
+    ///     else, and only a reader would notice. This test runs both paths over one verb output and holds them
+    ///     together.
+    /// </summary>
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("factory")]
+    public void TheUpdateAndTheSquadStepRelayTheSameCapturePluginGuidance(string harness)
+    {
+        string stdout = CapturePluginVerbStdout(harness);
+
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<ReconcileStep> steps = [];
+
+        SelfUpdateOutcome outcome = RunRecording(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            steps,
+            (_, args) => HarnessOf(args) == harness ? new ProcessResult(0, stdout, string.Empty) : QuietSuccess);
+
+        Assert.Equal(0, outcome.ExitCode);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", stdout);
+        KyberDashCapturePluginStep step = new(executor, () => "/fake/bin/kyberdash");
+        CapturedConsoleExecution<CapturePluginStepOutcome> captured = ProcessConsoleCapture.Run(() =>
+            step.Run(TargetOf(harness), harness == "opencode" ? "/fake/opencode" : null, false));
+
+        Assert.Equal(CapturePluginStepOutcome.Completed, captured.Result);
+
+        string[] expected = ExpectedGuidance(harness);
+        Assert.Equal(expected, RelayedGuidance(log));
+        Assert.Equal(expected, RelayedGuidance(captured.Output.Split('\n')));
+        // Neither path relays the verb's chatter, and neither relays the verdict as guidance.
+        Assert.DoesNotContain(log, line => line.Contains("verb chatter", StringComparison.Ordinal));
+        Assert.DoesNotContain(captured.Output, "verb chatter", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The capture-plugin verb's stdout for one harness: a verdict line, two guidance lines, and chatter that is
+    ///     not guidance. The wording after the harness prefix is KyberDash's, so these tests use neutral text.
+    /// </summary>
+    private static string CapturePluginVerbStdout(string harness)
+    {
+        return harness == "opencode"
+            ? "opencode plugin: upgraded /fake/plugins/kyberdash-opencode.js\n" +
+              $"{HarnessPrefix}relayed guidance alpha\n" +
+              $"{HarnessPrefix}relayed guidance beta\n" +
+              "verb chatter that is not guidance\n"
+            : "factory plugin: upgraded /fake/plugins/kyberdash-factory.js\n" +
+              "factory plugin: relayed guidance alpha\n" +
+              "factory plugin: relayed guidance beta\n" +
+              "verb chatter that is not guidance\n";
+    }
+
+    /// <summary>The guidance lines both paths must relay for one harness, in printed order.</summary>
+    private static string[] ExpectedGuidance(string harness)
+    {
+        return harness == "opencode"
+            ? ["relayed guidance alpha", "relayed guidance beta"]
+            : ["factory plugin: relayed guidance alpha", "factory plugin: relayed guidance beta"];
+    }
+
+    /// <summary>The relayed guidance lines in a printed output, in printed order.</summary>
+    private static string[] RelayedGuidance(IEnumerable<string> lines)
+    {
+        return lines
+            .Select(line => line.Trim())
+            .Where(line => line.Contains("relayed guidance", StringComparison.Ordinal))
+            .ToArray();
+    }
+
+    /// <summary>The Squad harness a verb token names.</summary>
+    private static SquadTarget TargetOf(string harness)
+    {
+        return harness == "opencode" ? SquadTarget.OpenCode : SquadTarget.Factory;
     }
 
     /// <summary>A KyberDash that predates the engine verb is a named skip, not a failed update.</summary>

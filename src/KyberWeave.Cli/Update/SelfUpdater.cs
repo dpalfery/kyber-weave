@@ -486,32 +486,8 @@ internal sealed class SelfUpdater : IDisposable
 
         string verdict = FirstLine(result.StandardOutput, string.Empty);
         _log(verdict.Length == 0 ? $"the {name} capture plugin is checked" : verdict);
-        foreach (string guidance in Guidance(harness, result.StandardOutput, verdict))
+        foreach (string guidance in KyberDashGuidance.CapturePluginGuidanceLines(harness, result.StandardOutput, verdict))
             _log(guidance);
-    }
-
-    /// <summary>
-    ///     The guidance the verb printed after its verdict. The OpenCode verb marks every guidance line with its
-    ///     harness prefix and prints other chatter beside them, so only the marked lines are relayed. The Factory
-    ///     verb's stdout is a contract — the plugin line, the consent file and the consent reminder — and every line
-    ///     in it names the plugin, so every line after the verdict is relayed.
-    /// </summary>
-    private static IReadOnlyList<string> Guidance(string harness, string standardOutput, string verdict)
-    {
-        if (harness == "opencode")
-            return KyberDashGuidance.HarnessOpenCodeLines(standardOutput);
-
-        List<string> lines = [];
-        foreach (string raw in standardOutput.Split('\n'))
-        {
-            string line = raw.TrimEnd('\r').Trim();
-            if (line.Length == 0 || line == verdict || !line.StartsWith("factory", StringComparison.Ordinal))
-                continue;
-
-            lines.Add(line);
-        }
-
-        return lines;
     }
 
     /// <summary>The installed kyberdash, beside kyber-weave. Reconciliation never looks on PATH, so it only touches the binary this update installed.</summary>
