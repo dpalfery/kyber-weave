@@ -89,6 +89,17 @@ projection, then `/api/kyber/*`.
   tree afterwards, because a local marketplace's source directory survives the harness's
   removal. Project scope is not used: the capture is per-user, and the owner may work in many
   projects.
+- **The tree is upgraded, not left where it was.** A tree KyberDash wrote, whose bytes still
+  match its receipt, and whose content is not the current bundle is recognised as an **upgrade**:
+  the published tree and its receipt are rewritten, and the harness's **cached copy** — the copy
+  that actually runs — is refreshed with `droid plugin update kyberdash-factory@kyberdash
+  --scope user`. Two harness behaviours make that the exact sequence. `droid plugin install` is
+  **refused** for a plugin that is already installed ("already installed at user scope"), so it
+  is never run against one; and `droid plugin update` **fails without the marketplace
+  registration** ("Marketplace \"kyberdash\" not found"), so the registration is restored first
+  when the harness holds the plugin but not the marketplace. A tree whose bytes the owner
+  changed stays the owner's and is never overwritten, and a tree no receipt proves is not
+  KyberDash's at all.
 - **The wire contract is Factory's own.** Version `1`, the `factory.*` attribute namespace, its
   own span names (`factory.session`, `factory.turn`, `factory.tool`),
   and deterministic id derivations. The OpenCode contract-3 keys are not reused: the OpenCode
