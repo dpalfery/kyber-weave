@@ -164,17 +164,30 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
     /// <summary>Reports one change — or one refusal — as the operator reads it.</summary>
     /// <remarks>
+    /// <para>
     /// Every value here that came out of a file goes through <see cref="TerminalText"/> first. A
     /// server name is written in <c>kyber-weave.yml</c> and a message or hint quotes it, so markup
     /// escaping alone — which only stops a bracket being read as a tag — would leave a control
     /// character to the terminal.
+    /// </para>
+    /// <para>
+    /// The harness and the path are on that list too, and for the same reason rather than a
+    /// different one. A change reported after a removal is read back out of the receipt — local
+    /// state a teammate, a bad merge or an earlier tool can have written — so a path carrying a
+    /// newline forges a second finding line above the operator's next prompt, and a harness carrying
+    /// an escape sequence acts on the console that reads it. They are rendered exactly as
+    /// <see cref="DocsMcpUnwireCommand"/> renders the same two fields on the record it lists: one
+    /// sanitiser for everything this branch writes to a terminal.
+    /// </para>
     /// </remarks>
     internal static void PrintChange(McpWiringFileChange change, bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(change);
 
-        string harness = Markup.Escape(change.Harness);
-        string file = change.Path is null ? "(no repository-scope file)" : Markup.Escape(change.Path);
+        string harness = Markup.Escape(TerminalText.Line(change.Harness));
+        string file = change.Path is null
+            ? "(no repository-scope file)"
+            : Markup.Escape(TerminalText.Line(change.Path));
 
         if (change.Outcome == McpWiringChangeOutcome.Refused)
         {

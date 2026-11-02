@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Mcp;
 using Xunit;
@@ -799,6 +800,44 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     public void ABlockKeepsACrlfPairAsOneLineBreakAndAddsNoIndentation()
     {
         Assert.Equal("a\nb", TerminalText.Block("a\r\nb"));
+    }
+
+    /// <summary>
+    /// The harness name and the path on a reported change come out of the receipt when the change
+    /// describes a write this tool recorded: local state a teammate, a bad merge or an earlier tool
+    /// can have written. A line break in either forges a second finding line above the operator's next
+    /// prompt, and an escape sequence acts on the console. Both are rendered by the same sanitiser
+    /// <see cref="DocsMcpUnwireCommand"/> uses for the receipt records it lists.
+    /// </summary>
+    /// <remarks>
+    /// Rendered unfolded, inside <see cref="CommandHelpers.WriteUnfolded"/>, because that is the
+    /// context both callers of <see cref="DocsMcpWireCommand.PrintChange"/> render it in. A folded
+    /// console breaks at 80 columns by itself, so asserting "one line" outside that scope would fail
+    /// on the wrapping rather than on the forgery this case is about.
+    /// </remarks>
+    [Fact]
+    public void AReceiptSuppliedHarnessNameAndPathCannotForgeALineOrActOnTheConsole()
+    {
+        McpWiringFileChange change = new(
+            Harness: "cursor\r\n  [green]ok[/] forged: wired",
+            Path: "config\u001b[2J\n  [green]ok[/] forged.json",
+            Outcome: McpWiringChangeOutcome.Created,
+            Servers: [ServerName]);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+        {
+            CommandHelpers.WriteUnfolded(() => DocsMcpWireCommand.PrintChange(change, dryRun: true));
+            return 0;
+        });
+
+        Assert.DoesNotContain("\u001b", execution.Output, StringComparison.Ordinal);
+        Assert.Single(
+            execution.Output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+
+        // The escape is gone and the newline is folded into the line it was forging, so the whole
+        // value is on the one line whose subject it is — not on a line of its own.
+        Assert.Contains("forged.json", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("forged: wired", execution.Output, StringComparison.Ordinal);
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
