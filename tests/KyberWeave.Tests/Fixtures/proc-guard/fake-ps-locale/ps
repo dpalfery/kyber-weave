@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Stand-in for `ps`, put first on PATH by a test. It answers the start-time column (`-o lstart=`)
+# the way a localised ps does: the C-locale text only when LC_ALL=C, French otherwise. Every other
+# question goes to the real ps, which prints and exits.
+for argument in "$@"; do
+  if [[ "${argument}" == "lstart=" ]]; then
+    if [[ "${LC_ALL:-}" == "C" ]]; then
+      printf 'Mon Nov  2 10:00:00 2026\n'
+    else
+      printf 'lun. nov.  2 10:00:00 2026\n'
+    fi
+    exit 0
+  fi
+done
+exec "$(PATH=/usr/bin:/bin:/usr/sbin command -v ps)" "$@"

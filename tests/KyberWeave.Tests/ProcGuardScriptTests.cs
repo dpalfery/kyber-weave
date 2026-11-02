@@ -216,6 +216,29 @@ public sealed class ProcGuardScriptTests
             "fast-loop.sh runs these without scripts/proc-guard.sh run --: " + string.Join("; ", unwrapped));
     }
 
+    /// <summary>
+    /// The one full-suite <c>dotnet</c> run in <c>scripts/fast-loop.sh</c> outside the declared gates (the <c>--regenerate</c>
+    /// timing run over the whole test assembly) must take the machine-wide test slot.
+    /// </summary>
+    /// <remarks>
+    /// <c>--full</c> reaches the slot through the <c>test</c> gate, but <c>--regenerate</c> runs the test assembly itself, all
+    /// ~2655 cases, and would otherwise overlap other full runs on the machine. The fast tier and <c>--class</c> runs are
+    /// partial and stay unslotted.
+    /// </remarks>
+    [Fact]
+    public void FastLoopRegenerateTimingRun_TakesTheMachineWideTestSlot()
+    {
+        string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+        string[] regenerateLines = script.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) &&
+                           line.Contains("-xml", StringComparison.Ordinal))
+            .ToArray();
+
+        string line = Assert.Single(regenerateLines);
+        Assert.Contains("--slot dotnet-test", line, StringComparison.Ordinal);
+    }
+
     private static bool IsDotnetTestInvocation(string code)
     {
         string[] tokens = code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);

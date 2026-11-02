@@ -242,6 +242,18 @@
       "bound": "GuardTimeout (20 s) kills the tree. The guard's process table, elapsed-time lookup, and clock are fixtures, so the guard can never examine or signal a live process."
     },
     {
+      "file": "tests/KyberWeave.Tests/ProcGuardSlotTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
+      "count": 1,
+      "bound": "Started by the Run at the end of RunGuard: GuardTimeout (30 s) kills the tree. The guard's process table is a fixture (KW_PROC_GUARD_PS) and its slot directory is a per-test temp directory (--slot-dir). The wrapped command is sh -c \"exit N\", an echo, or a sleep of at most 5 s, so every child exits by itself."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ProcGuardSlotTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GuardTimeout);",
+      "count": 1,
+      "bound": "GuardTimeout (30 s) kills the tree. The guard's process table is a fixture and its slot directory is a temp directory; the wrapped command exits by itself within 5 s."
+    },
+    {
       "file": "tests/KyberWeave.Tests/ProcGuardScriptTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"/bin/bash\")",
       "count": 1,
