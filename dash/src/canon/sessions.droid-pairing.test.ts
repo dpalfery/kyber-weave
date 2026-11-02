@@ -20,8 +20,11 @@
 //   * an unpaired plugin row reads `not_measurable` with a reason — never a
 //     zero, never a value borrowed from another session;
 //   * no token value is ever invented;
-//   * a child session is paired only when the companion file's
-//     `childInclusiveTokenUsageBySessionId` names it;
+//   * a Factory child session is a session of its own on disk — its own
+//     transcript file and its own companion settings file — so the file
+//     source discovers it as its own session and pairs it on its own session
+//     id; the parent's `childInclusiveTokenUsageBySessionId` map is the
+//     parent's aggregate view of its children, never a token source;
 //   * the two sources own different halves of a paired session: the plugin
 //     row supplies the turns and the session's structure, the file row
 //     supplies the counters and their availability, and the cost of both is
@@ -55,9 +58,9 @@ const SESSION_ID = 'factory-session-1'
 const PLUGIN_ONLY_SESSION_ID = 'factory-session-plugin-only'
 /** A session id one character away from the file row's — the near miss. */
 const NEAR_MISS_SESSION_ID = `${SESSION_ID}-2`
-/** The child session the companion file names. */
+/** The child session that has a companion settings file of its own. */
 const CHILD_SESSION_ID = 'factory-child-1'
-/** A child session the companion file does not name. */
+/** A child session whose own companion settings file reports no usage. */
 const UNMAPPED_CHILD_SESSION_ID = 'factory-child-unmapped'
 
 /** The counters the companion file reports for the parent session. */
@@ -89,6 +92,13 @@ const FILE_SESSION_OUTPUT = FILE_OUTPUT + FILE_THINKING
 /** The same derivation for the child session's own usage. */
 const CHILD_SESSION_INPUT = CHILD_INPUT + CHILD_CACHE_READ + CHILD_CACHE_CREATION
 const CHILD_SESSION_OUTPUT = CHILD_OUTPUT + CHILD_THINKING
+
+/**
+ * The session totals the parent's aggregate view of a child produces: the
+ * parent's own totals together with the child's.
+ */
+const AGGREGATE_SESSION_INPUT = FILE_SESSION_INPUT + CHILD_SESSION_INPUT
+const AGGREGATE_SESSION_OUTPUT = FILE_SESSION_OUTPUT + CHILD_SESSION_OUTPUT
 
 /** The telemetry source the Kyber-owned Factory plugin's export arrives under. */
 const PLUGIN_SOURCE = 'kyberdash-droid-plugin'
@@ -165,7 +175,7 @@ function parentTokenUsage(): Record<string, number> {
   }
 }
 
-/** The companion settings file's counters for the child session. */
+/** The child session's own companion settings file's counters. */
 function childTokenUsage(): Record<string, number> {
   return {
     inputTokens: CHILD_INPUT,
@@ -173,6 +183,24 @@ function childTokenUsage(): Record<string, number> {
     cacheCreationTokens: CHILD_CACHE_CREATION,
     cacheReadTokens: CHILD_CACHE_READ,
     thinkingTokens: CHILD_THINKING,
+  }
+}
+
+/**
+ * The counters the PARENT's companion file carries in its child-usage map.
+ *
+ * The map is the parent's aggregate view of its children — the parent's own
+ * totals together with the child's — so the figures it holds are neither the
+ * parent's own nor the child's own, and a child that read its counters out of
+ * the map would report the aggregate.
+ */
+function parentAggregateChildTokenUsage(): Record<string, number> {
+  return {
+    inputTokens: FILE_INPUT + CHILD_INPUT,
+    outputTokens: FILE_OUTPUT + CHILD_OUTPUT,
+    cacheCreationTokens: FILE_CACHE_CREATION + CHILD_CACHE_CREATION,
+    cacheReadTokens: FILE_CACHE_READ + CHILD_CACHE_READ,
+    thinkingTokens: FILE_THINKING + CHILD_THINKING,
   }
 }
 
@@ -483,12 +511,22 @@ describe('the Factory session pairing rule', () => {
 })
 
 describe('the Factory child session pairing rule', () => {
-  it('pairs a child session the companion file names with that child own usage', async () => {
+  it('pairs a child session with the child own companion file, so the child carries the child own usage', async () => {
+    // The parent session is written the way Factory writes it: its own
+    // transcript, its own companion settings file, and the child-usage map
+    // that file carries as the parent's aggregate view of its children. The
+    // map is not a token source.
     await writeFactorySession(SESSION_ID, {
       model: MODEL,
       tokenUsage: parentTokenUsage(),
-      childInclusiveTokenUsageBySessionId: { [CHILD_SESSION_ID]: childTokenUsage() },
+      childInclusiveTokenUsageBySessionId: { [CHILD_SESSION_ID]: parentAggregateChildTokenUsage() },
     })
+
+    // The child session is a session of its own on disk, exactly like any
+    // other Factory session: its own transcript file, whose session_start
+    // names the child session id, and its own companion settings file,
+    // carrying the child's own counters.
+    await writeFactorySession(CHILD_SESSION_ID, { model: MODEL, tokenUsage: childTokenUsage() })
 
     const store = new CanonStore(':memory:')
     try {
@@ -496,31 +534,79 @@ describe('the Factory child session pairing rule', () => {
         [
           pluginChildSpan(CHILD_SESSION_ID, SESSION_ID),
           pluginTurnSpan(CHILD_SESSION_ID, '2026-04-20T10:00:04.000Z'),
+          pluginTurnSpan(SESSION_ID, '2026-04-20T10:00:03.000Z'),
         ],
         store,
         [droidAdapter],
       )
-      store.upsertMany([await fileRow(SESSION_ID)])
+      store.upsertMany([await fileRow(SESSION_ID), await fileRow(CHILD_SESSION_ID)])
 
       await buildSessions(store)
 
-      // The child session carries the child's own usage, read from the
-      // companion file's child map — never the parent's counters.
+      // Two sessions, not one: the child is a session of its own, and the
+      // file source discovered it as one.
+      expect(store.sessionCount()).toBe(2)
+
+      // The child session is paired with the child's OWN usage, read from
+      // the child's own companion file.
       expect(store.sessionTokenTotals(CHILD_SESSION_ID)).toEqual({
         input: CHILD_SESSION_INPUT,
         output: CHILD_SESSION_OUTPUT,
       })
+      const child = summaryOf(store, CHILD_SESSION_ID)
+      expect(child.total_input).toBe(CHILD_SESSION_INPUT)
+      expect(child.total_output).toBe(CHILD_SESSION_OUTPUT)
+
+      // And the child never shows the parent's counters, nor the aggregate
+      // the parent's child-usage map carries.
+      expect(child.total_input).not.toBe(FILE_SESSION_INPUT)
+      expect(child.total_output).not.toBe(FILE_SESSION_OUTPUT)
+      expect(child.total_input).not.toBe(AGGREGATE_SESSION_INPUT)
+      expect(child.total_output).not.toBe(AGGREGATE_SESSION_OUTPUT)
+
+      // The parent's own counters are unaffected by the child's presence:
+      // the parent's session still carries the parent's own usage, not the
+      // child's and not a sum of both.
+      expect(store.sessionTokenTotals(SESSION_ID)).toEqual({
+        input: FILE_SESSION_INPUT,
+        output: FILE_SESSION_OUTPUT,
+      })
+      const parent = summaryOf(store, SESSION_ID)
+      expect(parent.total_input).toBe(FILE_SESSION_INPUT)
+      expect(parent.total_output).toBe(FILE_SESSION_OUTPUT)
+      expect(parent.total_input).not.toBe(CHILD_SESSION_INPUT)
+      expect(parent.total_output).not.toBe(CHILD_SESSION_OUTPUT)
+      expect(parent.total_input).not.toBe(AGGREGATE_SESSION_INPUT)
+      expect(parent.total_output).not.toBe(AGGREGATE_SESSION_OUTPUT)
     } finally {
       store.close()
     }
   })
 
-  it('reads a child session the companion file does not name as not measurable, with a reason', async () => {
+  it('reads a child session whose own companion file reports no usage as not measurable, with a reason', async () => {
+    // The parent's companion file names that child in its child-usage map,
+    // and the map holds figures that are not the child's own. The map is the
+    // parent's aggregate view, not a token source.
     await writeFactorySession(SESSION_ID, {
       model: MODEL,
       tokenUsage: parentTokenUsage(),
-      childInclusiveTokenUsageBySessionId: { [CHILD_SESSION_ID]: childTokenUsage() },
+      childInclusiveTokenUsageBySessionId: { [UNMAPPED_CHILD_SESSION_ID]: parentAggregateChildTokenUsage() },
     })
+
+    // The child session is on disk as a session of its own, but its own
+    // companion settings file reports no usage, so the file source measures
+    // nothing for it.
+    await writeFactorySession(UNMAPPED_CHILD_SESSION_ID, { model: MODEL })
+
+    // The file source DISCOVERS that child — it is a session of its own on
+    // disk — so what leaves the child unmeasurable is its own companion file
+    // reporting no usage, not the child being invisible to the file source.
+    const provider = createDroidProvider()
+    const discovered = await provider.discoverSessions()
+    expect(
+      discovered.some((candidate) => candidate.path.endsWith(`/${UNMAPPED_CHILD_SESSION_ID}.jsonl`)),
+      'the file source discovered the child session on disk',
+    ).toBe(true)
 
     const store = new CanonStore(':memory:')
     try {
@@ -536,17 +622,31 @@ describe('the Factory child session pairing rule', () => {
 
       await buildSessions(store)
 
-      // The companion file names no such child, so nothing pairs it: it
-      // reads not measurable with a reason, and never borrows the parent's
-      // or the named child's counters.
+      // Nothing measured the child, so it reads not measurable with a
+      // reason, exactly as any other session that measured nothing: no
+      // total at all, and a declaration that says so.
       expect(store.sessionTokenTotals(UNMAPPED_CHILD_SESSION_ID)).toBeUndefined()
       const summary = summaryOf(store, UNMAPPED_CHILD_SESSION_ID)
       expect(typeof summary.total_input).not.toBe('number')
-      expect(summary.total_input).not.toBe(FILE_SESSION_INPUT)
-      expect(summary.total_input).not.toBe(CHILD_SESSION_INPUT)
+      expect(typeof summary.total_output).not.toBe('number')
       const reason = reasonOf(summary.total_input)
       expect(reason).toMatch(/droid/i)
       expect(reason).toMatch(/token/i)
+
+      // It borrows nothing: not the parent's counters, not the child's own
+      // counters, and not the aggregate the parent's map carries. The
+      // parent's own totals are untouched by the child that measured
+      // nothing.
+      expect(summary.total_input).not.toBe(FILE_SESSION_INPUT)
+      expect(summary.total_output).not.toBe(FILE_SESSION_OUTPUT)
+      expect(summary.total_input).not.toBe(CHILD_SESSION_INPUT)
+      expect(summary.total_output).not.toBe(CHILD_SESSION_OUTPUT)
+      expect(summary.total_input).not.toBe(AGGREGATE_SESSION_INPUT)
+      expect(summary.total_output).not.toBe(AGGREGATE_SESSION_OUTPUT)
+      expect(store.sessionTokenTotals(SESSION_ID)).toEqual({
+        input: FILE_SESSION_INPUT,
+        output: FILE_SESSION_OUTPUT,
+      })
     } finally {
       store.close()
     }
