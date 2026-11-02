@@ -1,7 +1,7 @@
 // The Factory (Droid) plugin span envelope.
 //
-// The Kyber-owned Factory plugin emits one span per session, turn, tool call
-// and child session, with their identity under the `factory.*` namespace
+// The Kyber-owned Factory plugin emits one span per session, turn and tool
+// call, with their identity under the `factory.*` namespace
 // (`factory.session.id`, `factory.model.id`, `factory.tool.name`, and the
 // contract it was emitted under in `factory.contract_version`). Every envelope
 // span names that contract version. Ingest claims an envelope span only when
