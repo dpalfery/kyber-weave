@@ -1,0 +1,287 @@
+// The native OpenTelemetry export's EFFECTIVE SHAPE.
+//
+// Factory's native export sends what its SHAPE says it sends: the format decides which
+// metric catalog arrives (`droid.*` under `legacy`, `gen_ai.*` under `genai` — the two
+// replace each other and do not stack), the granularity decides whether the legacy format
+// produces spans at all, and the message-content switch decides whether content-bearing
+// spans are produced. An endpoint that points at this receiver says none of that: it says
+// where the traffic goes, not what is in it.
+//
+// The shape is configured in two places, and the two places do NOT follow one rule:
+//
+//   - the FORMAT follows precedence: the organisation's `telemetry.format` wins, and where
+//     the organisation sets it the machine's `OTEL_TELEMETRY_FORMAT` is not read at all.
+//     Anything unrecognised resolves to `legacy`.
+//   - the GRANULARITY follows most-restrictive-wins: `aggregate` beats `user`, whichever
+//     level each of them came from.
+//   - the MESSAGE-CONTENT switch follows precedence for the organisation's
+//     `telemetry.logMessageContent` — when it is set at all, the machine's
+//     `OTEL_LOG_MESSAGE_CONTENT` does not decide — and the granularity overrides both:
+//     `aggregate` overrides every content opt-in.
+//
+// The organisation's block is read from the same two managed-settings views the endpoint is
+// read from — the cached organisation settings under the Factory root and the system-managed
+// copy — and never from the owner's own settings file.
+//
+// Every path here is under a temporary home and the environment is injected, so the
+// machine's own settings are never reached.
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { readNativeExport, type NativeExportSources } from './native-export.js'
+
+const tempDirs: string[] = []
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+type Fixture = {
+  /** The reader's sources: the Factory root, the home and the platform. */
+  sources: NativeExportSources
+  /** The Factory root: the organisation-settings cache lives under it. */
+  root: string
+}
+
+/** The shape of an export nothing configures: the documented defaults. */
+const DEFAULT_SHAPE = {
+  format: { value: 'legacy', source: 'default' },
+  granularity: { value: 'user', source: 'default' },
+  content: { value: false, source: 'default' },
+}
+
+function fixture(prefix: string): Fixture {
+  const home = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(home)
+  const root = join(home, '.factory')
+  mkdirSync(root, { recursive: true })
+  return { sources: { factoryRoot: root, home, platform: process.platform }, root }
+}
+
+/** The directory the system-managed organisation settings live in, under the given home. */
+function systemManagedDir(home: string, platform: NodeJS.Platform): string {
+  if (platform === 'win32') return join(home, 'AppData', 'Roaming', 'Factory')
+  if (platform === 'linux') return join(home, 'etc', 'factory')
+  return join(home, 'Library', 'Application Support', 'Factory')
+}
+
+/**
+ * The organisation's managed settings, as the machine holds them. The `telemetry` block
+ * pins the sink for every member of the organisation, and it reaches the machine both as
+ * the cached view under the Factory root and as the system-managed copy. Both are written
+ * with the same block, so the fixture does not depend on which of the two the reader
+ * consults — and the machine's own organisation settings are never read.
+ */
+function writeOrgTelemetry(f: Fixture, telemetry: Record<string, unknown>): void {
+  writeFileSync(
+    join(f.root, 'org-managed-settings.cache.json'),
+    `${JSON.stringify(
+      {
+        orgId: 'org-test',
+        userId: 'user-test',
+        managedSettings: { telemetry },
+        factoryTier: 'team_annual',
+        revision: 1,
+        cachedAt: 0,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  const dir = systemManagedDir(f.sources.home, f.sources.platform)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'settings.json'), `${JSON.stringify({ telemetry }, null, 2)}\n`)
+}
+
+/** The system-managed copy alone: the machine that holds no cached organisation view. */
+function writeSystemTelemetry(f: Fixture, telemetry: Record<string, unknown>): void {
+  const dir = systemManagedDir(f.sources.home, f.sources.platform)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'settings.json'), `${JSON.stringify({ telemetry }, null, 2)}\n`)
+}
+
+/** The reader, with the machine environment injected rather than read from the shell. */
+function read(f: Fixture, processEnv: NodeJS.ProcessEnv = {}) {
+  return readNativeExport(f.sources, { processEnv })
+}
+
+describe("the native export's effective shape", () => {
+  it('reads the format from the machine variable when the organisation pins none', () => {
+    const f = fixture('factory-shape-format-machine-')
+
+    expect(read(f, { OTEL_TELEMETRY_FORMAT: 'genai' }).shape).toEqual({
+      format: { value: 'genai', source: 'OTEL_TELEMETRY_FORMAT' },
+      granularity: { value: 'user', source: 'default' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it('resolves an unrecognised machine format to legacy', () => {
+    const f = fixture('factory-shape-format-unknown-')
+
+    expect(read(f, { OTEL_TELEMETRY_FORMAT: 'otel' }).shape).toEqual(DEFAULT_SHAPE)
+  })
+
+  it("resolves the organisation's format over the machine variable", () => {
+    const f = fixture('factory-shape-format-organisation-')
+    writeOrgTelemetry(f, { format: 'genai' })
+
+    expect(read(f, { OTEL_TELEMETRY_FORMAT: 'legacy' }).shape).toEqual({
+      format: { value: 'genai', source: 'organisation' },
+      granularity: { value: 'user', source: 'default' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it("resolves the organisation's format even when it names an unrecognised value", () => {
+    const f = fixture('factory-shape-format-organisation-unknown-')
+    writeOrgTelemetry(f, { format: 'otel' })
+
+    // The organisation pinned the format, so the machine's variable is not read at all and
+    // the unrecognised value resolves to legacy.
+    expect(read(f, { OTEL_TELEMETRY_FORMAT: 'genai' }).shape).toEqual({
+      format: { value: 'legacy', source: 'organisation' },
+      granularity: { value: 'user', source: 'default' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it('reads the granularity from the machine variable', () => {
+    const f = fixture('factory-shape-granularity-machine-')
+
+    expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'aggregate' }).shape).toEqual({
+      format: { value: 'legacy', source: 'default' },
+      granularity: { value: 'aggregate', source: 'OTEL_TELEMETRY_GRANULARITY' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it('resolves the granularity most-restrictive-wins: an aggregate machine value beats an organisation that pins user', () => {
+    const f = fixture('factory-shape-granularity-machine-aggregate-')
+    writeOrgTelemetry(f, { granularity: 'user' })
+
+    expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'aggregate' }).shape).toEqual({
+      format: { value: 'legacy', source: 'default' },
+      granularity: { value: 'aggregate', source: 'OTEL_TELEMETRY_GRANULARITY' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it('resolves the granularity most-restrictive-wins: an organisation that pins aggregate beats a machine that pins user', () => {
+    const f = fixture('factory-shape-granularity-organisation-aggregate-')
+    writeOrgTelemetry(f, { granularity: 'aggregate' })
+
+    expect(read(f, { OTEL_TELEMETRY_GRANULARITY: 'user' }).shape).toEqual({
+      format: { value: 'legacy', source: 'default' },
+      granularity: { value: 'aggregate', source: 'organisation' },
+      content: { value: false, source: 'default' },
+    })
+  })
+
+  it('reads the message-content switch from the machine variable', () => {
+    const f = fixture('factory-shape-content-machine-')
+
+    expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: 'true' }).shape).toEqual({
+      format: { value: 'legacy', source: 'default' },
+      granularity: { value: 'user', source: 'default' },
+      content: { value: true, source: 'OTEL_LOG_MESSAGE_CONTENT' },
+    })
+  })
+
+  it('reads the message-content switch from the machine variable set to 1', () => {
+    const f = fixture('factory-shape-content-machine-one-')
+
+    expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: '1' }).shape.content).toEqual({
+      value: true,
+      source: 'OTEL_LOG_MESSAGE_CONTENT',
+    })
+  })
+
+  it("resolves the organisation's message-content switch over the machine variable that turns content on", () => {
+    const f = fixture('factory-shape-content-organisation-off-')
+    writeOrgTelemetry(f, { logMessageContent: false })
+
+    expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: 'true' }).shape.content).toEqual({
+      value: false,
+      source: 'organisation',
+    })
+  })
+
+  it("resolves the organisation's message-content switch over a machine variable that says nothing", () => {
+    const f = fixture('factory-shape-content-organisation-on-')
+    writeOrgTelemetry(f, { logMessageContent: true })
+
+    expect(read(f, {}).shape.content).toEqual({ value: true, source: 'organisation' })
+  })
+
+  it('lets the aggregate granularity override every content opt-in', () => {
+    const f = fixture('factory-shape-content-aggregate-')
+    writeOrgTelemetry(f, { granularity: 'aggregate', logMessageContent: true })
+
+    expect(read(f, { OTEL_LOG_MESSAGE_CONTENT: 'true' }).shape).toEqual({
+      format: { value: 'legacy', source: 'default' },
+      granularity: { value: 'aggregate', source: 'organisation' },
+      content: { value: false, source: 'granularity' },
+    })
+  })
+
+  it("ignores a telemetry block in the owner's own settings file", () => {
+    const f = fixture('factory-shape-owner-settings-')
+    writeFileSync(
+      join(f.root, 'settings.json'),
+      `${JSON.stringify({ telemetry: { format: 'genai', granularity: 'aggregate', logMessageContent: true } })}\n`,
+    )
+
+    // The block is read from the organisation level only; the owner's file decides nothing.
+    expect(read(f, {}).shape).toEqual(DEFAULT_SHAPE)
+  })
+
+  it('reads the organisation shape from the system-managed copy when the cache carries none', () => {
+    const f = fixture('factory-shape-system-copy-')
+    writeSystemTelemetry(f, { format: 'genai' })
+
+    expect(read(f, {}).shape.format).toEqual({ value: 'genai', source: 'organisation' })
+  })
+})
+
+describe('the native export verdict the shape travels with', () => {
+  it('names the endpoint variable it read, before the documented fallback', () => {
+    const f = fixture('factory-verdict-endpoint-variable-')
+
+    expect(
+      read(f, {
+        OTEL_TELEMETRY_ENDPOINT: 'http://127.0.0.1:4318',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel.example.com:4318',
+      }),
+    ).toMatchObject({ state: 'available', source: 'OTEL_TELEMETRY_ENDPOINT' })
+  })
+
+  it('falls back to the documented endpoint variable when the first is unset', () => {
+    const f = fixture('factory-verdict-endpoint-fallback-')
+
+    expect(read(f, { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318' })).toMatchObject({
+      state: 'available',
+      source: 'OTEL_EXPORTER_OTLP_ENDPOINT',
+    })
+  })
+
+  it('names the organisation as the cause when it pins the endpoint', () => {
+    const f = fixture('factory-verdict-organisation-pin-')
+    writeOrgTelemetry(f, { endpoint: 'https://otlp.acme.example' })
+
+    expect(read(f, { OTEL_TELEMETRY_ENDPOINT: 'http://127.0.0.1:4318' })).toMatchObject({
+      state: 'unavailable',
+      source: 'organisation',
+      cause: 'organisation-pinned',
+    })
+  })
+
+  it('reports not configured when nothing configures the export', () => {
+    const f = fixture('factory-verdict-unset-')
+
+    expect(read(f, {}).state).toBe('not-configured')
+  })
+})

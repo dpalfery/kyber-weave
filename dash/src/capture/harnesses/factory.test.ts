@@ -135,25 +135,28 @@ function writeConsent(f: Fixture, content: boolean): void {
 const RECEIVER_ADDRESS = DEFAULT_CAPTURE_ENDPOINT.replace(/^https?:\/\//, '')
 
 /**
- * The machine environment variable Factory's native export reads, and the documented
- * fallback beside it. Both are stubbed, so the developer's own shell cannot decide the
- * fixture and the fallback cannot answer for the variable.
+ * The machine environment Factory's native export reads: the endpoint variable and its
+ * documented fallback, and the three that carry the export's shape. All of them are
+ * stubbed, so the developer's own shell cannot decide the fixture and the fallback cannot
+ * answer for the variable.
  */
-function setNativeEndpoint(endpoint: string | undefined): void {
+function setNativeEnv(endpoint: string | undefined): void {
   vi.stubEnv('OTEL_TELEMETRY_ENDPOINT', endpoint)
   vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', undefined)
+  vi.stubEnv('OTEL_TELEMETRY_FORMAT', undefined)
+  vi.stubEnv('OTEL_TELEMETRY_GRANULARITY', undefined)
+  vi.stubEnv('OTEL_LOG_MESSAGE_CONTENT', undefined)
 }
 
 /**
  * The organisation's managed settings, as the machine holds them. The organisation's
- * `telemetry` block pins the endpoint and OVERRIDES the machine environment variable; it
- * reaches the machine both as the cached view under the Factory root and as the
- * system-managed file. Both are written here, under the temporary home, carrying the same
- * endpoint, so the fixture never depends on which of the two the reader consults — and
- * the machine's own organisation settings are never read.
+ * `telemetry` block pins the sink for every member of the organisation and OVERRIDES the
+ * machine environment variable; it reaches the machine both as the cached view under the
+ * Factory root and as the system-managed file. Both are written here, under the temporary
+ * home, carrying the same block, so the fixture never depends on which of the two the
+ * reader consults — and the machine's own organisation settings are never read.
  */
-function writeOrgTelemetry(home: string, root: string, endpoint: string): void {
-  const telemetry = { endpoint }
+function writeOrgTelemetry(home: string, root: string, telemetry: Record<string, unknown>): void {
   mkdirSync(root, { recursive: true })
   writeFileSync(
     join(root, 'org-managed-settings.cache.json'),
@@ -216,6 +219,32 @@ function nativeText(lines: readonly string[]): string {
  */
 function workingClaim(text: string): string {
   return text.replace(/\bunavailable\b/gi, '').replace(/\bnot\s+available\b/gi, '')
+}
+
+/**
+ * The row's own line about the export's effective shape: the format, the granularity and
+ * the message-content switch, each with the source it came from. A row that names the
+ * endpoint but not the shape is the defect these tests exist to catch, so the helper fails
+ * loudly instead of returning an empty string.
+ */
+function shapeText(lines: readonly string[]): string {
+  const found = lines.filter((line) => /\bshape\b/i.test(line))
+  if (found.length === 0) {
+    throw new Error(`the row does not name the export's shape: ${JSON.stringify(lines)}`)
+  }
+  return found.join('\n')
+}
+
+/**
+ * The row's own line about what KyberDash does with the export: the metrics, the spans and
+ * the content, in fixed words.
+ */
+function consequenceText(lines: readonly string[]): string {
+  const found = lines.filter((line) => /persisted/i.test(line))
+  if (found.length === 0) {
+    throw new Error(`the row does not say what KyberDash does with the export: ${JSON.stringify(lines)}`)
+  }
+  return found.join('\n')
 }
 
 /** The Factory row as `capture status` prints it. */
@@ -380,52 +409,136 @@ describe('the Factory (Droid) capture writer', () => {
 describe('the Factory row and the native OpenTelemetry export', () => {
   it('reports the native export as available when the machine variable points at this receiver', async () => {
     const f = fixture('factory-avail-')
-    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
 
-    const text = nativeText(await printedStatus(f.home))
+    const lines = await printedStatus(f.home)
+    const text = nativeText(lines)
 
     expect(text).toMatch(/\bavailable\b/i)
     expect(text).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
     // The row says which endpoint the native export is pointed at.
     expect(text).toContain(RECEIVER_ADDRESS)
+    // And it names the shape of what the export sends, not only where it sends it.
+    const shape = shapeText(lines)
+    expect(shape).toMatch(/format\s+legacy/i)
+    expect(shape).toMatch(/granularity\s+user/i)
+    expect(shape).toMatch(/message content\s+off/i)
   })
 
   it('reports the native export as unavailable when the machine variable points elsewhere', async () => {
     const f = fixture('factory-elsewhere-')
-    setNativeEndpoint('http://otel.example.com:4318')
+    setNativeEnv('http://otel.example.com:4318')
 
-    const text = nativeText(await printedStatus(f.home))
+    const lines = await printedStatus(f.home)
+    const text = nativeText(lines)
 
     expect(text).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
     // The reason names that the endpoint points somewhere other than this receiver.
     expect(text).toMatch(/\bpoint(s|ed|ing)?\b|\belsewhere\b|\bother\b|\bdifferent\b|\bnot\b/i)
+    // The shape is reported even when the endpoint is not this receiver.
+    const shape = shapeText(lines)
+    expect(shape).toMatch(/format\s+legacy/i)
+    expect(shape).toMatch(/granularity\s+user/i)
+    expect(shape).toMatch(/message content\s+off/i)
   })
 
   it('reports the native export as unavailable and names the organisation that pins it', async () => {
     const f = fixture('factory-orgpin-')
     // The machine variable is set correctly, and the organisation's pinned endpoint
     // overrides it: the organisation's endpoint is the one that receives the traffic.
-    setNativeEndpoint(DEFAULT_CAPTURE_ENDPOINT)
-    writeOrgTelemetry(f.home, f.root, 'https://otlp.acme.example')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    writeOrgTelemetry(f.home, f.root, { endpoint: 'https://otlp.acme.example' })
 
-    const text = nativeText(await printedStatus(f.home))
+    const lines = await printedStatus(f.home)
+    const text = nativeText(lines)
 
     expect(text).toMatch(/\bunavailable\b|\bnot\s+available\b/i)
     // The cause is named: an organisation-pinned endpoint, not the machine variable.
     expect(text).toMatch(/\borgani[sz]ation\b|\borg-managed\b|\bmanaged settings\b|\benterprise\b/i)
     // Never reported as working, whatever the machine variable says.
     expect(workingClaim(text)).not.toMatch(/\bavailable\b/i)
+    // The organisation's pin does not decide the shape: it pinned no shape of its own.
+    const shape = shapeText(lines)
+    expect(shape).toMatch(/format\s+legacy/i)
+    expect(shape).toMatch(/granularity\s+user/i)
   })
 
   it('reports the native export as not configured when nothing configures it', async () => {
     const f = fixture('factory-unset-')
-    setNativeEndpoint(undefined)
+    setNativeEnv(undefined)
 
-    const text = nativeText(await printedStatus(f.home))
+    const lines = await printedStatus(f.home)
+    const text = nativeText(lines)
 
     // "Not configured" is its own verdict: neither working, nor unavailable for a reason.
     expect(text).toMatch(/\bnot\s+configured\b/i)
     expect(text).not.toMatch(/\bunavailable\b|\bnot\s+available\b/i)
     expect(workingClaim(text)).not.toMatch(/\bavailable\b/i)
+    // The shape is reported even when nothing configures the export: the defaults are what
+    // such an export would send, and the row says where each of them came from.
+    const shape = shapeText(lines)
+    expect(shape).toMatch(/format\s+legacy/i)
+    expect(shape).toMatch(/granularity\s+user/i)
+    expect(shape).toMatch(/message content\s+off/i)
+  })
+
+  it("reports the organisation's format over the machine's format variable", async () => {
+    const f = fixture('factory-shape-format-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_TELEMETRY_FORMAT', 'legacy')
+    writeOrgTelemetry(f.home, f.root, { format: 'genai' })
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    // The organisation's block wins, and the row names it as the source.
+    expect(shape).toMatch(/format\s+genai/i)
+    expect(shape).toMatch(/\borgani[sz]ation\b/i)
+  })
+
+  it('reports the granularity most-restrictive-wins: an aggregate machine value beats an organisation that pins user', async () => {
+    const f = fixture('factory-shape-granularity-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_TELEMETRY_GRANULARITY', 'aggregate')
+    writeOrgTelemetry(f.home, f.root, { granularity: 'user' })
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    expect(shape).toMatch(/granularity\s+aggregate/i)
+    expect(shape).toMatch(/OTEL_TELEMETRY_GRANULARITY/)
+  })
+
+  it('reports that the aggregate granularity overrides the message-content opt-in', async () => {
+    const f = fixture('factory-shape-content-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    vi.stubEnv('OTEL_LOG_MESSAGE_CONTENT', 'true')
+    writeOrgTelemetry(f.home, f.root, { granularity: 'aggregate', logMessageContent: true })
+
+    const shape = shapeText(await printedStatus(f.home))
+
+    expect(shape).toMatch(/granularity\s+aggregate/i)
+    expect(shape).toMatch(/message content\s+off/i)
+  })
+
+  it('states that the native metrics are persisted, that no native span is claimed, and that no Factory content is stored while the consent is off', async () => {
+    const f = fixture('factory-consequence-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+
+    const consequence = consequenceText(await printedStatus(f.home))
+
+    expect(consequence).toMatch(/native metrics are persisted/i)
+    expect(consequence).toMatch(/native spans are not claimed/i)
+    expect(consequence).toMatch(/no Factory content is stored while KyberDash's consent is off/i)
+  })
+
+  it('states the content consequence from the consent file, not from an inference', async () => {
+    const f = fixture('factory-consent-on-')
+    setNativeEnv(DEFAULT_CAPTURE_ENDPOINT)
+    writeConsent(f, true)
+
+    const consequence = consequenceText(await printedStatus(f.home))
+
+    // The consent is on, so the row does not claim that no content is stored.
+    expect(consequence).toMatch(/Factory content is stored while KyberDash's consent is on/i)
+    expect(consequence).not.toMatch(/no Factory content is stored/i)
   })
 })
