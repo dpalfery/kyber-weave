@@ -453,7 +453,8 @@ internal sealed class SelfUpdater : IDisposable
         string kyberdash = InstalledKyberDash(windows);
         if (!File.Exists(kyberdash))
         {
-            _log($"kyberdash is not installed in {_host.InstallDirectory}; leaving the {name} capture plugin unchanged");
+            _log(
+                $"kyberdash is not installed in {_host.InstallDirectory}; leaving the {name} capture plugin unchanged");
             return;
         }
 
