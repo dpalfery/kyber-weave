@@ -35,6 +35,7 @@ import {
   readNativeExport,
   type NativeExportShape,
   type NativeExportShapeSource,
+  type NativeExportSwitch,
   type NativeExportVerdict,
 } from './factory-plugin/native-export.js'
 import { resolveFactoryHarnessCli, FACTORY_MARKETPLACE_MANIFEST } from './factory-plugin/marketplace.js'
@@ -130,17 +131,54 @@ function shapeSource(source: NativeExportShapeSource): string {
 }
 
 /**
- * The export's EFFECTIVE SHAPE: the format, the granularity and the message-content switch,
- * each with the source it came from.
+ * The source of a resolved switch, in the words the row prints. A switch whose source
+ * carried a value that could not be read says so: the source's name alone would read as
+ * that source having pinned the value the row reports.
+ */
+function switchSourceWords(sw: NativeExportSwitch<string | boolean>): string {
+  if (sw.unreadable === true) {
+    return `${shapeSource(sw.source)} carries a value that cannot be read, so the restrictive value applies`
+  }
+  return shapeSource(sw.source)
+}
+
+/**
+ * The enabled switch's words in the shape line.
  *
- * The endpoint says where the export sends; the shape says what it sends. The format picks
- * the metric catalog, the granularity decides whether the legacy format produces spans at
- * all, and the content switch decides whether content-bearing spans are produced — so a row
- * that named only the endpoint could read as "the native path works" while the export is
- * pinned to a shape KyberDash does not read.
+ * The switch is the export's master switch, so the row says what it does to the export and
+ * not only the key's value: the verdict beside it talks about where the endpoint POINTS,
+ * and a reader must not read a pointed endpoint as a running export. The organisation's
+ * `false` therefore reads as the export being switched off, with the organisation named as
+ * the cause — the same fixed words the endpoint's own cause uses.
+ */
+function enabledSourceWords(sw: NativeExportSwitch<boolean>): string {
+  if (sw.unreadable === true) {
+    return `${shapeSource(sw.source)} carries a value that cannot be read, so the export is switched off`
+  }
+  if (sw.source === 'organisation') {
+    return sw.value
+      ? "the organisation's telemetry block keeps the export on"
+      : "the organisation's telemetry block switches the export off"
+  }
+  if (sw.source === 'default') return 'the export is on by the documented default'
+  return sw.value
+    ? `the machine's ${sw.source} variable keeps the export on`
+    : `the machine's ${sw.source} variable switches the export off`
+}
+
+/**
+ * The export's EFFECTIVE SHAPE: the enabled switch, the format, the granularity and the
+ * message-content switch, each with the source it came from.
+ *
+ * The endpoint says where the export sends; the shape says what it sends. The enabled
+ * switch says whether it sends anything at all, the format picks the metric catalog, the
+ * granularity decides whether the legacy format produces spans at all, and the content
+ * switch decides whether content-bearing spans are produced — so a row that named only the
+ * endpoint could read as "the native path works" while the export is pinned to a shape
+ * KyberDash does not read.
  */
 function nativeExportShapeLine(shape: NativeExportShape): string {
-  return `native OpenTelemetry export shape: format ${shape.format.value} (${shapeSource(shape.format.source)}), granularity ${shape.granularity.value} (${shapeSource(shape.granularity.source)}), message content ${shape.content.value ? 'on' : 'off'} (${shapeSource(shape.content.source)})`
+  return `native OpenTelemetry export shape: enabled ${shape.enabled.value ? 'on' : 'off'} (${enabledSourceWords(shape.enabled)}), format ${shape.format.value} (${shapeSource(shape.format.source)}), granularity ${shape.granularity.value} (${switchSourceWords(shape.granularity)}), message content ${shape.content.value ? 'on' : 'off'} (${switchSourceWords(shape.content)})`
 }
 
 /**
@@ -150,13 +188,30 @@ function nativeExportShapeLine(shape: NativeExportShape): string {
  * The consent is KyberDash's own (`~/.kyberdash/factory-plugin.json`) and it is READ here,
  * not inferred from the shape: the export's own content switch says what Factory sends, and
  * the consent says what KyberDash is allowed to keep.
+ *
+ * The words name the CAPTURE, not "Factory content": the consent governs the capture
+ * plugin's prompt text and nothing else, so a sentence about "Factory content" would be a
+ * claim about the whole store that the consent file never made.
  */
 function nativeExportConsequenceLine(consent: ConsentState): string {
   const content =
     consent === 'on'
-      ? "Factory content is stored while KyberDash's consent is on"
-      : "no Factory content is stored while KyberDash's consent is off"
+      ? "while KyberDash's consent is on, KyberDash's own Factory capture stores the plugin's prompt text"
+      : "while KyberDash's consent is off, KyberDash's own Factory capture stores no prompt text"
   return `native OpenTelemetry export: Factory's native metrics are persisted; Factory's native spans are not claimed; ${content}`
+}
+
+/**
+ * The routes that carry Factory content, and which of them KyberDash's consent governs.
+ *
+ * The consent file is read in one place — the capture plugin's own hook runner — and it
+ * reaches one emission: the plugin's prompt text. The FILE source reads the owner's own
+ * transcript without consulting any consent file, and the native route's content is the
+ * harness's own switch to decide. The row names all three, because a row that named only
+ * the consent's reach reads as a claim about the whole store that was never true.
+ */
+function nativeExportContentRoutesLine(): string {
+  return "native OpenTelemetry export content routes: KyberDash's consent governs the capture plugin's prompt text only; the Factory file source stores the owner's first message fragment whatever the consent says; the native route's content follows Factory's own message-content switch"
 }
 
 /**
@@ -182,6 +237,7 @@ function factoryStatusLines(home: string, env: PathEnv | undefined): string[] {
     nativeExportLine(verdict),
     nativeExportShapeLine(verdict.shape),
     nativeExportConsequenceLine(readConsentState(paths.consentFile)),
+    nativeExportContentRoutesLine(),
   ]
 }
 
