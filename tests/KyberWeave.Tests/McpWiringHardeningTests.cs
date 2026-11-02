@@ -58,6 +58,20 @@ public sealed class McpWiringHardeningTests : IDisposable
 
     private string Repo => Path.Combine(_root.Path, "repo");
 
+    /// <summary>A record for a write that has not landed yet, in the shape the repair builds one.</summary>
+    /// <param name="path">The repository-relative file the record describes.</param>
+    /// <param name="pre">The file's bytes before the planned write.</param>
+    /// <param name="planned">The bytes the planned write would leave behind.</param>
+    private static McpWiringReceiptRecord Pending(string path, byte[] pre, byte[] planned) =>
+        new(
+            path,
+            pre.Length == 0 ? McpWiringWriteMode.Created : McpWiringWriteMode.Inserted,
+            [ServerName],
+            pre.Length == 0 ? null : Digest(pre),
+            Digest(planned),
+            new DateTimeOffset(2026, 10, 31, 0, 0, 0, TimeSpan.Zero),
+            pre.Length == 0 ? null : Convert.ToBase64String(pre));
+
     /// <summary>Where a case puts the fake launch binaries it wants the resolver to find.</summary>
     private string Bin => Path.Combine(_root.Path, "bin");
 
@@ -698,6 +712,69 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
     }
 
+    // ---- The journal never trades one file's undo for another's.
+
+    /// <summary>
+    /// A record whose save fails leaves the record already persisted for that file in place, so the
+    /// next record that does save does not clobber it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The record is persisted before the file is written, so a save that fails has to put the journal
+    /// back to what the receipt on disk describes: the caller is told the write will not happen, and
+    /// the receipt still holds the undo of the write that did land. Clearing the path instead loses
+    /// that undo for good — the next record that saves persists only itself, and the earlier file's
+    /// pre-write bytes are then nowhere the removal path can reach, even though the file still holds
+    /// the bytes that record describes.
+    /// </para>
+    /// <para>
+    /// Driven through the journal rather than through <c>mcp-wire</c> because the loss is only
+    /// observable across two records in one run, and the arrangement that makes one save fail — a
+    /// receipt file this process may not write — is the same condition that would fail the second.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARecordWhoseSaveFailsKeepsTheRecordAlreadyPersistedForThatFile()
+    {
+        byte[] pre = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
+        byte[] landed = Encoding.UTF8.GetBytes("""{"mcpServers": {"other-server": {}}}""");
+        WriteReceipt(Record(
+            ".mcp.json",
+            McpWiringWriteMode.Inserted,
+            Digest(pre),
+            Convert.ToBase64String(pre),
+            Digest(landed),
+            ["other-server"]));
+
+        McpWiringRepairer.ReceiptJournal journal = new(Repo, [.. McpWiringReceipt.Load(Repo).Files]);
+
+        DenyWritesToFile(ReceiptPath);
+
+        Assert.True(
+            journal.Record(Pending(".mcp.json", pre, landed)) is not null,
+            "the save was expected to fail, so the case proves nothing if it was recorded");
+
+        string? afterFailure = McpWiringReceipt.Load(Repo).Find(".mcp.json")?.PostSha256;
+        Assert.True(
+            afterFailure == Digest(landed),
+            $".mcp.json no longer holds the record of the write that landed (it holds {(afterFailure is null ? "no record" : "another record")}), so that file's undo is unreachable from mcp-unwire");
+
+        AllowWritesToFile(ReceiptPath);
+
+        Assert.True(
+            journal.Record(Pending(
+                ".vscode/mcp.json",
+                [],
+                Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""))) is null,
+            "the second record was expected to save, so the clobber this case is about never happened");
+
+        string? afterNextRecord = McpWiringReceipt.Load(Repo).Find(".mcp.json")?.PostSha256;
+        Assert.True(
+            afterNextRecord == Digest(landed),
+            $"the next record that saved dropped the undo of the write that landed (it holds {(afterNextRecord is null ? "no record" : "another record")}), because the failed save had cleared it from the journal");
+        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
+    }
+
     // ---- A template is data, and data that is the wrong shape is refused, not overwritten.
 
     /// <summary>
@@ -973,5 +1050,47 @@ public sealed class McpWiringHardeningTests : IDisposable
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+    }
+
+    /// <summary>
+    /// Removes this process's permission to write <paramref name="path"/>, or skips the calling test
+    /// where that cannot be arranged.
+    /// </summary>
+    /// <remarks>
+    /// The check is the denial itself rather than the account's name, for the reason
+    /// <see cref="DenyTraversal"/> gives. The probe rewrites the file with the bytes it already holds,
+    /// which changes nothing where the denial holds and proves the account bypassed the bits where it
+    /// does not.
+    /// </remarks>
+    private static void DenyWritesToFile(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This platform has no Unix permission bits, so a file this process may not write cannot be arranged here.");
+        }
+        else
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead);
+        }
+
+        string content = File.ReadAllText(path);
+
+        try
+        {
+            File.WriteAllText(path, content);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        AllowWritesToFile(path);
+        Assert.Skip("This account can write a file whose permission bits deny it, so the denial cannot be arranged here.");
+    }
+
+    private static void AllowWritesToFile(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 }

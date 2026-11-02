@@ -1306,6 +1306,7 @@ public static class McpWiringRepairer
     /// describes.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The order is the mechanism. Writing the file and then the record leaves a window in which a
     /// killed run has mutated a harness configuration and persisted no account of its previous bytes,
     /// so <c>mcp-unwire</c> refuses it as drift and the undo is unreachable outside version control.
@@ -1313,8 +1314,16 @@ public static class McpWiringRepairer
     /// and the removal can recognise that one, because the file still holds the bytes the record
     /// captured. A record therefore also gates the write: a change this tool cannot record is a change
     /// it does not make.
+    /// </para>
+    /// <para>
+    /// Internal so the journal's own invariant — a record it has persisted is still there after a save
+    /// that failed — is pinned directly. That invariant lives across two records of one run, and its
+    /// two halves (a save that fails, then a save that succeeds) cannot be arranged from the command
+    /// surface, because the state that makes the first save fail is the state that would fail the
+    /// second.
+    /// </para>
     /// </remarks>
-    private sealed class ReceiptJournal
+    internal sealed class ReceiptJournal
     {
         private readonly string _root;
         private readonly List<McpWiringReceiptRecord> _records;
@@ -1333,15 +1342,28 @@ public static class McpWiringRepairer
         {
             ArgumentNullException.ThrowIfNull(record);
 
+            int at = _records.FindIndex(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
+            McpWiringReceiptRecord? displaced = at < 0 ? null : _records[at];
+            int position = at < 0 ? _records.Count : at;
+
             _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
-            _records.Add(record);
+            _records.Insert(Math.Min(position, _records.Count), record);
 
             string? failure = McpWiringReceipt.Save(_root, _records);
 
             // A receipt that could not be written must not read as though it had been, so the
-            // in-memory copy goes back to what is on disk before the caller is told.
+            // in-memory copy goes back to what is on disk before the caller is told — and that includes
+            // the record this one displaced. Dropping the file's records instead would lose an undo
+            // that is still owed: the file on disk is the one that earlier record describes, so the
+            // next record that saves would persist only itself and leave those pre-write bytes
+            // unreachable from the removal path.
             if (failure is not null)
+            {
                 _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
+
+                if (displaced is not null)
+                    _records.Insert(Math.Min(position, _records.Count), displaced);
+            }
 
             return failure;
         }
