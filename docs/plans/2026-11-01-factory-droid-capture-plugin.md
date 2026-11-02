@@ -2193,6 +2193,18 @@ the **name-conflict refusal and the residue report** (T36/T37), the **hooks file
 pending half), or the **consent gate over the native and quarantine routes** (T42/T43), because
 those have not landed.
 
+**AMENDED (D66).** The list is re-based again, on what the branch carries now: the **hooks file's
+shape** (T38) **has landed** — keyed directly by event name, and the `SubagentStop` event is not
+registered at all — and it was verified **live**, because a fixture can only assert the bytes: a
+real Droid turn produced the session, turn and tool spans through the corrected file, with the
+consent off and no prompt text on the live span. The **consent gate over the native and quarantine
+routes** (T42/T43) **has landed** and runs at the ingest seam before normalization and before the
+quarantine write, with the fail-closed arm D52 records. The **name-conflict refusal** (T36/T37)
+**has landed** in the harness-state reader and in the installer's refusal. The closeout **may**
+describe all of them as shipped, and it must name the gate's fail-closed arm and the harness's
+**wrapped** list table, because both are properties a reader of the closed plan cannot infer from
+the code.
+
 **AMENDED (D64).** The closeout mapping gains a row per decision of this amendment, D57–D64, and
 the harvest carries **H26** — the consent's scope stated as what it governs and what it does not,
 and the organisation-control position (D57, D60). **The closeout must not claim the corrected
@@ -2200,7 +2212,12 @@ consent wording before T48 lands**: the branch carries a status surface that say
 content is stored while KyberDash's consent is off"*, and that sentence is **false** — the Factory
 file source stores the first user-message fragment whatever the consent file says (D57). T47/T48
 correct it, and until they land the closeout describes the row as it stands, including the
-sentence that is wrong, rather than describing the row that has not shipped. **The closeout also
+sentence that is wrong, rather than describing the row that has not shipped. **AMENDED (D66): T47
+and T48 HAVE LANDED**, so the closeout **may** describe the corrected row: both consent branches
+name what KyberDash's own capture stores, the file source's route is named as one the consent
+does **not** govern, the native route's content is attributed to the harness's own switch, and
+the reported shape carries the organisation's `enabled` master switch and the granularity's
+unreadable-value fallback. **The closeout also
 must not claim the quarantine is bounded**: the 256 KiB cap bounds one packet, not the table, and
 no retention or re-quarantine policy for the rows themselves was identified (D61, D62).
 
