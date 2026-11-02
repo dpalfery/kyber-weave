@@ -15,6 +15,8 @@ public sealed class KyberWeaveConfig
 
     public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
 
+    public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -59,7 +61,8 @@ public sealed class KyberWeaveConfig
         DocsAnalysisConfig? docsAnalysis = null,
         SquadConfig? squad = null,
         ConfigRegConfig? configReg = null,
-        ReviewConfig? review = null) =>
+        ReviewConfig? review = null,
+        McpConfig? mcp = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
@@ -67,6 +70,7 @@ public sealed class KyberWeaveConfig
             DocsAnalysis = docsAnalysis ?? DocsAnalysis,
             Squad = squad ?? Squad,
             ConfigReg = configReg ?? ConfigReg,
-            Review = review ?? Review
+            Review = review ?? Review,
+            Mcp = mcp ?? Mcp
         };
 }

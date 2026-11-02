@@ -50,6 +50,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; sqlite3 executes one SQL argument against a per-test database and exits."
     },
     {
+      "file": "tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run at line 536: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only (`init --quiet`), in a temp repository the fixture created."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/DocsInitMcpCheckTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "Run at line 536: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only (`init --quiet`), in a temp repository the fixture created."
+    },
+    {
       "file": "tests/KyberWeave.Tests/DocsInitReviewGatesTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,

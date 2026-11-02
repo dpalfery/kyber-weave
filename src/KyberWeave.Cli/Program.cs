@@ -113,6 +113,17 @@ app.Configure(config =>
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
 
+        docs.AddCommand<DocsMcpWireCommand>("mcp-wire")
+            .WithDescription("Write the declared MCP servers into the named harnesses' repository-scope configuration.")
+            .WithExample("docs", "mcp-wire", ".")
+            .WithExample("docs", "mcp-wire", ".", "--target", "claude-code,opencode")
+            .WithExample("docs", "mcp-wire", ".", "--target", "factory", "--dry-run");
+
+        docs.AddCommand<DocsMcpUnwireCommand>("mcp-unwire")
+            .WithDescription("Remove the MCP entries a previous mcp-wire wrote, refusing over any later edit.")
+            .WithExample("docs", "mcp-unwire", ".")
+            .WithExample("docs", "mcp-unwire", ".", "--target", "claude-code,opencode");
+
         docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
             .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
             .WithExample("docs", "integrity-check", ".", "--format", "sarif")

@@ -3,14 +3,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using KyberWeave.Cli.Commands.Docs;
-using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Tests.Fakes;
-using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -67,7 +64,8 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
     /// <summary>
     ///     A host-owned <c>review:</c> section is never rewritten, with or without
-    ///     <c>--force</c>. Regenerating it would discard gates the operator tuned by hand.
+    ///     <c>--force</c>. Regenerating it would discard gates the operator tuned by hand. The
+    ///     run adds the <c>mcp:</c> declaration the file lacks and nothing else.
     /// </summary>
     [Theory]
     [InlineData(false)]
@@ -90,7 +88,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsScaffolder.Scaffold(repo, force: force);
 
-        Assert.Equal(original, File.ReadAllText(ConfigPath(repo)));
+        // The operator's file, hand-owned review section included, is an exact prefix of what
+        // was written; the declaration is the only thing appended after it.
+        Assert.Equal(original + McpWiringFixture.AppendedDeclaration("\n"), File.ReadAllText(ConfigPath(repo)));
     }
 
     /// <summary>
@@ -118,7 +118,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     /// <summary>
     ///     Adding the section must not touch any other byte: comments, key order, and the
     ///     file's newline style belong to the operator. Both newline styles are covered because
-    ///     the append uses the file's existing style.
+    ///     the append uses the file's existing style. The <c>mcp:</c> declaration is appended
+    ///     ahead of the review section, so everything before <c>review:</c> is the operator's
+    ///     bytes plus exactly that declaration.
     /// </summary>
     [Theory]
     [InlineData("\n")]
@@ -140,7 +142,9 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string updated = File.ReadAllText(ConfigPath(repo));
         Assert.Contains(newline + "review:", updated, StringComparison.Ordinal);
         int reviewIndex = updated.IndexOf(newline + "review:", StringComparison.Ordinal);
-        Assert.Equal(original.TrimEnd('\r', '\n') + newline, updated.Substring(0, reviewIndex));
+        Assert.Equal(
+            original.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(newline),
+            updated.Substring(0, reviewIndex));
     }
 
     /// <summary>
@@ -153,7 +157,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            DocsApp().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
+            CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill", "--no-review-gates"]));
 
         Assert.True(
             execution.Result == 0,
@@ -172,7 +176,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewRepo(["azure"]);
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -192,7 +196,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            DocsApp().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
+            CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill", "--kyber-standards"]));
 
         Assert.True(
             execution.Result == 0,
@@ -225,7 +229,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         string repo = NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -253,7 +257,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "hand-owned review");
 
         CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsApp().Run(["docs", "init", repo, "--no-skill"]));
+            ProcessConsoleCapture.Run(() => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
 
         Assert.True(
             execution.Result == 0,
@@ -300,7 +304,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         File.AppendAllText(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
         string reportPath = Path.Combine(_temp.Path, "rust-gates-" + Guid.NewGuid().ToString("N") + ".json");
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => ReviewApp().Run(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run(
         [
             "review", "gates", repo, "--agent", "rust-dev", "--task", "r6-4-probe",
             "--paths", "src/lib.rs", "--out", reportPath
@@ -454,29 +458,6 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target);
         }
-    }
-
-    private static CommandApp DocsApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("docs", docs => { docs.AddCommand<DocsInitCommand>("init"); });
-        });
-        return app;
-    }
-
-    private static CommandApp ReviewApp()
-    {
-        CommandApp app = new();
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.UseStrictParsing();
-            config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });
-        });
-        return app;
     }
 
     private static void MustGit(string repo, params string[] arguments)

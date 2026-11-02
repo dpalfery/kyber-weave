@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Docs;
 using Spectre.Console.Cli;
 using Xunit;
 
@@ -22,14 +21,7 @@ public sealed class DocsInitKyberDocsSkillTests : IDisposable
     [Fact]
     public void ExecuteNamesKyberDocsAuthoringSkill()
     {
-        CommandApp app = new CommandApp();
-        app.Configure(config =>
-        {
-            config.AddBranch("docs", docs =>
-            {
-                docs.AddCommand<DocsInitCommand>("init");
-            });
-        });
+        CommandApp app = CommandAppFixture.DocsInit();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture
             .Run(() => app.Run(["docs", "init", _temp.Path, "--no-skill"]));
@@ -59,14 +51,7 @@ public sealed class DocsInitKyberDocsSkillTests : IDisposable
             Path.Combine(staleDir, "SKILL.md"), "---\nname: kyber-weave-docs\n---\nStale.\n");
         Assert.Empty(Directory.EnumerateFiles(skillsRoot, "*.lock", SearchOption.AllDirectories));
 
-        CommandApp app = new CommandApp();
-        app.Configure(config =>
-        {
-            config.AddBranch("docs", docs =>
-            {
-                docs.AddCommand<DocsInitCommand>("init");
-            });
-        });
+        CommandApp app = CommandAppFixture.DocsInit();
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture
             .Run(() => app.Run(["docs", "init", repoRoot, "--no-skill"]));

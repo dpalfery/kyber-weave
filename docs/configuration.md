@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-28
+last-reviewed: 2026-11-01
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -64,6 +64,13 @@ squad:
   targets: [codex, cursor]
   exclusions: [warp]
   translation: best-effort
+
+mcp:
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
 
 harness:
   profiles:
@@ -407,6 +414,84 @@ cannot mean byte equality.
 
 Set these so a legitimate capability difference is not reported as `KW-AGENT-SYNC-002`
 drift.
+
+## MCP servers
+
+The `mcp:` section declares the MCP servers this repository's agent instructions rely on.
+`docs init` checks the declaration against each harness's repository-scope configuration,
+and `docs mcp-wire` writes the gaps into the harnesses an operator names; the recipes, the
+verbs, and their exit codes are in the [MCP
+runbook](docgraph/mcp-runbook.md#checking-and-wiring).
+
+The check reads **repository scope only**, so both ways a path can leave the repository are
+refusals rather than reads. A configuration under a home directory is never opened. A
+repository-scope path that is a symbolic link is refused as well — the check reports it as a
+symbolic link it did not read, and neither repair verb writes through it, because the bytes
+would land in whichever file the link names. A linked configuration is therefore checked
+against nothing: the report says the server is not wired until a real file stands in the tree.
+A repository-scope file this process may not inspect is refused for the adjacent reason: a
+denied file cannot be told from an absent one, so it is reported as a gap and no repair is
+offered for it either.
+
+| Key | Default | Effect |
+|---|---|---|
+| `required-servers` | empty | The declared servers, keyed by the name an MCP client sees |
+| `required-servers.<name>.command` | required | Launch command as argv — the program first, then each argument. Never a shell line, for the same reason `review.gates` takes argv |
+| `required-servers.<name>.provenance` | required | `first-party` (a binary Kyber-Weave itself ships, today `kyber-weave-mcp`) or `third-party` (one the operator installs). It decides which repair an absent binary gets, not whether the server is checked. `first-party` is bound to the shipped binary: it is accepted only when the command's program is `kyber-weave-mcp` |
+| `required-servers.<name>.level` | `required` | `required` reports a missing server as a warning; `recommended` reports the same line at `info` |
+| `required-servers.<name>.install` | none | Free-text manual install command, printed verbatim when the binary is absent. Never executed — Kyber-Weave installs no external software |
+
+```yaml
+mcp:
+  required-servers:
+    kyber-weave:
+      command: [kyber-weave-mcp, --repo-root, .]
+      provenance: first-party
+      level: required
+    codegraph:
+      command: [codegraph, serve, --mcp]
+      provenance: third-party
+      level: recommended
+      install: codegraph init .
+```
+
+`docs init` scaffolds the section with exactly one server — `kyber-weave`, launched
+`kyber-weave-mcp --repo-root .`, first-party — when it creates a host configuration, and
+appends it, leaving every other byte alone, when an existing file has none. An existing
+section is never rewritten: it is host-owned from then on. The append is textual, so it
+survives the file's own encoding and line endings: the section is recognised under CRLF, LF,
+or lone-CR endings and past a UTF-8 byte-order mark, the lines it adds take the ending the
+file uses most, and the operator's trailing blank lines are returned unchanged.
+
+The product default is **no servers at all**. An absent section behaves exactly as it did
+before this key existed, and upgrading never invents a declaration a host did not make. The
+host's map **replaces** the inherited one rather than merging into it, so removing a server
+from your own section retracts it; a union would keep reporting a dependency nobody declares.
+Unknown keys are ignored, as in every other section. A declaration that gives a server a
+blank name, names no command, carries an empty argument, claims `first-party` for a command
+that does not run `kyber-weave-mcp`, or gives an unrecognised `provenance` or `level` fails
+the load as `KW-CONFIG-001`, naming the section and the server at fault.
+
+**`first-party` is a claim about who ships the binary, so it is refused when it is untrue.**
+The provenance decides the remedy an absent binary gets, and the first-party remedy is
+"this Kyber-Weave installation is broken; run `kyber-weave update`" — advice about a program
+the repository never installed if the server were somebody else's. The claim is therefore
+checked against argv[0] at load time, and the comparison is a case-insensitive filename
+**equality** — a directory prefix and the `.exe` suffix a Windows install appends still
+count, but a program that merely carries the shipped name inside it does not. Declare a
+binary you install yourself as `third-party`, whatever it does.
+
+The declaration is independent of Squad: it is not Squad's `toolchain.yml`
+`required-mcp-tools` roster and not `products/kyber-squad/mcp.json`, and neither is read by
+the check or the repair.
+
+**Editing this section escalates for human review by path, in this repository and in any
+host that copies the policy.** The section lives in `.kyber-weave/kyber-weave.yml`, which is
+on this repository's `review.policy.always-human` list, so **any** change to the file — the
+MCP declaration included — is routed to a human before any finding is weighed, whatever the
+change contains. That is the accepted cost of keeping the declaration in the file the rest
+of the product already reads, and it is why the declaration's schema and scaffolded default
+are part of what a reviewer approves.
 
 ## This repository's own config
 

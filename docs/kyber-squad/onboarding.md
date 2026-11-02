@@ -1117,7 +1117,9 @@ dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests
 against the compiled DLL with `--no-build`. This avoids multi-second MSBuild project re-evaluation
 on every inner loop turn, reducing test feedback latency to sub-seconds (<500ms). Full test suite
-runs are reserved strictly for task exit gates and final council review.
+runs are reserved strictly for the final council review, which runs it once per run, on the
+integrated head. A worker's task end runs only the test classes its task touched. A task with no
+covering class reports `TESTS: total=0` with the reason; zero tests run is not zero failures.
 
 ### Standardized 6-field completion digest
 
@@ -1318,7 +1320,7 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
 - [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
 - [ADR 0044](../adr/0044-squad-lock-v2-and-instance-deployment-scope.md) — Squad Lock v2 and Instance deployment scope
-- [ADR 0050](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
+- [ADR 0049](../adr/0049-kyber-squad-ships-the-kyber-weave-skills.md) — why Kyber-Squad deploys the six `.apm/skills` Kyber-Weave skills beside its own
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

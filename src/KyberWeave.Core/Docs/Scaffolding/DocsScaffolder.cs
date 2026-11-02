@@ -86,6 +86,13 @@ public static class DocsScaffolder
     private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
     private const string AnalysisCacheIgnoreEntry = "cache/";
 
+    /// <summary>
+    /// The wiring receipts directory, ignored beside the analysis cache. A receipt is a
+    /// machine-local record of what this tool wrote into a harness configuration; committed, it
+    /// would read as a decision the repository never made.
+    /// </summary>
+    private const string McpReceiptsIgnoreEntry = "receipts/";
+
     /// <summary>The one file the configuration registry is rendered into.</summary>
     private const string AgentsFilePath = "AGENTS.md";
 
@@ -145,7 +152,7 @@ public static class DocsScaffolder
         List<ScaffoldedFile> files =
         [
             WriteHostConfig(root, resolvedDocsRoot, kyberStandards, ReviewBlockFor(reviewPlan)),
-            WriteAnalysisCacheIgnore(root),
+            WriteLocalStateIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
                 OntologyReference(resolvedDocsRoot, resolvedOwner), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
@@ -365,8 +372,9 @@ public static class DocsScaffolder
             isWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     /// <summary>
-    /// Creates the host config when the repository has none; otherwise sets only its
-    /// <c>ontology.docs-root</c>, in place.
+    /// Creates the host config when the repository has none — with the <c>mcp:</c> declaration
+    /// and any rendered review block already in it — and otherwise rewrites only its
+    /// <c>ontology.docs-root</c> while appending the sections it lacks.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -383,6 +391,14 @@ public static class DocsScaffolder
     /// read back out of this same file, means only when the operator moved it with
     /// <c>--docs-root</c>. Leaving it stale instead would point <c>docs validate</c> at a
     /// different tree than the one the catalog was just written to.
+    /// </para>
+    /// <para>
+    /// The <c>mcp:</c> declaration and the review gates are append-only: written when the file
+    /// has none, never rewritten once the host has one. Both are host-owned from the moment
+    /// they exist, so a re-run that regenerated either would replace the repository's own
+    /// claims with the tool's guess — and, since the host config is on this repository's
+    /// <c>review.policy.always-human</c> list, escalate a change nobody made for human review
+    /// by path alone.
     /// </para>
     /// </remarks>
     private static ScaffoldedFile WriteHostConfig(
@@ -419,6 +435,16 @@ public static class DocsScaffolder
 
         bool mergeChanged = !string.Equals(existing, updated, StringComparison.Ordinal);
 
+        // A host-owned mcp declaration is never rewritten, with or without --force, for the
+        // same reason as the review block below and one more: the declaration is host-owned
+        // from the moment it exists, and this file escalates for human review by path alone.
+        bool mcpAppended = false;
+        if (!McpDeclarationBlockWriter.HasMcpSection(updated))
+        {
+            updated = McpDeclarationBlockWriter.AppendBlock(updated);
+            mcpAppended = true;
+        }
+
         // A host-owned review section is never rewritten, with or without --force.
         bool reviewAppended = false;
         if (reviewBlock is not null && !ReviewBlockWriter.HasReviewSection(updated))
@@ -435,25 +461,25 @@ public static class DocsScaffolder
                 "your configuration, kept as-is; --force does not overwrite it");
         }
 
-        string note;
-        if (reviewAppended && mergeChanged)
+        List<string> changes = [];
+        if (mergeChanged)
         {
-            note = kyberStandards
-                ? "docs-root and technologies, and review gates appended; the rest of the file is untouched"
-                : "docs-root and review gates appended; the rest of the file is untouched";
+            changes.Add(kyberStandards
+                ? "docs-root and technologies rewritten"
+                : "docs-root rewritten");
         }
-        else if (reviewAppended)
+
+        if (mcpAppended)
         {
-            note = "review gates appended; the rest of the file is untouched";
+            changes.Add("the mcp declaration appended");
         }
-        else if (kyberStandards)
+
+        if (reviewAppended)
         {
-            note = "docs-root and technologies; the rest of the file is untouched";
+            changes.Add("the review gates appended");
         }
-        else
-        {
-            note = "docs-root only; the rest of the file is untouched";
-        }
+
+        string note = $"{string.Join(", ", changes)}; the rest of the file is untouched";
 
         File.WriteAllText(existingPath, updated);
         return new ScaffoldedFile(
@@ -504,22 +530,26 @@ public static class DocsScaffolder
     }
 
     /// <summary>
-    /// Establishes the narrow repository-local cache exclusion without regenerating the
-    /// operator's other ignore rules.
+    /// Establishes the narrow repository-local state exclusions — the analysis cache and the
+    /// wiring receipts — without regenerating the operator's other ignore rules.
     /// </summary>
     /// <remarks>
     /// An exact entry earlier in the file is not enough when a later negation exposes the
     /// analysis database again. Appending the same narrow entry after that negation restores
     /// protection while preserving every existing byte. The existing newline style is used
     /// for the appended boundary so a merge does not introduce mixed line endings.
+    /// The two entries are decided independently: a host that already ignores the cache still
+    /// needs the receipts directory, which an older scaffold never wrote.
     /// </remarks>
-    private static ScaffoldedFile WriteAnalysisCacheIgnore(string repoRoot)
+    private static ScaffoldedFile WriteLocalStateIgnore(string repoRoot)
     {
         string absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
         if (!File.Exists(absolute))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
-            File.WriteAllText(absolute, AnalysisCacheIgnoreEntry + "\n");
+            File.WriteAllText(
+                absolute,
+                AnalysisCacheIgnoreEntry + "\n" + McpReceiptsIgnoreEntry + "\n");
             return new ScaffoldedFile(AnalysisCacheIgnorePath, ScaffoldOutcome.Created);
         }
 
@@ -529,7 +559,19 @@ public static class DocsScaffolder
             existingBytes,
             preambleLength,
             existingBytes.Length - preambleLength);
-        if (HasEffectiveAnalysisCacheIgnore(existing))
+
+        List<string> missing = [];
+        if (!HasEffectiveAnalysisCacheIgnore(existing))
+        {
+            missing.Add(AnalysisCacheIgnoreEntry);
+        }
+
+        if (!HasIgnoreEntry(existing, McpReceiptsIgnoreEntry))
+        {
+            missing.Add(McpReceiptsIgnoreEntry);
+        }
+
+        if (missing.Count == 0)
         {
             return new ScaffoldedFile(
                 AnalysisCacheIgnorePath,
@@ -539,7 +581,7 @@ public static class DocsScaffolder
 
         string newline = ExistingNewline(existing);
         string boundary = existing.Length == 0 || EndsWithNewline(existing) ? string.Empty : newline;
-        byte[] appendedBytes = encoding.GetBytes(boundary + AnalysisCacheIgnoreEntry + newline);
+        byte[] appendedBytes = encoding.GetBytes(boundary + string.Join(newline, missing) + newline);
         using (FileStream stream = File.Open(absolute, FileMode.Append, FileAccess.Write, FileShare.None))
         {
             stream.Write(appendedBytes);
@@ -548,7 +590,25 @@ public static class DocsScaffolder
         return new ScaffoldedFile(
             AnalysisCacheIgnorePath,
             ScaffoldOutcome.Updated,
-            "added cache/ only; existing ignore rules are untouched");
+            $"added {string.Join(" and ", missing)}; existing ignore rules are untouched");
+    }
+
+    /// <summary>True when <paramref name="content"/> carries <paramref name="entry"/> as a whole line.</summary>
+    /// <remarks>
+    /// Exact equality rather than a pattern match: the receipts directory is a plain directory
+    /// rule with no negation semantics of its own, and a line that merely starts with the entry
+    /// (<c>receipts/archive/</c>) does not ignore the directory the wiring writes into.
+    /// </remarks>
+    private static bool HasIgnoreEntry(string content, string entry)
+    {
+        using StringReader reader = new StringReader(content);
+        while (reader.ReadLine() is { } line)
+        {
+            if (StringComparer.Ordinal.Equals(line, entry))
+                return true;
+        }
+
+        return false;
     }
 
     private static (Encoding Encoding, int PreambleLength) DetectEncoding(byte[] content) =>
@@ -672,6 +732,8 @@ public static class DocsScaffolder
           # re-running 'docs init' creates {docsRoot}/standards/<technology>/, publishes its
           # registry property, and legalizes that value in the standard's 'technology' key.
           {technologiesBlock}
+
+        {McpDeclarationBlockWriter.DeclarationYaml}
 
         # Additions to the configuration registry rendered into AGENTS.md. Everything
         # 'docs init' creates is already published; name only what is yours.
