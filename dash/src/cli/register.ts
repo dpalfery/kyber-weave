@@ -455,13 +455,16 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
   // Whole-file plugin install for callers outside the Settings drawer (Squad, `kyber-weave
   // update`). `--preserve` keeps an edited or foreign plugin and an existing consent file and
   // exits 0; without it the install is strict, like `capture enable`. Contract in
-  // capture/harnesses/opencode-plugin/install-command.ts.
-  capture
+  // capture/harnesses/opencode-plugin/install-command.ts and
+  // capture/harnesses/factory-plugin/install-command.ts.
+  const capturePlugin = capture
     .command('plugin')
-    .description('Install the harness capture plugin file')
+    .description('Install the harness capture plugin file, or set its consent')
+
+  capturePlugin
     .command('install')
-    .description('Install or upgrade the OpenCode capture plugin (opencode.jsonc is never touched)')
-    .option('--harness <id>', 'Harness whose plugin to install (only: opencode)')
+    .description('Install or upgrade the OpenCode or Factory capture plugin (the harness settings are never touched)')
+    .option('--harness <id>', 'Harness whose plugin to install (only: opencode, factory)')
     .option('--preserve', 'Keep an edited or foreign plugin and an existing consent file; warn and exit 0')
     .option('--if-installed', 'Act only when the plugin file is already present')
     .option('--config-dir <dir>', 'OpenCode config root (default: $OPENCODE_CONFIG_DIR, else ~/.config/opencode)')
@@ -470,13 +473,51 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .action(
       async (opts: { harness?: string; preserve?: boolean; ifInstalled?: boolean; configDir?: string; dryRun?: boolean }) => {
         const { homedir } = await import('node:os')
-        const { runPluginInstall } = await import('../capture/harnesses/opencode-plugin/install-command.js')
-        const result = runPluginInstall({ ...opts, homeDir: homedir() })
+        const homeDir = homedir()
+        if (opts.harness !== 'opencode' && opts.harness !== 'factory') {
+          const given = opts.harness === undefined ? 'missing' : `"${opts.harness}" is not supported`
+          process.stderr.write(
+            `kyberdash capture plugin install: --harness ${given}. Expected one of: opencode, factory.\n`,
+          )
+          process.exitCode = 2
+          return
+        }
+        const result =
+          opts.harness === 'factory'
+            ? (await import('../capture/harnesses/factory-plugin/install-command.js')).runFactoryPluginInstall({
+                harness: opts.harness,
+                homeDir,
+                ...(opts.preserve !== undefined ? { preserve: opts.preserve } : {}),
+                ...(opts.ifInstalled !== undefined ? { ifInstalled: opts.ifInstalled } : {}),
+                ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+              })
+            : (await import('../capture/harnesses/opencode-plugin/install-command.js')).runPluginInstall({ ...opts, homeDir })
         if (result.stdout !== '') process.stdout.write(result.stdout)
         if (result.stderr !== '') process.stderr.write(result.stderr)
         process.exitCode = result.exitCode
       },
     )
+
+  // The content consent of a capture plugin: whether the prompt text and the tool content
+  // may be recorded at all. It is off unless the owner says otherwise, and this verb is how
+  // they say it. Contract in capture/harnesses/factory-plugin/install-command.ts.
+  capturePlugin
+    .command('consent')
+    .description('Turn the content consent of a harness capture plugin on or off')
+    .option('--harness <id>', 'Harness whose plugin consent to set (only: factory)')
+    .option('--on', 'Let the plugin record the prompt text and the tool content')
+    .option('--off', 'Keep the plugin from recording the prompt text and the tool content')
+    .exitOverride(captureUsageExit)
+    .action(async (opts: { harness?: string; on?: boolean; off?: boolean }) => {
+      const { homedir } = await import('node:os')
+      const { runFactoryPluginConsent } = await import(
+        '../capture/harnesses/factory-plugin/install-command.js'
+      )
+      const result = runFactoryPluginConsent({ ...opts, homeDir: homedir() })
+      if (result.stdout !== '') process.stdout.write(result.stdout)
+      if (result.stderr !== '') process.stderr.write(result.stderr)
+      process.exitCode = result.exitCode
+    })
 
   // `kyberdash engine ensure --if-running` (D12): bring a live engine to this CLI's version.
   // Contract in cli/engine.ts.

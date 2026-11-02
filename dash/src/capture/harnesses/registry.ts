@@ -1,5 +1,5 @@
-// The capture harness registry (T8): the six D6 harnesses plus Kilo Code (P3),
-// in one place.
+// The capture harness registry (T8): the six D6 harnesses plus Kilo Code (P3)
+// and Factory (Droid), in one place.
 //
 // Every writer module is a "pending discovery" stub until its Phase 2 task
 // maps the harness's real OTLP exporter surface and turns it into a managed
@@ -22,6 +22,7 @@ import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
 import { codexHarness } from './codex.js'
 import { copilotHarness } from './copilot.js'
+import { factoryHarness } from './factory.js'
 import { kiloHarness } from './kilo.js'
 import { opencodeHarness } from './opencode.js'
 import { piHarness } from './pi.js'
@@ -202,7 +203,7 @@ export type ManagedFilePlugin = {
 
 export type CaptureHarnessWriter = PendingHarnessWriter | ManagedHarnessWriter
 
-/** The seven harnesses, the default `--harness` set. Kilo is appended last. */
+/** The eight harnesses, the default `--harness` set. Kilo and Factory are appended last. */
 export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   copilotHarness,
   claudeCodeHarness,
@@ -211,6 +212,7 @@ export const CAPTURE_HARNESS_REGISTRY: readonly CaptureHarnessWriter[] = [
   piHarness,
   antigravityHarness,
   kiloHarness,
+  factoryHarness,
 ]
 
 export const SUPPORTED_CAPTURE_HARNESS_IDS: readonly string[] = CAPTURE_HARNESS_REGISTRY.map(
