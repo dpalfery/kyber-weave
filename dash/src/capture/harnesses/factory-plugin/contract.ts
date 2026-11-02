@@ -38,6 +38,13 @@ export const FACTORY_KEYS = {
 export type FactorySpanKind = 'session' | 'turn' | 'tool' | 'child_session'
 
 /**
+ * The roles a turn's spans play: the prompt the user submitted and the completion the turn
+ * produced. Both are `turn` spans of one turn, so they share that turn's trace id; they are two
+ * spans of one turn, so the role is what tells their span ids apart.
+ */
+export type FactoryTurnRole = 'prompt' | 'completion'
+
+/**
  * Span names, one per kind. The key and the kind are the same word, so `SPAN_NAMES[kind]` is the
  * name of that kind: `child_session`, not `childSession`.
  */
@@ -80,7 +87,19 @@ export function traceIdFor(sessionId: string, anchorId: string): string {
  * a message id for a turn span, the session id for a session span. The two hooks of one unit (the
  * `PreToolUse` and the `PostToolUse` of one call) therefore share a span id, and two units never
  * do.
+ *
+ * A role qualifies a span inside its kind. The prompt span and the completion span of one turn
+ * are both turn spans of one turn, so they share the anchor and the trace id, and the role is
+ * what tells their span ids apart: one shared span id would let the completion land on the
+ * prompt's row and take the prompt text and the model with it. A span with no role derives over
+ * the fields above, so the kinds that have no roles keep the ids they had.
  */
-export function spanIdFor(kind: FactorySpanKind, sessionId: string, anchorId: string): string {
-  return sha256Hex(`factory|${kind}|${field(sessionId)}|${field(anchorId)}`).slice(0, 16)
+export function spanIdFor(
+  kind: FactorySpanKind,
+  sessionId: string,
+  anchorId: string,
+  role: FactoryTurnRole | '' = '',
+): string {
+  const parts = role === '' ? [kind, sessionId, anchorId] : [kind, role, sessionId, anchorId]
+  return sha256Hex(`factory|${parts.map((part) => field(part)).join('|')}`).slice(0, 16)
 }

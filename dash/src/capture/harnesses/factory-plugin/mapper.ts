@@ -17,6 +17,7 @@ import {
   spanIdFor,
   traceIdFor,
   type FactorySpanKind,
+  type FactoryTurnRole,
 } from './contract.js'
 
 /**
@@ -136,17 +137,20 @@ function capPrompt(text: string): string {
 
 /**
  * One mapped span. The trace and the span id are derived from the session id and the anchor of
- * the unit of work the span covers, so the two hooks of one unit share both ids.
+ * the unit of work the span covers, so the two hooks of one unit share both ids. A role
+ * qualifies the span inside its kind, and only the span id takes it: the two spans of one turn
+ * stay in one trace and land on two rows.
  */
 function span(
   kind: FactorySpanKind,
   sessionId: string,
   anchor: string,
   attributes: FactoryWireAttribute[],
+  role: FactoryTurnRole | '' = '',
 ): FactoryWireSpan {
   return {
     traceId: traceIdFor(sessionId, anchor),
-    spanId: spanIdFor(kind, sessionId, anchor),
+    spanId: spanIdFor(kind, sessionId, anchor, role),
     name: SPAN_NAMES[kind],
     kind: 'SPAN_KIND_INTERNAL',
     attributes,
@@ -173,6 +177,10 @@ function sessionSpan(payload: Record<string, unknown>): FactoryWireSpan {
 /**
  * The turn span of a submitted prompt: the model invocation, anchored at the message id. The
  * operation is the contract's word for that invocation, not a value the payload states.
+ *
+ * The prompt carries the prompt role, so it is a span of its own: the prompt and the completion
+ * of one turn share that turn's trace id, and a shared span id would let the completion replace
+ * the prompt's row and take the prompt text and the model with it.
  */
 function promptTurnSpan(
   payload: Record<string, unknown>,
@@ -193,12 +201,16 @@ function promptTurnSpan(
   }
   const model = textOf(payload['model'])
   if (model !== undefined) attributes.push(stringAttribute(FACTORY_KEYS.modelId, model))
-  return span('turn', sessionId, messageId ?? sessionId, attributes)
+  return span('turn', sessionId, messageId ?? sessionId, attributes, 'prompt')
 }
 
 /**
  * The turn span of a finished turn, anchored at the message id. The contract names no operation
  * for the end of a turn, so none is written.
+ *
+ * The completion carries the completion role, so it is a span of its own: the prompt and the
+ * completion of one turn share that turn's trace id, and a shared span id would let the
+ * completion replace the prompt's row and take the prompt text and the model with it.
  */
 function stopTurnSpan(payload: Record<string, unknown>): FactoryWireSpan {
   const sessionId = sessionIdOf(payload)
@@ -207,7 +219,7 @@ function stopTurnSpan(payload: Record<string, unknown>): FactoryWireSpan {
   const session = textOf(payload['session_id'])
   if (session !== undefined) attributes.push(stringAttribute(FACTORY_KEYS.sessionId, session))
   if (messageId !== undefined) attributes.push(stringAttribute(FACTORY_KEYS.messageId, messageId))
-  return span('turn', sessionId, messageId ?? sessionId, attributes)
+  return span('turn', sessionId, messageId ?? sessionId, attributes, 'completion')
 }
 
 /**
