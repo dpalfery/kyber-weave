@@ -94,7 +94,8 @@ if [[ "${1:-}" == "--regenerate" ]]; then
   if [[ -z "${timings}" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
     timings="$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")"
-    scripts/proc-guard.sh run --slot dotnet-test -- dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
+    # Waits as long as the declared `test` gate does (--slot-wait 900): same slot, same bound.
+    scripts/proc-guard.sh run --slot dotnet-test --slot-wait 900 -- dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
   fi
   python3 - "${timings}" "${CLASS_LIST}" <<'PY'
 import sys, xml.etree.ElementTree as ET

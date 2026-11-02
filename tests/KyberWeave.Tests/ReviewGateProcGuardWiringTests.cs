@@ -100,6 +100,27 @@ public sealed class ReviewGateProcGuardWiringTests
     }
 
     /// <summary>
+    /// <c>fast-loop.sh --regenerate</c> queues for the <c>dotnet-test</c> slot as long as the <c>test</c> gate does.
+    /// </summary>
+    /// <remarks>
+    /// Both wait on the same slot. The guard's default wait is shorter than the gate's, so a regenerate that did not say so
+    /// would give up with exit 88 under exactly the contention the slot serialises, while a gate queued beside it kept waiting.
+    /// </remarks>
+    [Fact]
+    public void FastLoopRegenerateWaitsForTheSlotAsLongAsTheTestGate()
+    {
+        string[] gateFlags = GateRunArgv("test").Skip(2).TakeWhile(word => word != "--").ToArray();
+        string script = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "fast-loop.sh"));
+        string regenerate = Assert.Single(
+            script.Split('\n').Select(line => line.Trim()),
+            line => line.StartsWith("scripts/proc-guard.sh run", StringComparison.Ordinal) && line.Contains("-xml", StringComparison.Ordinal));
+        string[] regenerateFlags = regenerate.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(2).TakeWhile(word => word != "--").ToArray();
+
+        Assert.Equal(FlagValue(gateFlags, "--slot"), FlagValue(regenerateFlags, "--slot"));
+        Assert.Equal(FlagValue(gateFlags, "--slot-wait"), FlagValue(regenerateFlags, "--slot-wait"));
+    }
+
+    /// <summary>
     /// No gate other than <c>test</c> takes a slot: builds, format checks and the dash tests are never serialized.
     /// </summary>
     /// <remarks>
