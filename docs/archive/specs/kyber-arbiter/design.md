@@ -1181,7 +1181,7 @@ All read at `rev=13dcb73`.
 
 ## 20. Open questions
 
-None from the design phase. The tasks phase raised Q15 (Claude return observation), Q16 (phase PRs and the open-specification rule) and Q17 (Antigravity return observation). The [task list](tasks.md#decisions-on-design-gaps) records all three. Q15 and Q17, once answered, amend §9.2, §10.2 and §10.5.
+None from the design phase. The tasks phase raised Q15 (Claude return observation), Q16 (phase PRs and the open-specification rule) and Q17 (Antigravity return observation). The [task list](tasks.md#decisions) records all three. Q15 and Q17, once answered, amend §9.2, §10.2 and §10.5.
 
 The owner answered every design-phase question on 2026-10-03:
 
