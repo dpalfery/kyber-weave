@@ -104,8 +104,13 @@ export type IngestWriterOptions = {
    * 200) and persistence (this hook) are different moments, and only the second proves
    * telemetry landed. Never called for a failed or empty flush. A throwing hook is
    * fenced — persistence already happened, so a hook failure must not fail the flush.
+   *
+   * The counts cover every kind of record the sink committed, metrics included: a
+   * metrics-only commit is Factory's default export shape, and a hook that counted
+   * only spans and logs would leave the receiver's liveness fact stale for exactly
+   * the traffic a metrics-only deployment sends.
    */
-  onPersisted?: (info: { spans: number; logs: number }) => void
+  onPersisted?: (info: { spans: number; logs: number; metrics: number }) => void
 }
 
 export const DEFAULT_BATCH_SIZE = 512
@@ -255,7 +260,7 @@ export class IngestWriter implements OtlpSpanStore, OtlpMetricsStore {
   private flushInFlight: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private stopped = false
-  private onPersisted: ((info: { spans: number; logs: number }) => void) | undefined
+  private onPersisted: ((info: { spans: number; logs: number; metrics: number }) => void) | undefined
 
   constructor(sink: IngestSink, opts: IngestWriterOptions = {}) {
     this.batchSink = isBatchSink(sink) ? sink : null
@@ -413,7 +418,7 @@ export class IngestWriter implements OtlpSpanStore, OtlpMetricsStore {
    * the receiver exists (the receiver needs the writer as its store, so the writer is
    * always built first) — one hook at a time, latest wins.
    */
-  setPersistedHook(hook: ((info: { spans: number; logs: number }) => void) | undefined): void {
+  setPersistedHook(hook: ((info: { spans: number; logs: number; metrics: number }) => void) | undefined): void {
     this.onPersisted = hook
   }
 
@@ -616,7 +621,9 @@ export class IngestWriter implements OtlpSpanStore, OtlpMetricsStore {
         this.inflightLogCount -= logs.length
         this.inflightMetricCount -= metrics.length
         this.inflightByteCount -= sentBytes
-        if (batch.length > 0 || logs.length > 0) this.notifyPersisted(batch.length, logs.length)
+        if (batch.length > 0 || logs.length > 0 || metrics.length > 0) {
+          this.notifyPersisted(batch.length, logs.length, metrics.length)
+        }
       } catch (err) {
         // The store refused the batch: put it back at the head, in order,
         // so no span is dropped (R2.5), and let the caller see the failure.
@@ -663,11 +670,11 @@ export class IngestWriter implements OtlpSpanStore, OtlpMetricsStore {
     this.queuedBytes += Math.max(0, width)
   }
 
-  private notifyPersisted(spans: number, logs: number): void {
+  private notifyPersisted(spans: number, logs: number, metrics: number): void {
     const hook = this.onPersisted
     if (hook === undefined) return
     try {
-      hook({ spans, logs })
+      hook({ spans, logs, metrics })
     } catch (err) {
       // The batch is committed; a hook failure must not fail the flush or re-queue it,
       // but it is logged so a broken hook is not invisible.

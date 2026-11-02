@@ -22,6 +22,7 @@ const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
 import { deflateSync, inflateSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
 import { setImmediate as scheduleImmediate } from 'node:timers'
 
 import type { TokenCacheStore } from './tokens.js'
@@ -43,6 +44,7 @@ import {
   type RefreshTrigger,
 } from './refresh-run.js'
 import { contentFromParts } from './types.js'
+import type { OtlpMetric, OtlpScope } from '../otel/receiver.js'
 import { compressColumn, decompressColumn, type CompressedColumn } from './compressed-column.js'
 import {
   SESSION_PAYLOAD_FRAGMENTS_SELECT,
@@ -88,9 +90,12 @@ export interface StoreWipeReport {
  * clears it authoritatively, so this function leaves it. `quarantine`,
  * `pending_logs`, and `quarantined_logs` carry the harness tag since schema
  * v19 (plan 2026-10-10, D-Q3) and go with the wipe; `enriched_logs` has no
- * attribution and stays for the complete wipe. Call inside the caller's
- * transaction, like `commitSourceUnit`'s inverse: a failure rolls back
- * everything, so records and checkpoints can never disagree about coverage.
+ * attribution and stays for the complete wipe. `metric_point` has none
+ * either -- a metric point has no span, so it names no harness -- and stays
+ * for the same reason: a scoped wipe cannot claim a row it cannot attribute.
+ * Call inside the caller's transaction, like `commitSourceUnit`'s inverse: a
+ * failure rolls back everything, so records and checkpoints can never
+ * disagree about coverage.
  *
  * <remarks>
  * Why a free function and not methods: only `wipeHarnesses` and `wipeAll`
@@ -569,6 +574,44 @@ CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
   last_refresh_at TEXT,
   last_error TEXT
 );
+-- Native OpenTelemetry metric points: one row per decoded data point. This
+-- is the destination for Factory's native metrics export, whose DEFAULT shape
+-- is metrics only, so it is the path a real deployment hits first.
+--
+-- A new table, not a new column on an existing one, so the CREATE ... IF NOT
+-- EXISTS the store applies on every open covers a store already stamped at
+-- SCHEMA_VERSION: landing it cost no version bump and needs no migration
+-- step -- the model_context_window_catalog precedent. A store that predates
+-- the table opens unchanged and grows the table on the next open.
+--
+-- A metric point has no span, so the row carries no harness and no adapter
+-- fingerprint: the exporter's service.name is its source, and a row is never
+-- attributed to a harness. That is also why a scoped per-harness wipe cannot
+-- clear these rows -- it cannot attribute what it would remove -- and only
+-- the full corpus wipe clears them.
+--
+-- point_key is the point's identity: a digest of everything the row carries.
+-- A metric point has no span id to key on, so the content digest is what
+-- makes a re-delivered point land on the row it already occupies instead of
+-- beside it.
+CREATE TABLE IF NOT EXISTS metric_point (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  point_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  unit TEXT,
+  aggregation_temporality INTEGER,
+  time_unix_nano TEXT,
+  timestamp TEXT,
+  value REAL,
+  point_count INTEGER,
+  point_sum REAL,
+  attributes_json TEXT NOT NULL,
+  resource_json TEXT NOT NULL,
+  scope_json TEXT NOT NULL,
+  source TEXT
+);
+CREATE INDEX IF NOT EXISTS metric_point_by_name ON metric_point (name);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
 /**
@@ -1603,6 +1646,224 @@ export type IngestLogEntry = {
   source: string
   count: number
   timestamp: string
+}
+
+/**
+ * One persisted metric point: what a decoded OTLP data point became.
+ *
+ * A field the point did not carry reads absent -- null, never a zero. A point
+ * that reported no value of its own is a fact about the measurement, not a
+ * measured zero (docs/rules/honest-unobservability.md).
+ */
+export type MetricPointRow = {
+  /** The metric's name, as the exporter sent it. */
+  name: string
+  /** The data shape the metric carried: `gauge`, `sum`, `histogram`, … */
+  kind: string
+  /** The metric's unit; null when the exporter named none. */
+  unit: string | null
+  /** The aggregation temporality the shape declared (1 delta, 2 cumulative); null when it declared none. */
+  aggregationTemporality: number | null
+  /** The point's timestamp as an ISO instant; null when the point carried none. */
+  timestamp: string | null
+  /** The point's timestamp in Unix nanoseconds, verbatim; null when it carried none. */
+  timeUnixNano: string | null
+  /** The point's own value, for a gauge or a sum; null when the point carried none. */
+  value: number | null
+  /** The point's count, for a histogram or a summary; null when the point carried none. */
+  count: number | null
+  /** The point's sum, for a histogram or a summary; null when the point carried none. */
+  sum: number | null
+  /** The point's own attributes. */
+  attributes: Record<string, unknown>
+  /** The resource attributes of the emitting process. */
+  resource: Record<string, unknown>
+  /** The instrumentation scope that produced the point. */
+  scope: OtlpScope
+  /** The exporter's `service.name`; null when the exporter named none. */
+  source: string | null
+  /** Always null: a metric point has no span, so it names no harness. */
+  harness: null
+  /** Always null: a metric point carries no adapter fingerprint. */
+  adapterFingerprint: null
+}
+
+/**
+ * A metric point on its way to a row: the column values the write statement
+ * binds, plus the digest that identifies the point.
+ */
+type MetricPointDraft = {
+  pointKey: string
+  name: string
+  kind: string
+  unit: string | null
+  aggregationTemporality: number | null
+  timeUnixNano: string | null
+  timestamp: string | null
+  value: number | null
+  count: number | null
+  sum: number | null
+  attributesJson: string
+  resourceJson: string
+  scopeJson: string
+  source: string | null
+}
+
+/**
+ * A JSON rendering whose object keys are in a stable order.
+ *
+ * The point's digest is what identifies the point, so two deliveries of the
+ * same point must digest the same however the exporter ordered its
+ * attributes. Key order carries no meaning in an attribute map, so it is
+ * normalized away here rather than trusted.
+ */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null'
+  }
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+  return `{${entries.join(',')}}`
+}
+
+/**
+ * The instant a metric point's nanosecond timestamp denotes, as an ISO
+ * string, or null when the point carried no timestamp or one that is not a
+ * nanosecond count.
+ *
+ * The verbatim nanoseconds are stored beside it, so the sub-millisecond part
+ * of the timestamp survives even where the ISO reading cannot carry it.
+ */
+function metricInstant(nanos: string | null): string | null {
+  if (nanos === null) return null
+  let millis: number
+  try {
+    millis = Number(BigInt(nanos) / 1_000_000n)
+  } catch {
+    // A timestamp that is not a nanosecond count has no instant to derive.
+    // The row keeps the value it arrived with and no reading of it.
+    return null
+  }
+  const instant = new Date(millis)
+  return Number.isNaN(instant.getTime()) ? null : instant.toISOString()
+}
+
+/**
+ * The digest that identifies a metric point: everything the row carries, in
+ * the stable rendering above.
+ *
+ * A metric point has no span id, so there is no exporter-supplied identity to
+ * key on. The content digest is the identity: a point re-delivered lands on
+ * the row it already occupies instead of beside it, which is what makes the
+ * write an upsert rather than an append.
+ */
+function metricPointKey(draft: Omit<MetricPointDraft, 'pointKey'>): string {
+  return createHash('sha256')
+    .update(
+      stableJson([
+        draft.name,
+        draft.kind,
+        draft.unit,
+        draft.aggregationTemporality,
+        draft.timeUnixNano,
+        draft.value,
+        draft.count,
+        draft.sum,
+        draft.attributesJson,
+        draft.resourceJson,
+        draft.scopeJson,
+        draft.source,
+      ]),
+      'utf8',
+    )
+    .digest('hex')
+}
+
+/** The rows one decoded metric contributes: one per data point it carried. */
+function metricPointDrafts(metrics: readonly OtlpMetric[]): MetricPointDraft[] {
+  const drafts: MetricPointDraft[] = []
+  for (const metric of metrics) {
+    const resourceJson = stableJson(metric.resource)
+    const scopeJson = stableJson(metric.scope)
+    const serviceName = metric.resource['service.name']
+    // The exporter's service.name is the row's source. It is a source, not an
+    // attribution: the row names no harness, because a metric point has no
+    // span to attribute.
+    const source = typeof serviceName === 'string' && serviceName !== '' ? serviceName : null
+    const unit = metric.unit ?? null
+    const aggregationTemporality = metric.aggregationTemporality ?? null
+    for (const point of metric.dataPoints) {
+      const withoutKey: Omit<MetricPointDraft, 'pointKey'> = {
+        name: metric.name,
+        kind: metric.kind,
+        unit,
+        aggregationTemporality,
+        timeUnixNano: point.timeUnixNano,
+        timestamp: metricInstant(point.timeUnixNano),
+        // A point that reported no value keeps it absent: the absence is the
+        // fact, and it must never read as a measured zero.
+        value: point.value,
+        count: point.count,
+        sum: point.sum,
+        attributesJson: stableJson(point.attributes),
+        resourceJson,
+        scopeJson,
+        source,
+      }
+      drafts.push({ ...withoutKey, pointKey: metricPointKey(withoutKey) })
+    }
+  }
+  return drafts
+}
+
+/** A stored number, or null when the row carried none. */
+function metricNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'bigint') return Number(value)
+  return null
+}
+
+/** A stored text, or null when the row carried none. */
+function metricText(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  return null
+}
+
+/** The instrumentation scope a row carried, as the receiver's shape. */
+function metricScope(value: unknown): OtlpScope {
+  const parsed = parseJsonObject(value)
+  if (parsed === undefined) return {}
+  const scope: OtlpScope = {}
+  if (typeof parsed.name === 'string') scope.name = parsed.name
+  if (typeof parsed.version === 'string') scope.version = parsed.version
+  return scope
+}
+
+/** One stored metric row, as the read-back accessor hands it over. */
+function toMetricPointRow(row: Record<string, unknown>): MetricPointRow {
+  return {
+    name: String(row.name),
+    kind: String(row.kind),
+    unit: metricText(row.unit),
+    aggregationTemporality: metricNumber(row.aggregation_temporality),
+    timestamp: metricText(row.timestamp),
+    timeUnixNano: metricText(row.time_unix_nano),
+    value: metricNumber(row.value),
+    count: metricNumber(row.point_count),
+    sum: metricNumber(row.point_sum),
+    attributes: parseJsonObject(row.attributes_json) ?? {},
+    resource: parseJsonObject(row.resource_json) ?? {},
+    scope: metricScope(row.scope_json),
+    source: metricText(row.source),
+    // A metric point has no span: it names no harness and carries no adapter
+    // fingerprint. The absence is stated rather than left implicit, so a
+    // reader cannot mistake an unattributed row for an attributed one.
+    harness: null,
+    adapterFingerprint: null,
+  }
 }
 
 /** One quarantined span: held back from the corpus, with the reason why. */
@@ -2770,6 +3031,34 @@ INSERT OR REPLACE INTO records (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
+/**
+ * The metric-point write, keyed on the point's content digest.
+ *
+ * The conflict arm restates the row rather than replacing it: a replacement
+ * would delete the row and insert it again, which moves it to the end of the
+ * table's order and loses the position the point was first seen at.
+ */
+const UPSERT_METRIC_POINT_SQL = `
+INSERT INTO metric_point (
+  point_key, name, kind, unit, aggregation_temporality, time_unix_nano, timestamp,
+  value, point_count, point_sum, attributes_json, resource_json, scope_json, source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(point_key) DO UPDATE SET
+  name = excluded.name,
+  kind = excluded.kind,
+  unit = excluded.unit,
+  aggregation_temporality = excluded.aggregation_temporality,
+  time_unix_nano = excluded.time_unix_nano,
+  timestamp = excluded.timestamp,
+  value = excluded.value,
+  point_count = excluded.point_count,
+  point_sum = excluded.point_sum,
+  attributes_json = excluded.attributes_json,
+  resource_json = excluded.resource_json,
+  scope_json = excluded.scope_json,
+  source = excluded.source
+`
+
 /** Server-side finding filters (issue #191): detector and harness narrow the
  * set. Paging lives in the bridge (`listFindingsPage`), which slices the
  * narrowed set once `total` is known — one owner, not two (review). */
@@ -2949,6 +3238,7 @@ function readSchemaVersion(db: Database): string | undefined {
 export class CanonStore {
   private readonly db: Database
   private readonly upsertStatement: StatementSync
+  private readonly upsertMetricPointStatement: StatementSync
 
   /**
    * Whether the turn table has been materialized on this handle.
@@ -3022,6 +3312,7 @@ export class CanonStore {
     }
 
     this.upsertStatement = this.db.prepare(UPSERT_RECORD_SQL)
+    this.upsertMetricPointStatement = this.db.prepare(UPSERT_METRIC_POINT_SQL)
   }
 
   /**
@@ -4718,6 +5009,10 @@ export class CanonStore {
       this.db.exec('DELETE FROM pending_logs')
       this.db.exec('DELETE FROM quarantined_logs')
       this.db.exec('DELETE FROM enriched_logs')
+      // The metric points carry no harness, so a scoped per-harness wipe
+      // cannot claim them and leaves them; the whole corpus wipe clears
+      // everything the store holds, these rows included.
+      this.db.exec('DELETE FROM metric_point')
     })
     this.stampClean(['*'])
     this.reclaimSpace()
@@ -6020,6 +6315,76 @@ export class CanonStore {
       count: row.count as number,
       timestamp: text(row.timestamp),
     }))
+  }
+
+  /**
+   * Persist a decoded metrics batch: one row per metric data point.
+   *
+   * This is the destination for native OpenTelemetry metrics, and Factory's
+   * default export shape is metrics only, so it is the path a real deployment
+   * hits first. Nothing is dropped and nothing is fabricated: every decoded
+   * point becomes a row, and a point that carried no value of its own keeps
+   * the value absent rather than zero.
+   *
+   * The rows carry the exporter's `service.name` as their source and no
+   * harness attribution: a metric point has no span, so it belongs to no
+   * harness and a scoped per-harness wipe cannot claim it.
+   *
+   * The batch commits as one transaction, so a batch that fails leaves no
+   * half-written rows. It does NOT bump the records-write marker: a metric
+   * point changes no record, and the marker is the corpus's change signal --
+   * a metrics batch that moved it would ask for a projection it did not
+   * change.
+   */
+  upsertMetrics(metrics: readonly OtlpMetric[]): void {
+    const drafts = metricPointDrafts(metrics)
+    if (drafts.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const draft of drafts) {
+        this.upsertMetricPointStatement.run(
+          draft.pointKey,
+          draft.name,
+          draft.kind,
+          draft.unit,
+          draft.aggregationTemporality,
+          draft.timeUnixNano,
+          draft.timestamp,
+          draft.value,
+          draft.count,
+          draft.sum,
+          draft.attributesJson,
+          draft.resourceJson,
+          draft.scopeJson,
+          draft.source,
+        )
+      }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /**
+   * The persisted metric points, in the order they were first stored.
+   *
+   * `limit` caps the read for a caller that wants a window rather than the
+   * whole table; without one every row the store holds is returned, which is
+   * what the read-back accessor is for.
+   */
+  getMetricPoints(limit?: number): MetricPointRow[] {
+    const cap =
+      limit === undefined || !Number.isFinite(limit) || limit < 0 ? null : Math.floor(limit)
+    const rows = this.db
+      .prepare(
+        `SELECT name, kind, unit, aggregation_temporality, time_unix_nano, timestamp,
+                value, point_count, point_sum, attributes_json, resource_json,
+                scope_json, source
+         FROM metric_point ORDER BY id${cap === null ? '' : ' LIMIT ?'}`,
+      )
+      .all(...(cap === null ? [] : [cap])) as Record<string, unknown>[]
+    return rows.map(toMetricPointRow)
   }
 
   /** Read a metadata value; absent key gives undefined. */

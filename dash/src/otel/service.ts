@@ -2,7 +2,7 @@
 import { dirname } from 'path'
 import { mkdirSync } from 'fs'
 import chalk from 'chalk'
-import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpSpan } from './receiver.js'
+import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpMetric, type OtlpSpan } from './receiver.js'
 import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
 import { resolveCanonDbPath } from '../canon/paths.js'
@@ -14,6 +14,7 @@ import {
   ingestLogBatch,
   reconcileExpiredPending,
 } from '../canon/log-ingest.js'
+import { ingestMetricBatch } from '../canon/metric-ingest.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { relinkQuarantinedClaudeLogs } from '../tools/backfill.js'
 
@@ -213,6 +214,34 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       // Only an enrichment changed a stored record; pending logs altered
       // nothing a projection reads.
       if (outcome.enriched > 0) void scheduler.request()
+    },
+    upsertMetrics: (metrics: readonly OtlpMetric[]) => {
+      // Factory's native export is metrics-only by default, so this is the
+      // path a real deployment hits first. The store persists the points;
+      // the audit row below records the arrival.
+      const outcome = ingestMetricBatch(metrics, canon)
+      // A metrics batch is receiver activity like any other (D4): one audit
+      // row per batch, under the single 'otlp:metrics' key the log batch
+      // uses, carrying the points it carried. Written after the ingest
+      // returns, on this same store handle.
+      // Fenced exactly like the span and log audit writes above: a failed
+      // audit row must never fail the ingest it audits, and must never
+      // requeue the batch behind it.
+      if (metrics.length > 0) {
+        try {
+          canon.logIngest('otlp:metrics', outcome.points)
+        } catch (err) {
+          console.error(
+            chalk.red('[ingest] audit write failed; batch already committed:'),
+            err instanceof Error ? err.message : String(err),
+          )
+        }
+      }
+      console.log(chalk.dim(
+        `[${new Date().toLocaleTimeString()}] Ingested ${outcome.points} metric points`,
+      ))
+      // A metric point changes no projected record, so a metrics batch asks
+      // for no projection: there is nothing to rebuild.
     },
   }
 
