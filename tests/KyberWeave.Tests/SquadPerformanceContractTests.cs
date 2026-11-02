@@ -96,7 +96,7 @@ public sealed class SquadPerformanceContractTests
     /// </summary>
     internal static bool ReservesFullSuiteForTaskEnd(string content)
     {
-        string text = Regex.Replace(content, @"\b(e\.g|i\.e)\.", "$1");
+        string text = Regex.Replace(content, @"\b(e\.g|i\.e)\.", "$1", RegexOptions.IgnoreCase);
         foreach (string block in Regex.Split(
                      text,
                      @"(?:\r?\n){2,}|\r?\n(?=\s*(?:[-*+]\s|\d+\.\s|#{1,6}\s|\|))|(?<=^#{1,6}[ \t][^\r\n]*)\r?\n",
@@ -104,7 +104,7 @@ public sealed class SquadPerformanceContractTests
         {
             string flattened = Regex.Replace(block, @"\s+", " ");
             foreach (string sentence in Regex.Split(flattened, @"(?<=[.!?])\s+"))
-                if (Regex.IsMatch(sentence, @"\breserv(?:e|es|ed|ing)\b", RegexOptions.IgnoreCase) &&
+                if (Regex.IsMatch(sentence, @"\breserv(?:e|es|ed|ing|ation|ations)\b", RegexOptions.IgnoreCase) &&
                     Regex.IsMatch(sentence, @"\bfull[- ](?:test[- ])?suite\b", RegexOptions.IgnoreCase) &&
                     Regex.IsMatch(sentence, @"\btask[- ](?:end|exit[- ]gates?)\b", RegexOptions.IgnoreCase))
                     return true;
@@ -124,6 +124,8 @@ public sealed class SquadPerformanceContractTests
     [InlineData("Full suite runs are reserved for task-end verification.", true)]
     [InlineData("The reservoir holds the full suite at task end.", false)]
     [InlineData("Reserve the full suite, e.g. at task end.", true)]
+    [InlineData("Reserve the full suite, E.g. at task end.", true)]
+    [InlineData("Full suite reservations cover task end.", true)]
     [InlineData("- Reserve the full suite for the council\n- At task end run only touched classes", false)]
     [InlineData("## Reserve the full suite\nAt task end run only touched classes", false)]
     public void FullSuiteReservationHelperReadsSentencesNotLines(string input, bool expected)
@@ -486,25 +488,33 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(ConductorExecutionPath)]
-    [InlineData(ConductorAgentPath)]
     [InlineData(CSharpDevAgentPath)]
     [InlineData(TestDevAgentPath)]
     [InlineData(TestCodingStandardPath)]
-    public void SharedTestInfrastructureEscalatesToOneConductorOwnedFullRun(string relativePath)
+    public void WorkerSurfacesAskTheConductorForOneFullRunOnSharedTestInfrastructure(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
         Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
-        Assert.Matches(
-            @"(?i)\b(?:ask the conductor for one full run|conductor alone dispatches one full run)\b",
-            content);
+        Assert.Matches(@"(?i)\bask the conductor for one full run\b", content);
+    }
+
+    [Theory]
+    [InlineData(ConductorExecutionPath)]
+    [InlineData(ConductorAgentPath)]
+    public void ConductorSurfacesAloneDispatchOneFullRunOnSharedTestInfrastructure(string relativePath)
+    {
+        string content = ReadRepoFile(relativePath);
+        Assert.Matches(@"(?i)\bshared test infrastructure\b", content);
+        Assert.Matches(@"(?i)\bconductor alone dispatches one full run\b", content);
+        Assert.Matches(@"(?i)\bworkers never start one\b", content);
     }
 
     [Fact]
-    public void TestStandardBoundsSharedTestInfrastructure()
+    public void TestStandardBoundsSharedTestInfrastructureByCountAndByRun()
     {
         string content = ReadRepoFile(TestCodingStandardPath);
-        Assert.Matches(@"(?i)\banything more than one test class depends on\b", content);
+        Assert.Matches(@"(?i)\banything referenced by more than one test class\b", content);
+        Assert.Matches(@"(?i)\bat most one full run for the whole run\b", content);
     }
 
     [Theory]
