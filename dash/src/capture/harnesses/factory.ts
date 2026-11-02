@@ -27,6 +27,7 @@ import {
   uninstallFactoryPlugin,
   type FactoryPluginResult,
 } from './factory-plugin/install.js'
+import { readNativeExport } from './factory-plugin/native-export.js'
 import type { ManagedFilePlugin, ManagedHarnessWriter } from './registry.js'
 
 const FACTORY_HARNESS_ID = 'factory'
@@ -58,10 +59,43 @@ function factorySettingsPath(home: string, env?: PathEnv): string {
 }
 
 /**
+ * The native OpenTelemetry export's line: whether Factory's own export is pointed at this
+ * KyberDash receiver, and the cause when it is not.
+ *
+ * The native path is never reported as working when it is not. An organisation's pinned
+ * endpoint OVERRIDES the machine variable, so a developer whose variable points at this
+ * receiver is told the native path is unavailable and that the organisation is the cause —
+ * not that the native path works, when the organisation's endpoint is what receives the
+ * traffic.
+ */
+function nativeExportLine(home: string, env: PathEnv | undefined): string {
+  const paths = factoryPluginPaths(home, env)
+  const verdict = readNativeExport({
+    factoryRoot: paths.root,
+    home,
+    platform: env?.platform ?? process.platform,
+    ...(env?.appData !== undefined ? { appData: env.appData } : {}),
+  })
+  switch (verdict.state) {
+    case 'available':
+      return `native OpenTelemetry export: available (${verdict.source} points at ${verdict.endpoint}, this KyberDash receiver)`
+    case 'unavailable':
+      return verdict.source === 'organisation'
+        ? `native OpenTelemetry export: unavailable (an organisation pins the telemetry endpoint ${verdict.endpoint} in its managed settings, and that endpoint overrides the machine variable)`
+        : `native OpenTelemetry export: unavailable (${verdict.source} points at ${verdict.endpoint}, not this KyberDash receiver)`
+    case 'not-configured':
+      return 'native OpenTelemetry export: not configured (neither OTEL_TELEMETRY_ENDPOINT nor OTEL_EXPORTER_OTLP_ENDPOINT is set, and no organisation pins a telemetry endpoint)'
+  }
+}
+
+/**
  * The status lines for the Factory row: the plugin state, the directory the plugin
  * resolves to, the receipt and the content consent. The consent lines come from the
  * installer, which owns the consent file's shape; the directory and the receipt are added
- * here because the Factory plugin is a TREE and the row has to say where it lives.
+ * here because the Factory plugin is a TREE and the row has to say where it lives. The
+ * native export line is added here too: it is the Factory row's own fact about the second
+ * capture path, and it is the same line the printed status, the structured row and the API
+ * route carry.
  */
 function factoryStatusLines(home: string, env: PathEnv | undefined): string[] {
   const paths = factoryPluginPaths(home, env)
@@ -73,6 +107,7 @@ function factoryStatusLines(home: string, env: PathEnv | undefined): string[] {
     `plugin directory: ${paths.pluginDir}`,
     `plugin receipt: ${state.receipt ? 'recorded' : 'absent'}`,
     ...described.slice(1),
+    nativeExportLine(home, env),
   ]
 }
 
