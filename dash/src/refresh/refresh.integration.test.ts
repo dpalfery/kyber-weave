@@ -14,6 +14,7 @@ import {
   getAntigravityStatusLineEventsPath,
   recordAntigravityStatusLinePayload,
 } from '../providers/antigravity.js'
+import { createDroidProvider } from '../providers/droid.js'
 import { refreshHarnessSources } from './orchestrator.js'
 import { descriptorFor } from './registry.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
@@ -610,6 +611,75 @@ describe('antigravity status-line recorder attribution (T11)', () => {
       expect(row(report, 'antigravity').created).toBe(0)
     } finally {
       store.close()
+    }
+  })
+})
+
+// T14 - the Factory (Droid) FILE source must keep producing a droid session
+// whose tokens come from the companion settings file, whatever a hooks-based
+// capture plugin for the same harness does. This case drives the shipped
+// provider through the shipped refresh path: production discovery of the
+// transcript, the companion <transcript-stem>.settings.json file, the
+// registry's droid classification, and the canonical store.
+describe('droid file source through refresh (T14)', () => {
+  it('refreshes a droid session whose tokens come from the companion settings file', async () => {
+    const root = tempRoot()
+    const factoryDir = join(root, '.factory')
+    const sessionDir = join(factoryDir, 'sessions', '-tmp-my-project')
+    mkdirSync(sessionDir, { recursive: true })
+
+    // The transcript carries no usage information of its own, so every
+    // counter below can only have come from the companion settings file. The
+    // transcript stem and the session id are deliberately different here: the
+    // provider finds the companion file beside the transcript under the
+    // transcript's own stem, while the session identity is the session_start
+    // record's id. On a real machine the two coincide, because the transcript
+    // is named after the session id.
+    const transcriptStem = 'droid-transcript'
+    const sessionId = 'droid-session-9001'
+    writeFileSync(join(sessionDir, `${transcriptStem}.jsonl`), [
+      JSON.stringify({ type: 'session_start', id: sessionId, cwd: '/tmp/my-project', title: 'File source session' }),
+      JSON.stringify({ type: 'message', id: 'u1', timestamp: '2026-09-06T13:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'build this' }] } }),
+      JSON.stringify({ type: 'message', id: 'a1', timestamp: '2026-09-06T14:00:00.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }),
+    ].join('\n'))
+    writeFileSync(join(sessionDir, `${transcriptStem}.settings.json`), JSON.stringify({
+      model: 'custom:gpt-5-[Proxy]-0',
+      tokenUsage: { inputTokens: 1200, outputTokens: 300, cacheCreationTokens: 40, cacheReadTokens: 500, thinkingTokens: 0 },
+    }))
+
+    // FACTORY_DIR points the provider at the temp tree, so this case can
+    // never read the developer's real ~/.factory (C3).
+    const previousFactoryDir = process.env['FACTORY_DIR']
+    process.env['FACTORY_DIR'] = factoryDir
+    const store = new CanonStore(join(root, 'canon.db'))
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [createDroidProvider()],
+        descriptors: descriptorsFor(['droid']),
+        jobConcurrency: 1,
+        commandStartedAt: COMMAND_STARTED_AT,
+        parseAllSessions: async () => undefined,
+      })
+
+      expect(row(report, 'droid')).toMatchObject({ status: 'ok', created: 1, updated: 0 })
+
+      const records = store.listAll()
+      expect(records).toHaveLength(1)
+      const record = records[0]!
+      expect(record.harness).toBe('droid')
+      expect(record.sessionId).toBe(sessionId)
+      // The model is the companion file's, stripped of its Droid wrapper.
+      expect(record.name).toBe('droid:gpt-5')
+      // The counters are the companion file's tokenUsage, not the transcript's.
+      expect(record.tokens.freshInput).toBe(1200)
+      expect(record.tokens.cacheRead).toBe(500)
+      expect(record.tokens.cacheCreation).toBe(40)
+      expect(record.tokens.output).toBe(300)
+      expect(record.tokens.reportedInput).toBe(1740)
+    } finally {
+      store.close()
+      if (previousFactoryDir === undefined) delete process.env['FACTORY_DIR']
+      else process.env['FACTORY_DIR'] = previousFactoryDir
     }
   })
 })
