@@ -766,19 +766,23 @@ KyberDash does not own), `drift` (the tree the owner edited) and `unreadable` (t
 harness's own state, could not be read). Strict mode refuses with exit 1 and writes nothing;
 preserve mode keeps the state with a warning and exits 0.
 
-**The receipt proves the plugin identity.** What makes a plugin identity KyberDash's own is the
-**receipt**, when it names **this** tree, **this** marketplace and **this** identity
+**The tree or the receipt proves the plugin identity.** What makes a plugin identity KyberDash's
+own is **either** the tree KyberDash wrote **or** the receipt that proves it — an OR, not a
+fallback order. The tree's presence proves the identity ours when KyberDash wrote that tree; the
+receipt proves it when the tree is gone but the receipt survives, and a receipt proves an identity
+only when it names **this** tree, **this** marketplace and **this** identity
 (`kyberdash-factory@kyberdash`); every part of that has to hold, so a receipt naming another
 tree, another marketplace or no identity at all proves nothing, and an arbitrary plugin identity is
 never treated as ours. The receipt is the proof that survives the harness's own teardown — the
 harness removes a marketplace registration **without** removing the plugin, so a plugin can
-outlive the registration that named it. Ownership therefore does not fall back to the tree's
-presence: a tree that is absent while the receipt still proves the plugin identity is **ours**,
-not a conflict, and the install then runs the sequence the harness's own registry dictates — the
+outlive the registration that named it. Ownership therefore does not rest on the tree's presence
+alone: a tree that is absent while the receipt still proves the plugin identity is **ours**, not a
+conflict, and the install then runs the sequence the harness's own registry dictates — the
 marketplace registration is restored **first** when it is missing, and `plugin update` refreshes
 the harness's cached copy against the installed plugin, because `plugin install` is refused for an
 installed plugin. The tree's presence is what proves a marketplace ours when the harness names no
-source to compare against; the receipt is what proves the plugin identity ours.
+source to compare against; the tree's presence **or** the receipt is what proves the plugin
+identity ours.
 
 **The residue rule — report, never patch.** If the harness's own uninstall leaves an entry
 behind, KyberDash names it (which registry, which entry) and prints the exact `droid plugin …`
